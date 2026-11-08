@@ -558,7 +558,7 @@ Other entity kinds have no recovered turret initialization here.
 
 `find_original_flat_path()` ports base 00427370 and expansion 00429A90 with their original node creation helpers.
 The input is a resolved flat search graph. It does not infer UnitClass eligibility from map artwork.
-Its contract requires equal floor levels, no bridges, tubes, marked terrain, or hierarchical search.
+The flat wrapper supplies equal Cell height levels. Both entry points exclude bridges, tubes, marked terrain, and hierarchical search.
 The ordinary Unit profile has type +C94 and +E0C clear, with the constructor cost weight of one.
 A missing graph record means an unallocated original cell. An empty entry status means an unresolved callback.
 This slice accepts only original entry results zero and seven.
@@ -578,10 +578,11 @@ The original 65,536-node storage bound produces an explicit native error before 
 
 `original_path_check.py executable [--base] --vectors` executes the original search, node creation, and path postprocessing.
 It supplies a resolved flat 9x9 test graph through the CanEnterCell callback.
-It tests all 81 goals, a blocked goal, an impassable row, and an alternate monotone route.
+It tests all 81 flat goals, a blocked goal, an impassable row, and an alternate monotone route.
+Four more cases cover ramp bytes, blocked height steps, a descent and return, and an unreachable level change.
 Both original editions return identical paths and node-cost float bits.
-`test_path.sh` compares those 84 cases in each edition and eight explicit input/limit checks.
-These 176 checks also verify unknown eligibility and unported nonmonotone postprocessing.
+`test_path.sh` compares those 88 cases in each edition and eight explicit input/limit checks.
+These 184 checks also verify unknown eligibility and unported nonmonotone postprocessing.
 
 ## Cell height-entry gate
 
@@ -596,3 +597,39 @@ This function proves only the height gate. It does not prove full UnitClass elig
 `original_entry_height_check.py executable [--base]` executes 112,896 cases in each original executable.
 Both return hash 5D4CC105.
 `test_entry_height.sh` checks the same complete native grid and explicit missing-input/overflow errors.
+
+## Ground search height profiles and original Unit entry
+
+`find_original_ground_path()` adds resolved Cell height profiles to the regular search.
+It calls the recovered height gate on each directed edge and preserves the blocked-goal height test.
+The heuristic still uses X/Y only, matching 0042A460. Selected physical drive tracks need separate floor checks.
+The flat API remains available as a zero-height wrapper.
+Unknown height inputs and bridge path states produce explicit errors.
+
+The path oracle now executes the complete original Unit entry at base 00703040 and expansion 0073F0A0.
+Only designated test walls supply an external blocked result. Empty cells execute the real Unit, height, tube, and locomotor bodies.
+`original_empty_entry_check.py executable [--base]` separately verifies 4,608 original empty-cell decisions per edition.
+It varies restricted land, land category, heading, terrain speed, and same-level ramp profiles.
+Both editions return hash 28ABC0F5.
+Map bounds in this oracle are explicit adapters. It tests both bounds answers and both Unit on-map flag states.
+Hierarchy still needs integration.
+
+`SimDecompileAt.java` recovers missing function entries into a transient Ghidra view and prints evidence to stdout.
+Run it only with `analyzeHeadless -readOnly -noanalysis`.
+Both Unit entry bodies were recovered this way. Ghidra reports that it discards the transient changes.
+No decompiled source files or naming indexes are changed.
+
+Ordinary far-goal Move stays unsupported until 0042C900/0042C290 hierarchy and occupied-cell decisions are integrated.
+Unit map placement sets +3D5, which can enable that hierarchy branch.
+The command layer does not silently substitute the regular-search branch.
+Supplied original paths continue to execute through the tested drive state.
+
+## Original maximum building bounds
+
+Original maximum foundation height adds one row only when Rules Bib=yes.
+Base 00458940 and expansion 0045ECA0 make this decision. Their constructors initialize Bib to false.
+Width comes from base 00458930 and expansion 0045EC90.
+The Move guard now uses this proven maximum instead of adding a row to every building.
+`original_foundation_check.py executable [--base]` verifies all 22 foundation sizes, both Bib states, and both include-Bib arguments.
+Both editions pass 88 cases with hash 7737195D.
+Move also rejects IsTrain=yes and authored Tubes sections until their extra state is recovered.

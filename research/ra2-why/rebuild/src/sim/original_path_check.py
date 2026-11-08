@@ -53,19 +53,32 @@ m.callbacks[0x428370 if base else 0x42aa90]=capture_cost
 def can_enter():
     cell=m.argument(); pair=m.read(cell+0x24)
     point=(pair&65535,pair>>16)
-    cpu.reg_write(UC_X86_REG_EAX,7 if point in blocked else 0)
+    if point in blocked: cpu.reg_write(UC_X86_REG_EAX,7)
+    else: cpu.reg_write(UC_X86_REG_EIP,0x703040 if base else 0x73f0a0)
 
 # The C runtime exit-registration callback does not affect the search output.
 m.bind(0x78298a if base else 0x7c978a,0,m.ret(0))
 
-def run(goal,walls=()):
+def run(goal,walls=(),scenario=0):
     global blocked,last_cost
     last_cost=0
     r.setup((0,),15); blocked=set(walls)
     m.virtual(0x194 if base else 0x1ac,20,can_enter)
+    m.word(m.VT+(0x198 if base else 0x1b0),0x4c8730 if base else 0x4d9c60)
+    m.word(m.FOOT+(0x564 if base else 0x674),m.LOCO+4)
+    m.word(m.TYPE+(0xb94 if base else 0xdfc),-1)
+    m.virtual(0x2f4 if base else 0x320,0,m.ret(0))
+    m.bind(0x55a740 if base else 0x578540,8,m.ret(1))
     for y in range(65,74):
         for x in range(50,59):
             cell=m.cell_for(x,y)
+            level=3 if scenario in (10,12,13) else 0
+            ramp=(x+y)%20 if scenario==10 else 0
+            if scenario==11 and (x,y)==(54,68): level=1
+            if scenario==12 and (x,y)==(55,68): level,ramp=2,3
+            if scenario==13 and (x,y)!=(54,69): level=0
+            cpu.mem_write(cell+0x11b,struct.pack('<bB',level,ramp))
+            m.word(cell+0x54,-1); m.word(cell+0x58,-1)
             cpu.mem_write(cell+0x116,struct.pack('<h',-1))
             cpu.mem_write(regions+(y*512+x)*10,struct.pack('<h',1))
     invoke(0x427e90 if base else 0x42a5b0,SEARCH)
@@ -81,8 +94,9 @@ def run(goal,walls=()):
 if __name__=='__main__':
     cases=[((x,y),0,()) for y in range(65,74) for x in range(50,59)]
     cases.extend((((54,67),1,((54,67),)),((54,67),2,tuple((x,68) for x in range(50,59))),((57,67),3,((55,68),))))
+    cases.extend((((56,67),10,()),((56,67),11,()),((56,67),12,()),((54,67),13,())))
     for goal,scenario,walls in cases:
-        result=run(goal,walls)
+        result=run(goal,walls,scenario)
         if '--vectors' in sys.argv:
             count,directions,cost=result or (0,(),0)
             print('{%d,%d,%d,%d,0x%08xu,{%s}},'%(goal[0],goal[1],scenario,count,cost,','.join(map(str,directions))))

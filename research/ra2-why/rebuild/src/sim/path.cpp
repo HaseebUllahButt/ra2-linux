@@ -21,8 +21,8 @@ bool same(ra2map::Cell a,ra2map::Cell b) { return a.x==b.x && a.y==b.y; }
 struct Node { std::size_t cell,parent; float cost,priority; unsigned depth; };
 constexpr std::size_t none=static_cast<std::size_t>(-1);
 }
-PathResult find_original_flat_path(ra2map::Cell source,ra2map::Cell goal,
-    const std::vector<ResolvedFlatPathCell>& cells,const OriginalDistance& distance,int limit) {
+PathResult find_original_ground_path(ra2map::Cell source,ra2map::Cell goal,
+    const std::vector<ResolvedGroundPathCell>& cells,const OriginalDistance& distance,int limit) {
     PathResult result; result.end=source;
     std::map<int,std::size_t> lookup;
     for (std::size_t i=0;i<cells.size();++i) {
@@ -33,6 +33,14 @@ PathResult find_original_flat_path(ra2map::Cell source,ra2map::Cell goal,
         throw std::invalid_argument("original search endpoint exceeds the map array");
     if (!lookup.count(key(source)) || !lookup.count(key(goal)) || same(source,goal)) {
         result.evidence="00429A90: missing endpoint or identical flat endpoints"; return result;
+    }
+    const auto& start_height=cells[lookup.at(key(source))].height;
+    const auto& goal_height=cells[lookup.at(key(goal))].height;
+    if (!start_height || !goal_height) {
+        result.status=PathStatus::NeedsInput; result.evidence="00429A90: endpoint height is unresolved"; return result;
+    }
+    if (start_height->flag_100 || goal_height->flag_100) {
+        result.status=PathStatus::Unsupported; result.evidence="00429A90: bridge path states are not recovered"; return result;
     }
     if (limit<0) limit=0xfff7; // Original default, not a native gameplay value.
     std::vector<Node> nodes; nodes.reserve(std::min<std::size_t>(cells.size(),65536));
@@ -75,15 +83,27 @@ PathResult find_original_flat_path(ra2map::Cell source,ra2map::Cell goal,
             // The original marks nodes when generated and never decreases their stored cost.
             // For the side-effect-free resolved 0/7 adapter, an existing mark cannot add a node.
             if (seen[next]) continue;
-            if (!cells[next].entry_status) {
-                result.status=PathStatus::NeedsInput; result.evidence="00429F04: unresolved CanEnterCell result"; return result;
+            if (!cells[next].height) {
+                result.status=PathStatus::NeedsInput; result.evidence="00429A90: neighbor height is unresolved"; return result;
             }
-            const int entry=*cells[next].entry_status;
+            if (cells[next].height->flag_100) {
+                result.status=PathStatus::Unsupported; result.evidence="00429A90: bridge path states are not recovered"; return result;
+            }
+            HeightEntryInputs height; height.direction=static_cast<int>(direction);
+            height.source=cells[nodes[current].cell].height; height.destination=*cells[next].height;
+            height.layer_height=height.source->level;
+            int entry=original_height_entry(height).status;
+            if (entry!=7) {
+                if (!cells[next].entry_status) {
+                    result.status=PathStatus::NeedsInput; result.evidence="00429F04: unresolved CanEnterCell result at "+std::to_string(cells[next].cell.x)+","+std::to_string(cells[next].cell.y); return result;
+                }
+                entry=*cells[next].entry_status;
+            }
             if (entry!=0 && entry!=7) {
                 result.status=PathStatus::Unsupported; result.evidence="00429830: cell-entry cost requires unrecovered occupant inputs"; return result;
             }
             if (entry==7) {
-                if (same(cells[next].cell,goal)) { stopped_at_blocked_goal=true; break; }
+                if (same(cells[next].cell,goal) && std::abs(static_cast<int>(height.source->level)-goal_height->level)<2) { stopped_at_blocked_goal=true; break; }
                 continue;
             }
             if (nodes.size()==65536) {
@@ -131,4 +151,11 @@ PathResult find_original_flat_path(ra2map::Cell source,ra2map::Cell goal,
     result.evidence="00429A90/0042A460: resolved flat regular search and unchanged monotone postprocessing";
     return result;
 }
+PathResult find_original_flat_path(ra2map::Cell source,ra2map::Cell goal,
+    const std::vector<ResolvedFlatPathCell>& cells,const OriginalDistance& distance,int limit) {
+    std::vector<ResolvedGroundPathCell> ground; ground.reserve(cells.size());
+    for (const auto& cell:cells) ground.push_back({cell.cell,cell.entry_status,EntryHeightCell{}});
+    return find_original_ground_path(source,goal,ground,distance,limit);
+}
+
 }

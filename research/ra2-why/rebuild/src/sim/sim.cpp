@@ -36,6 +36,7 @@ bool equal_ascii_case(const std::string& a,const std::string& b) {
 }
 }
 Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed,const TerrainCells& terrain,const TheaterInputs* theater):random_(seed),terrain_(terrain) {
+    const auto* tubes=map.find_section("Tubes"); explicit_tubes_=tubes && !tubes->entries.empty();
     for (std::size_t i=0;i<terrain_.size();++i) {
         const auto cell=terrain_[i].cell;
         const auto key=static_cast<std::uint32_t>(cell.x)|(static_cast<std::uint32_t>(cell.y)<<16);
@@ -234,19 +235,21 @@ Snapshot Simulation::snapshot() const {
 std::vector<Capability> Simulation::capabilities() {
     return {
         {"map_objects",true,"Authored objects, houses and missions; partial vehicle HP recovered"},
+        {"map_placement",false,"Authored positions only; parent unlimbo, ordered occupancy, and constructor side effects remain incomplete"},
         {"rules",true,"Authored type/weapon values with map overlay; no guessed defaults"},
         {"random",true,"0065C6D0/780/7E0; gamemd constants; signed nonoverflow spans"},
         {"native_commands",true,"Scheduled FIFO; not original event wire format or autonomous AI"},
         {"cash_debit",true,"004F9790 cash-only; no ore; local player initialization unresolved"},
         {"resolved_health_arithmetic",true,"005F5390 forced arithmetic for vehicles/aircraft; dead entities remain as records"},
         {"death_effects",false,"Derived death handlers, triggers, passengers and scoring are missing"},
-        {"ground_primitives",true,"ground.h: guarded destination setter and original curve transforms; no map movement tick"},
+        {"ground_primitives",true,"ground.h: guarded destination setter and original curve transforms"},
         {"damage_primitives",true,"combat.h: 00489180 armor/range arithmetic in explicit precision domain"},
+        {"path_primitives",true,"path.h: original regular search with resolved ground entries; hierarchy and occupied-cell callbacks incomplete"},
         {"target_primitives",true,"combat.h: resolved candidate maximum and original threat category flags"},
-        {"movement",true,"Aligned adjacent Move, or supplied original path with straight steps and one final curve; flat clear/road cells; no path search"},
+        {"movement",true,"Aligned adjacent Move, or supplied original path with straight steps and one final curve; flat clear/road cells; goal hierarchy unresolved"},
         {"target_selection",false,"Threat arithmetic recovered; full 006F7CA0 eligibility and bounded scans remain incomplete"},
         {"combat",false,"Armor/range arithmetic recovered; projectile and derived damage handlers remain incomplete"},
-        {"production",false,"Cash-only Factory primitive available; 006F47A0 complete formula and placement unresolved"}
+        {"production",false,"Build time and cash primitives recovered; full prerequisites, queues and placement remain incomplete"}
     };
 }
 }

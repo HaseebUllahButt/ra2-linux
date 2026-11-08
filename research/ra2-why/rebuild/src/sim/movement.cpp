@@ -33,6 +33,8 @@ void Simulation::load_ground_assets(const std::string& executable,const Ini& art
         const auto authored=art.read_string(image,"Foundation","1x1");
         auto bounds=FoundationBounds{1,1}; // Original constructor 0045DD90, Foundation=0.
         for (const auto& name:names) if (equal_ascii(authored,name.first)) { bounds=name.second; break; }
+        // Base 00458940 / Yuri 0045ECA0 extend the maximum height only for Rules Bib=yes.
+        if (Ini::bool_value(field(entry.second.fields,"Bib")).value_or(false)) ++bounds.height;
         foundations.emplace(entry.first,bounds);
     }
     foundations_=std::move(foundations); drive_tables_=std::move(tables);
@@ -46,7 +48,9 @@ Result Simulation::start_move(const Command& c) {
         return unsupported("replanning and immediate segment chaining are not recovered");
     if (e.mission!="Guard" && e.mission!="Area Guard") return unsupported("Move mission transitions from this initial mission are not recovered");
     if (!movements_.empty()) return unsupported("simultaneous drive collision handling is not recovered");
+    if (explicit_tubes_) return unsupported("map-authored tube occupancy is not recovered");
     const auto& type=types_.at(e.type);
+    if (Ini::bool_value(field(type.fields,"IsTrain")).value_or(false)) return unsupported("original train movement is not recovered");
     if (Ini::bool_value(field(type.fields,"Naval")).value_or(false)) return unsupported("naval drive movement is not recovered");
     if (!type.speed || !type.strength || *e.hp!=*type.strength) return unsupported("Move needs original Speed and full vehicle health");
     if (field(type.fields,"Locomotor")!="{4A582741-9839-11d1-B709-00A024DDAFD1}")
@@ -82,6 +86,8 @@ Result Simulation::start_move(const Command& c) {
     const auto destination=terrain_index_.find(key(c.destination));
     if (destination==terrain_index_.end() || !terrain_[destination->second].floor_world_height) return unsupported("Move destination floor is missing");
     Coord goal{c.destination.x*256+128,c.destination.y*256+128,*terrain_[destination->second].floor_world_height};
+    if (c.path_directions.empty() && std::max(std::abs(static_cast<int>(c.destination.x)-e.cell.x),std::abs(static_cast<int>(c.destination.y)-e.cell.y))>1)
+        return unsupported("original goal hierarchy and occupied-cell eligibility are not recovered; provide a resolved original path");
     std::optional<DriveSegment> planned;
     try {
         if (c.path_directions.empty()) planned=DriveSegment::begin(*e.position,goal,static_cast<unsigned>(e.facing),speed,*drive_tables_);
@@ -104,14 +110,14 @@ Result Simulation::start_move(const Command& c) {
             if (!multiplier || *multiplier!=1) return unsupported("Move currently needs original terrain multipliers of one");
         }
         if (terrain_blockers_.count(key(crossed))) return unsupported("terrain-object occupancy is present");
-        // Conservative bounds also cover the cells cut by a turn, not only the supplied path cells.
+        // The original maximum foundation bounds also cover cells cut by a drive curve.
         for (const auto& blocker:state_.entities) {
             if (blocker.dead || blocker.id==e.id) continue;
             if (blocker.kind==Kind::Structure) {
                 const auto foundation=foundations_.find(blocker.type);
                 if (foundation==foundations_.end()) return unsupported("building foundation metadata is unresolved");
                 const auto bounds=foundation->second;
-                if (bounds.width && bounds.height && crossed.x>=blocker.cell.x && crossed.x<blocker.cell.x+bounds.width && crossed.y>=blocker.cell.y && crossed.y<blocker.cell.y+bounds.height+1)
+                if (bounds.width && bounds.height && crossed.x>=blocker.cell.x && crossed.x<blocker.cell.x+bounds.width && crossed.y>=blocker.cell.y && crossed.y<blocker.cell.y+bounds.height)
                     return unsupported("Move swept cell intersects a conservative original building foundation bound");
             } else if (key(blocker.cell)==key(crossed) || (blocker.move_goal && key(*blocker.move_goal)==key(crossed)))
                 return unsupported("vehicle or infantry collision handling is not recovered");

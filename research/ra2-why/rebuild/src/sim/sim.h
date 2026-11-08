@@ -122,6 +122,7 @@ private:
     TerrainCells terrain_;
     std::map<std::uint32_t,std::size_t> terrain_index_;
     std::optional<DriveTables> drive_tables_;
+    bool explicit_tubes_=false;
     struct FoundationBounds { int width,height; };
     std::map<std::string,FoundationBounds> foundations_;
     std::map<std::string,Fields> country_fields_;

@@ -16,6 +16,20 @@ std::vector<ResolvedFlatPathCell> grid(int scenario) {
     }
     return cells;
 }
+std::vector<ResolvedGroundPathCell> ground_grid(int scenario) {
+    std::vector<ResolvedGroundPathCell> cells;
+    for (const auto& flat:grid(scenario)) {
+        const auto x=flat.cell.x,y=flat.cell.y;
+        EntryHeightCell height;
+        height.level=scenario==10 || scenario==12 || scenario==13?3:0;
+        height.ramp=scenario==10?(x+y)%20:0;
+        if (scenario==11 && x==54 && y==68) height.level=1;
+        if (scenario==12 && x==55 && y==68) { height.level=2; height.ramp=3; }
+        if (scenario==13 && (x!=54 || y!=69)) height.level=0;
+        cells.push_back({flat.cell,flat.entry_status,height});
+    }
+    return cells;
+}
 void require(bool value,const char* message) { if (!value) throw std::runtime_error(message); }
 }
 int main(int argc,char** argv) try {
@@ -24,7 +38,7 @@ int main(int argc,char** argv) try {
     for (int edition=1;edition<3;++edition) {
         const auto distance=OriginalDistance::from_executable(argv[edition]);
         for (const auto& golden:goldens) {
-            const auto result=find_original_flat_path({54,69},{static_cast<std::uint16_t>(golden.x),static_cast<std::uint16_t>(golden.y)},grid(golden.scenario),distance);
+            const auto result=find_original_ground_path({54,69},{static_cast<std::uint16_t>(golden.x),static_cast<std::uint16_t>(golden.y)},ground_grid(golden.scenario),distance);
             if (!golden.count) require(result.status==PathStatus::NoPath,"original no-path result differs");
             else {
                 if (result.status!=PathStatus::Found && result.status!=PathStatus::Partial) {
@@ -48,5 +62,5 @@ int main(int argc,char** argv) try {
         require(find_original_flat_path({54,69},{54,67},grid(0),distance,1).status==PathStatus::NoPath,"original search limit ignored"); ++count;
         require(find_original_flat_path({54,69},{54,67},grid(4),distance).status==PathStatus::Unsupported,"nonmonotone postprocessing accepted"); ++count;
     }
-    std::cout<<"original flat regular paths and explicit limits: "<<count<<" checks passed\n";
+    std::cout<<"original regular ground paths and explicit limits: "<<count<<" checks passed\n";
 } catch(const std::exception& error) { std::cerr<<error.what()<<"\n"; return 1; }

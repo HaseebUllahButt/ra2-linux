@@ -15,6 +15,6 @@ for source in test_inputs.cpp "$shared/render/minimap.cpp" "$shared/render/tmp_d
     index=$((index+1))
 done
 ${CXX:-g++} -std=c++17 -Wall -Wextra -Werror -O2 ${SIM_TEST_FLAGS:-} \
-    sim.cpp random.cpp factory.cpp ground.cpp combat.cpp target.cpp distance.cpp floor.cpp world.cpp world_init.cpp replacement.cpp drive.cpp movement.cpp test_move.cpp \
+    sim.cpp random.cpp factory.cpp ground.cpp combat.cpp target.cpp distance.cpp floor.cpp world.cpp world_init.cpp replacement.cpp drive.cpp path.cpp cell_entry.cpp movement.cpp test_move.cpp \
     ../rules/ini_file.cpp ../map/map_file.cpp ../pack/map_pack.cpp "${asset_objects[@]}" -ldl -o "$build/test"
 "$build/test" "${1:-/path/to/user/ra2/game}" "${2:-/path/to/user/ra2/analysis/extracted}" "${@:3}"
