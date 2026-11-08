@@ -48,10 +48,26 @@ int main(int argc, char** argv) {
             const auto cells = app::terrain_inputs(packed, terrain_art);
             const auto rules = read_ini(files, expansion ? "RULESMD.INI" : "RULES.INI");
             const auto art = read_ini(files, expansion ? "ARTMD.INI" : "ART.INI");
-            sim::Simulation simulation(rules, map, 0, cells);
-            app::Scene scene(files, art, app::overlay_rules(rules, map), geometry, cells,
+            const auto theater = app::theater_inputs(terrain_art);
+            sim::Simulation simulation(rules, map, 0, cells, &theater);
+            const auto live = app::initialized_terrain(packed, simulation.terrain());
+            require(live.tiles.size() == packed.tiles.size(), "Initialized map lost packed cells");
+            for (std::size_t i = 0; i < live.tiles.size(); ++i) {
+                const auto& cell = simulation.terrain().at(i);
+                require(live.tiles[i].index == cell.resolved_tile_index &&
+                        live.tiles[i].subtile == cell.subtile &&
+                        live.tiles[i].x == packed.tiles[i].x && live.tiles[i].y == packed.tiles[i].y &&
+                        packed.tiles[i].index == cell.tile_index,
+                        "Terrain drawing lost live indexes or changed the packed source");
+            }
+            bool unresolved_rejected = false;
+            try { app::initialized_terrain(packed, cells); }
+            catch (const std::runtime_error&) { unresolved_rejected = true; }
+            require(unresolved_rejected, "Terrain drawing accepted an unfinished tile pass");
+            app::Scene scene(files, art, app::overlay_rules(rules, map), geometry, simulation.terrain(),
                 "TEMPERATE", map_objects.terrain());
-            const auto battlefield = render::render_minimap(packed, geometry, terrain_art);
+            const auto battlefield = render::render_minimap(live, geometry, terrain_art,
+                render::TileIndexSpace::LiveCell);
             const auto frame = scene.render(battlefield, simulation.snapshot(),
                 {0, 0, battlefield.width, battlefield.height});
             for (const auto& gap : frame.gaps)

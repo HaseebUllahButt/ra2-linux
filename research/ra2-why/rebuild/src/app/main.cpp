@@ -201,12 +201,13 @@ int main(int argc, char** argv) {
         const auto geometry = ra2::render::MapGeometry::from_ini(ini);
         auto art = ra2::render::TheaterArt::load(files, ini.read_string("Map", "Theater"));
         const auto cells = ra2::app::terrain_inputs(terrain, art);
+        const auto theater = ra2::app::theater_inputs(art);
         const auto rules_name = args.variant == ra2::fs::GameVariant::RedAlert2 ? "RULES.INI" : "RULESMD.INI";
         const auto rules_bytes = files.read_file(rules_name);
         if (!rules_bytes) throw std::runtime_error(std::string("Missing original ") + rules_name);
         ra2::rules::IniFile rules;
         rules.parse(std::string_view(reinterpret_cast<const char*>(rules_bytes->data()), rules_bytes->size()));
-        ra2::sim::Simulation simulation(rules, ini, 0, cells);
+        ra2::sim::Simulation simulation(rules, ini, 0, cells, &theater);
         const auto art_name = args.variant == ra2::fs::GameVariant::RedAlert2 ? "ART.INI" : "ARTMD.INI";
         const auto actor_bytes = files.read_file(art_name);
         if (!actor_bytes) throw std::runtime_error(std::string("Missing original ") + art_name);
@@ -217,8 +218,10 @@ int main(int argc, char** argv) {
         ra2map::MapFile map_objects;
         map_objects.parse(ini);
         ra2::app::Scene scene(files, std::move(actor_art), ra2::app::overlay_rules(rules, ini),
-            geometry, cells, ini.read_string("Map", "Theater"), map_objects.terrain());
-        const auto battlefield = ra2::render::render_minimap(terrain, geometry, art);
+            geometry, simulation.terrain(), ini.read_string("Map", "Theater"), map_objects.terrain());
+        const auto live_terrain = ra2::app::initialized_terrain(terrain, simulation.terrain());
+        const auto battlefield = ra2::render::render_minimap(live_terrain, geometry, art,
+            ra2::render::TileIndexSpace::LiveCell);
         ra2::app::Window window("Red Alert 2 native rebuild: scene checks", 1024, 768, !args.headless);
         NativePump pump(window, args.headless);
         ScenePresenter presenter(window, battlefield, scene, simulation);

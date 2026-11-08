@@ -1,5 +1,6 @@
 #include "terrain_inputs.h"
 #include "../sim/floor.h"
+#include <map>
 #include <stdexcept>
 
 namespace ra2::app {
@@ -63,6 +64,29 @@ sim::TheaterInputs theater_inputs(render::TheaterArt& art) {
         -> std::optional<sim::TileMetadata> {
         return normalized_metadata(art, index, subtile);
     };
+    return result;
+}
+
+pack::Terrain initialized_terrain(const pack::Terrain& source, const sim::TerrainCells& cells) {
+    std::map<std::pair<std::uint16_t,std::uint16_t>, const sim::TerrainCell*> by_cell;
+    for (const auto& cell : cells) {
+        if (!cell.tile_replacement_resolved || !cell.resolved_tile_index || !cell.height_level ||
+            *cell.height_level < -128 || *cell.height_level > 127)
+            throw std::runtime_error("Terrain drawing needs completed original tile initialization");
+        if (!by_cell.emplace(std::make_pair(cell.cell.x, cell.cell.y), &cell).second)
+            throw std::runtime_error("Duplicate initialized terrain cell");
+    }
+    if (source.tiles.size() != cells.size())
+        throw std::runtime_error("Initialized terrain does not match the packed map");
+    auto result = source;
+    for (auto& tile : result.tiles) {
+        const auto found = by_cell.find({tile.x, tile.y});
+        if (found == by_cell.end()) throw std::runtime_error("Initialized terrain cell is missing");
+        const auto& cell = *found->second;
+        tile.index = *cell.resolved_tile_index;
+        tile.subtile = cell.subtile;
+        tile.height = static_cast<std::uint8_t>(*cell.height_level);
+    }
     return result;
 }
 }

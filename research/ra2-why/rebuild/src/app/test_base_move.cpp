@@ -31,7 +31,8 @@ int main(int argc, char** argv) try {
     const auto packed = pack::load_terrain(map);
     auto tiles = render::TheaterArt::load(files, map.read_string("Map", "Theater"));
     const auto cells = app::terrain_inputs(packed, tiles);
-    sim::Simulation first(rules, map, 9, cells), replay(rules, map, 9, cells);
+    const auto theater = app::theater_inputs(tiles);
+    sim::Simulation first(rules, map, 9, cells, &theater), replay(rules, map, 9, cells, &theater);
     const auto executable = (std::filesystem::path(argv[1]) / "game.exe").string();
     first.load_ground_assets(executable, art);
     replay.load_ground_assets(executable, art);
@@ -42,7 +43,8 @@ int main(int argc, char** argv) try {
             "Original base campaign tank fixture changed");
     const auto geometry = render::MapGeometry::from_ini(map);
     app::Scene scene(files, art, app::overlay_rules(rules, map), geometry, first.terrain(), "SNOW");
-    const auto battlefield = render::render_minimap(packed, geometry, tiles);
+    const auto live = app::initialized_terrain(packed, first.terrain());
+    const auto battlefield = render::render_minimap(live, geometry, tiles, render::TileIndexSpace::LiveCell);
     const auto start_anchor = scene.map_anchor(initial);
     const render::Rectangle viewport{static_cast<int>(start_anchor.x)-160,
                                      static_cast<int>(start_anchor.y)-120, 320, 240};
