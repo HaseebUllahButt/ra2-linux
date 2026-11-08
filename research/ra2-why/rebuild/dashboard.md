@@ -2,12 +2,16 @@
 
 Data: decomp index + call edges + symbols.
 
+The native game is incomplete. These metrics track function names and exported code.
+
 | metric | value |
 |---|---|
 | functions | 8584 |
 | decompiled ok | 8583
 | code bytes | 2590052
-| community-named | 8584
+| named | 8584 |
+| community-named | 1410 |
+| inferred names | 7174 |
 
 ## Largest functions
 
