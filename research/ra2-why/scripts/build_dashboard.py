@@ -21,7 +21,7 @@ def read_edges():
 
 def build_stats(funcs, symbols, edges):
     by_addr = {f['address'].upper(): f for f in funcs}
-    named = sum(1 for a in by_addr if symbols.get(a, {}).get('community_name'))
+    named = sum(1 for a in by_addr if symbols.get(a, {}).get('name'))
     ok = sum(1 for f in funcs if str(f['ok']).lower() == 'true')
     total = sum(int(f['size']) for f in funcs)
     out_edges = collections.Counter()
@@ -33,7 +33,7 @@ def build_stats(funcs, symbols, edges):
 
 
 def name_of(addr, by_addr, symbols):
-    s = symbols.get(addr, {}).get('community_name')
+    s = symbols.get(addr, {}).get('name')
     if s:
         return s
     f = by_addr.get(addr)
@@ -89,7 +89,7 @@ def main():
     funcs = read_csv(os.path.join(ROOT, 'rebuild', 'decomp', 'index.csv'))
     try:
         symbols = {r['address']: r for r in read_csv(
-            os.path.join(ROOT, 'rebuild', 'symbols.csv'))}
+            os.path.join(ROOT, 'rebuild', 'symbols-extended.csv'))}
     except FileNotFoundError:
         symbols = {}
     edges = read_edges()
