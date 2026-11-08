@@ -1,0 +1,54 @@
+#pragma once
+#include "../gfx/shp_decode.h"
+#include "../text/csf.h"
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace ra2::ui {
+// Original dialog resource units. Convert using the actual UI font metrics.
+struct Rect { int x, y, width, height; };
+// Windows dialog units use average character width and font height.
+// The caller supplies the font metrics used by the host.
+Rect dialog_to_pixels(Rect bounds, unsigned base_width, unsigned base_height);
+struct Control {
+    std::uint32_t id, style, extended_style;
+    std::uint16_t class_id;
+    Rect bounds;
+    std::string label_key, label;
+};
+enum class Page { Main, SinglePlayer, Skirmish };
+struct Dialog {
+    std::uint16_t resource_id;
+    Rect bounds;
+    std::string font;
+    std::uint16_t font_points;
+    std::vector<Control> controls;
+    // Input is in original dialog units. Only owner-drawn buttons have
+    // verified hit bounds. Returns only IDs explicitly enabled.
+    std::optional<std::uint32_t> hit_test(int x, int y,
+                                          const std::vector<std::uint32_t>& enabled) const;
+    std::optional<std::uint32_t> hit_test_pixels(int x, int y, unsigned base_width,
+                                                 unsigned base_height,
+                                                 const std::vector<std::uint32_t>& enabled) const;
+};
+// Reads the original 32-bit PE dialog templates; no Windows dependency.
+Dialog load_dialog(const std::vector<std::uint8_t>& exe, Page page, const ra2text::CsfFile& strings);
+class GameFont {
+public:
+    static GameFont parse(std::vector<std::uint8_t> bytes);
+    // A missing code point returns nullopt. Pixels are transparent or color.
+    std::optional<gfx::RgbaImage> glyph(char16_t codepoint, gfx::Rgba color) const;
+    // Draws UTF-8 text in the original bitmap font, clipped to the image.
+    void draw_text(gfx::RgbaImage& image, std::string_view utf8, int x, int y, gfx::Rgba color) const;
+    std::uint32_t line_height() const noexcept { return line_height_; }
+private:
+    std::vector<std::uint8_t> bytes_;
+    std::uint32_t max_width_=0, row_bytes_=0, height_=0, line_height_=0;
+    std::uint32_t count_=0, glyph_bytes_=0;
+};
+// Decodes the original 8-bit, single-plane PCX variant to opaque RGBA.
+gfx::RgbaImage decode_pcx(const std::vector<std::uint8_t>& bytes);
+}
