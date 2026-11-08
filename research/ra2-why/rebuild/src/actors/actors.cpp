@@ -50,12 +50,12 @@ ActorArt ActorArt::load(const fs::MixFileSystem& files, const rules::IniFile& ar
     const bool theater_name = shape.size() >= 2 &&
         (shape[0] == 'G' || shape[0] == 'N' || shape[0] == 'C' || shape[0] == 'Y') &&
         (shape[1] == 'A' || shape[1] == 'T');
-    if (art.read_bool(image, "NewTheater", false) && theater_name) {
+    if (theater_name) {
         if (theater_code < 'A' || theater_code > 'Z') throw std::runtime_error("invalid theater code");
         filename[1] = theater_code;
     }
     auto bytes = files.read_file(filename);
-    if (!bytes && art.read_bool(image, "NewTheater", false) && theater_name) {
+    if (!bytes && theater_name) {
         // 0x005f9710 and 0x0045f230 retry the generic G variant.
         filename[1] = 'G';
         bytes = files.read_file(filename);

@@ -36,15 +36,19 @@ unregistered building type. These two unresolved names are registered; their
 final draw behavior is not established.
 
 The audit reads 161 extracted original maps, using the original art and rules
-files. It decodes frame zero for every infantry, structure, and terrain type,
-theater, and map-local Image override combination. All 933 combinations load.
-All theater MIXes are mounted together for this availability check, so it does
-not prove theater-specific archive precedence. The audit does not apply other
-map-specific rules overrides.
+files. It merges each map's type section over its base type section. It decodes
+frame zero for each distinct infantry, structure, and terrain type, theater,
+and map-local type override combination.
+
+The all-theaters availability audit resolves 960 of 960 combinations. The
+isolated audit also resolves 960 of 960 combinations. The isolated run builds a
+new filesystem per theater and mounts its base, extension, ISO MD, and ISO
+archives after the generic archives. Snow additionally mounts SNOWMD.MIX.
 
 `0x00672660` registers names from BuildingTypes even without a rules section.
-`0x0045F230` falls back to the type name when Image is absent. This loads
-CALA02.SHP and CALOND02.SHP without invented art. `0x0044F820` skips a truly
+`0x0045F230` falls back to the type name when Image is absent, applies theater
+substitution, then retries the generic `G` variant. For New Urban, CALA02 and
+CALOND02 resolve to CNLA02.SHP and CNLOND02.SHP. `0x0044F820` skips a truly
 unregistered building type.
 
 Run the real actor test:
@@ -56,3 +60,7 @@ Run the map audit:
 
     c++ -std=c++17 -O0 -Wall -Wextra -Werror -I rebuild/src/fs rebuild/src/actors/{actors,map_audit}.cpp rebuild/src/gfx/{palette,shp_decode}.cpp rebuild/src/rules/ini_file.cpp rebuild/src/fs/{filename_hash,mix_archive,mix_bootstrap}.cpp -o /tmp/actors_audit
     /tmp/actors_audit /path/to/user/ra2/game analysis/extracted/maps
+
+Run the isolated theater audit:
+
+    /tmp/actors_audit /path/to/user/ra2/game analysis/extracted/maps --isolated
