@@ -459,3 +459,14 @@ Both original editions agree with the native output.
 Overlay land decisions, bridge/tube objects, map animations, shadow objects, and the passability cache remain gaps.
 Relevant original functions include 0047E040/0047E470, 00727FD0, 00421EA0, 00547370, and 00483C80.
 The Cell index, ramp, floor, and supported non-overlay land decisions do not replace those effects.
+
+## Sparse packed terrain
+
+Original map allocation creates the full diamond before packed terrain records load.
+Base Cell constructor 00470F10 and expansion 0047BBF0 share the tested defaults.
+`original_default_terrain_cell(cell)` exposes tile 0xFFFF, subtile zero, level zero, ramp zero, clear land, and no bridge.
+The scenario's 00653F50 call supplies initial height zero to 00565C10.
+A missing packed record keeps those defaults.
+Overlay loading still applies the separate full overlay grid to that cell.
+The adapter must supply all allocated cells, including omitted packed records.
+`original_defaults_check.py executable [--base]` executes both original constructors and verifies the default fields.

@@ -23,6 +23,9 @@ struct TerrainCell {
     std::optional<std::int32_t> overlay_type_index; // -1 means no overlay.
 };
 using TerrainCells=std::vector<TerrainCell>;
+// Base 00470F10 / expansion 0047BBF0, then the scenario's zero initial height.
+// Apply decoded overlay-grid values after creating this default cell.
+TerrainCell original_default_terrain_cell(ra2map::Cell);
 // 00545150 catalog order. The vector index is the original TileSet number.
 struct TileSetRange { std::uint32_t first=0,count=0; };
 struct TileMetadata {

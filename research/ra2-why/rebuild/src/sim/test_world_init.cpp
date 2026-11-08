@@ -13,6 +13,8 @@ std::uint32_t digest(const TerrainCells& cells) {
 }
 }
 int main() try {
+    const auto defaults=original_default_terrain_cell({1,3});
+    require(defaults.tile_index==0xffff && defaults.resolved_tile_index==0xffff && defaults.subtile==0 && defaults.height_level==0 && defaults.ramp_index==0 && defaults.floor_world_height==0 && defaults.overlay_type_index==-1 && defaults.land_type==0 && defaults.bridge==false && !defaults.tile_replacement_resolved && !defaults.tmp_terrain,"original allocated Cell defaults differ");
     const unsigned order_golden[][4]={{2,1,3,0x60f95c5b},{3,2,10,0xc43f5a1f},{80,102,16218,0xf5c43f0b},{105,110,22990,0x94212cff},{94,53,9911,0xbece1cd3}};
     for (const auto& test:order_golden) {
         const auto order=original_map_cell_order(test[0],test[1]); std::uint32_t hash=2166136261u;

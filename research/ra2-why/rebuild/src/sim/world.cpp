@@ -3,6 +3,12 @@
 #include <map>
 #include <stdexcept>
 namespace ra2::sim {
+TerrainCell original_default_terrain_cell(ra2map::Cell coord) {
+    TerrainCell out; out.cell=coord; out.tile_index=0xffff; out.resolved_tile_index=0xffff;
+    out.subtile=0; out.height_level=0; out.ramp_index=0; out.floor_world_height=0;
+    out.overlay_type_index=-1; out.land_type=0; out.bridge=false;
+    return out;
+}
 int original_tmp_land_type(std::uint8_t raw) {
     // 00544BE0, table at 008288E4. TMP terrain bytes are not Cell LandType values.
     constexpr int land[]={0,8,8,8,8,10,9,3,3,2,6,1,1,0,7,3};
