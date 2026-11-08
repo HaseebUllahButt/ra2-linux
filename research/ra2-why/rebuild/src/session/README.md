@@ -85,6 +85,8 @@ pass before checking every cell. The boundary comparison tests the adapter;
 original executables match all 15,525 real first-pass cell checks.
 Run `test_real_terrain.sh GAME_DIRECTORY --original` for both comparisons.
 The optional original checks require Python Unicorn.
+Set `RA2_SESSION_YURI_MAP=C1A02MD.MAP` to also load the original expansion map
+from MIX files. Its 22,990 first-pass cells match the expansion executable.
 
 `original_geometry_check.py` runs original map clipping and map boundary
 instructions for 8,712 cases per edition. Build `geometry_cases.cpp` with

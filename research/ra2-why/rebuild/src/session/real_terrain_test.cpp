@@ -3,17 +3,26 @@
 #include "../sim/sim.h"
 #include "../sim/world_init.h"
 #include <cassert>
+#include <filesystem>
 #include <iostream>
 #include <map>
 
 using namespace ra2;
 int main(int argc, char** argv) {
-    if (argc<2 || argc>3 || (argc==3 && std::string(argv[2])!="--cases")) return 2;
-    const bool cases=argc==3;
-    const std::string game=argv[1], map_name="ALL02S.MAP";
+    if (argc<2 || argc>5) return 2;
+    bool cases=false,base=true;
+    std::string map_name="ALL02S.MAP";
+    for (int i=2;i<argc;++i) {
+        const std::string arg=argv[i];
+        if (arg=="--cases") cases=true;
+        else if (arg=="--yuri" && i+1<argc) { base=false; map_name=argv[++i]; }
+        else return 2;
+    }
+    const std::string game=argv[1];
     rules::IniFile map, rules;
-    map.parse(original_test_ini(game,map_name,true));
-    rules.parse(original_test_ini(game,"RULES.INI",true));
+    if (std::filesystem::is_regular_file(map_name)) map=rules::IniFile::from_file(map_name);
+    else map.parse(original_test_ini(game,map_name,base));
+    rules.parse(original_test_ini(game,base?"RULES.INI":"RULESMD.INI",base));
     auto rectangle=[&](const char* name) {
         const auto fields=map.read_list("Map",name);
         assert(fields.size()==4);
@@ -26,7 +35,7 @@ int main(int argc, char** argv) {
     };
     const auto geometry=session::resolve_placement_geometry(rectangle("Size"),rectangle("LocalSize"));
     assert(geometry);
-    const auto input=original_test_cells(game,map_name,true);
+    const auto input=original_test_cells(game,map_name,base);
     std::map<std::pair<int,int>,const OriginalTestCell*> by_cell;
     for (const auto& cell:input) by_cell[{cell.x,cell.y}]=&cell;
     sim::TerrainCells cells;
@@ -42,7 +51,7 @@ int main(int argc, char** argv) {
         }
         cells.push_back(cell);
     }
-    const auto source=original_test_catalog(game,map_name,true);
+    const auto source=original_test_catalog(game,map_name,base);
     sim::TheaterInputs theater;
     theater.theater_name=source.name; theater.settings.parse(source.settings);
     for (const auto range:source.ranges) theater.tile_sets.push_back({range.first,range.count});

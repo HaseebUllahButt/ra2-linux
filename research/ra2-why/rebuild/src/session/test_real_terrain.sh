@@ -13,11 +13,18 @@ ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared/app" -I "$shared/re
     "$shared/rules/ini_file.cpp" "$shared/map/map_file.cpp" "$shared/pack/map_pack.cpp" \
     -ldl -o "$build/test"
 "$build/test" "$game"
+if [ -n "${RA2_SESSION_YURI_MAP:-}" ]; then
+    "$build/test" "$game" --yuri "$RA2_SESSION_YURI_MAP"
+fi
 if [ "${2:-}" = "--original" ]; then
-    printf '%s\n' '#!/bin/sh' 'exec "$RA2_TERRAIN_TEST" "$RA2_GAME_DIR" --cases' > "$build/cases"
+    printf '%s\n' '#!/bin/sh' 'if [ -n "${RA2_TERRAIN_YURI:-}" ]; then exec "$RA2_TERRAIN_TEST" "$RA2_GAME_DIR" --cases --yuri "$RA2_TERRAIN_YURI"; fi' 'exec "$RA2_TERRAIN_TEST" "$RA2_GAME_DIR" --cases' > "$build/cases"
     chmod +x "$build/cases"
     export RA2_TERRAIN_TEST="$build/test" RA2_GAME_DIR="$game"
     export PYTHONPATH="$shared/sim${PYTHONPATH:+:$PYTHONPATH}"
     python3 original_geometry_check.py "$game/game.exe" "$build/cases"
     python3 original_geometry_check.py "$game/gamemd.exe" "$build/cases"
+    if [ -n "${RA2_SESSION_YURI_MAP:-}" ]; then
+        export RA2_TERRAIN_YURI="$RA2_SESSION_YURI_MAP"
+        python3 original_geometry_check.py "$game/gamemd.exe" "$build/cases"
+    fi
 fi
