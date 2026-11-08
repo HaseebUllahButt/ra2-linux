@@ -5,11 +5,11 @@
 CXX ?= g++
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O2
 
-.PHONY: all test clean fs rules text hook
+.PHONY: all test clean fs rules text loop gfx hook
 
 all: test
 
-test: fs rules text hook
+test: fs rules text loop gfx hook
 	@echo "== all layer tests passed =="
 
 fs: run-fs
@@ -44,3 +44,15 @@ run-text:
 		src/text/test_csf.cpp -o src/text/test_csf
 	src/text/test_csf ../analysis/extracted/ra2.csf | head -3
 	src/text/test_csf ../analysis/extracted/ra2md.csf | head -3
+
+run-loop:
+	$(CXX) $(CXXFLAGS) -I src/loop src/loop/game_loop.cpp \
+		src/loop/test_main.cpp -o src/loop/loop_test
+	src/loop/loop_test
+
+run-gfx:
+	$(CXX) $(CXXFLAGS) -I src/gfx -I src/fs src/gfx/palette.cpp \
+		src/gfx/shp_decode.cpp src/gfx/test_main.cpp \
+		src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp \
+		src/fs/filename_hash.cpp -o src/gfx/gfx_test
+	cd .. && rebuild/src/gfx/gfx_test
