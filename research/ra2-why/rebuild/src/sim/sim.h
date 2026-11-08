@@ -2,6 +2,8 @@
 #include "../map/map_file.h"
 #include "world.h"
 #include "ground.h"
+#include "drive.h"
+#include <set>
 #include <array>
 #include <map>
 #include <optional>
@@ -40,6 +42,7 @@ struct Weapon {
 struct House {
     std::string name, country;
     std::vector<std::string> allies;
+    std::optional<std::int32_t> iq;
     std::optional<std::int32_t> cash; // Unknown for local player money adjustment.
     std::int64_t spent=0;
 };
@@ -47,7 +50,11 @@ enum class Kind { Structure, Unit, Infantry, Aircraft };
 struct Entity {
     std::uint32_t id=0; // Stable native ID; not an original pointer or array index.
     Kind kind=Kind::Unit;
-    std::string house, type, mission;
+    std::string house, type, mission, tag;
+    std::optional<std::int32_t> map_veterancy,map_group,map_follow;
+    std::optional<bool> map_above_bridge;
+    bool moving=false;
+    std::optional<ra2map::Cell> move_goal;
     ra2map::Cell cell;
     std::int32_t facing=0, subcell=0, map_health=0;
     // Unit health scaling recovered from original instructions at 007435DA.
@@ -89,18 +96,31 @@ public:
     // Map INI overlays the base rules. All input objects are copied.
     Simulation(const Ini& rules, const Ini& map, std::uint32_t seed,const TerrainCells& terrain={});
     Result issue(const Command&); // Only accepted commands receive a ticket.
-    void tick(); // Execute due native commands in issue order, then increment frame.
+    void tick(); // Advance active movement, execute due commands in issue order, then increment frame.
     Snapshot snapshot() const;
     const std::map<std::string,Type>& types() const { return types_; }
     const std::map<std::string,Weapon>& weapons() const { return weapons_; }
     static std::vector<Capability> capabilities();
     const TerrainCells& terrain() const { return terrain_; }
+    void load_ground_assets(const std::string& original_executable,const Ini& art);
 private:
     Result execute(const Command&);
+    Result start_move(const Command&);
+    void update_movement();
     Snapshot state_;
     Random random_;
     TerrainCells terrain_;
     std::map<std::uint32_t,std::size_t> terrain_index_;
+    std::optional<DriveTables> drive_tables_;
+    struct FoundationBounds { int width,height; };
+    std::map<std::string,FoundationBounds> foundations_;
+    std::map<std::string,Fields> country_fields_;
+    Fields clear_fields_,road_fields_;
+    int guard_area_iq_=4;
+    std::set<std::uint32_t> terrain_blockers_;
+    std::map<std::uint32_t,DriveSegment> movements_;
+    std::map<std::uint32_t,std::string> completion_missions_;
+    std::map<std::uint32_t,std::uint64_t> last_move_completion_;
     std::uint64_t next_ticket_=1;
     struct Pending { Command command; std::uint64_t ticket; };
     std::vector<Pending> queue_;

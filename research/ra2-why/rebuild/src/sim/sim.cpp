@@ -40,6 +40,22 @@ Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed,const T
         const auto key=static_cast<std::uint32_t>(cell.x)|(static_cast<std::uint32_t>(cell.y)<<16);
         if (!terrain_index_.emplace(key,i).second) throw std::invalid_argument("duplicate terrain input cell");
     }
+    // Rules constructor 00665650 gives CliffBackImpassability an initial byte value of zero.
+    const auto general_fields=fields(base,map,"General");
+    const auto cliff=static_cast<std::uint8_t>(number(general_fields,"CliffBackImpassability").value_or(0));
+    resolve_overlay_free_terrain(terrain_,cliff);
+    const auto iq_fields=fields(base,map,"IQ");
+    guard_area_iq_=number(iq_fields,"GuardArea").value_or(4); // 00665650 constructor, 00674240 reader.
+    const auto max_iq=number(iq_fields,"MaxIQLevels").value_or(5);
+    clear_fields_=fields(base,map,"Clear"); road_fields_=fields(base,map,"Road");
+    if (const auto* trees=map.find_section("Terrain")) for (const auto& entry:trees->entries) {
+        const auto packed=Ini::integer_value(entry.key);
+        if (packed && *packed>=0) {
+            // Modern packed map cells: original 0068BDC0, X=remainder, Y=quotient.
+            const auto x=static_cast<std::uint32_t>(*packed%1000), y=static_cast<std::uint32_t>(*packed/1000);
+            terrain_blockers_.insert(x|(y<<16));
+        }
+    }
     // Registry names remain authored inputs. No guessed constructor defaults.
     for (const auto* category:{"BuildingTypes","VehicleTypes","InfantryTypes","AircraftTypes"}) {
         const auto registry=fields(base,map,category);
@@ -64,8 +80,11 @@ Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed,const T
     if (auto houses=map.find_section("Houses")) for (const auto& entry:houses->entries) {
         if (std::any_of(state_.houses.begin(),state_.houses.end(),[&](const House& h){return h.name==entry.value;}))
             throw std::runtime_error("duplicate house: "+entry.value);
-        House h; h.name=entry.value; h.country=map.read_string(h.name,"Country");
+        House h; h.name=entry.value;
+        h.iq=map.read_integer(h.name,"IQ",0); if (*h.iq>max_iq) h.iq=1; // 00500B40 +24C.
+        h.country=map.read_string(h.name,"Country");
         h.allies=map.read_list(h.name,"Allies");
+        if (!h.country.empty()) country_fields_.emplace(h.country,fields(base,map,h.country));
         // 00500B40: Credits*100; local player adjustments depend on session globals.
         const auto credits=map.read_integer(h.name,"Credits",0);
         const auto cash=static_cast<std::int64_t>(credits)*100;
@@ -83,7 +102,12 @@ Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed,const T
     }
     ra2map::MapFile parsed; parsed.parse(text.str());
     auto append=[&](const auto& objects,Kind kind) {
+        std::size_t source_index=0;
+        const char* section_name=kind==Kind::Structure?"Structures":kind==Kind::Unit?"Units":kind==Kind::Infantry?"Infantry":"Aircraft";
+        const auto* original_section=map.find_section(section_name);
         for (const auto& obj:objects) {
+            const auto record=original_section && source_index<original_section->entries.size()?Ini::split_list(original_section->entries[source_index].value):std::vector<std::string>{};
+            ++source_index;
             Entity e; e.id=static_cast<std::uint32_t>(state_.entities.size()+1); e.kind=kind;
             e.type=obj.type; e.house=obj.house; e.cell=obj.cell; e.facing=obj.facing; e.map_health=obj.health;
             auto t=types_.find(e.type);
@@ -96,6 +120,11 @@ Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed,const T
             }
             e.type=t->first;
             object_fields(e,obj);
+            if (kind==Kind::Unit && record.size()>11) {
+                e.tag=record[7]; e.map_veterancy=Ini::integer_value(record[8]);
+                e.map_group=Ini::integer_value(record[9]); e.map_follow=Ini::integer_value(record[11]);
+                if (const auto n=Ini::integer_value(record[10])) e.map_above_bridge=*n!=0;
+            }
             const auto key=static_cast<std::uint32_t>(e.cell.x)|(static_cast<std::uint32_t>(e.cell.y)<<16);
             const auto floor=terrain_index_.find(key);
             if (floor!=terrain_index_.end() && terrain_[floor->second].floor_world_height) {
@@ -126,9 +155,10 @@ Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed,const T
 }
 Result Simulation::issue(const Command& c) {
     if (c.frame<state_.frame) return failure(Error::PastFrame,"command frame has passed");
-    if (c.op==Op::Move || c.op==Op::Attack || c.op==Op::Produce || c.op==Op::Stop)
+    if (c.op==Op::Move && !drive_tables_) return failure(Error::Unsupported,"Move needs load_ground_assets and resolved original terrain");
+    if (c.op==Op::Attack || c.op==Op::Produce || c.op==Op::Stop)
         return failure(Error::Unsupported,"unrecovered command semantics; inspect capabilities()");
-    if (c.op!=Op::TakeCash && c.op!=Op::ResolvedDamage && c.op!=Op::RandomRange)
+    if (c.op!=Op::TakeCash && c.op!=Op::ResolvedDamage && c.op!=Op::RandomRange && c.op!=Op::Move)
         return failure(Error::Unsupported,"unknown command opcode");
     if (c.op==Op::RandomRange && std::abs(static_cast<std::int64_t>(c.amount)-c.high)>std::numeric_limits<std::int32_t>::max())
         return failure(Error::InvalidAmount,"random range exceeds signed original span");
@@ -136,6 +166,7 @@ Result Simulation::issue(const Command& c) {
     queue_.push_back({c,result.ticket}); return result;
 }
 Result Simulation::execute(const Command& c) {
+    if (c.op==Op::Move) return start_move(c);
     if (c.op==Op::RandomRange) return {0,Error::None,random_.ranged(c.amount,c.high),{}};
     if (c.op==Op::TakeCash) {
         if (c.amount<0) return failure(Error::InvalidAmount,"negative debit unsupported");
@@ -154,17 +185,21 @@ Result Simulation::execute(const Command& c) {
     if (e.kind==Kind::Structure || e.kind==Kind::Infantry)
         return failure(Error::Unsupported,"derived damage handler is not recovered for this category");
     if (e.dead || c.amount==0) return {};
+    if (e.moving) return failure(Error::Unsupported,"forced health changes during drive movement need the original speed and death handlers");
     const auto maximum=types_.at(e.type).strength;
     if (!maximum) return failure(Error::UnknownHealth,"Strength missing");
     const auto old=*e.hp;
     const auto changed=static_cast<std::int64_t>(old)-c.amount;
     e.hp=static_cast<std::int32_t>(std::clamp<std::int64_t>(changed,0,*maximum));
     e.dead=*e.hp==0;
+    if (e.dead) { e.moving=false; e.move_goal.reset(); movements_.erase(e.id); }
     return {0,Error::None,old-*e.hp,{}};
 }
 void Simulation::tick() {
     if (state_.frame==std::numeric_limits<std::uint64_t>::max()) throw std::overflow_error("native frame overflow");
     state_.results.clear();
+    // Original frame updates precede event dispatch (0055AFB0 -> 00647260).
+    update_movement();
     std::vector<Pending> future;
     for (const auto& pending:queue_) {
         if (pending.command.frame>state_.frame) { future.push_back(pending); continue; }
@@ -189,9 +224,9 @@ std::vector<Capability> Simulation::capabilities() {
         {"ground_primitives",true,"ground.h: guarded destination setter and original curve transforms; no map movement tick"},
         {"damage_primitives",true,"combat.h: 00489180 armor/range arithmetic in explicit precision domain"},
         {"target_primitives",true,"combat.h: resolved candidate maximum and original threat category flags"},
-        {"movement",false,"Locomotor/pathfinding virtual dispatch is missing"},
-        {"target_selection",false,"004D9920 threat scoring and Techno virtual target handlers missing"},
-        {"combat",false,"00489180 FP operands, projectile and derived damage handlers missing"},
+        {"movement",true,"One aligned adjacent flat drive segment; road terrain, original assets, and resolved inputs required"},
+        {"target_selection",false,"Threat arithmetic recovered; full 006F7CA0 eligibility and bounded scans remain incomplete"},
+        {"combat",false,"Armor/range arithmetic recovered; projectile and derived damage handlers remain incomplete"},
         {"production",false,"Cash-only Factory primitive available; 006F47A0 complete formula and placement unresolved"}
     };
 }

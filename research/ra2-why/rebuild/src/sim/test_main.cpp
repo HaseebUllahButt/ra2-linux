@@ -176,6 +176,36 @@ int main(int argc,char** argv) try {
     check(select_resolved_table_target({{1,false,100},{2,true,1},{3,true,2}})==3,"original eligible maximum");
     check(!select_resolved_table_target({{1,true,-1}}),"original score minus one excluded");
     check(threat_categories(0x100)==0x8042 && threat_categories(4)==4 && threat_categories(0)==0,"original threat category conversion");
+    const int expected_land[]={0,8,8,8,8,10,9,3,3,2,6,1,1,0,7,3};
+    for (unsigned i=0;i<16;++i) check(original_tmp_land_type(i)==expected_land[i],"original TMP-to-land conversion");
+    TerrainCells cliff_cells;
+    const int cliff_neighbors[][2]={{0,0},{0,-1},{-1,0},{2,2},{1,1},{1,-1},{-1,1}};
+    for (const auto& delta:cliff_neighbors) {
+        TerrainCell cell; cell.cell={static_cast<std::uint16_t>(50+delta[0]),static_cast<std::uint16_t>(50+delta[1])};
+        cell.tmp_terrain=0; cell.ramp_index=0; cell.height_level=0; cell.overlay_type_index=-1;
+        cliff_cells.push_back(cell);
+    }
+    auto clear_cells=cliff_cells; resolve_overlay_free_terrain(clear_cells,2);
+    check(clear_cells[0].land_type==0 && clear_cells[0].bridge==false,"original clear-cell initialization");
+    cliff_cells[1].height_level=4; resolve_overlay_free_terrain(cliff_cells,2);
+    check(cliff_cells[0].land_type==3,"original cliff-back land conversion");
+    auto unresolved=TerrainCells{clear_cells[0]}; unresolved[0].land_type.reset();
+    resolve_overlay_free_terrain(unresolved,2);
+    check(!unresolved[0].land_type,"missing cliff neighbors stay unresolved");
+    std::uint32_t land_hash=2166136261u;
+    const int ordered_neighbors[][2]={{0,0},{0,-1},{-1,0},{2,2},{1,1},{-1,1},{1,-1}};
+    for (unsigned raw=0;raw<16;++raw) for (unsigned mode=0;mode<4;++mode) for (unsigned mask=0;mask<64;++mask) {
+        TerrainCells cells;
+        for (unsigned i=0;i<7;++i) {
+            TerrainCell cell; cell.cell={static_cast<std::uint16_t>(50+ordered_neighbors[i][0]),static_cast<std::uint16_t>(50+ordered_neighbors[i][1])};
+            cell.tmp_terrain=raw; cell.overlay_type_index=-1; cell.ramp_index=0;
+            cell.height_level=i && (mask&(1u<<(i-1)))?4:0;
+            cells.push_back(cell);
+        }
+        resolve_overlay_free_terrain(cells,mode);
+        land_hash=(land_hash^static_cast<std::uint32_t>(cells[0].land_type.value()))*16777619u;
+    }
+    check(land_hash==0xbc614341u,"4096 original cliff-back decisions");
     std::uint32_t floor_hash=2166136261u; unsigned floor_count=0;
     const int local_points[][2]={{0,0},{0,255},{255,0},{255,255},{128,128},{64,192},{192,64},{-1,-1}};
     for (int level:{-1,0,1,7}) for (int ramp=0;ramp<=20;++ramp) for (const auto& point:local_points) {
@@ -204,6 +234,36 @@ int main(int argc,char** argv) try {
         check(bits==distance_bits[i],"original lookup square root bits");
         check(expansion_distance.square_root(squared_vectors[i])==value,"base and expansion distance table parity");
     }
+    const auto base_drive=DriveTables::from_executable(root+"/../../game/game.exe");
+    const auto expansion_drive=DriveTables::from_executable(root+"/../../game/gamemd.exe");
+    struct DriveGolden { unsigned facing; int speed,frames; std::uint32_t hash; };
+    const DriveGolden drive_golden[]={
+#include "move_golden.inc"
+    };
+    constexpr int drive_directions[][2]={{0,-1},{1,-1},{1,0},{1,1},{0,1},{-1,1},{-1,0},{-1,-1}};
+    for (const auto* tables:{&base_drive,&expansion_drive}) for (const auto& golden:drive_golden) {
+        const unsigned direction=golden.facing/32;
+        auto segment=DriveSegment::begin({13952,17792,0},{13952+drive_directions[direction][0]*256,17792+drive_directions[direction][1]*256,0},golden.facing,golden.speed,*tables);
+        std::uint32_t hash=2166136261u; int frames=0;
+        while (segment.active && frames<1024) {
+            segment.tick(*tables); ++frames;
+            for (int value:{segment.current.x,segment.current.y,segment.current.z,segment.motion.track,segment.motion.sample,segment.motion.remainder})
+                hash=(hash^static_cast<std::uint32_t>(value))*16777619u;
+        }
+        if (hash!=golden.hash) std::cerr<<"Drive mismatch facing="<<golden.facing<<" speed="<<golden.speed<<" frames="<<frames<<" hash="<<std::hex<<hash<<std::dec<<"\n";
+        check(frames==golden.frames && hash==golden.hash,"original adjacent drive tick trace");
+    }
+    for (auto edition:{DriveEdition::BaseRa2,DriveEdition::YurisRevenge}) {
+        std::uint32_t idle_hash=2166136261u;
+        for (int iq:{0,1,2,3,5}) for (bool default_area:{false,true}) for (bool ability:{false,true}) for (unsigned mask=0;mask<16;++mask) {
+            DriveIdleInputs in; in.edition=edition; in.house_iq=iq; in.guard_area_iq=2;
+            in.default_to_guard_area=default_area; in.ability_guard_area=ability;
+            in.slot_5d4_nonzero=mask&1; in.slot_2dc_nonzero=mask&2; in.slot_2d8_nonzero=mask&4; in.slot_2e4_nonzero=mask&8;
+            idle_hash=(idle_hash^static_cast<std::uint32_t>(original_armed_drive_idle(in)))*16777619u;
+        }
+        check(idle_hash==(edition==DriveEdition::BaseRa2?0xe4ba2365u:0x2a52cf05u),"320 original armed vehicle idle decisions per edition");
+    }
+    check(original_rule_speed(6)==15 && original_rule_speed(100)==255 && original_rule_speed(101)==255 && original_rule_speed(0)==0,"original authored Speed conversion");
     ThreatScoreInputs scoring;
     scoring.coefficients={rules.read_double("General","MyEffectivenessCoefficientDefault"),
         rules.read_double("General","TargetEffectivenessCoefficientDefault"),

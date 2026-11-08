@@ -38,7 +38,8 @@ This record state does not reproduce original destruction effects.
 `TakeCash` removes available cash and records the paid amount.
 It supports houses with known cash and no stored ore.
 `RandomRange` uses the recovered original random stream.
-Move, Attack, Produce, Stop, and unknown commands return `Unsupported`.
+Attack, Produce, Stop, and unknown commands return `Unsupported`.
+Move supports the limited original drive segment described below.
 Unknown health or money produces a specific error.
 
 The separate `Factory` primitive advances cash-only factory stages.
@@ -91,7 +92,8 @@ Type and weapon fields preserve authored text after map overlays.
 Missing integer fields stay optional; unknown engine defaults are not guessed.
 Weapon fields include Damage, ROF, Range, Projectile, and Warhead.
 Cost and Speed are authored rule values, not final engine values.
-No armor multipliers, movement rate, fire interval, or projectile motion is inferred from these inputs.
+Unrecovered armor selection, fire intervals, and projectile motion remain explicit gaps.
+Drive Speed uses the original conversion and the supported terrain and country inputs described below.
 Registry indexes are not original object indexes.
 Native IDs follow Structures, Units, Infantry, Aircraft order.
 
@@ -101,15 +103,15 @@ Partial health for other categories remains unknown.
 Referenced houses absent from the map receive unknown cash and a reported gap.
 Local player cash stays unknown because session adjustments need more state.
 Triggers, tags, teams, transports, bridges, occupancy, terrain effects, and reinforcement scripts do not execute.
-The existing map reader decodes packed terrain; this core does not yet use it for movement.
+Decoded terrain inputs now support the limited adjacent Move command.
 Map overlays follow the existing INI reader's documented first-key policy.
 
 ## Remaining recovery
 
-Movement needs the 004B2630 locomotor dispatch, linked Foot state, cell passability, and pathfinding handlers.
+General movement still needs the rest of 004B2630, linked Foot state, cell passability, and pathfinding handlers.
 Target selection needs 006F8DF0 and its virtual eligibility/threat handlers.
 004D9920 only wraps that selection. 006FCDB0 also applies transport and target eligibility rules.
-Combat needs 00489180 floating-point damage operands and derived damage/destruction handlers.
+Combat still needs projectile updates and derived damage/destruction handlers.
 The forced health primitive must not replace those handlers.
 Production needs the complete 006F47A0 build-time formula, house multipliers, prerequisites, and placement handlers.
 The factory primitive accepts resolved inputs to avoid inventing those numbers.
@@ -119,7 +121,7 @@ The core does not claim replay parity with original network events or original a
 ## Recovered ground movement state
 
 `ground.h` exposes `GroundMotion`, `GroundGuards`, and world coordinates.
-These are verified movement primitives. They do not execute map movement ticks.
+These are verified movement primitives. The separate Move integration executes the limited map segment described below.
 `GroundMotion::move_to()` ports the destination setter at 004AFD40.
 The caller supplies four resolved Foot virtual results and the resolved bridge height adjustment.
 Each true guard leaves the destination unchanged.
@@ -319,3 +321,82 @@ The shared floating-point helpers now support general nonnegative damage radii.
 They replace the earlier binary-radius-only implementation.
 Both original executables and the native port produce hash AFF8A2E1 for 5,832 armor/range cases.
 Nonfinite, overflowing, negative-radius, and negative-distance paths still return explicit errors where applicable.
+
+## Original adjacent Move
+
+Call `load_ground_assets(original_executable_path, original_art_ini)` before issuing commands or advancing time.
+Use the matching base or expansion executable and ART INI.
+The loader reads original static curve data. It executes no Windows instructions.
+It checks the supported distance-helper signature, curve pointer ranges, sample bounds, and control rows.
+Base curve descriptors start at 007A00A0. Expansion descriptors start at 007E7A28.
+Controls start at base 007A0180 or expansion 007E7B28.
+
+Queue `Command{}` with `op=Op::Move`, the entity ID, an absolute frame, and a destination cell.
+A successful issue returns a ticket. The tick result reports whether the specific Move can run.
+Movement updates run before due commands. A newly accepted Move starts moving on the following tick.
+Read `Entity.position`, `cell`, `moving`, and `move_goal` in snapshots.
+The native command API does not reproduce the original network event format.
+
+The command currently supports one full-health, non-veteran, non-accelerating drive vehicle at a time.
+Its initial mission must be Guard or Area Guard. Its map tag must be None.
+Groups, follow links, bridges, naval movement, and retained unknown fields return explicit errors.
+The goal must be one adjacent cell in the vehicle's current eight-way direction.
+Both cells must have resolved flat floors at the same height, road land, and no overlay or terrain object.
+Clear-cell Move returns Unsupported until tile replacement at 0047CA80 is recovered.
+Foot, Track, and Wheel multipliers must all be one on those cells.
+This avoids guessing the unresolved default SpeedType while preserving these equal original rates.
+The original country SpeedUnitsMult applies. Its constructor default is float one at 005113F0.
+
+Base 006DCC01–006DCC3B and expansion 0071465F–00714699 clamp authored Speed, scales it by 256/100, and caps it at 255.
+004DB1A0 supplies the speed calculation order. Foot construction at 004D31E0 starts the other supported multipliers at one.
+Rules loader 00674000 and LandType-name getter 0048DFD0 prove Clear=0 and Road=1.
+The supported path chooses only its already aligned adjacent original direction.
+The eight offsets come from original initializer 0049F2F0.
+This does not substitute a new path finder for 004D3920.
+
+Track updates port expansion 004B0F20 and base 004A1000.
+They use original seven-unit sample budgets and original straight curves.
+Fractional movement preserves the original float conversion and diagonal third-cell guard.
+The terminal branch preserves its Manhattan-distance correction and signed remainder.
+The completed segment clears its anchor and selects the recovered idle mission.
+Armed vehicles use house IQ, IQ.GuardArea, and DefaultToGuardArea to choose Guard or Area Guard.
+House IQ initialization follows 00500B40; IQ rules follow 00674240.
+Base 006FD630 and expansion 00738970 have different extra idle-state guards.
+`original_idle_check.py executable [--base]` verifies 320 resolved armed idle decisions per edition.
+The native checks preserve both hashes: base E4BA2365 and expansion 2A52CF05.
+Same-frame segment chaining, replanning, turns, and simultaneous movement return explicit errors.
+Static building checks use original ART Foundation names and conservative bounds.
+They reject uncertain foundation cells instead of claiming full building collision recovery.
+Forced health changes during movement also return an explicit error until damaged-speed and death integration is recovered.
+
+`original_move_trace.py executable [--base]` runs isolated original track updates with explicit flat-map and Foot adapters.
+It tests eight directions at speeds 1, 7, 15, 30, and 255.
+Both executables produce the same 40 complete traces.
+The native tests compare every frame's coordinates, track, sample index, and signed remainder against their hashes.
+These checks prove this resolved track slice. They do not prove unrecovered callbacks.
+
+Run `rebuild/src/sim/test_move.sh` for the real-map command check.
+This optional integration test reads the parent's current renderer sources through `RA2_SHARED_SOURCE`.
+Its default is `/path/to/user/ra2/rebuild/src`.
+It loads original C1A02MD.MAP, the original ART INI, and exact TMP metadata from original MIX archives.
+Original YTNK entity 259 moves from 113,115 to 113,114 in 12 movement ticks.
+Each position matches original x86 output at its real Speed=6, converted to 15.
+The original IQ=3 house makes this YTNK enter Area Guard after arrival.
+A second simulation replays the commands and matches each tick.
+An unsupported path and an unsupported health change leave entity state intact.
+
+## Overlay-free terrain initialization
+
+`world.cpp` ports the raw TMP conversion and the final cliff-back branch.
+Base sources are 00529300 and 00472540; expansion sources are 00544BE0 and 0047D2B0.
+The raw conversion tables at base 007DE4EC and expansion 008288E4 match.
+The six height tests use their exact original offsets and order.
+CliffBackImpassability=2 changes eligible land types to rock when a tested neighbor is four levels higher.
+Missing required neighbor heights leave the final land unresolved.
+Overlay cells remain unresolved until their original overlay decisions are recovered.
+Ordinary flat clear or road cells without overlays cannot create the land-10 bridge object.
+Those supported cells therefore receive the original false bridge state.
+
+`original_land_check.py executable [--base]` checks 4,096 original branch cases in each edition.
+Both produce hash BC614341. The native tests compare the same grid.
+This does not yet port autotile replacement at 0047CA80, bridge creation, tunnel flags, or overlay-specific land decisions.

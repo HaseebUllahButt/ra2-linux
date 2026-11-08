@@ -20,3 +20,11 @@ struct TerrainCell {
 };
 using TerrainCells=std::vector<TerrainCell>;
 }
+
+namespace ra2::sim {
+// 00544BE0's raw TMP conversion. This does not apply overlay or cliff decisions.
+int original_tmp_land_type(std::uint8_t raw);
+// Supported 0047D2B0 slice: valid TMP input, no overlay, and cliff-back height tests.
+// Missing required neighbors or overlay metadata leave final fields empty.
+void resolve_overlay_free_terrain(TerrainCells&,std::uint8_t cliff_back_impassability);
+}
