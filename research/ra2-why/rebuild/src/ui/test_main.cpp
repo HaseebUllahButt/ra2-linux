@@ -107,7 +107,7 @@ int main(int argc,char** argv) {
     auto base_countries=ui::load_skirmish_countries(base,base_strings);
     auto expansion_countries=ui::load_skirmish_countries(files,strings);
     auto colors=ui::load_skirmish_colors(base_strings);
-    assert(colors.size()==10 && colors[0].index==-2 && !colors[0].swatch);
+    assert(colors.size()==9 && colors[0].index==-2 && !colors[0].swatch);
     assert(colors[2].index==1 && colors[2].swatch && colors[2].swatch->r==255 &&
            colors[2].swatch->g==25 && colors[2].swatch->b==25);
     for (const auto& color : colors) assert(!color.name.empty());
@@ -228,6 +228,25 @@ int main(int argc,char** argv) {
     assert(menu.setup().short_game && *menu.setup().short_game!=*previous_short_game);
     menu.pointer_down(short_x,short_y); assert(menu.pointer_up(short_x,short_y)==ui::Action::SetupChanged);
     assert(menu.setup().short_game==previous_short_game);
+    menu.select_opponent(1,ui::Opponent::Easy);
+    assert(menu.select_opponent(1,ui::Opponent::Closed)==ui::Action::SetupChanged);
+    assert(menu.select_country(1,0)==ui::Action::None);
+    assert(menu.select_opponent(1,ui::Opponent::Easy)==ui::Action::SetupChanged);
+    assert(menu.select_country(1,0)==ui::Action::SetupChanged);
+    assert(menu.setup().opponents[0].country==0);
+    int free_color=-1;
+    for (int color=0;color<8;++color) {
+        bool used=menu.setup().color==color;
+        for(std::size_t i=1;i<menu.setup().opponents.size();++i) {
+            const auto& other=menu.setup().opponents[i];
+            if(other.opponent && *other.opponent!=ui::Opponent::Closed && other.color==color) used=true;
+        }
+        if(!used) {free_color=color;break;}
+    }
+    assert(free_color>=0 && menu.select_color(1,free_color)==ui::Action::SetupChanged);
+    assert(menu.select_color(0,free_color)==ui::Action::None);
+    assert(menu.select_opponent(1,ui::Opponent::Closed)==ui::Action::SetupChanged);
+    assert(menu.setup().opponents[0].country==-2 && menu.setup().opponents[0].color==-2);
     auto ally=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
                            [](const auto& c){return c.id==1693;});
     if (ally!=base_skirmish.controls.end() && (ally->style&0x08000000u)) {

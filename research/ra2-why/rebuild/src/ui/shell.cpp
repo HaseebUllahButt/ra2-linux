@@ -142,6 +142,7 @@ Menu Menu::load(const fs::MixFileSystem& files, const std::vector<std::uint8_t>&
     if (expansion_data) expansion_rules.parse(std::string_view(reinterpret_cast<const char*>(expansion_data->data()),expansion_data->size()));
     result.setup_ = read_skirmish_setup(preferences, base_data ? &base_rules : nullptr,
                                        expansion_data ? &expansion_rules : nullptr);
+    result.countries_ = load_skirmish_countries(files, strings);
     const auto colors = gfx::Palette::from_bytes(required(files, "SDBTNANM.PAL"));
     const auto button = shape(files, "SDBTNANM.SHP");
     result.normal_ = button.decode_frame(2, colors);
@@ -318,6 +319,61 @@ Action Menu::key_down(Key key) noexcept {
         hovered_.reset(); held_.reset();
     }
     return Action::None;
+}
+Action Menu::select_opponent(std::size_t slot, Opponent value) noexcept {
+    if (page()!=Page::Skirmish || confirming_exit_ || slot<1 || slot>setup_.opponents.size())
+        return Action::None;
+    if (value!=Opponent::Closed && value!=Opponent::Easy && value!=Opponent::Medium && value!=Opponent::Hard)
+        return Action::None;
+    auto& target=setup_.opponents[slot-1];
+    bool changed=target.opponent!=value;
+    target.opponent=value;
+    // 0x006ADC20 resets the closed slot and disables its other controls.
+    if (value==Opponent::Closed) {
+        changed=changed || target.country!=-2 || target.color!=-2;
+        target.country=-2;
+        target.color=-2;
+    }
+    return changed ? Action::SetupChanged : Action::None;
+}
+Action Menu::select_country(std::size_t slot, int index) {
+    if (page()!=Page::Skirmish || confirming_exit_ || slot>setup_.opponents.size()) return Action::None;
+    const auto choice=std::find_if(countries_.begin(),countries_.end(),
+                                   [index](const auto& country){return country.index==index;});
+    if (choice==countries_.end()) return Action::None;
+    if (slot==0) {
+        if (setup_.country==choice->id) return Action::None;
+        setup_.country=choice->id;
+        return Action::SetupChanged;
+    }
+    auto& target=setup_.opponents[slot-1];
+    if (!target.opponent || *target.opponent==Opponent::Closed || target.country==index) return Action::None;
+    target.country=index;
+    return Action::SetupChanged;
+}
+Action Menu::select_color(std::size_t slot, int index) noexcept {
+    if (page()!=Page::Skirmish || confirming_exit_ || slot>setup_.opponents.size() ||
+        (index!=-2 && (index<0 || index>7))) return Action::None;
+    if (slot && (!setup_.opponents[slot-1].opponent ||
+                 *setup_.opponents[slot-1].opponent==Opponent::Closed)) return Action::None;
+    // 0x004E4C20 reserves each selected color for one active player.
+    if (index!=-2) {
+        if (slot!=0 && setup_.color==index) return Action::None;
+        for (std::size_t i=0;i<setup_.opponents.size();++i) {
+            const auto& other=setup_.opponents[i];
+            if (slot==i+1 || !other.opponent || *other.opponent==Opponent::Closed) continue;
+            if (other.color==index) return Action::None;
+        }
+    }
+    if (slot==0) {
+        if (setup_.color==index) return Action::None;
+        setup_.color=index;
+    } else {
+        auto& target=setup_.opponents[slot-1];
+        if (target.color==index) return Action::None;
+        target.color=index;
+    }
+    return Action::SetupChanged;
 }
 
 gfx::RgbaImage Menu::render() const {

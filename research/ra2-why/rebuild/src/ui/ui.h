@@ -139,6 +139,10 @@ public:
     void pointer_down(int x, int y);
     Action pointer_up(int x, int y);
     Action key_down(Key key) noexcept;
+    // Slot zero is the player; slots one through seven are opponents.
+    Action select_opponent(std::size_t slot, Opponent value) noexcept;
+    Action select_country(std::size_t slot, int country_index);
+    Action select_color(std::size_t slot, int color_index) noexcept;
 private:
     struct Button { std::uint32_t id; Rect bounds; std::string label; bool enabled; };
     std::vector<Button> buttons() const;
@@ -153,6 +157,7 @@ private:
     bool confirming_exit_ = false;
     bool credit_changed_ = false;
     SkirmishSetup setup_;
+    std::vector<SkirmishCountry> countries_;
     GameFont font_;
     Dialog main_, single_, skirmish_;
     MenuNavigation navigation_;

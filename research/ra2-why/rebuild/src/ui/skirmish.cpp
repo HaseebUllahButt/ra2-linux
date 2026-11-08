@@ -60,7 +60,8 @@ std::optional<int> credit_from_slider_pointer(int local_x, int width,
 }
 
 std::vector<SkirmishColor> load_skirmish_colors(const ra2text::CsfFile& strings) {
-    // 0x004E43C0 builds these nine labels and COLORREFs at 0x008316A8.
+    // 0x004E43C0 builds nine swatches at 0x008316A8. 0x004E45A0 offers
+    // only the first eight in the player color picker.
     static constexpr const char* keys[]={"GUI:GoldAbbrev","GUI:RedAbbrev","GUI:BlueAbbrev",
         "GUI:GreenAbbrev","GUI:OrangeAbbrev","GUI:SkyBlueAbbrev","GUI:PurpleAbbrev",
         "GUI:PinkAbbrev","GUI:GrayAbbrev"};
@@ -72,7 +73,7 @@ std::vector<SkirmishColor> load_skirmish_colors(const ra2text::CsfFile& strings)
     };
     std::vector<SkirmishColor> result;
     result.push_back({-2,std::nullopt,text("GUI:RandomAsSymbols"),"GUI:RandomAsSymbols"});
-    for (int i=0;i<9;++i) {
+    for (int i=0;i<8;++i) {
         const auto c=colors[i];
         const gfx::Rgba rgb{static_cast<std::uint8_t>(c),static_cast<std::uint8_t>(c>>8),
                             static_cast<std::uint8_t>(c>>16),255};
