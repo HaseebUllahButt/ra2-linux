@@ -37,7 +37,7 @@ SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS))
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 SESSION_OBJECTS = build/native/src/session/session.o build/native/src/session/map_geometry.o build/native/src/session/placement_terrain.o
 
-native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-filtered-path sim-smoothing sim-entry-height sim-category sim-regions sim-hierarchy sim-hierarchy-route sim-replacement sim-world sim-build-time sim-production session session-terrain weapons
+native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-filtered-path sim-smoothing sim-full-smoothing sim-entry-height sim-category sim-regions sim-hierarchy sim-hierarchy-route sim-replacement sim-world sim-build-time sim-production session session-terrain weapons
 	build/ra2-native --game-dir ../game --frames 3 --headless
 	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
@@ -117,6 +117,13 @@ sim-smoothing: build/sim_smoothing_test
 	build/sim_smoothing_test
 
 build/sim_smoothing_test: build/native/src/sim/test_smoothing.o build/native/src/sim/path_smoothing.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+.PHONY: sim-full-smoothing
+sim-full-smoothing: build/sim_full_smoothing_test
+	build/sim_full_smoothing_test
+
+build/sim_full_smoothing_test: build/native/src/sim/test_full_smoothing.o build/native/src/sim/path_smoothing.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 sim-entry-height: build/sim_entry_height_test
