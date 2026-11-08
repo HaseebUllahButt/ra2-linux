@@ -113,19 +113,21 @@ Integer multiply_mod(Integer a, const Integer& b, const Integer& modulus) {
     return result;
 }
 std::array<std::uint8_t, 56> decode_key(const std::vector<std::uint8_t>& block) {
-    // A compile-time public modulus keeps the arithmetic independent of OS or
-    // crypto libraries. The format constant is supplied as 40 big-endian bytes.
-#ifdef RA2_MIX_PUBLIC_MODULUS
-    static constexpr std::uint8_t modulus_bytes[40] = {RA2_MIX_PUBLIC_MODULUS};
-#else
-    // The original code's public-key bytes are not in the supplied function
-    // decompilations. Fail explicitly until the format constant is available.
-    static constexpr std::uint8_t modulus_bytes[40] = {};
-#endif
+    // Westwood public modulus: ASN.1 INTEGER payload of OpenRA's
+    // BlowfishKeyProvider.PublicKeyString, also [PublicKey] 1 in the
+    // shipped 151-byte INI entry 0x763c81dd (see RE-REPORT-2.md).
+    // Two 40-byte little-endian inputs yield 39 bytes each; take 56.
+    static constexpr std::uint8_t modulus_bytes[40] = {
+        0x51, 0xbc, 0xda, 0x08, 0x6d, 0x39, 0xfc, 0xe4,
+        0x56, 0x51, 0x60, 0xd6, 0x51, 0x71, 0x3f, 0xa2,
+        0xe8, 0xaa, 0x54, 0xfa, 0x66, 0x82, 0xb0, 0x4a,
+        0xab, 0xdd, 0x0e, 0x6a, 0xf8, 0xb0, 0xc1, 0xe6,
+        0xd1, 0xfb, 0x4f, 0x3d, 0xaa, 0x43, 0x7f, 0x15,
+    };
     Integer modulus{};
     for (unsigned i = 0; i < 40; ++i)
         modulus[i / 4] |= std::uint32_t(modulus_bytes[39 - i]) << (8 * (i % 4));
-    if (modulus == Integer{}) throw MixError("MIX public modulus is not configured");
+    if (block.size() != 80) throw MixError("MIX key block must contain exactly 80 bytes");
     std::array<std::uint8_t, 56> key{};
     for (unsigned offset = 0; offset < 80; offset += 40) {
         Integer value{};

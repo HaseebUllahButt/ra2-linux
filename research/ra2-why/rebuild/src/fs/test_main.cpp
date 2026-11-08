@@ -106,7 +106,12 @@ int main(int argc, char** argv) {
                 if (entry.size && entry.size <= 4096) { require(archive->read(entry).size() == entry.size, "Real payload read"); break; }
         }
         MixFileSystem fs(game);
-        fs.bootstrap(); fs.mount_overlays(); fs.mount_resources();
+        fs.bootstrap(); fs.mount_overlays();
+        // The game's language initialization is outside these reconstructed
+        // stages. Supply its archives explicitly for the real-install test:
+        // their nested CAMEOMD/CAMEO archives are required by resources.
+        fs.mount("LANGMD.MIX"); fs.mount("LANGUAGE.MIX");
+        fs.mount_resources();
         std::cout << "Mounted search order:\n";
         for (const auto& archive : fs.mixes()) print_archive(*archive);
         const auto rules = fs.read_file("rulesmd.ini");

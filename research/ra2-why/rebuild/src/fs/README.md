@@ -1,22 +1,17 @@
 # MIX filesystem reconstruction
 
-**Status: incomplete pending the public-key format constant.** The module
-compiles and its independent tests pass, but the default build explicitly
-rejects encrypted MIX archives with `MIX public modulus is not configured`.
-The supplied decompiled functions reference the public-key storage without
-its bytes. The separately requested permission to read the local OpenRA
-`BlowfishKeyProvider.cs` is pending because that helper is outside the named
-read scope. No such helper was read. A temporary compile-time
-`RA2_MIX_PUBLIC_MODULUS` override accepts 40 comma-separated big-endian public
-modulus bytes. This is an interim integration point, not a completed real-game
-encryption implementation. The encrypted format description below documents
-the intended implementation; full archive verification remains outstanding.
+**Status: encrypted-header verification passes on the real installation.**
+The default build contains Westwood's 40-byte RSA public modulus recovered
+from the authorized local OpenRA `BlowfishKeyProvider.cs`. Its ASN.1 INTEGER
+is identical to `[PublicKey] 1` in the 151-byte shipped INI described in
+`analysis/RE-REPORT-2.md` (entry ID `0x763c81dd`). There is no build-time
+modulus override or external crypto dependency.
 
 Linux C++17 replacement of the gamemd.exe 1.001 MIX layer. All implementation,
 fixtures, build outputs, and this document belong in `rebuild/src/fs/`.
 Game files are opened in binary read-only mode. No original executable is run.
 
-Build from `/tmp/r2` (the repository symlink):
+Build from the repository root (or the staged workspace root):
 
 ```sh
 g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -I rebuild/src/fs \
@@ -191,9 +186,10 @@ with Chudnovsky at 10200 decimal digits, with first/last-word checks.
 * `mix_test --self-test` passes hash vectors, both header formats, every
   truncation of small fixtures, malformed offsets/sizes/flags, checksum trailer
   presence, and nested archive lifetime/bounds.
-* The standalone primitive test passes the published all-zero Blowfish
-  key/plaintext known answer and modular arithmetic identities across the full
-  320-bit width. Build separately because it includes the implementation:
+* The standalone primitive test passes the all-zero Blowfish key/plaintext
+  known answer, modular arithmetic identities across the full 320-bit width,
+  and rejection of wrapped key lengths other than 80 bytes. Build separately
+  because it includes the implementation:
 
   ```sh
   g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -I rebuild/src/fs \
@@ -202,13 +198,59 @@ with Chudnovsky at 10200 decimal digits, with first/last-word checks.
   rebuild/src/fs/crypto_test
   ```
 
-* `mix_test --archive PATH` prints one archive's entry count. The real
-  unencrypted archives are readable; see `verification.txt` for actual output.
-* The full game-directory test currently fails at the first encrypted archive
-  because the public modulus is unavailable. Bootstrap/nested real-archive
-  verification is therefore not yet complete.
+* `mix_test --archive PATH` opens and prints one archive's directory count.
+  The requested encrypted archives produce:
 
-During constant discovery, `CCINIClass.h` was also fetched from the same
-permitted YRpp raw host. One read mistakenly went beyond the requested YRpp
-headers: `StaticInits.cpp` from that repository. It did not supply the key.
-All filesystem writes remained in `rebuild/src/fs/`.
+  | Archive | Entries | Data start |
+  | --- | ---: | ---: |
+  | ra2.mix | 21 | 348 |
+  | ra2md.mix | 25 | 396 |
+  | expandmd01.mix | 33 | 492 |
+  | multimd.mix | 173 | 2172 |
+
+* `mix_test /path/to/user/ra2/game` passes all 16 top-level MIX archives
+  (13 encrypted), 21 mounts, and reads the 743,215-byte `RULESMD.INI`.
+  The integration harness explicitly mounts `LANGMD.MIX` and `LANGUAGE.MIX`
+  before the resources stage to supply their nested cameo archives. This
+  supplies language initialization for the test without changing bootstrap
+  or resource mounting semantics.
+* `python3 rebuild/src/fs/verify_encrypted.py` independently decodes the
+  extracted INI's base64 ASN.1 public modulus, checks it against OpenRA's
+  `PublicKeyString`, and recovers all four 56-byte Blowfish keys using Python's
+  arbitrary-precision `pow`. Each key matches the C++ output byte for byte.
+  The test also reads and compares the actual embedded `[PublicKey]` values
+  from `ra2.mix`, `ra2md.mix`, and `expandmd01.mix`, then checks each archive's
+  expected count and padded data start. It never uses the INI's private value.
+
+The modulus is 319 significant bits in 40 big-endian bytes:
+
+```text
+51bcda086d39fce4565160d651713fa2e8aa54fa6682b04aabdd0e6af8b0c1e6d1fb4f3daa437f15
+```
+
+The exponent is 65537. OpenRA's `pubkey.Len = bit_length - 1` followed by
+`a = (pubkey.Len - 1) / 8` gives `a = 39`: decrypt two 40-byte little-endian
+integers, concatenate the low 39 little-endian result bytes from each, and
+keep the first 56 bytes. OpenRA's `Blowfish.cs` confirms the standard
+big-endian block words and key schedule already implemented here.
+
+An optional independent reference harness compiles the **unmodified** local
+GPLv3-or-later OpenRA `BlowfishKeyProvider.cs` and `Blowfish.cs` by reference.
+No OpenRA source files were copied into this directory. The C++ reader does
+not link this harness or require .NET. Reproduce the direct comparison with:
+
+```sh
+DOTNET_CLI_HOME="$PWD/rebuild/src/fs/openra-reference/.dotnet" \
+  NUGET_PACKAGES="$PWD/rebuild/src/fs/openra-reference/.nuget" \
+  DOTNET_GENERATE_ASPNET_CERTIFICATE=false DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+  dotnet build rebuild/src/fs/openra-reference/Reference.csproj -c Release \
+  --configfile rebuild/src/fs/openra-reference/NuGet.Config
+python3 rebuild/src/fs/verify_encrypted.py \
+  --openra-reference rebuild/src/fs/openra-reference/bin/Release/net8.0/Reference.dll
+```
+
+The optional reference requires the local .NET 8 SDK and uses no package
+sources. Override MSBuild's `OpenRaFormats` property for a different local
+OpenRA source directory, and `verify_encrypted.py --repo` for different input
+roots. All four reference keys and decrypted header counts match the C++
+reader and INI-based Python calculation. Actual output is in `verification.txt`.

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <OpenRaFormats Condition="'$(OpenRaFormats)' == ''">/path/to/user/ra2/openra/ra2/engine/OpenRA.Mods.Cnc/FileFormats</OpenRaFormats>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(OpenRaFormats)/BlowfishKeyProvider.cs" Link="BlowfishKeyProvider.cs" />
+    <Compile Include="$(OpenRaFormats)/Blowfish.cs" Link="Blowfish.cs" />
+  </ItemGroup>
+</Project>
