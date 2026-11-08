@@ -39,6 +39,10 @@ enum class PlacementEdition { Base, Yuri };
 using PlacementCheck = std::function<bool(StartPoint, sim::Random&)>;
 std::optional<StartPoint> find_initial_placement(StartPoint origin, PlacementBounds bounds,
     PlacementEdition edition, sim::Random& random, const PlacementCheck& valid, const PlacementCheck& place);
+// The extra-unit generator starts at radius 4. Negative radii are unsupported.
+std::optional<StartPoint> find_initial_placement(StartPoint origin, PlacementBounds bounds,
+    std::int32_t start_radius, PlacementEdition edition, sim::Random& random,
+    const PlacementCheck& valid, const PlacementCheck& place);
 // Returns a point index and marks it used. The RNG is the simulation's shared
 // original state. Invalid or unsupported input leaves both arguments unchanged.
 // This covers regular players in standard Battle mode, without observers.

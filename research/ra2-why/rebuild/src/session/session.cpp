@@ -71,12 +71,18 @@ std::optional<int> point_distance(StartPoint a, StartPoint b, const sim::Origina
 }
 std::optional<StartPoint> find_initial_placement(StartPoint origin, PlacementBounds bounds,
     PlacementEdition edition, sim::Random& random, const PlacementCheck& valid, const PlacementCheck& place) {
+    return find_initial_placement(origin,bounds,1,edition,random,valid,place);
+}
+std::optional<StartPoint> find_initial_placement(StartPoint origin, PlacementBounds bounds,
+    std::int32_t start_radius, PlacementEdition edition, sim::Random& random,
+    const PlacementCheck& valid, const PlacementCheck& place) {
     // Base 00660B60; expansion 00688ED0. Callers resolve both operations.
-    if (!valid || !place || bounds.left>bounds.right || bounds.top>bounds.bottom) return std::nullopt;
+    if (!valid || !place || start_radius<0 || bounds.left>bounds.right || bounds.top>bounds.bottom)
+        return std::nullopt;
     if (valid(origin,random) && place(origin,random)) return origin;
     static constexpr int dx[8]={0,1,1,1,0,-1,-1,-1};
     static constexpr int dy[8]={-1,-1,0,1,1,1,0,-1};
-    for (int radius=1;radius<32;++radius) {
+    for (int radius=start_radius;radius<32;++radius) {
         int direction=random.ranged(0,7);
         for (int pass=0;pass<2;++pass) for (int i=0;i<8;++i) {
             int x=std::clamp(int(origin.x)+dx[direction]*radius,int(bounds.left),int(bounds.right));

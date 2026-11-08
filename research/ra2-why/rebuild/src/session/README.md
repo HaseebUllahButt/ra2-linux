@@ -26,7 +26,7 @@ map and unit processing. Base `0x004E8300` and expansion `0x004FCE00` match.
 `0x00660B60` and expansion `0x00688ED0`. The caller supplies resolved map
 validation, occupancy, and placement callbacks. Base validates the origin;
 Yuri also validates each retry. The callbacks share the simulation RNG.
-The test compares 21 search traces and complete RNG states per edition against
+The test compares 63 search traces and complete RNG states per edition against
 the original x86 code. The map and object checks are supplied test inputs.
 
 `starting_unit_budget` filters resolved starting types and computes the shared
@@ -35,7 +35,39 @@ vehicles, average eligible costs with original rounding, and multiply by the
 unit count. Unknown required inputs and arithmetic overflow return no result.
 
 This is not a complete skirmish session. House creation, final cash, additional
-units, actual map and unit placement checks, observers, and random waypoint
-fallback remain incomplete. Start must remain disabled.
-`Simulation.load_random_state` can restore the advanced setup RNG before ticks
-or queued commands. The complete session setup must supply that state.
+unit selection, actual map and unit placement checks, observers, random waypoint fallback, and RNG state
+handoff to `Simulation` are not implemented. Start must remain disabled.
+
+For this helper checkout, build the test against the parent simulation headers:
+
+    c++ -std=c++17 -O0 -Wall -Wextra -Werror -I /path/to/user/ra2/rebuild/src/app rebuild/src/session/{session,test_main}.cpp /path/to/user/ra2/rebuild/src/sim/{random,distance}.cpp /path/to/user/ra2/rebuild/src/rules/ini_file.cpp rebuild/src/fs/{filename_hash,mix_archive,mix_bootstrap}.cpp -o /tmp/session_test
+    /tmp/session_test /path/to/user/ra2/game
+
+The test reads the real MP02T2 map from MULTI.MIX and both original executable
+distance tables. It does not write game assets.
+
+For the optional original x86 comparison, build `chooser_cases.cpp` with
+`session.cpp`, `sim/random.cpp`, and `sim/distance.cpp`. Run
+`original_chooser_check.py game.exe chooser_cases` and repeat for `gamemd.exe`.
+It needs Python Unicorn and `sim/original_image.py`. It runs 502 cases per
+edition. It compares the selected point, flags, random indexes, and all random
+state words. It replaces only debug logging.
+
+`original_base_unit_check.py` compares the native BaseUnit choice with the
+original selector. Build `base_unit_cases.cpp` with `session.cpp` and the same
+simulation sources. It runs 320 cases per edition. The country resolver is
+stubbed to provide the already resolved country index. The selector itself runs.
+
+`original_house_check.py` compares the multiplayer house field assignment with
+the original x86 instructions. Build `house_cases.cpp` with `session.cpp` and
+the same simulation sources. It runs 56 cases per edition without stubs.
+
+`original_placement_check.py` compares placement search traces against the
+original code with supplied map and object results. Build `placement_cases.cpp`
+with `session.cpp` and the same simulation sources. The real map occupancy and
+unit placement checks still need integration.
+
+`original_budget_check.py` compares the budget prefix with original x86. Build
+`budget_cases.cpp` with `session.cpp` and the same simulation sources. It tests
+192 cases per edition. The type Cost virtual returns the supplied resolved cost;
+the original filter and arithmetic instructions execute.

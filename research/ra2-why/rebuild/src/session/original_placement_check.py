@@ -64,17 +64,17 @@ cpu.hook_add(UC_HOOK_CODE,cell_lookup,begin=lookup,end=lookup)
 lines=subprocess.check_output([native,'base' if base else 'yuri'],text=True).splitlines()
 for line in lines:
     data=list(map(int,line.split()))
-    seed,wanted,native_success,first,second,count=data[:6]
-    coordwords=data[6:6+2*count]
+    seed,wanted,radius,native_success,first,second,count=data[:7]
+    coordwords=data[7:7+2*count]
     expected=list(zip(coordwords[example.invalid],coordwords[example.invalid]))
-    expected_table=tuple(data[6+2*count:])
+    expected_table=tuple(data[7+2*count:])
     assert len(expected_table)==250
     put(stack,end,seed)
     cpu.reg_write(UC_X86_REG_ECX,scenario+0x218)
     cpu.reg_write(UC_X86_REG_ESP,stack)
     cpu.emu_start(constructor,end,count=100000)
     cpu.mem_write(origin,struct.pack('<hh',5,6))
-    put(stack,end,1)
+    put(stack,end,radius)
     cpu.reg_write(UC_X86_REG_ECX,entity)
     cpu.reg_write(UC_X86_REG_EDX,origin)
     cpu.reg_write(UC_X86_REG_ESP,stack)
