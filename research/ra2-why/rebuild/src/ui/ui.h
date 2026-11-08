@@ -12,7 +12,7 @@ namespace ra2::ui {
 // Original dialog resource units. Convert using the actual UI font metrics.
 struct Rect { int x, y, width, height; };
 // Windows dialog units use average character width and font height.
-// The caller supplies the font metrics used by the host.
+// The caller supplies the original Windows font metrics, if known.
 Rect dialog_to_pixels(Rect bounds, unsigned base_width, unsigned base_height);
 struct Control {
     std::uint32_t id, style, extended_style;
@@ -53,6 +53,7 @@ public:
     std::optional<gfx::RgbaImage> glyph(char16_t codepoint, gfx::Rgba color) const;
     // Draws UTF-8 text in the original bitmap font, clipped to the image.
     void draw_text(gfx::RgbaImage& image, std::string_view utf8, int x, int y, gfx::Rgba color) const;
+    std::uint32_t text_width(std::string_view utf8) const;
     std::uint32_t line_height() const noexcept { return line_height_; }
 private:
     std::vector<std::uint8_t> bytes_;
@@ -64,4 +65,22 @@ gfx::RgbaImage decode_pcx(const std::vector<std::uint8_t>& bytes);
 // Static shell background at the original 800x600 resolution. Mount NTRLMD.MIX
 // and NEUTRAL.MIX before calling. Other resolutions are not yet implemented.
 gfx::RgbaImage draw_shell_background(const fs::MixFileSystem& files, unsigned width, unsigned height);
+class Menu {
+public:
+    static Menu load(const fs::MixFileSystem& files, const std::vector<std::uint8_t>& exe,
+                     const ra2text::CsfFile& strings);
+    Page page() const noexcept { return navigation_.page(); }
+    gfx::RgbaImage render() const;
+    void pointer_move(int x, int y);
+    void pointer_down(int x, int y);
+    Action pointer_up(int x, int y);
+private:
+    struct Button { std::uint32_t id; Rect bounds; std::string label; bool enabled; };
+    std::vector<Button> buttons() const;
+    gfx::RgbaImage background_, normal_, hover_, pressed_;
+    GameFont font_;
+    Dialog main_, single_, skirmish_;
+    MenuNavigation navigation_;
+    std::optional<std::uint32_t> hovered_, held_;
+};
 }

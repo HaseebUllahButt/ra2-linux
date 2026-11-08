@@ -8,6 +8,23 @@ namespace ra2::ui {
 namespace {
 using Bytes = std::vector<std::uint8_t>;
 void require(bool ok, const char* why) { if (!ok) throw std::runtime_error(why); }
+std::uint32_t next_codepoint(std::string_view text, std::size_t& i) {
+    const auto first=static_cast<unsigned char>(text[i++]);
+    std::uint32_t cp=first; unsigned continuation=0;
+    if (first>=0xc2 && first<=0xdf) {cp=first&31;continuation=1;}
+    else if (first>=0xe0 && first<=0xef) {cp=first&15;continuation=2;}
+    else if (first>=0xf0 && first<=0xf4) {cp=first&7;continuation=3;}
+    else require(first<0x80, "invalid UTF-8 text");
+    require(continuation<=text.size()-i, "truncated UTF-8 text");
+    for (unsigned j=0;j<continuation;++j) {
+        auto next=static_cast<unsigned char>(text[i++]);
+        require((next&0xc0)==0x80, "invalid UTF-8 text"); cp=(cp<<6)|(next&63);
+    }
+    require((continuation!=1 || cp>=0x80) && (continuation!=2 || cp>=0x800) &&
+            (continuation!=3 || cp>=0x10000) && cp<=0xffff && !(cp>=0xd800 && cp<=0xdfff),
+            "unsupported Unicode character");
+    return cp;
+}
 void range(const Bytes& b, std::size_t p, std::size_t n) {
     require(p <= b.size() && n <= b.size() - p, "truncated UI data");
 }
@@ -195,20 +212,7 @@ void GameFont::draw_text(gfx::RgbaImage& image, std::string_view text, int x, in
     require(image.pixels.size()==std::size_t(image.width)*image.height*4, "invalid RGBA image");
     std::int64_t cursor=x, row=y;
     for (std::size_t i=0;i<text.size();) {
-        const auto first=static_cast<unsigned char>(text[i++]);
-        std::uint32_t cp=first; unsigned continuation=0;
-        if (first>=0xc2 && first<=0xdf) {cp=first&31;continuation=1;}
-        else if (first>=0xe0 && first<=0xef) {cp=first&15;continuation=2;}
-        else if (first>=0xf0 && first<=0xf4) {cp=first&7;continuation=3;}
-        else require(first<0x80, "invalid UTF-8 text");
-        require(continuation<=text.size()-i, "truncated UTF-8 text");
-        for (unsigned j=0;j<continuation;++j) {
-            auto next=static_cast<unsigned char>(text[i++]);
-            require((next&0xc0)==0x80, "invalid UTF-8 text"); cp=(cp<<6)|(next&63);
-        }
-        require((continuation!=1 || cp>=0x80) && (continuation!=2 || cp>=0x800) &&
-                (continuation!=3 || cp>=0x10000) && cp<=0xffff && !(cp>=0xd800 && cp<=0xdfff),
-                "unsupported Unicode character");
+        auto cp=next_codepoint(text,i);
         if (cp=='\r') continue;
         if (cp=='\n') {cursor=x;row+=line_height_;continue;}
         auto bitmap=glyph(static_cast<char16_t>(cp),color);
@@ -223,6 +227,18 @@ void GameFont::draw_text(gfx::RgbaImage& image, std::string_view text, int x, in
         }
         cursor += bitmap->width + 1; // 0x00433880 sets one pixel of character spacing.
     }
+}
+std::uint32_t GameFont::text_width(std::string_view text) const {
+    std::uint64_t width=0;
+    for (std::size_t i=0;i<text.size();) {
+        auto cp=next_codepoint(text,i);
+        require(cp!='\n' && cp!='\r' && cp!='\t', "multiline text width is unsupported");
+        auto bitmap=glyph(static_cast<char16_t>(cp),{});
+        require(bool(bitmap), "character missing from original game font");
+        width+=bitmap->width+1;
+        require(width<=std::numeric_limits<std::uint32_t>::max(), "text width overflow");
+    }
+    return static_cast<std::uint32_t>(width);
 }
 gfx::RgbaImage decode_pcx(const Bytes& b) {
     require(b.size()>=897 && b[0]==10 && b[2]==1 && b[3]==8 && b[65]==1, "unsupported PCX format");

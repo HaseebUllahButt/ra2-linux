@@ -90,6 +90,32 @@ int main(int argc,char** argv) {
     assert(base_main.controls.size()==11 && base_single.controls.size()==8 && base_skirmish.controls.size()==51);
     auto base_shell=ui::draw_shell_background(base,800,600);
     assert(base_shell.width==800 && base_shell.height==600);
+    auto menu=ui::Menu::load(base,base_exe,base_strings);
+    // Reference dialog normalization at 0x00775BC0, followed by cell snapping.
+    for (int dlu : {125,152,179,206,233,122,149,176}) {
+        const int expected=(dlu*163/100-199+21)/42;
+        for (int font_height=8;font_height<=24;++font_height) {
+            const int reference=(100*font_height+4)/8;
+            const int initial=(dlu*font_height+4)/8;
+            assert((initial*163/reference-199+21)/42==expected);
+        }
+    }
+    auto unhovered=menu.render();
+    menu.pointer_move(644,199);
+    auto hovered=menu.render(); assert(hovered.pixels!=unhovered.pixels);
+    menu.pointer_down(644,199);
+    auto pressed=menu.render(); assert(pressed.pixels!=hovered.pixels);
+    assert(menu.pointer_up(643,199)==ui::Action::None && menu.page()==ui::Page::Main);
+    menu.pointer_down(800,199); assert(menu.pointer_up(800,199)==ui::Action::None);
+    menu.pointer_down(645,200); assert(menu.pointer_up(645,200)==ui::Action::PageChanged);
+    assert(menu.page()==ui::Page::SinglePlayer); menu.render();
+    menu.pointer_down(645,284); assert(menu.pointer_up(645,284)==ui::Action::PageChanged);
+    assert(menu.page()==ui::Page::Skirmish); menu.render();
+    menu.pointer_down(645,242); assert(menu.pointer_up(645,242)==ui::Action::None);
+    menu.pointer_down(645,536); assert(menu.pointer_up(645,536)==ui::Action::PageChanged);
+    assert(menu.page()==ui::Page::SinglePlayer);
+    auto expansion_menu=ui::Menu::load(files,exe,strings);
+    assert(expansion_menu.render().width==800);
     fails([&]{ui::draw_shell_background(files,640,480);});
     auto damaged=*title;damaged.resize(140); fails([&]{ui::decode_pcx(damaged);});
     damaged=*title;damaged[0]=0;fails([&]{ui::decode_pcx(damaged);});
