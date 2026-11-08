@@ -1,7 +1,10 @@
 #include "ui.h"
 #include "../fs/mix_bootstrap.h"
 #include "../rules/ini_file.h"
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
+#include <filesystem>
 #include <stdexcept>
 
 namespace ra2::ui {
@@ -31,13 +34,17 @@ std::vector<SkirmishMap> load_skirmish_maps(const fs::MixFileSystem& files,
     const auto packet = files.read_file(files.variant() == fs::GameVariant::RedAlert2 ?
                                         "MISSIONS.PKT" : "MISSIONSMD.PKT");
     if (!packet) throw std::runtime_error("Missing original multiplayer map catalog");
-    rules::IniFile ini;
-    ini.parse(std::string_view(reinterpret_cast<const char*>(packet->data()), packet->size()));
-    const auto* maps = ini.find_section("MultiMaps");
-    if (!maps) throw std::runtime_error("Missing MultiMaps section");
     std::vector<SkirmishMap> result;
-    result.reserve(maps->entries.size());
-    for (const auto& entry : maps->entries) {
+    auto append = [&](const std::vector<std::uint8_t>& bytes, const std::string& source,
+                      const std::shared_ptr<fs::MixArchive>& archive, bool required) {
+      rules::IniFile ini;
+      ini.parse(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+      const auto* maps = ini.find_section("MultiMaps");
+      if (!maps) {
+          if (required) throw std::runtime_error("Missing MultiMaps section");
+          return;
+      }
+      for (const auto& entry : maps->entries) {
         // 0x0069A3B0 appends .MAP and reads each matching catalog section.
         const auto id = rules::IniFile::trim(entry.value);
         if (id.empty() || id.size()>128 || id.find_first_of("/\\:")!=std::string_view::npos ||
@@ -46,16 +53,45 @@ std::vector<SkirmishMap> load_skirmish_maps(const fs::MixFileSystem& files,
         SkirmishMap map;
         map.id = id;
         map.filename = map.id + ".MAP";
+        map.source_archive = source;
         const auto* description_text = ini.find(map.id, "DescriptionText");
         if (description_text) map.name = description_text->value;
         else if (const auto* description = ini.find(map.id, "Description")) {
+            map.description_key = description->value;
             if (const auto* text = strings.find(description->value)) map.name = text->text;
         }
         map.min_players = ini.read_integer(map.id, "MinPlayers", 2);
         map.max_players = ini.read_integer(map.id, "MaxPlayers", 4);
         map.modes = ini.read_list(map.id, "GameMode");
-        map.available = bool(files.locate(map.filename)) || bool(files.read_file(map.filename));
+        map.available = (archive && archive->find(map.filename)) || bool(files.locate(map.filename)) ||
+                        bool(files.read_file(map.filename));
         result.push_back(std::move(map));
+      }
+    };
+    append(*packet, "", nullptr, true);
+    // 0x00699980 appends loose PKT and MMX/YRO packet entries. Windows does
+    // not guarantee directory enumeration order; sort for reproducible Linux.
+    std::vector<std::filesystem::path> loose, archives;
+    const bool base = files.variant() == fs::GameVariant::RedAlert2;
+    for (const auto& file : std::filesystem::directory_iterator(files.directory())) {
+        if (!file.is_regular_file()) continue;
+        auto ext=file.path().extension().string();
+        std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return static_cast<char>(std::toupper(c));});
+        if (ext==".PKT") loose.push_back(file.path());
+        else if (ext==(base ? ".MMX" : ".YRO")) archives.push_back(file.path());
+    }
+    std::sort(loose.begin(),loose.end());
+    std::sort(archives.begin(),archives.end());
+    for (const auto& path : loose) {
+        auto name=path.filename().string();
+        std::transform(name.begin(),name.end(),name.begin(),[](unsigned char c){return static_cast<char>(std::toupper(c));});
+        if (name==(base ? "MISSIONS.PKT" : "MISSIONSMD.PKT")) continue;
+        if (const auto bytes=files.read_file(path.filename().string())) append(*bytes,"",nullptr,false);
+    }
+    for (const auto& path : archives) {
+        const auto archive=fs::MixArchive::open(path);
+        const auto* item=archive->find(path.stem().string()+".PKT");
+        if (item) append(archive->read(*item),path.filename().string(),archive,false);
     }
     return result;
 }

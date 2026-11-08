@@ -104,11 +104,17 @@ int main(int argc,char** argv) {
     assert(base_shell.width==800 && base_shell.height==600);
     auto base_maps=ui::load_skirmish_maps(base,base_strings);
     auto expansion_maps=ui::load_skirmish_maps(files,strings);
-    assert(base_maps.size()==137 && expansion_maps.size()==161);
+    assert(base_maps.size()>=137 && expansion_maps.size()>=161);
     assert(base_maps[0].id=="MP02T2" && base_maps[0].filename=="MP02T2.MAP" && !base_maps[0].name.empty());
     assert(expansion_maps[0].id=="XMP29U2" && !expansion_maps[0].name.empty());
     assert(std::any_of(base_maps.begin(),base_maps.end(),[](const auto& map){return map.available;}));
     assert(std::any_of(expansion_maps.begin(),expansion_maps.end(),[](const auto& map){return map.available;}));
+    assert(std::any_of(base_maps.begin(),base_maps.end(),[](const auto& map){
+        return map.source_archive=="Grinder.mmx" && map.filename=="Grinder.MAP" && map.available && !map.name.empty();
+    }));
+    assert(std::any_of(expansion_maps.begin(),expansion_maps.end(),[](const auto& map){
+        return map.source_archive=="DeepFrze.yro" && map.available && map.description_key=="Name:DpFreeze";
+    }));
     auto menu=ui::Menu::load(base,base_exe,base_strings);
     rules::IniFile defaults;
     auto empty_setup=ui::read_skirmish_setup(defaults);

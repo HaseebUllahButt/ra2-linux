@@ -48,10 +48,11 @@ when their original dialog control is enabled. A change returns
 Start and Choose Map stay disabled. `0x00697F10` reads the
 original saved skirmish settings; `0x006980C0` reads player preferences.
 `load_skirmish_maps` reads the original `MultiMaps` packet in catalog order.
-It resolves CSF names and checks files through the prepared filesystem. It
-does not yet add loose PKT, YRO, or YRM entries, or select a fallback map for
-the active game mode. Therefore a saved scenario index is not yet guaranteed
-to resolve to a usable map.
+It resolves CSF names, checks files through the prepared filesystem, and adds
+loose PKT and MMX/YRO packet entries. Local entries use sorted Linux order;
+the original Windows enumeration order is not guaranteed. YRM entries and
+fallback selection for the active game mode are not yet implemented. A saved
+scenario index is therefore not guaranteed to resolve to the same map.
 
 `draw_shell_background` draws the static 800x600 shell into RGBA, using a
 prepared filesystem. Mount `NEUTRAL.MIX` for the base game and mount

@@ -40,13 +40,13 @@ struct SkirmishSetup {
     std::array<OpponentSlot,7> opponents;
 };
 struct SkirmishMap {
-    std::string id, filename, name;
+    std::string id, filename, name, description_key, source_archive;
     int min_players = 2, max_players = 4;
     std::vector<std::string> modes;
     bool available = false;
 };
-// Original MISSIONS.PKT or MISSIONSMD.PKT catalog order. Mount map archives
-// before calling to check availability. Extra PKT files are not yet included.
+// Built-in packet order, followed by local PKT and MMX/YRO entries. Local
+// archive order is sorted; Windows enumeration order is not specified.
 std::vector<SkirmishMap> load_skirmish_maps(const fs::MixFileSystem& files,
                                              const ra2text::CsfFile& strings);
 // Original dialog 258. 0x006AE6E0 and 0x004E37D0 map player slots.
