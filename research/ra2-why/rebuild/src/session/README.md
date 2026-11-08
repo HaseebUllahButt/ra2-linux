@@ -43,11 +43,24 @@ above 100,000 units are unsupported. Add a positive remaining budget to house
 cash only at the original caller's later step. After every house succeeds,
 `finish_starting_unit_generation` consumes the original debug RNG draw.
 
-This is not a complete skirmish session. House creation, final cash, additional
-unit missions, actual map and unit placement checks, observers, random waypoint
-fallback, and complete session assembly are not implemented. Start must remain
-disabled. `Simulation.load_random_state` can restore setup RNG state before ticks
-or queued commands. The complete session setup must supply that state.
+`plan_battle` stages one regular single-player Battle setup. Its input must
+contain resolved first-pass starts, slot and country data, and post-overlay mode
+and type values. Its RNG must already be at the end of the first start pass.
+The required callbacks stage world preparation, unit placement, four house
+updates, and the remaining scenario initialization in private scratch state.
+World preparation must confirm the second Battle start pass and unchanged
+active houses, starts, and resolved type inputs. The final phase must confirm
+that the staged houses, starts, type inputs, and units remain valid. Any unresolved result
+aborts and leaves the caller RNG unchanged. Only a successful plan commits it.
+
+The callbacks are not implemented here. House creation, unit missions, real
+map and unit placement checks, observers, random waypoint fallback, and later
+scenario behavior remain open. A synthetic callback test does not establish a
+playable session. The simulation supports RNG state handoff separately. Start
+must remain disabled.
+`Simulation.load_random_state` restores setup RNG state before ticks or queued
+commands. The complete session setup must supply that state.
+
 
 
 Run the native checks from the project root:
@@ -93,3 +106,9 @@ original x86 code. Build `unit_loop_cases.cpp` with `session.cpp` and the same
 simulation sources. It checks 27 cases per edition. Creation, Cost, and
 placement results are supplied. Original selection, retry, subtraction, final debug draw, and RNG instructions
 execute.
+
+`original_phase_check.py` runs the original second Battle-entry prefix and
+unit driver in both editions. It stubs the mode methods and four house updates
+to record their order. It verifies the second start pass precedes the unit
+driver, and that each house gets base unit, extra units, and four updates
+before the final debug draw. It does not verify the stubbed work.

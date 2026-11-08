@@ -195,5 +195,124 @@ int main(int argc, char** argv) {
         assert(a && b && *a==*b);
     }
     assert(random_base.table()==random_yuri.table());
+
+    // Staged phase test uses real map points and real base rules. The world
+    // and placement outcomes below are supplied fixtures, not game behavior.
+    const auto rules_bytes=files.read_file("RULES.INI"); assert(rules_bytes);
+    rules::IniFile base_rules;
+    base_rules.parse(std::string_view(reinterpret_cast<const char*>(rules_bytes->data()),rules_bytes->size()));
+    const auto* registry=base_rules.find_section("Countries"); assert(registry);
+    auto index_of=[&](const char* name) {
+        const auto it=std::find_if(registry->entries.begin(),registry->entries.end(),
+                                    [name](const auto& item){return item.value==name;});
+        assert(it!=registry->entries.end());
+        return static_cast<unsigned>(it-registry->entries.begin());
+    };
+    const auto america=index_of("Americans"), russia=index_of("Russians");
+    auto owner_bits=[&](const char* type) {
+        const auto owners=base_rules.read_list(type,"Owner");
+        std::uint32_t bits=0;
+        for (std::size_t i=0;i<registry->entries.size();++i)
+            if (std::find(owners.begin(),owners.end(),registry->entries[i].value)!=owners.end())
+                bits|=std::uint32_t{1}<<i;
+        return bits;
+    };
+    session::BattlePlanInput input{5000,1,1,true,
+        {{0,america,std::uint32_t{1}<<america,0,1,1},
+         {1,russia,std::uint32_t{1}<<russia,1,1,1}},
+        {real[0],real[1]},
+        {{"AMCV",owner_bits("AMCV")},{"SMCV",owner_bits("SMCV")}},
+        {{true,owner_bits("E1"),1,base_rules.read_integer("E1","Cost",-1),false,std::nullopt},
+         {true,owner_bits("E2"),1,base_rules.read_integer("E2","Cost",-1),false,std::nullopt}}};
+    std::vector<std::string> events;
+    auto prepare=[&](const std::vector<session::BattleHousePlan>& houses,sim::Random& state)
+        -> std::optional<session::PreparedBattleWorld> {
+        events.push_back("prepare");state.next();
+        session::PreparedBattleWorld world;
+        for (const auto& h:houses) {
+            world.active_slots.push_back(h.input.slot);world.starts.push_back(h.start);
+            world.cash.push_back(h.initial_values.cash);
+        }
+        world.resolved_types_unchanged=true;
+        return world;
+    };
+    auto place=[&](std::size_t house,bool base_unit,std::size_t,session::StartPoint start,sim::Random&)
+        -> std::optional<session::UnitAttemptResult> {
+        events.push_back(std::string(base_unit ? "base" : "unit")+std::to_string(house));
+        return session::UnitAttemptResult{true,start};
+    };
+    auto finish_house=[&](std::size_t house,std::int32_t cash,sim::Random& state)
+        -> std::optional<std::int32_t> {
+        events.push_back("house"+std::to_string(house));state.next();return cash;
+    };
+    auto finish_world=[&](const std::vector<session::BattleHousePlan>& houses,sim::Random& state)
+        -> std::optional<session::PreparedBattleWorld> {
+        events.push_back("finish");state.next();
+        session::PreparedBattleWorld world;
+        for (const auto& h:houses) {
+            world.active_slots.push_back(h.input.slot);world.starts.push_back(h.start);
+            world.cash.push_back(h.cash_after_units);
+        }
+        world.resolved_types_unchanged=true;
+        world.staged_units_unchanged=true;
+        return world;
+    };
+    sim::Random staged_rng(951), staged_expected(951);
+    const auto planned=session::plan_battle(input,staged_rng,prepare,place,finish_house,finish_world);
+    assert(planned && planned->unit_budget==150 && planned->houses.size()==2);
+    assert(planned->houses[0].base_unit && planned->houses[0].base_unit->type_index==0 &&
+           planned->houses[1].base_unit && planned->houses[1].base_unit->type_index==1);
+    assert(planned->houses[0].extra_units.size()==1 && planned->houses[1].extra_units.size()==2);
+    assert(planned->houses[0].cash_after_units==5000 && planned->houses[1].cash_after_units==5000 &&
+           planned->houses[0].cash_after_world==5000 && planned->houses[1].cash_after_world==5000);
+    assert((events==std::vector<std::string>{"prepare","base0","unit0","house0",
+                                             "base1","unit1","unit1","house1","finish"}));
+    staged_expected.next();staged_expected.next();staged_expected.next();
+    session::finish_starting_unit_generation(staged_expected);staged_expected.next();
+    assert(staged_rng.state().table==staged_expected.state().table &&
+           staged_rng.state().first==staged_expected.state().first &&
+           staged_rng.state().second==staged_expected.state().second);
+    const auto saved_state=staged_rng.state();
+    auto unknown_world=[](const std::vector<session::BattleHousePlan>&,sim::Random& state)
+        -> std::optional<session::PreparedBattleWorld> {state.next();return std::nullopt;};
+    assert(!session::plan_battle(input,staged_rng,unknown_world,place,finish_house,finish_world));
+    assert(staged_rng.state().table==saved_state.table && staged_rng.state().first==saved_state.first && staged_rng.state().second==saved_state.second);
+    auto unknown_place=[](std::size_t,bool,std::size_t,session::StartPoint,sim::Random& state)
+        -> std::optional<session::UnitAttemptResult> {state.next();return std::nullopt;};
+    assert(!session::plan_battle(input,staged_rng,prepare,unknown_place,finish_house,finish_world));
+    assert(staged_rng.state().table==saved_state.table && staged_rng.state().first==saved_state.first && staged_rng.state().second==saved_state.second);
+    auto unknown_house=[](std::size_t,std::int32_t,sim::Random& state)
+        -> std::optional<std::int32_t> {state.next();return std::nullopt;};
+    assert(!session::plan_battle(input,staged_rng,prepare,place,unknown_house,finish_world));
+    assert(staged_rng.state().table==saved_state.table && staged_rng.state().first==saved_state.first && staged_rng.state().second==saved_state.second);
+    auto unknown_finish=[](const std::vector<session::BattleHousePlan>&,sim::Random& state)
+        -> std::optional<session::PreparedBattleWorld> {state.next();return std::nullopt;};
+    assert(!session::plan_battle(input,staged_rng,prepare,place,finish_house,unknown_finish));
+    assert(staged_rng.state().table==saved_state.table && staged_rng.state().first==saved_state.first && staged_rng.state().second==saved_state.second);
+    auto wrong_starts=[&](const std::vector<session::BattleHousePlan>& houses,sim::Random& state)
+        -> std::optional<session::PreparedBattleWorld> {
+        auto world=prepare(houses,state);assert(world);world->starts[0].x++;
+        return world;
+    };
+    assert(!session::plan_battle(input,staged_rng,wrong_starts,place,finish_house,finish_world));
+    assert(staged_rng.state().table==saved_state.table && staged_rng.state().first==saved_state.first && staged_rng.state().second==saved_state.second);
+    auto changed_units=[&](const std::vector<session::BattleHousePlan>& houses,sim::Random& state)
+        -> std::optional<session::PreparedBattleWorld> {
+        auto world=finish_world(houses,state);assert(world);world->staged_units_unchanged=false;
+        return world;
+    };
+    assert(!session::plan_battle(input,staged_rng,prepare,place,finish_house,changed_units));
+    assert(staged_rng.state().table==saved_state.table && staged_rng.state().first==saved_state.first && staged_rng.state().second==saved_state.second);
+    auto unknown_types=[&](const std::vector<session::BattleHousePlan>& houses,sim::Random& state)
+        -> std::optional<session::PreparedBattleWorld> {
+        auto world=prepare(houses,state);assert(world);world->resolved_types_unchanged=false;
+        return world;
+    };
+    assert(!session::plan_battle(input,staged_rng,unknown_types,place,finish_house,finish_world));
+    assert(staged_rng.state().table==saved_state.table && staged_rng.state().first==saved_state.first &&
+           staged_rng.state().second==saved_state.second);
+    assert(!session::plan_battle(input,staged_rng,prepare,place,finish_house,{}));
+    assert(staged_rng.state().table==saved_state.table && staged_rng.state().first==saved_state.first && staged_rng.state().second==saved_state.second);
+
     std::cout<<"original start selection and real map waypoints passed\n";
 }

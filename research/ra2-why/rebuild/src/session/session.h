@@ -71,4 +71,61 @@ std::optional<StartPoint> find_initial_placement(StartPoint origin, PlacementBou
 std::optional<std::size_t> choose_start_point(const std::vector<StartPoint>& points,
     std::vector<bool>& used, sim::Random& random,
     const sim::OriginalDistance& distance);
+
+// Inputs are resolved immediately after the first original start assignment.
+// The supplied RNG is at that same point. Slots must be in original order:
+// local slot 0, then AI slots. Observers are not supported.
+struct BattleHouseInput {
+    unsigned slot, country_index;
+    std::uint32_t unit_owner_bit;
+    // Difficulty is resolved engine level 0..2. The local player uses 1.
+    std::int32_t raw_color, tech_level, difficulty;
+};
+struct BattlePlanInput {
+    std::int32_t credits, unit_count, global_tech_level;
+    bool bases_enabled;
+    std::vector<BattleHouseInput> houses;
+    std::vector<StartPoint> assigned_starts;
+    std::vector<BaseUnitCandidate> base_units;
+    std::vector<StartingUnitType> starting_types;
+};
+struct BattleHousePlan {
+    BattleHouseInput input;
+    HouseValues initial_values;
+    StartPoint start;
+    std::int32_t cash_before_units, cash_after_units, cash_after_world;
+    std::optional<StartingUnit> base_unit;
+    std::vector<StartingUnit> extra_units;
+};
+struct BattlePlan { std::vector<BattleHousePlan> houses; std::int32_t unit_budget; };
+// World preparation includes map and terrain steps and the second original
+// waypoint pass. It confirms the active slots, starts, and cash before units.
+// A mismatch or nullopt blocks the plan.
+struct PreparedBattleWorld {
+    std::vector<unsigned> active_slots;
+    std::vector<StartPoint> starts;
+    std::vector<std::int32_t> cash;
+    // Required after each world phase; confirms the resolved mode and type
+    // inputs still match the staged world.
+    bool resolved_types_unchanged=false;
+    // Required after the final world phase; it confirms the staged units remain.
+    bool staged_units_unchanged=false;
+};
+using PrepareBattleWorld = std::function<std::optional<PreparedBattleWorld>(
+    const std::vector<BattleHousePlan>&, sim::Random&)>;
+// base_unit selects the BaseUnit list; otherwise index selects starting_types.
+// The callback handles the original direct placement and radius search. It
+// must return nullopt if the supplied type values cease to be valid.
+// All callbacks use private scratch state and return nullopt if unresolved.
+using PlaceBattleUnit = std::function<std::optional<UnitAttemptResult>(
+    std::size_t house, bool base_unit, std::size_t index, StartPoint start, sim::Random&)>;
+// Resolves the four original per-house updates after unit generation. Return
+// nullopt if they invalidate type values needed by a later house.
+using FinishBattleHouse = std::function<std::optional<std::int32_t>(
+    std::size_t house, std::int32_t cash, sim::Random&)>;
+// Resolves remaining scenario initialization after the final unit RNG draw.
+using FinishBattleWorld = PrepareBattleWorld;
+std::optional<BattlePlan> plan_battle(const BattlePlanInput& input, sim::Random& random,
+    const PrepareBattleWorld& prepare_world, const PlaceBattleUnit& place_unit,
+    const FinishBattleHouse& finish_house, const FinishBattleWorld& finish_world);
 }

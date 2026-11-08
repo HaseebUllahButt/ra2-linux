@@ -199,4 +199,88 @@ std::optional<std::size_t> choose_start_point(const std::vector<StartPoint>& poi
     used[selected]=true;
     return selected;
 }
+std::optional<BattlePlan> plan_battle(const BattlePlanInput& input, sim::Random& random,
+    const PrepareBattleWorld& prepare_world, const PlaceBattleUnit& place_unit,
+    const FinishBattleHouse& finish_house, const FinishBattleWorld& finish_world) {
+    // 00686B20 performs the first start assignment before map loading.
+    // 00686890 then calls Battle +84 and 005D6D80 in that order. The caller
+    // supplies the first result; the world phase resolves the intervening work.
+    if (!prepare_world || !place_unit || !finish_house || !finish_world ||
+        input.credits<0 || input.unit_count<0 ||
+        input.houses.empty() || input.houses.size()>8 || input.houses[0].slot!=0 ||
+        input.assigned_starts.size()!=input.houses.size())
+        return std::nullopt;
+    std::uint32_t colors=0, owner_mask=0;
+    unsigned previous_slot=0;
+    for (std::size_t i=0;i<input.houses.size();++i) {
+        const auto& house=input.houses[i];
+        if (house.slot>7 || (i && house.slot<=previous_slot) || house.country_index>=32 ||
+            house.raw_color<0 || house.raw_color>7 || house.difficulty<0 || house.difficulty>2 ||
+            (!i && house.difficulty!=1) || !house.unit_owner_bit ||
+            (house.unit_owner_bit & (house.unit_owner_bit-1))) return std::nullopt;
+        const auto color_bit=std::uint32_t{1}<<house.raw_color;
+        if (colors & color_bit) return std::nullopt;
+        colors|=color_bit;
+        owner_mask|=house.unit_owner_bit;
+        previous_slot=house.slot;
+        if (input.bases_enabled && !select_base_unit(input.base_units,house.country_index))
+            return std::nullopt;
+    }
+    const auto budget=starting_unit_budget(input.unit_count,input.global_tech_level,
+                                           owner_mask,input.starting_types);
+    if (!budget) return std::nullopt;
+    auto working=random;
+    BattlePlan plan{{},*budget};
+    for (std::size_t i=0;i<input.houses.size();++i) {
+        const auto& house=input.houses[i];
+        plan.houses.push_back({house,initialize_house_values(input.credits,house.raw_color),
+                               input.assigned_starts[i],0,0,0,std::nullopt,{}});
+    }
+    const auto prepared=prepare_world(plan.houses,working);
+    if (!prepared || !prepared->resolved_types_unchanged || prepared->active_slots.size()!=plan.houses.size() ||
+        prepared->starts.size()!=plan.houses.size() ||
+        prepared->cash.size()!=plan.houses.size()) return std::nullopt;
+    for (std::size_t i=0;i<plan.houses.size();++i) {
+        auto& house=plan.houses[i];
+        if (prepared->active_slots[i]!=house.input.slot || prepared->starts[i].x!=house.start.x ||
+            prepared->starts[i].y!=house.start.y) return std::nullopt;
+        house.cash_before_units=prepared->cash[i];
+        if (input.bases_enabled) {
+            const auto index=select_base_unit(input.base_units,house.input.country_index);
+            if (!index) return std::nullopt;
+            const auto placed=place_unit(i,true,*index,house.start,working);
+            if (!placed || !placed->placed) return std::nullopt;
+            house.base_unit=StartingUnit{*index,placed->cell};
+        }
+        const auto generated=generate_starting_units(*budget,house.input.tech_level,
+            house.input.unit_owner_bit,input.starting_types,working,
+            [&](std::size_t type,sim::Random& state) {
+                return place_unit(i,false,type,house.start,state);
+            });
+        if (!generated) return std::nullopt;
+        house.extra_units=generated->placed;
+        // 005D6D80 adds only a positive unused budget to that house's cash.
+        const auto cash=std::int64_t(house.cash_before_units)+std::max(0,generated->remaining_budget);
+        if (cash<std::numeric_limits<std::int32_t>::min() || cash>std::numeric_limits<std::int32_t>::max())
+            return std::nullopt;
+        // 005D6FA1..005D6FDA invokes four house updates before the next house.
+        const auto finished=finish_house(i,static_cast<std::int32_t>(cash),working);
+        if (!finished) return std::nullopt;
+        house.cash_after_units=*finished;
+    }
+    finish_starting_unit_generation(working);
+    const auto finished=finish_world(plan.houses,working);
+    if (!finished || !finished->resolved_types_unchanged || !finished->staged_units_unchanged ||
+        finished->active_slots.size()!=plan.houses.size() || finished->starts.size()!=plan.houses.size() ||
+        finished->cash.size()!=plan.houses.size()) return std::nullopt;
+    for (std::size_t i=0;i<plan.houses.size();++i) {
+        auto& house=plan.houses[i];
+        if (finished->active_slots[i]!=house.input.slot || finished->starts[i].x!=house.start.x ||
+            finished->starts[i].y!=house.start.y) return std::nullopt;
+        house.cash_after_world=finished->cash[i];
+    }
+    random=working;
+    return plan;
+}
+
 }
