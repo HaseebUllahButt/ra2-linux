@@ -24,7 +24,10 @@ struct TerrainCell {
 using TerrainCells=std::vector<TerrainCell>;
 // 00545150 catalog order. The vector index is the original TileSet number.
 struct TileSetRange { std::uint32_t first=0,count=0; };
-struct TileMetadata { std::uint8_t terrain=0,ramp=0; };
+struct TileMetadata {
+    std::uint8_t terrain=0,ramp=0; // Getter values use original subtile modulo.
+    bool valid_subtile=true; // 00544C20 validates the unwrapped input index separately.
+};
 struct TheaterInputs {
     std::string theater_name;
     rules::IniFile settings; // Original theater INI; [General] values name TileSet numbers.
