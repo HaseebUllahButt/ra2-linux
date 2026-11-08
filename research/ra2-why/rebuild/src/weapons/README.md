@@ -16,6 +16,8 @@ make -C rebuild build/weapons_area_impact_test
 RA2_GAME_DIR="$PWD/game" python3 rebuild/src/weapons/verify_area_impact_x86.py rebuild/build/weapons_area_impact_test
 make -C rebuild build/weapons_occupant_test
 RA2_GAME_DIR="$PWD/game" python3 rebuild/src/weapons/verify_occupant_x86.py rebuild/build/weapons_occupant_test
+make -C rebuild build/weapons_object_damage_test
+RA2_GAME_DIR="$PWD/game" python3 rebuild/src/weapons/verify_object_damage_x86.py rebuild/build/weapons_object_damage_test
 
 ```
 
@@ -115,6 +117,12 @@ warhead, armor and distance inputs. Simulation owns health and event
 application. Area target collection at `0x47E2C0`, derived health handlers,
 death effects and impact ordering remain open. Do not use the event as proof
 that the original damage dispatch completed.
+
+`object_damage.h` contains isolated base damage and Unit death plans. They
+stop before callbacks and do not change Simulation health. Original checks
+cover 4,096 shared prefixes, 2,059 Unit entry chains, and 120 death branches.
+The armor result and virtual checks use supplied test values. Derived damage,
+triggers, death effects, and removal remain required before live integration.
 
 The asset test reads base `rules.ini`: HTNK uses 120mm; its damage is 90,
 ROF 65, projectile Cannon, speed 40 and warhead AP. Cannon is arcing and

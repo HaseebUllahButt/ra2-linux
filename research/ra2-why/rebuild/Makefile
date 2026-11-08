@@ -10,11 +10,11 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/render/tmp_decode.cpp src/render/minimap.cpp src/loop/game_loop.cpp \
     src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp src/fs/filename_hash.cpp \
     src/gfx/palette.cpp src/gfx/shp_decode.cpp src/actors/actors.cpp \
-    src/session/session.cpp src/session/map_geometry.cpp src/session/placement_terrain.cpp src/weapons/weapons.cpp src/weapons/occupant_order.cpp \
+    src/session/session.cpp src/session/map_geometry.cpp src/session/placement_terrain.cpp src/weapons/weapons.cpp src/weapons/occupant_order.cpp src/weapons/object_damage.cpp \
     src/ui/ui.cpp src/ui/shell.cpp src/ui/skirmish.cpp src/text/csf.cpp \
     src/pack/map_pack.cpp src/rules/ini_file.cpp src/map/map_file.cpp \
     src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
-    src/sim/combat.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp src/sim/path.cpp src/sim/cell_entry.cpp src/sim/production.cpp \
+    src/sim/combat.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp src/sim/path.cpp src/sim/cell_entry.cpp src/sim/regions.cpp src/sim/production.cpp \
     src/sim/world.cpp src/sim/world_init.cpp src/sim/drive.cpp src/sim/movement.cpp src/sim/replacement.cpp src/sim/build_time.cpp src/voxel/voxel.cpp
 NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
 
@@ -37,7 +37,7 @@ SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS))
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 SESSION_OBJECTS = build/native/src/session/session.o build/native/src/session/map_geometry.o build/native/src/session/placement_terrain.o
 
-native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-entry-height sim-replacement sim-world sim-build-time sim-production session session-terrain weapons
+native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-entry-height sim-regions sim-replacement sim-world sim-build-time sim-production session session-terrain weapons
 	build/ra2-native --game-dir ../game --frames 3 --headless
 	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
@@ -109,6 +109,13 @@ sim-entry-height: build/sim_entry_height_test
 	build/sim_entry_height_test
 
 build/sim_entry_height_test: build/native/src/sim/test_entry_height.o build/native/src/sim/cell_entry.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+.PHONY: sim-regions
+sim-regions: build/sim_regions_test
+	build/sim_regions_test
+
+build/sim_regions_test: build/native/src/sim/test_regions.o build/native/src/sim/regions.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/native/src/sim/test_inputs.o: src/sim/test_inputs.cpp
@@ -221,6 +228,9 @@ build/weapons_area_impact_test: build/native/src/weapons/area_impact_test.o buil
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/weapons_occupant_test: build/native/src/weapons/occupant_order_test.o build/native/src/weapons/occupant_order.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/weapons_object_damage_test: build/native/src/weapons/object_damage_test.o build/native/src/weapons/object_damage.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 scene: build/scene_test
