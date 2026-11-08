@@ -655,3 +655,23 @@ Both editions match all 256 cases, including flat regions, alternating categorie
 `test_regions.sh` compares complete result hashes and verifies seven explicit input cases: 263 checks.
 The same native checks pass with address and undefined-behavior sanitizers.
 Tube edges, final Cell category recovery, three hierarchy layers, and hierarchy search remain separate work.
+
+## Three map hierarchy layers
+
+`build_original_hierarchy()` ports base 00563D80/00564290 and expansion 00581F90/005824A0.
+It builds levels two, one, and zero in that order, with the original eight-, four-, and two-cell block boundaries.
+Each cell supplies a resolved coarse category, raw height byte, and original usable-area answer.
+It retains raw component boundaries, height tests, parent identities, center indices, and ordered neighbor lists.
+Each link retains its original diagonal flag. Repeated discovery keeps the first flag instead of combining flags.
+Dummy node zero has no recovered center value, so its native center stays unknown.
+Tube and bridge transition records are excluded from this slice.
+Missing required inputs, invalid blocked borders, and native storage limits produce explicit errors.
+
+`original_hierarchy_check.py` executes the original recursive fill with an explicit test driver.
+`original_hierarchy_builder_check.py` additionally executes the complete original builder and node-list construction.
+The complete oracle supplies usable-area results and memory allocation. It preserves original gameplay decisions.
+Both original editions return the same 256 complete three-layer results in both oracles.
+The test includes flat regions, alternating categories, varying heights, and selectively unusable boundary cells.
+`test_hierarchy.sh` checks all 768 native layer hashes and one unresolved-input error.
+All 769 checks also pass with address and undefined-behavior sanitizers.
+Hierarchy search and the Cell +4C producer still need integration before ordinary far-goal Move works.
