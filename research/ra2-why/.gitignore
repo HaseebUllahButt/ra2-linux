@@ -1,5 +1,5 @@
 # Game files and builds stay out of version control.
-game/
+/game
 openra/
 *.zip
 analysis/ghdump.rep
@@ -16,3 +16,14 @@ rebuild/hook/winmm.dll
 /analysis/base-ra2/*.gpr
 /analysis/base-ra2/*.rep/
 /analysis/base-ra2/*.lock*
+
+# Generated tests must be rebuilt for the current Linux CPU.
+/rebuild/src/fs/mix_test
+/rebuild/src/gfx/gfx_test
+/rebuild/src/loop/loop_test
+/rebuild/src/map/map_test
+/rebuild/src/render/render_test
+/rebuild/src/rules/rules_test
+/rebuild/src/text/test_csf
+/rebuild/hook/*.o
+/rebuild/hook/test_trampoline
