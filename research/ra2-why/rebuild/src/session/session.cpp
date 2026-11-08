@@ -54,6 +54,22 @@ std::optional<std::int32_t> starting_unit_budget(std::int32_t unit_count,
     return static_cast<std::int32_t>(budget);
 }
 
+std::optional<StartingUnitChoice> choose_starting_unit(std::int32_t initial_budget,
+    std::int32_t remaining_budget, std::size_t vehicle_count, std::size_t infantry_count,
+    sim::Random& random) {
+    // Base 005B8282; expansion 005D732F. Lists are the mode's already
+    // filtered candidates. The last third of the budget selects infantry.
+    if (initial_budget<=0 || remaining_budget<=0 ||
+        vehicle_count>std::size_t(std::numeric_limits<std::int32_t>::max()) ||
+        infantry_count>std::size_t(std::numeric_limits<std::int32_t>::max())) return std::nullopt;
+    const bool vehicle=remaining_budget>initial_budget/3 && vehicle_count>0;
+    const auto count=vehicle ? vehicle_count : infantry_count;
+    // The original indexes an empty list here. Reject it safely.
+    if (!count) return std::nullopt;
+    const auto index=static_cast<std::size_t>(random.ranged(0,static_cast<std::int32_t>(count-1)));
+    return StartingUnitChoice{vehicle ? StartingUnitGroup::Vehicle : StartingUnitGroup::Infantry,index};
+}
+
 namespace {
 std::optional<int> point_distance(StartPoint a, StartPoint b, const sim::OriginalDistance& distance) {
     // Base 005B7920 and expansion 005D6890 narrow the differences and result to signed 16-bit values.

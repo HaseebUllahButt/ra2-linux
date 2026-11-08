@@ -33,9 +33,12 @@ the original x86 code. The map and object checks are supplied test inputs.
 unit budget. Base `0x005B7CE0` and expansion `0x005D6D80` exclude BaseUnit
 vehicles, average eligible costs with original rounding, and multiply by the
 unit count. Unknown required inputs and arithmetic overflow return no result.
+`choose_starting_unit` selects one entry from already filtered vehicle and
+infantry lists. It uses the shared RNG and rejects an empty required list.
 
 This is not a complete skirmish session. House creation, final cash, additional
-unit selection, actual map and unit placement checks, observers, random waypoint fallback, and RNG state
+the complete unit generation loop, actual map and unit placement checks,
+observers, random waypoint fallback, and RNG state
 handoff to `Simulation` are not implemented. Start must remain disabled.
 
 For this helper checkout, build the test against the parent simulation headers:
@@ -71,3 +74,8 @@ unit placement checks still need integration.
 `budget_cases.cpp` with `session.cpp` and the same simulation sources. It tests
 192 cases per edition. The type Cost virtual returns the supplied resolved cost;
 the original filter and arithmetic instructions execute.
+
+`original_unit_choice_check.py` compares the extra-unit choice boundary with
+original x86. Build `unit_choice_cases.cpp` with `session.cpp` and the same
+simulation sources. It tests 327 cases per edition, including every RNG word.
+The original decision and RNG execute with supplied filtered candidate lists.

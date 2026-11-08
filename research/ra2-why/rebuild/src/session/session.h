@@ -28,6 +28,12 @@ struct StartingUnitType {
 std::optional<std::int32_t> starting_unit_budget(std::int32_t unit_count,
     std::int32_t tech_level, std::uint32_t house_mask,
     const std::vector<StartingUnitType>& types);
+// The candidate lists must already be filtered for the current house.
+enum class StartingUnitGroup { Vehicle, Infantry };
+struct StartingUnitChoice { StartingUnitGroup group; std::size_t index; };
+std::optional<StartingUnitChoice> choose_starting_unit(std::int32_t initial_budget,
+    std::int32_t remaining_budget, std::size_t vehicle_count, std::size_t infantry_count,
+    sim::Random& random);
 // Original waypoint cell coordinates are signed 16-bit values.
 struct StartPoint { std::int16_t x, y; };
 // Inclusive cell bounds and resolved map and object checks. The validation

@@ -53,6 +53,17 @@ int main(int argc, char** argv) {
     assert(!session::choose_start_point(invalid,used,random,base));
     assert(!used[1] && !used[2] && !used[3]);
 
+    sim::Random choice_rng(789);
+    const auto choice_before=choice_rng.table();
+    assert(!session::choose_starting_unit(100,0,2,3,choice_rng));
+    assert(!session::choose_starting_unit(100,30,2,0,choice_rng));
+    assert(choice_rng.table()==choice_before);
+    const auto vehicle_choice=session::choose_starting_unit(100,34,1,1,choice_rng);
+    assert(vehicle_choice && vehicle_choice->group==session::StartingUnitGroup::Vehicle && vehicle_choice->index==0);
+    const auto infantry_choice=session::choose_starting_unit(100,33,1,1,choice_rng);
+    assert(infantry_choice && infantry_choice->group==session::StartingUnitGroup::Infantry && infantry_choice->index==0);
+    assert(choice_rng.table()==choice_before);
+
     using session::StartingUnitType;
     const std::vector<StartingUnitType> unit_types{
         {true,1,1,100,false,std::nullopt}, {true,3,1,201,false,std::nullopt},
