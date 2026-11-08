@@ -46,7 +46,9 @@ the shipped rules, not this API's defaults.
 stable map. It converts the position to original cell coordinates and asks the
 caller for the resolved cell. The original later path looks up the same cell
 and repeats the same checks. Unknown map cells return `NeedsCell`. The caller
-must supply cell identity, bridge-adjusted floor, wall type, owner and alliance.
+must supply cell identity, the original floor result, wall type, owner and alliance.
+That floor result uses Cell +0x140 bit 0x80. The simulation's separate
+`TerrainCell.bridge` value describes bit 0x100 and cannot supply this bit.
 The original out-of-map fallback cell also needs a resolved lookup. Projectile
 object collision and the complete projectile tick remain outside this API.
 `verify_trace_x86.py` checks the full original function with resolved map and

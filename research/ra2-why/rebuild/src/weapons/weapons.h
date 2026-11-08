@@ -116,7 +116,7 @@ ImpactStatus base_cannon_impact(const CannonImpactInputs &);
 // A positive result needs further distance and adjacent-cell checks.
 struct TerrainTraceFirstCell {
   bool checks_cliffs, checks_walls;
-  // 0x47CF10: signed cell level plus four for its bridge flag.
+  // 0x47CF10: signed cell level plus four for Cell +0x140 bit 0x80.
   int sample_floor, reference_floor, source_floor;
   bool sample_is_destination, sample_has_wall;
   int source_level, destination_level; // Signed cell height bytes.
@@ -130,7 +130,7 @@ bool base_trace_first_cell_candidate(const TerrainTraceFirstCell &);
 // out-of-map fallback cell. Cell IDs must be nonzero and unique.
 struct TerrainTraceCell {
   std::uint32_t id;
-  int floor; // 0x47CF10: signed level plus four when bridge bit 0x80 is set.
+  int floor; // 0x47CF10: signed level plus four for Cell +0x140 bit 0x80.
   bool wall, has_owner, owner_allied;
 };
 struct TerrainTraceInput {
