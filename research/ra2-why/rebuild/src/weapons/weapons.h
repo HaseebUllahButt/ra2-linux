@@ -5,6 +5,7 @@
 #include <sim/target.h>
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <string>
 
 namespace ra2::weapons {
@@ -110,6 +111,43 @@ struct CannonImpactInputs {
 // Base 0x461C10, limited to the shipped Cannon flags: cliffs and walls on;
 // Level, FlakScatter and AA off. Does not perform the terrain trace.
 ImpactStatus base_cannon_impact(const CannonImpactInputs &);
+
+// First sampled cell in the base terrain trace, 0x4BBB50..0x4BBC19.
+// A positive result needs further distance and adjacent-cell checks.
+struct TerrainTraceFirstCell {
+  bool checks_cliffs, checks_walls;
+  // 0x47CF10: signed cell level plus four for its bridge flag.
+  int sample_floor, reference_floor, source_floor;
+  bool sample_is_destination, sample_has_wall;
+  int source_level, destination_level; // Signed cell height bytes.
+  bool allied_wall_rule, sample_has_owner, owner_allied;
+};
+bool base_trace_first_cell_candidate(const TerrainTraceFirstCell &);
+
+// Base 0x4BBAF0 with a stable map. The lookup must return the same cell and
+// state for a given coordinate for the duration of this call. An absent
+// optional means the caller cannot resolve the cell, including the original
+// out-of-map fallback cell. Cell IDs must be nonzero and unique.
+struct TerrainTraceCell {
+  std::uint32_t id;
+  int floor; // 0x47CF10: signed level plus four when bridge bit 0x80 is set.
+  bool wall, has_owner, owner_allied;
+};
+struct TerrainTraceInput {
+  std::array<std::int32_t, 3> position;
+  std::uint32_t destination_cell_id;
+  int reference_floor, source_floor, source_level, destination_level;
+  bool checks_cliffs, checks_walls, allied_wall_rule;
+};
+enum class TerrainTraceStatus { Clear, Hit, NeedsCell };
+struct TerrainTraceResult {
+  TerrainTraceStatus status;
+  std::uint32_t cell_id; // Nonzero only for Hit.
+};
+using TerrainTraceLookup =
+    std::function<std::optional<TerrainTraceCell>(std::int16_t, std::int16_t)>;
+TerrainTraceResult base_trace_terrain(const TerrainTraceInput &,
+                                      const TerrainTraceLookup &);
 
 // Original area-damage entry checks at 0x47E2E8..0x47E31B.
 bool base_area_impact_enabled(int raw_damage, bool scenario_blocks_damage,

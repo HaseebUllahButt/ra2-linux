@@ -274,6 +274,52 @@ ImpactStatus base_cannon_impact(const CannonImpactInputs &input) {
   return ImpactStatus::Continue;
 }
 
+bool base_trace_first_cell_candidate(const TerrainTraceFirstCell &input) {
+  if (input.sample_floor < -128 || input.sample_floor > 131 ||
+      input.reference_floor < -128 || input.reference_floor > 131 ||
+      input.source_floor < -128 || input.source_floor > 131 ||
+      input.source_level < -128 || input.source_level > 127 ||
+      input.destination_level < -128 || input.destination_level > 127)
+    throw std::invalid_argument("invalid terrain cell level");
+  if (input.checks_cliffs &&
+      static_cast<std::int64_t>(input.sample_floor) - input.reference_floor >= 4 &&
+      input.sample_floor > input.source_floor)
+    return true;
+  if (!input.checks_walls || input.sample_is_destination ||
+      !input.sample_has_wall || input.source_level > input.destination_level)
+    return false;
+  return !(input.allied_wall_rule && input.sample_has_owner && input.owner_allied);
+}
+
+TerrainTraceResult base_trace_terrain(const TerrainTraceInput &input,
+                                      const TerrainTraceLookup &lookup) {
+  if (!input.destination_cell_id || !lookup)
+    throw std::invalid_argument("invalid terrain trace input");
+  // The game divides towards zero, then stores the low 16 bits.
+  const auto cell_coordinate = [](std::int32_t world) {
+    const auto bits = static_cast<std::uint32_t>(world / 256) & 0xffffu;
+    return static_cast<std::int16_t>(bits < 0x8000 ? static_cast<int>(bits)
+                                                   : static_cast<int>(bits) - 0x10000);
+  };
+  const auto cell = lookup(cell_coordinate(input.position[0]),
+                           cell_coordinate(input.position[1]));
+  if (!cell)
+    return {TerrainTraceStatus::NeedsCell, 0};
+  if (!cell->id)
+    throw std::invalid_argument("terrain trace cell ID zero");
+  const TerrainTraceFirstCell candidate{
+      input.checks_cliffs, input.checks_walls, cell->floor,
+      input.reference_floor, input.source_floor,
+      cell->id == input.destination_cell_id, cell->wall,
+      input.source_level, input.destination_level, input.allied_wall_rule,
+      cell->has_owner, cell->owner_allied};
+  if (!base_trace_first_cell_candidate(candidate))
+    return {TerrainTraceStatus::Clear, 0};
+  // The remaining geometry branch repeats 0x548070 for the same packed cell
+  // and repeats the same candidate tests. A stable map returns this same cell.
+  return {TerrainTraceStatus::Hit, cell->id};
+}
+
 bool base_area_impact_enabled(int raw_damage, bool scenario_blocks_damage,
                               bool warhead_present) {
   return raw_damage != 0 && !scenario_blocks_damage && warhead_present;

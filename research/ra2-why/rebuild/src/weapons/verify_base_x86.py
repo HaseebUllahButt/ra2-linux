@@ -646,6 +646,68 @@ for case, line in zip(recipient_cases, recipient_native):
             base + 0x3000,
         ), (case, requests[-1:], expected)
 assert len(recipient_native) == len(recipient_cases)
+# First candidate selection in the terrain trace. Positive is not a full hit.
+trace_source, trace_dest, trace_sample, trace_ref = [base + n for n in
+    (0x60000, 0x62000, 0x64000, 0x66000)]
+trace_projectile, trace_rules = base + 0x68000, base + 0x6A000
+trace_overlay, trace_table, trace_owner_table = base + 0x6C000, base + 0x6E000, base + 0x70000
+trace_heights = {}
+trace_allied = 0
+trace_result = None
+
+
+def trace_hook(cpu, address, size, unused):
+    global trace_result
+    if address == 0x47CF10:
+        return_stub(cpu, trace_heights[cpu.reg_read(UC_X86_REG_ECX)], 0)
+    elif address == 0x4E5540:
+        return_stub(cpu, trace_allied, 1)
+    else:
+        trace_result = address == 0x4BBC19
+        cpu.emu_stop()
+
+
+for address in (0x47CF10, 0x4E5540, 0x4BBC19, 0x4BBDF8):
+    u.hook_add(UC_HOOK_CODE, trace_hook, begin=address, end=address)
+trace_cases = [tuple([heading_rng.randrange(2), heading_rng.randrange(2)] +
+    [heading_rng.randrange(-8, 9) for _ in range(3)] +
+    [heading_rng.randrange(2), heading_rng.randrange(2)] +
+    [heading_rng.randrange(-4, 5), heading_rng.randrange(-4, 5)] +
+    [heading_rng.randrange(2) for _ in range(3)]) for _ in range(2048)]
+trace_native = subprocess.check_output([sys.argv[1], "--trace-first"],
+    input="".join(" ".join(map(str, c)) + "\n" for c in trace_cases), text=True).splitlines()
+for case, line in zip(trace_cases, trace_native):
+    (cliffs, walls, sample_height, ref_height, source_height, same, wall,
+     source_level, dest_level, rule, owner, trace_allied) = case
+    trace_result = None
+    trace_dest_actual = trace_sample if same else trace_dest
+    trace_heights = {trace_sample: sample_height, trace_ref: ref_height,
+                     trace_source: source_height}
+    u.mem_write(trace_projectile + 0x266, bytes([cliffs, 0, walls]))
+    u.mem_write(trace_source + 0x11B, bytes([source_level & 255]))
+    u.mem_write(trace_dest_actual + 0x11B, bytes([dest_level & 255]))
+    w(trace_sample + 0x44, 0)
+    w(trace_sample + 0x50, 0)
+    w(0xA35DEC, trace_table)
+    w(trace_table, trace_overlay)
+    u.mem_write(trace_overlay + 0x278, bytes([wall]))
+    w(0x839848, trace_rules)
+    u.mem_write(trace_rules + 0x1498, bytes([rule]))
+    w(0xA3229C, trace_owner_table)
+    w(trace_owner_table, base + 0x72000 if owner else 0)
+    w(stack + 0x4C, trace_projectile)
+    w(stack + 0x3C, trace_ref)
+    w(stack + 0x10, trace_dest_actual)
+    w(stack + 0x50, base + 0x74000)
+    u.reg_write(UC_X86_REG_EDX, trace_projectile)
+    u.reg_write(UC_X86_REG_ESI, trace_sample)
+    u.reg_write(UC_X86_REG_EBX, trace_dest_actual)
+    u.reg_write(UC_X86_REG_EBP, trace_source)
+    u.reg_write(UC_X86_REG_ESP, stack)
+    u.emu_start(0x4BBB50, stop, count=1000)
+    assert trace_result is not None and trace_result == bool(int(line)), (case, trace_result, line)
+assert len(trace_native) == len(trace_cases)
+
 print(
-    f"Base game.exe: {len(speeds)} ballistic speeds, {len(angle_cases)} launch angles, {len(heading_cases)} headings, {len(velocity_cases)} horizontal vectors, {len(limit_cases)} speed limits, {len(pitch_cases)} pitch vectors, {len(lobber_cases)} Lobber branches, {len(launch_cases)} connected launches, {len(cases)} arc proposals, {len(fire_cases)} fire events, and {len(impact_cases)} impact checks, {len(recipient_cases)} damage recipients, and {len(gate_cases)} impact gates match"
+    f"Base game.exe: {len(speeds)} ballistic speeds, {len(angle_cases)} launch angles, {len(heading_cases)} headings, {len(velocity_cases)} horizontal vectors, {len(limit_cases)} speed limits, {len(pitch_cases)} pitch vectors, {len(lobber_cases)} Lobber branches, {len(launch_cases)} connected launches, {len(cases)} arc proposals, {len(fire_cases)} fire events, and {len(impact_cases)} impact checks, {len(recipient_cases)} damage recipients, and {len(gate_cases)} impact gates, and {len(trace_cases)} first terrain candidates match"
 )

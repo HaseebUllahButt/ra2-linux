@@ -6,6 +6,45 @@
 using namespace ra2::weapons;
 int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--trace-full") {
+      int cliffs, walls, sample_floor, same, wall, rule, owner, allied;
+      TerrainTraceInput input{};
+      while (std::cin >> cliffs >> walls >> sample_floor >> input.reference_floor >>
+             input.source_floor >> same >> wall >> input.source_level >>
+             input.destination_level >> rule >> owner >> allied >> input.position[0] >>
+             input.position[1] >> input.position[2]) {
+        input.destination_cell_id = same ? 1 : 2;
+        input.checks_cliffs = cliffs;
+        input.checks_walls = walls;
+        input.allied_wall_rule = rule;
+        int cell_x = 0, cell_y = 0;
+        const auto result = base_trace_terrain(input, [&](std::int16_t x, std::int16_t y) {
+          cell_x = x; cell_y = y;
+          return std::optional<TerrainTraceCell>(
+              TerrainTraceCell{1, sample_floor, wall != 0, owner != 0, allied != 0});
+        });
+        std::cout << (result.status == TerrainTraceStatus::Hit) << ' '
+                  << cell_x << ' ' << cell_y << '\n';
+      }
+      return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--trace-first") {
+      int cliffs, walls, same, wall, rule, owner, allied;
+      TerrainTraceFirstCell input{};
+      while (std::cin >> cliffs >> walls >> input.sample_floor >>
+             input.reference_floor >> input.source_floor >> same >> wall >>
+             input.source_level >> input.destination_level >> rule >> owner >> allied) {
+        input.checks_cliffs = cliffs;
+        input.checks_walls = walls;
+        input.sample_is_destination = same;
+        input.sample_has_wall = wall;
+        input.allied_wall_rule = rule;
+        input.sample_has_owner = owner;
+        input.owner_allied = allied;
+        std::cout << base_trace_first_cell_candidate(input) << '\n';
+      }
+      return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--impact-gate") {
       int damage, blocked, warhead;
       while (std::cin >> damage >> blocked >> warhead)
@@ -160,6 +199,14 @@ int main(int argc, char **argv) {
         std::cout << '\n';
       }
       return 0;
+    }
+    {
+      TerrainTraceInput input{};
+      input.destination_cell_id = 1;
+      auto missing = base_trace_terrain(input, [](std::int16_t, std::int16_t)
+          -> std::optional<TerrainTraceCell> { return std::nullopt; });
+      if (missing.status != TerrainTraceStatus::NeedsCell || missing.cell_id != 0)
+        throw std::runtime_error("unresolved terrain cell accepted");
     }
     ra2::sim::CandidatePrefix prefix;
     if (assess_target_for_scan(prefix).status != ra2::sim::CandidateStatus::NeedsInput)
