@@ -154,10 +154,9 @@ PixelStats pixel_stats(const RgbaImage& image) {
     return stats;
 }
 void write_ppm(const RgbaImage& image) {
-    // This test's only data output stays inside the authorized graphics tree.
-    const auto directory = std::filesystem::canonical("rebuild/src/gfx");
-    require(directory == std::filesystem::path("/path/to/user/ra2/rebuild/src/gfx"),
-            "Run from /tmp/r2 or /path/to/user/ra2");
+    // Keep generated evidence in the ignored build directory for this checkout.
+    std::filesystem::create_directories("rebuild/build/gfx");
+    const auto directory = std::filesystem::canonical("rebuild/build/gfx");
     const auto path = directory / "decoded_frame.ppm";
     require(!std::filesystem::is_symlink(std::filesystem::symlink_status(path)),
             "Refusing a symlink output file");
@@ -172,9 +171,9 @@ void write_ppm(const RgbaImage& image) {
     std::cout << "Wrote " << path << '\n';
 }
 void real_archive_test() {
-    MixFileSystem files("/path/to/user/ra2/game");
+    MixFileSystem files("game");
     files.bootstrap();
-    const std::filesystem::path loose = "/path/to/user/ra2/game/conquer.mix";
+    const std::filesystem::path loose = "game/conquer.mix";
     auto conquer = std::filesystem::exists(loose) ? MixArchive::open(loose) : files.mount("CONQUER.MIX");
     if (!std::filesystem::exists(loose))
         std::cout << "No loose conquer.mix; opened CONQUER.MIX through the existing MIX mounts.\n";

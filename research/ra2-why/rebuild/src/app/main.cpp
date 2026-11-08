@@ -112,6 +112,7 @@ class MenuPump final : public ra2::loop::MessagePump {
     ra2::app::Window& window_;
     ra2::ui::Menu& menu_;
     bool headless_;
+    int pointer_x_ = -1, pointer_y_ = -1;
 public:
     MenuPump(ra2::app::Window& window, ra2::ui::Menu& menu, bool headless)
         : window_(window), menu_(menu), headless_(headless) {}
@@ -121,9 +122,17 @@ public:
             if (input.kind == InputKind::Quit) state.running = false;
             else if (input.kind == InputKind::Focus) {
                 if (!headless_) state.window_active = input.pressed;
-                if (!input.pressed) menu_.pointer_up(-1, -1);
-            } else if (input.kind == InputKind::Motion) menu_.pointer_move(input.x, input.y);
+                if (!input.pressed) {
+                    menu_.pointer_up(-1, -1);
+                    pointer_x_ = pointer_y_ = -1;
+                }
+            } else if (input.kind == InputKind::Motion) {
+                pointer_x_ = input.x; pointer_y_ = input.y;
+                menu_.pointer_move(input.x, input.y);
+            } else if (input.kind == InputKind::Wheel)
+                menu_.pointer_scroll(pointer_x_, pointer_y_, input.y);
             else if (input.kind == InputKind::Button && input.key == SDL_BUTTON_LEFT) {
+                pointer_x_ = input.x; pointer_y_ = input.y;
                 if (input.pressed) menu_.pointer_down(input.x, input.y);
                 else if (menu_.pointer_up(input.x, input.y) == ra2::ui::Action::Quit)
                     state.running = false;
