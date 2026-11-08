@@ -193,6 +193,9 @@ build/weapons_lobber_asset_test: build/native/src/weapons/lobber_asset_test.o $(
 build/weapons_fractional_tick_test: build/native/src/weapons/fractional_tick_test.o build/native/src/weapons/weapons.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
+build/weapons_near_ground_test: build/native/src/weapons/near_ground_test.o build/native/src/weapons/weapons.o build/native/src/sim/test_inputs.o $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
+
 scene: build/scene_test
 	build/scene_test ../game ../analysis/extracted/maps/2PEAKS.MAP
 

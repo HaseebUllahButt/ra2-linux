@@ -191,8 +191,8 @@ struct FlatCannonTickResult {
   ArcProposal state;
   std::uint32_t object_id;
 };
-// Ownerless near-ground motion, bridge, interception and slow initial-velocity
-// paths remain unresolved. Impact does not dispatch damage.
+// Near-ground motion without a source, bridges, interception, and slow initial
+// velocity remain unresolved. Impact does not dispatch damage.
 FlatCannonTickResult base_flat_cannon_tick(const FlatCannonTickInput &,
                                            const TerrainTraceLookup &,
                                            const sim::OriginalDistance &);

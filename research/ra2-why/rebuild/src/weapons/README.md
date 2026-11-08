@@ -10,6 +10,8 @@ python3 rebuild/src/weapons/verify_object_x86.py rebuild/build/weapons_test
 python3 rebuild/src/weapons/verify_tick_x86.py rebuild/build/weapons_test
 make -C rebuild build/weapons_fractional_tick_test
 RA2_GAME_DIR="$PWD/game" python3 rebuild/src/weapons/verify_fractional_x86.py rebuild/build/weapons_fractional_tick_test
+make -C rebuild build/weapons_near_ground_test
+RA2_GAME_DIR="$PWD/game" python3 rebuild/src/weapons/verify_near_ground_x86.py rebuild/build/weapons_near_ground_test
 
 ```
 
@@ -70,8 +72,8 @@ another object because selection occurs before those checks.
 collision, map bounds and the terrain impact decision for a guarded slice. It
 returns typed decisions and does not change simulation state. It needs the
 original cell snapshots, building-interception result and terrain lookup.
-Near-ground motion, bridge crossings, building interception and slow starting
-velocity return `NeedsInput`. Other projectile types, visual effects, damage
+Near-ground motion without a source, bridge crossings, building interception,
+and slow starting velocity return `NeedsInput`. Other projectile types, visual effects, damage
 dispatch and the full lifecycle are outside this slice. The test compares
 1,536 connected base x86 cases. The original floor, map, building, alliance,
 height and terrain trace results use resolved stubs. A separate test compares
@@ -79,7 +81,13 @@ height and terrain trace results use resolved stubs. A separate test compares
 `verify_fractional_x86.py` compares 32 original fractional launch vectors and
 eight consecutive updates per vector. All 256 snapshots match the original
 position and velocity. The world, height, and terrain trace remain supplied
-test inputs. This check does not prove near-ground motion or a full lifecycle.
+test inputs. This check does not prove a full lifecycle.
+
+`bind_flat_tick_cells()` reads floor and bridge state from initialized, flat
+simulation cells. Unknown metadata, overlays, ramps, and bridges block binding.
+The near-ground check uses 32 initialized ALL02S.MAP cells and compares 288 ticks
+with the original executable. The floor comes from the real map. Height,
+object, building, and terrain trace results remain supplied test inputs.
 
 `base_area_impact_enabled()` matches the original area-damage entry gate.
 `base_resolved_impact_recipient()` matches the final recipient checks and returns
