@@ -1,5 +1,6 @@
 #include "ui.h"
 #include "../fs/mix_bootstrap.h"
+#include "../rules/ini_file.h"
 #include <algorithm>
 #include <cassert>
 #include <fstream>
@@ -83,15 +84,35 @@ int main(int argc,char** argv) {
     base.bootstrap(fs::GameVariant::RedAlert2); base.mount_language(fs::GameVariant::RedAlert2);
     base.mount("neutral.mix");
     auto basecsf=base.read_file("ra2.csf"); assert(basecsf);
+    auto base_art=base.read_file("art.ini"); assert(base_art && !base_art->empty());
+    rules::IniFile art; art.parse(std::string_view(reinterpret_cast<const char*>(base_art->data()),base_art->size()));
+    assert(art.section_count()>100);
     ra2text::CsfFile base_strings; base_strings.parse(basecsf->data(),basecsf->size());
     auto base_exe=read(std::string(argv[1])+"/game.exe");
     auto base_main=ui::load_dialog(base_exe,ui::Page::Main,base_strings);
     auto base_single=ui::load_dialog(base_exe,ui::Page::SinglePlayer,base_strings);
     auto base_skirmish=ui::load_dialog(base_exe,ui::Page::Skirmish,base_strings);
     assert(base_main.controls.size()==11 && base_single.controls.size()==8 && base_skirmish.controls.size()==51);
+    for (auto id : ui::SkirmishControls::opponents)
+        assert(std::any_of(base_skirmish.controls.begin(),base_skirmish.controls.end(),[id](const auto& c){return c.id==id;}));
+    for (auto id : ui::SkirmishControls::countries)
+        assert(std::any_of(base_skirmish.controls.begin(),base_skirmish.controls.end(),[id](const auto& c){return c.id==id;}));
+    for (auto id : ui::SkirmishControls::colors)
+        assert(std::any_of(base_skirmish.controls.begin(),base_skirmish.controls.end(),[id](const auto& c){return c.id==id;}));
     auto base_shell=ui::draw_shell_background(base,800,600);
     assert(base_shell.width==800 && base_shell.height==600);
     auto menu=ui::Menu::load(base,base_exe,base_strings);
+    rules::IniFile defaults;
+    auto empty_setup=ui::read_skirmish_setup(defaults);
+    assert(empty_setup.scenario_index==0 && !empty_setup.credits);
+    assert(empty_setup.opponents[0].opponent==ui::Opponent::Hard);
+    assert(empty_setup.opponents[1].opponent==ui::Opponent::Closed);
+    rules::IniFile saved; saved.parse("[MultiPlayer]\nSide=Russians\nColor=2\n[Skirmish]\nCredits=10000\nSlot01=4,-2,-2\n");
+    auto setup=ui::read_skirmish_setup(saved);
+    assert(setup.country=="Russians" && setup.color==2 && setup.credits==10000);
+    assert(setup.opponents[0].opponent==ui::Opponent::Easy && setup.opponents[0].country==-2);
+    auto actual=rules::IniFile::from_file(std::string(argv[1])+"/RA2.INI");
+    assert(menu.skirmish_setup().credits==actual.read_integer("Skirmish","Credits"));
     // Reference dialog normalization at 0x00775BC0, followed by cell snapping.
     for (int dlu : {125,152,179,206,233,122,149,176}) {
         const int expected=(dlu*163/100-199+21)/42;

@@ -40,6 +40,12 @@ of the 200x100 dialog-unit reference at `0x00775BC0`. For these button rows,
 the result stays the same for reference font heights from 8 to 24 pixels.
 The original Windows font base units remain unverified.
 
+`Menu::skirmish_setup()` exposes saved player and opponent choices from the
+original edition-specific INI file. `read_skirmish_setup` accepts an `IniFile`.
+Missing values that depend on the game rules remain unset. These values are
+not editable in the UI yet, and Start stays disabled. `0x00697F10` reads the
+original saved skirmish settings; `0x006980C0` reads player preferences.
+
 `draw_shell_background` draws the static 800x600 shell into RGBA, using a
 prepared filesystem. Mount `NEUTRAL.MIX` for the base game and mount
 `NTRLMD.MIX` followed by `NEUTRAL.MIX` for Yuri's Revenge. `0x00534E50`
@@ -49,7 +55,7 @@ sizes and complete menu composition are not yet implemented.
 
 Run the tests:
 
-    c++ -std=c++17 -O0 -Wall -Wextra -Werror -I rebuild/src/fs rebuild/src/ui/{ui,shell,test_main}.cpp rebuild/src/text/csf.cpp rebuild/src/fs/{filename_hash,mix_archive,mix_bootstrap}.cpp rebuild/src/gfx/{shp_decode,palette}.cpp -o /tmp/ui_test
+    c++ -std=c++17 -O0 -Wall -Wextra -Werror -I rebuild/src/fs rebuild/src/ui/{ui,shell,skirmish,test_main}.cpp rebuild/src/text/csf.cpp rebuild/src/rules/ini_file.cpp rebuild/src/fs/{filename_hash,mix_archive,mix_bootstrap}.cpp rebuild/src/gfx/{shp_decode,palette}.cpp -o /tmp/ui_test
     /tmp/ui_test /path/to/user/ra2/game
 
 The test checks all three original dialog resources, main-menu text and hit

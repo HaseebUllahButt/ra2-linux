@@ -1,5 +1,6 @@
 #include "ui.h"
 #include "../fs/mix_bootstrap.h"
+#include "../rules/ini_file.h"
 #include <algorithm>
 #include <stdexcept>
 
@@ -90,6 +91,10 @@ Menu Menu::load(const fs::MixFileSystem& files, const std::vector<std::uint8_t>&
     result.single_ = load_dialog(exe, Page::SinglePlayer, strings);
     result.skirmish_ = load_dialog(exe, Page::Skirmish, strings);
     result.font_ = GameFont::parse(required(files, "GAME.FNT"));
+    rules::IniFile preferences;
+    auto saved = files.read_file(files.variant() == fs::GameVariant::RedAlert2 ? "RA2.INI" : "RA2MD.INI");
+    if (saved) preferences.parse(std::string_view(reinterpret_cast<const char*>(saved->data()), saved->size()));
+    result.setup_ = read_skirmish_setup(preferences);
     const auto colors = gfx::Palette::from_bytes(required(files, "SDBTNANM.PAL"));
     const auto button = shape(files, "SDBTNANM.SHP");
     result.normal_ = button.decode_frame(2, colors);
