@@ -14,7 +14,7 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/ui/ui.cpp src/ui/shell.cpp src/ui/skirmish.cpp src/text/csf.cpp \
     src/pack/map_pack.cpp src/rules/ini_file.cpp src/map/map_file.cpp \
     src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
-    src/sim/combat.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp src/sim/path.cpp src/sim/cell_entry.cpp \
+    src/sim/combat.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp src/sim/path.cpp src/sim/cell_entry.cpp src/sim/production.cpp \
     src/sim/world.cpp src/sim/world_init.cpp src/sim/drive.cpp src/sim/movement.cpp src/sim/replacement.cpp src/sim/build_time.cpp src/voxel/voxel.cpp
 NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
 
@@ -36,7 +36,7 @@ GFX_OBJECTS = build/native/src/gfx/palette.o build/native/src/gfx/shp_decode.o
 SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS))
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 
-native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-entry-height sim-replacement sim-world sim-build-time session weapons
+native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-entry-height sim-replacement sim-world sim-build-time sim-production session weapons
 	build/ra2-native --game-dir ../game --frames 3 --headless
 	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
@@ -137,6 +137,13 @@ sim-build-time: build/sim_build_time_test
 build/sim_build_time_test: build/native/src/sim/test_build_time.o build/native/src/sim/build_time.o build/native/src/sim/factory.o build/native/src/sim/random.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
+.PHONY: sim-production
+sim-production: build/sim_production_test
+	build/sim_production_test
+
+build/sim_production_test: build/native/src/sim/test_production.o build/native/src/sim/production.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
 .PHONY: session
 session: build/session_test
 	build/session_test ../game
@@ -166,14 +173,18 @@ build/session_unit_loop_cases: build/native/src/session/session.o build/native/s
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 .PHONY: weapons
-weapons: build/weapons_test build/weapons_asset_test
+weapons: build/weapons_test build/weapons_asset_test build/weapons_lobber_asset_test
 	build/weapons_test
 	build/weapons_asset_test ../game
+	build/weapons_lobber_asset_test ../game
 
 build/weapons_test: build/native/src/weapons/weapons.o build/native/src/weapons/test_main.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/weapons_asset_test: build/native/src/weapons/asset_test.o $(FS_OBJECTS) build/native/src/rules/ini_file.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/weapons_lobber_asset_test: build/native/src/weapons/lobber_asset_test.o $(FS_OBJECTS) build/native/src/rules/ini_file.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 scene: build/scene_test
