@@ -10,6 +10,7 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/render/tmp_decode.cpp src/render/minimap.cpp src/loop/game_loop.cpp \
     src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp src/fs/filename_hash.cpp \
     src/gfx/palette.cpp src/gfx/shp_decode.cpp src/actors/actors.cpp \
+    src/session/session.cpp \
     src/ui/ui.cpp src/ui/shell.cpp src/ui/skirmish.cpp src/text/csf.cpp \
     src/pack/map_pack.cpp src/rules/ini_file.cpp src/map/map_file.cpp \
     src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
@@ -35,7 +36,7 @@ GFX_OBJECTS = build/native/src/gfx/palette.o build/native/src/gfx/shp_decode.o
 SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS))
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 
-native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-replacement sim-world sim-build-time
+native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-replacement sim-world sim-build-time session
 	build/ra2-native --game-dir ../game --frames 3 --headless
 	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
@@ -116,6 +117,13 @@ sim-build-time: build/sim_build_time_test
 build/sim_build_time_test: build/native/src/sim/test_build_time.o build/native/src/sim/build_time.o build/native/src/sim/factory.o build/native/src/sim/random.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
+.PHONY: session
+session: build/session_test
+	build/session_test ../game
+
+build/session_test: build/native/src/session/session.o build/native/src/session/test_main.o build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/rules/ini_file.o $(FS_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
 scene: build/scene_test
 	build/scene_test ../game ../analysis/extracted/maps/2PEAKS.MAP
 
@@ -160,6 +168,13 @@ catalog: build/catalog_test
 
 build/catalog_test: build/native/src/render/catalog_test.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
 	mkdir -p build
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
+
+.PHONY: render-check
+render-check: build/render_test
+	cd .. && rebuild/build/render_test
+
+build/render_test: build/native/src/render/test_main.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 build/ra2-native: $(NATIVE_OBJECTS)

@@ -17,10 +17,9 @@ This is not a complete skirmish session. House creation, credits, initial
 units, placement, observer handling, random waypoint fallback, and RNG state
 handoff to `Simulation` are not implemented. Start must remain disabled.
 
-For this helper checkout, build the test against the parent simulation headers:
+Run the native checks from the project root:
 
-    c++ -std=c++17 -O0 -Wall -Wextra -Werror -I /path/to/user/ra2-native-integration/rebuild/src/app rebuild/src/session/{session,test_main}.cpp /path/to/user/ra2-native-integration/rebuild/src/sim/{random,distance}.cpp /path/to/user/ra2-native-integration/rebuild/src/rules/ini_file.cpp rebuild/src/fs/{filename_hash,mix_archive,mix_bootstrap}.cpp -o /tmp/session_test
-    /tmp/session_test /path/to/user/ra2/game
+    make -C rebuild session
 
 The test reads the real MP02T2 map from MULTI.MIX and both original executable
 distance tables. It does not write game assets.

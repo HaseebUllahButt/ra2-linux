@@ -75,7 +75,4 @@ Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry,
                       TheaterArt& art, const ra2map::MapFile* objects);
 void write_ppm(const Bitmap& image, const std::filesystem::path& path);
 
-// Draws object placement markers (houses, units, infantry, aircraft)
-// over the composed terrain. Aircraft hover at their flight level.
-// Colors are schematic. The native actor renderer uses original game artwork.
 } // namespace ra2::render
