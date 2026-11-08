@@ -14,7 +14,7 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/pack/map_pack.cpp src/rules/ini_file.cpp src/map/map_file.cpp \
     src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
     src/sim/combat.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp \
-    src/sim/world.cpp src/sim/world_init.cpp src/sim/drive.cpp src/sim/movement.cpp src/sim/replacement.cpp src/voxel/voxel.cpp
+    src/sim/world.cpp src/sim/world_init.cpp src/sim/drive.cpp src/sim/movement.cpp src/sim/replacement.cpp src/sim/build_time.cpp src/voxel/voxel.cpp
 NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
 
 build/native/%.o: %.cpp
@@ -35,7 +35,7 @@ GFX_OBJECTS = build/native/src/gfx/palette.o build/native/src/gfx/shp_decode.o
 SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS))
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 
-native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-replacement sim-world
+native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-replacement sim-world sim-build-time
 	build/ra2-native --game-dir ../game --frames 3 --headless
 	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
@@ -84,6 +84,7 @@ build/sim_test: build/native/src/sim/test_main.o $(SIM_OBJECTS) $(MAP_OBJECTS)
 
 sim-move: build/sim_move_test
 	build/sim_move_test ../game ../analysis/extracted
+	build/sim_move_test ../game ../analysis/extracted --base
 
 build/sim_move_test: build/native/src/sim/test_move.o build/native/src/sim/test_inputs.o $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
@@ -106,6 +107,13 @@ build/sim_world_test: build/native/src/sim/test_world_init.o build/native/src/si
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/terrain_depth_test: build/native/src/render/test_depth.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+.PHONY: sim-build-time
+sim-build-time: build/sim_build_time_test
+	build/sim_build_time_test --self-test
+
+build/sim_build_time_test: build/native/src/sim/test_build_time.o build/native/src/sim/build_time.o build/native/src/sim/factory.o build/native/src/sim/random.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 scene: build/scene_test

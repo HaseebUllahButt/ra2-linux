@@ -476,3 +476,20 @@ A missing packed record keeps those defaults.
 Overlay loading still applies the separate full overlay grid to that cell.
 The adapter must supply all allocated cells, including omitted packed records.
 `original_defaults_check.py executable [--base]` executes both original constructors and verifies the default fields.
+
+## Production timing
+
+`original_build_time` ports base `006C22A0` and expansion `006F47A0`.
+It uses original cost timing, power penalties, factory discounts, and wall timing.
+Base RA2 does not apply the expansion's `BuildTimeMultiplier` step.
+The caller supplies the resolved country multiplier and factory count.
+The function rejects values outside its verified numeric range.
+Prerequisites, production commands, complete queues, and placement remain incomplete.
+
+The original executable check covers 2,052 cases per edition.
+Five native checks also connect these times to the cash-only factory timer.
+
+```sh
+make -C rebuild sim-build-time
+PYTHONPATH=/tmp/ra2-sim-capstone /usr/bin/python3 rebuild/src/sim/original_build_time_check.py game rebuild/build/sim_build_time_test
+```
