@@ -12,7 +12,7 @@ std::vector<ResolvedGroundPathCell> grid(int profile) {
     std::vector<ResolvedGroundPathCell> cells;
     for (int y=65;y<74;++y) for (int x=50;x<59;++x) {
         ResolvedGroundPathCell cell{{static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)},0,EntryHeightCell{}};
-        cell.hierarchy_zone=x>54?2:1;
+        cell.hierarchy_zone=profile==26?(x==54 && y==68?2:1):(x>54?2:1);
         cell.occupancy_neighbors=profile==24?255:((profile==21 || profile==22) && y==67 && x>54?1:0);
         cell.marked_40000=profile==22 && x==55 && y==68;
         cells.push_back(cell);
@@ -33,8 +33,8 @@ int main(int argc,char** argv) try {
             else {
                 std::uint32_t bits; std::memcpy(&bits,&result.cost,4);
                 require(bits==golden.cost,"original filtered path cost differs");
-                if ((golden.profile==21 || golden.profile==22) && golden.x==56 && golden.y==67) {
-                    require(result.status==PathStatus::Unsupported && result.directions==std::vector<unsigned>({0,1,2}),"unrecovered monotone shortcut accepted");
+                if (((golden.profile==21 || golden.profile==22) && golden.x==56 && golden.y==67) || (golden.profile==26 && golden.x==54 && golden.y==67)) {
+                    require(result.status==PathStatus::Unsupported && result.directions==(golden.profile==26?std::vector<unsigned>({1,7}):std::vector<unsigned>({0,1,2})),"shortcut without explicit state accepted");
                 } else {
                     require(result.status==PathStatus::Found,"original filtered path rejected");
                     require(result.directions.size()==static_cast<unsigned>(golden.count-1),"original filtered path length differs");
@@ -75,6 +75,9 @@ int main(int argc,char** argv) try {
         cells=grid(23); filter.allowed_zones={false,true,true};
         for (auto& cell:cells) if (cell.cell.x==55 && cell.cell.y==68) cell.marked_40000=true;
         require(find_original_ground_path({54,69},{56,67},cells,distance,-1,&filter,&postprocessing).status==PathStatus::Unsupported,"unrecovered regular-search marked-cell cost accepted"); ++checks;
+        cells=grid(26); filter.allowed_zones={false,true,false};
+        for (auto& cell:cells) if (cell.cell.x==54 && cell.cell.y==66) cell.height.reset();
+        require(find_original_ground_path({54,69},{54,67},cells,distance,-1,&filter,&postprocessing).status==PathStatus::NeedsInput,"unknown full-postprocessing lookahead accepted"); ++checks;
     }
     std::cout<<"original hierarchy-filtered regular paths and explicit gaps: "<<checks<<" checks passed\n";
 } catch(const std::exception& error) { std::cerr<<error.what()<<"\n"; return 1; }

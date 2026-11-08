@@ -166,12 +166,9 @@ PathResult find_original_ground_path(ra2map::Cell source,ra2map::Cell goal,
     }
     std::reverse(result.directions.begin(),result.directions.end());
     const auto direct_steps=static_cast<std::size_t>(std::max(std::abs(static_cast<int>(result.end.x)-source.x),std::abs(static_cast<int>(result.end.y)-source.y)));
-    if ((x_positive && x_negative) || (y_positive && y_negative)) {
-        result.status=PathStatus::Unsupported; result.evidence="0042B210/0042B7F0: path smoothing and nonmonotone postprocessing are not recovered"; return result;
-    }
-    if (result.directions.size()>direct_steps) {
+    if ((x_positive && x_negative) || (y_positive && y_negative) || result.directions.size()>direct_steps) {
         if (!postprocessing) {
-            result.status=PathStatus::Unsupported; result.evidence="0042B7F0: monotone smoothing needs explicit actor and cell inputs"; return result;
+            result.status=PathStatus::Unsupported; result.evidence="0042B210/0042B7F0: path postprocessing needs explicit actor and cell inputs"; return result;
         }
         std::vector<std::optional<int>> layers;
         auto at=source;
@@ -194,13 +191,19 @@ PathResult find_original_ground_path(ra2map::Cell source,ra2map::Cell goal,
             const auto entry=status==7?std::optional<int>(7):target.entry_status;
             return SmoothingCell{entry,target.height->level,target.height->flag_100,target.marked_40000};
         };
-        const auto smoothed=smooth_original_monotone_path(source,result.directions,layers,postprocessing->actor_threat_weight,probe);
+        const auto metadata=[&](ra2map::Cell cell)->std::optional<SmoothingCell> {
+            const auto found=lookup.find(key(cell));
+            if (found==lookup.end() || !cells[found->second].height) return {};
+            const auto& value=cells[found->second];
+            return SmoothingCell{std::nullopt,value.height->level,value.height->flag_100,value.marked_40000};
+        };
+        const auto smoothed=smooth_original_path(source,result.directions,layers,postprocessing->actor_threat_weight,probe,metadata);
         if (smoothed.status!=SmoothingStatus::Complete) {
             result.status=unsupported_bridge || smoothed.status==SmoothingStatus::Unsupported?PathStatus::Unsupported:PathStatus::NeedsInput;
             result.evidence=unsupported_bridge?"0042BE20: shortcut bridge entry state is not recovered":smoothed.detail; return result;
         }
         result.directions=smoothed.directions;
-        result.evidence="00429A90/0042B7F0: original regular search and monotone smoothing with resolved zero threat";
+        result.evidence="00429A90/0042B7F0: original regular search and full path postprocessing with resolved zero threat";
     } else result.evidence="00429A90/0042A460: resolved regular search and unchanged shortest monotone postprocessing";
     result.status=stopped_at_blocked_goal?PathStatus::Partial:PathStatus::Found;
     return result;

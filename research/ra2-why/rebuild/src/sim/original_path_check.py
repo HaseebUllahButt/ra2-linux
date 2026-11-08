@@ -10,6 +10,7 @@ from unicorn import UcError
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_ESP,UC_X86_REG_EIP
 m=r.m; cpu=m.cpu; base=m.base
 cpu.mem_map(0x2000000,0x1000000)
+cpu.mem_map(0x3000000,0x100000) # Resolved zero house threat table for original corner checks.
 SEARCH=0x2000000
 allocation=0x2010000
 
@@ -63,6 +64,7 @@ def run(goal,walls=(),scenario=0,hierarchy_profile=None):
     global blocked,last_cost
     last_cost=0
     r.setup((0,),15); blocked=set(walls)
+    m.word(m.FOOT+(0x1b4 if base else 0x21c),0x3000000)
     m.virtual(0x194 if base else 0x1ac,20,can_enter)
     m.word(m.VT+(0x198 if base else 0x1b0),0x4c8730 if base else 0x4d9c60)
     m.word(m.FOOT+(0x564 if base else 0x674),m.LOCO+4)
@@ -81,6 +83,7 @@ def run(goal,walls=(),scenario=0,hierarchy_profile=None):
             m.word(cell+0x54,-1); m.word(cell+0x58,-1)
             cpu.mem_write(cell+0x116,struct.pack('<h',-1))
             zone=2 if hierarchy_profile is not None and x>54 else 1
+            if hierarchy_profile==26: zone=2 if (x,y)==(54,68) else 1
             neighbors=0
             if hierarchy_profile in (21,22) and y==67 and x>54: neighbors=1
             if hierarchy_profile==24: neighbors=255

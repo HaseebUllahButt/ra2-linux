@@ -573,8 +573,8 @@ The result distinguishes Found, Partial, NoPath, NeedsInput, and Unsupported.
 The native command layer does not yet call this search. The original Foot wrapper and cell eligibility remain required.
 
 Shortest monotone paths keep their original reconstructed direction list.
-Paths that reverse an axis require unported postprocessing and return Unsupported.
-Extra-step monotone paths need explicit PathPostprocessing state for the recovered smoothing pass.
+Paths that reverse an axis or use extra steps need explicit PathPostprocessing state.
+The recovered full sequence then preserves original corner checks, reversal windows, and cleanup.
 The original default expansion limit is 0xFFF7. The original 10,000-expansion failure case is also preserved.
 The original 65,536-node storage bound produces an explicit native error before overflow.
 
@@ -732,10 +732,10 @@ The native code tests the zone before it tests the entry state, matching the ori
 An unused neighbor byte can remain unknown when the zone is allowed.
 Unknown required zones, marks, or neighbor bytes return NeedsInput.
 
-`original_filtered_path_check.py executable [--base] --vectors` executes twenty-five original cases per edition.
+`original_filtered_path_check.py executable [--base] --vectors` executes thirty original cases per edition.
 It supplies selected zone marks and zero, one, or 255 in Cell +122.
 Both editions return identical paths and search cost bits.
-`test_filtered_path.sh` passes 118 checks, also with address and undefined-behavior sanitizers.
+`test_filtered_path.sh` passes 140 checks, also with address and undefined-behavior sanitizers.
 It tests each fixture with and without explicit smoothing state, plus missing-state and unsupported-domain cases.
 The existing regular-path checks still pass all 184 cases. Their original 88 vectors per edition are unchanged.
 
@@ -771,7 +771,7 @@ Regular search enables this primitive only when the caller supplies its required
 The supported smoothing profile requires an explicit zero.
 Its ground records also supply optional Cell flag 0x40000.
 Unknown required marks, shortcut cells, or levels return NeedsInput. Nonzero threat and shortcut bridge states remain unsupported.
-The integrated path retains the original search cost after smoothing changes its directions.
+The integrated path retains the original search cost after postprocessing changes its directions.
 Marked shortcut cells can reject a replacement and keep the original longer route.
 An explored marked cell still needs its unported regular-search cost and returns Unsupported.
 Callers that omit PathPostprocessing keep the existing shortest-monotone profile.
@@ -805,4 +805,23 @@ The fixtures include reversals, repeated corners, closed paths, blocked entries,
 `test_full_smoothing.sh` passes 266 checks, including required lookahead after a blocked entry.
 These checks pass with address and undefined-behavior sanitizers.
 The original 256 monotone vectors and 266 native monotone checks remain unchanged.
-Regular search still enables only its existing monotone integration until its full postprocessing call is connected.
+Regular search enables the complete sequence when PathPostprocessing and required cell state are present.
+
+
+## Complete regular-search postprocessing integration
+
+`find_original_ground_path()` now runs both recovered postprocessing passes for nonmonotone and extra-step paths.
+It requires explicit PathPostprocessing state and preserves the separate entry and metadata callbacks.
+The regular search still rejects unrecovered bridge, tube, marked-cost, and other occupied-cell cost states.
+A forbidden hierarchy zone can force a detour that original postprocessing later shortens through a valid entry cell.
+The entry checks retain their original order. They do not reapply the search's hierarchy filter.
+A missing lookahead cell produces NeedsInput even after the final candidate entry succeeds.
+
+`original_postprocessed_path_check.py executable [--base] --vectors` tests seven obstacle patterns and twenty-five goals.
+Both editions match all 175 complete paths, blocked-goal stops, and original search cost bits.
+`test_postprocessed_path.sh` passes 350 checks, also under address and undefined-behavior sanitizers.
+The expanded filtered test passes 140 checks, including the successful corner cut through an excluded hierarchy zone.
+Its missing-lookahead test preserves the distinction between entry dispatch and metadata lookup.
+All 184 earlier native path checks and 88 original vectors per edition remain unchanged.
+The original house threat table is supplied as resolved zero data. Original corner threat lookups still execute in the oracle.
+Live-world goal commands still need staged state and the original Foot goal-wrapper retry logic.

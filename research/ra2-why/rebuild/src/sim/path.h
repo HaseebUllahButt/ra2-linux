@@ -35,7 +35,7 @@ struct PathResult {
 };
 // Base 00427370, 00427D40; expansion 00429A90, 0042A460.
 // Preserves the original direction order, open-list ties, float storage, and lookup heuristic.
-// Monotone smoothing needs explicit postprocessing state. Nonmonotone paths remain unsupported.
+// Smoothing and nonmonotone paths need explicit postprocessing state and known shortcut cell inputs.
 PathResult find_original_ground_path(ra2map::Cell source,ra2map::Cell goal,
     const std::vector<ResolvedGroundPathCell>&,const OriginalDistance&,int expansion_limit=-1,const PathHierarchyFilter* filter=nullptr,const PathPostprocessing* postprocessing=nullptr);
 PathResult find_original_flat_path(ra2map::Cell source,ra2map::Cell goal,
