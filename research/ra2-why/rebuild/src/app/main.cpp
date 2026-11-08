@@ -164,6 +164,9 @@ int run_menu(const Options& args, ra2::fs::MixFileSystem& files) {
     ra2text::CsfFile strings;
     strings.parse(csf->data(), csf->size());
     auto menu = ra2::ui::Menu::load(files, *exe, strings);
+    files.mount_resources();
+    menu.configure_maps(ra2::ui::load_skirmish_maps(files, strings),
+                        ra2::ui::load_skirmish_modes(files, strings));
     ra2::app::Window window("Red Alert 2 native rebuild: menu", 800, 600, !args.headless);
     MenuPump pump(window, menu, args.headless);
     MenuPresenter presenter(window, menu);
@@ -197,8 +200,8 @@ int main(int argc, char** argv) {
             if (!original_map) throw std::runtime_error("Original map is missing: " + args.map.string());
             ini.parse(std::string_view(reinterpret_cast<const char*>(original_map->data()), original_map->size()));
         }
-        const auto terrain = ra2::pack::load_terrain(ini);
         const auto geometry = ra2::render::MapGeometry::from_ini(ini);
+        const auto terrain = ra2::app::allocated_terrain(ra2::pack::load_terrain(ini), geometry);
         auto art = ra2::render::TheaterArt::load(files, ini.read_string("Map", "Theater"));
         const auto cells = ra2::app::terrain_inputs(terrain, art);
         const auto theater = ra2::app::theater_inputs(art);

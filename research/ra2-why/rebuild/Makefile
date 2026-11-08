@@ -41,6 +41,7 @@ native-check: native platform terrain-inputs scene base-move actors ui audio vox
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ALL01T.MAP --frames 3 --headless
+	build/ra2-native --game-dir ../game --map MP25MW.MAP --frames 3 --headless
 
 actors: build/actors_test
 	build/actors_test ../game
@@ -119,6 +120,13 @@ base-move: build/base_move_test
 	build/base_move_test ../game
 
 build/base_move_test: build/native/src/app/scene.o build/native/src/app/vehicle_art.o build/native/src/app/terrain_inputs.o build/native/src/app/test_base_move.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
+
+.PHONY: world-maps
+world-maps: build/world_maps_test
+	build/world_maps_test ../game
+
+build/world_maps_test: build/native/src/app/terrain_inputs.o build/native/src/app/test_world_maps.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 terrain-inputs: build/terrain_inputs_test

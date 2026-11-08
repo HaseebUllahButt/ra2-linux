@@ -73,6 +73,21 @@ int main(int argc, char** argv) {
         if (clear.tile_index != 0xffff || clear.resolved_tile_index != 0xffff ||
             clear.ramp_index != 0 || clear.tmp_terrain)
             throw std::runtime_error("Clear land was replaced by renderer fallback metadata");
+        // The original loader permits sparse records, repeated cells, and records
+        // outside the allocated diamond. Check constructor defaults and last writes.
+        ra2::pack::Terrain sparse;
+        sparse.overlay.assign(512*512, 255);
+        sparse.overlay[3*512+1] = 17;
+        sparse.tiles = {{1,3,12,1,4,3}, {1,3,13,2,5,7}, {0,1,999,0,0,0}};
+        const auto allocated = ra2::app::allocated_terrain(sparse, {{0,0,3,2},{0,0,3,2}});
+        if (allocated.tiles.size() != 10 || allocated.overlay != sparse.overlay ||
+            allocated.tiles.front().index != 13 || allocated.tiles.front().subtile != 2 ||
+            allocated.tiles.front().height != 5 || allocated.tiles.front().ice != 7)
+            throw std::runtime_error("Sparse map loading lost defaults or ordered record writes");
+        for (std::size_t i = 1; i < allocated.tiles.size(); ++i)
+            if (allocated.tiles[i].index != 0xffff || allocated.tiles[i].subtile ||
+                allocated.tiles[i].height || allocated.tiles[i].ice)
+                throw std::runtime_error("Missing map records lost original Cell constructor defaults");
         std::cout << "Native terrain inputs passed: " << inputs.size()
                   << " cells, signed levels, floor heights, and original overlay indexing.\n";
     } catch (const std::exception& error) {

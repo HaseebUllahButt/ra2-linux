@@ -1,5 +1,6 @@
 #include "terrain_inputs.h"
 #include "../sim/floor.h"
+#include "../sim/world_init.h"
 #include <map>
 #include <stdexcept>
 
@@ -17,6 +18,24 @@ std::optional<sim::TileMetadata> normalized_metadata(render::TheaterArt& art,
         return sim::TileMetadata{record.terrain, record.ramp, valid};
     } catch (const render::RenderError&) { return std::nullopt; }
 }
+}
+pack::Terrain allocated_terrain(const pack::Terrain& source, const render::MapGeometry& geometry) {
+    const auto order = sim::original_map_cell_order(geometry.size.width, geometry.size.height);
+    std::map<std::pair<std::uint16_t,std::uint16_t>, const pack::Tile*> records;
+    // 0056BAC0 applies each packed record to an allocated Cell. A later
+    // record replaces an earlier record at that cell. Outside records are discarded.
+    for (const auto& tile : source.tiles) records[{tile.x,tile.y}] = &tile;
+    pack::Terrain result;
+    result.overlay = source.overlay;
+    result.overlay_data = source.overlay_data;
+    result.tiles.reserve(order.size());
+    for (const auto cell : order) {
+        const auto found = records.find({cell.x,cell.y});
+        // Cell constructor 0047BBF0 and scenario's initial height zero.
+        result.tiles.push_back(found == records.end() ?
+            pack::Tile{cell.x,cell.y,0xffff,0,0,0} : *found->second);
+    }
+    return result;
 }
 sim::TerrainCells terrain_inputs(const pack::Terrain& terrain, render::TheaterArt& art) {
     constexpr std::size_t cells = 512 * 512;

@@ -28,7 +28,7 @@ int main(int argc, char** argv) try {
     const auto map = read_ini(files, "ALL02S.MAP");
     const auto rules = read_ini(files, "RULES.INI");
     const auto art = read_ini(files, "ART.INI");
-    const auto packed = pack::load_terrain(map);
+    const auto packed = app::allocated_terrain(pack::load_terrain(map), render::MapGeometry::from_ini(map));
     auto tiles = render::TheaterArt::load(files, map.read_string("Map", "Theater"));
     const auto cells = app::terrain_inputs(packed, tiles);
     const auto theater = app::theater_inputs(tiles);

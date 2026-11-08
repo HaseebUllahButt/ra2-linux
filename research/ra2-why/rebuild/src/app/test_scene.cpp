@@ -29,8 +29,8 @@ int main(int argc, char** argv) {
                 merged.read_integer("NewType", "Value") == 2,
                 "Map overrides changed the first effective source values");
         const auto map = rules::IniFile::from_file(argv[2]);
-        const auto packed = pack::load_terrain(map);
         const auto geometry = render::MapGeometry::from_ini(map);
+        const auto packed = app::allocated_terrain(pack::load_terrain(map), geometry);
         ra2map::MapFile map_objects;
         map_objects.parse(map);
         const auto tree_center = actors::terrain_position({2,3}, -104);
