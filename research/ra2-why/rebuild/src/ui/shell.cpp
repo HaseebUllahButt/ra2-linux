@@ -320,6 +320,40 @@ Action Menu::key_down(Key key) noexcept {
     }
     return Action::None;
 }
+void Menu::configure_maps(std::vector<SkirmishMap> maps, std::vector<SkirmishMode> modes) {
+    maps_=std::move(maps);
+    modes_=std::move(modes);
+    setup_.map_filename.reset();
+    setup_.map_archive.reset();
+}
+Action Menu::select_mode(int id) {
+    if (page()!=Page::Skirmish || confirming_exit_) return Action::None;
+    const auto mode=std::find_if(modes_.begin(),modes_.end(),[id](const auto& item){return item.id==id;});
+    if (mode==modes_.end() || setup_.game_mode==id) return Action::None;
+    setup_.game_mode=id;
+    // Original fallback selection is not yet recovered. Require an explicit map.
+    setup_.scenario_index.reset();
+    setup_.map_filename.reset();
+    setup_.map_archive.reset();
+    return Action::SetupChanged;
+}
+Action Menu::select_map(std::size_t index) {
+    if (page()!=Page::Skirmish || confirming_exit_ || index>=maps_.size() || !setup_.game_mode)
+        return Action::None;
+    const auto mode=std::find_if(modes_.begin(),modes_.end(),[&](const auto& item){return item.id==*setup_.game_mode;});
+    const auto& map=maps_[index];
+    if (mode==modes_.end() || !map.available || map.filename.empty() ||
+        !skirmish_map_matches_mode(map,*mode)) return Action::None;
+    const auto archive=map.source_archive;
+    if (setup_.map_filename==map.filename && setup_.map_archive==archive) return Action::None;
+    setup_.map_filename=map.filename;
+    setup_.map_archive=archive;
+    // Local file enumeration differs between Windows and Linux.
+    if (map.built_in && index<=static_cast<std::size_t>(std::numeric_limits<int>::max()))
+        setup_.scenario_index=static_cast<int>(index);
+    else setup_.scenario_index.reset();
+    return Action::SetupChanged;
+}
 Action Menu::select_opponent(std::size_t slot, Opponent value) noexcept {
     if (page()!=Page::Skirmish || confirming_exit_ || slot<1 || slot>setup_.opponents.size())
         return Action::None;

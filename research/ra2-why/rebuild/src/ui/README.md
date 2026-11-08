@@ -91,3 +91,11 @@ To run bounded-input tests under sanitizers, pass the original executable, CSF,
 TITLE.PCX, and GAME.FNT as four file arguments to `test_safety.cpp`. The test
 never writes decoded assets. Those assets can be obtained through the existing
 MIX reader for local testing.
+
+`Menu::configure_maps` accepts the original map and mode catalogs from the
+prepared filesystem. `select_mode` and `select_map` validate programmatic
+selection. Explicit map selection stores its file and source archive in
+`setup()`. Local archive order differs from Windows, so local selections do not
+set the saved scenario index. Changing mode clears the selection until the
+original fallback is recovered. The on-screen map picker and dropdowns remain
+unimplemented. Match Start remains disabled.

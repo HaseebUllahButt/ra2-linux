@@ -69,6 +69,19 @@ std::vector<SkirmishMode> load_skirmish_modes(const fs::MixFileSystem& files,
     return result;
 }
 
+bool skirmish_map_matches_mode(const SkirmishMap& map, const SkirmishMode& mode) {
+    auto upper=[](std::string value) {
+        std::transform(value.begin(),value.end(),value.begin(),[](unsigned char c){return static_cast<char>(std::toupper(c));});
+        return value;
+    };
+    const auto filter=upper(mode.map_filter);
+    // 0x0069AE10 treats a missing map mode list as standard.
+    if (map.modes.empty()) return filter=="STANDARD";
+    for (const auto& allowed : map.modes)
+        if (upper(allowed)==filter) return true;
+    return false;
+}
+
 std::optional<SkirmishMap> resolve_saved_skirmish_map(const SkirmishSetup& setup,
     const std::vector<SkirmishMap>& maps, const std::vector<SkirmishMode>& modes) {
     if (!setup.scenario_index || !setup.game_mode || *setup.scenario_index<0 ||
@@ -76,17 +89,8 @@ std::optional<SkirmishMap> resolve_saved_skirmish_map(const SkirmishSetup& setup
     const auto& map=maps[static_cast<std::size_t>(*setup.scenario_index)];
     if (!map.built_in || !map.available) return std::nullopt;
     const auto mode=std::find_if(modes.begin(),modes.end(),[&](const auto& m){return m.id==*setup.game_mode;});
-    if (mode==modes.end()) return std::nullopt;
-    auto upper=[](std::string value) {
-        std::transform(value.begin(),value.end(),value.begin(),[](unsigned char c){return static_cast<char>(std::toupper(c));});
-        return value;
-    };
-    const auto filter=upper(mode->map_filter);
-    // 0x0069AE10 treats a missing map mode list as standard.
-    if (map.modes.empty()) return filter=="STANDARD" ? std::optional(map) : std::nullopt;
-    for (const auto& allowed : map.modes)
-        if (upper(allowed)==filter) return map;
-    return std::nullopt;
+    if (mode==modes.end() || !skirmish_map_matches_mode(map,*mode)) return std::nullopt;
+    return map;
 }
 
 std::optional<int> credit_from_slider_pointer(int local_x, int width,

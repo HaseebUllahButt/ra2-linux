@@ -41,7 +41,7 @@ struct SkirmishSetup {
     std::optional<int> game_mode, scenario_index, game_speed, credits, unit_count;
     int min_credits=2500, max_credits=10000, credit_increment=100;
     std::optional<bool> short_game, super_weapons, build_off_ally, mcv_repacks, crates;
-    std::optional<std::string> country;
+    std::optional<std::string> country, map_filename, map_archive;
     std::optional<int> color;
     std::array<OpponentSlot,7> opponents;
 };
@@ -58,6 +58,8 @@ struct SkirmishMode {
 };
 std::vector<SkirmishMode> load_skirmish_modes(const fs::MixFileSystem& files,
                                                const ra2text::CsfFile& strings);
+// Tests the original map mode filter, including the default standard mode.
+bool skirmish_map_matches_mode(const SkirmishMap& map, const SkirmishMode& mode);
 // Returns a saved built-in map only when it exists and matches the mode.
 // Local Windows enumeration order and original fallback rules remain unknown.
 std::optional<SkirmishMap> resolve_saved_skirmish_map(const SkirmishSetup& setup,
@@ -150,6 +152,10 @@ public:
     void pointer_down(int x, int y);
     Action pointer_up(int x, int y);
     Action key_down(Key key) noexcept;
+    // Configure catalogs from the prepared filesystem before selecting a map.
+    void configure_maps(std::vector<SkirmishMap> maps, std::vector<SkirmishMode> modes);
+    Action select_mode(int id);
+    Action select_map(std::size_t index);
     // Slot zero is the player; slots one through seven are opponents.
     Action select_opponent(std::size_t slot, Opponent value) noexcept;
     Action select_country(std::size_t slot, int country_index);
@@ -169,6 +175,8 @@ private:
     bool credit_changed_ = false;
     SkirmishSetup setup_;
     std::vector<SkirmishCountry> countries_;
+    std::vector<SkirmishMap> maps_;
+    std::vector<SkirmishMode> modes_;
     GameFont font_;
     Dialog main_, single_, skirmish_;
     MenuNavigation navigation_;
