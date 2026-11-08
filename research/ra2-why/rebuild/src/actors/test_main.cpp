@@ -5,6 +5,10 @@
 using namespace ra2;
 int main(int argc, char** argv) {
     if (argc != 2) return 2;
+    assert(actors::infantry_direction(0)==7);
+    assert(actors::infantry_direction(64)==5);
+    assert(actors::infantry_direction(128)==3);
+    assert(actors::infantry_direction(192)==1);
     auto center=actors::building_center({2,3},3,2,60);
     assert(center.x==896 && center.y==1024 && center.z==60);
     fs::MixFileSystem files(argv[1]);
@@ -19,8 +23,12 @@ int main(int argc, char** argv) {
         auto actor=actors::ActorArt::load(files,art,rules,type,actors::Kind::Infantry);
         assert(actor.remappable());
         assert(actor.frame("Ready",0,0)==0);
+        assert(actor.frame_for_map("Walk",64,2)==actor.frame("Walk",5,2));
+        assert(actor.frame_for_map("Walk",64,8)==actor.frame("Walk",5,2));
         auto standing=actor.draw("Ready",0,0,pal);
         assert(!standing.pixels.empty());
+        auto origin=actor.main_canvas_origin({1000,1000});
+        assert(origin.x==1000-standing.width/2 && origin.y==1000-standing.height/2);
         auto walk=actor.draw("Walk",3,2,pal); assert(!walk.pixels.empty());
         bool finished=false;
         assert(actor.frame_at_tick("Walk",3,6,finished)==actor.frame("Walk",3,2));

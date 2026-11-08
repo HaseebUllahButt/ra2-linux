@@ -11,9 +11,10 @@ It reports completion but does not choose the next sequence.
 Evidence:
 
 * `0x00523D00` reads infantry sequence first frame, length, facing stride,
-  and optional fixed facing. The first + facing * stride + step formula is an
-  inference from the records and SHP layout; the original drawing path remains
-  unverified.
+  and optional fixed facing. `0x00518D80` selects the displayed frame using
+  first + facing * stride + (sequence frame % count). `0x00518F52` uses
+  the original facing table at `0x007EAEFC`. `0x006F6D94` converts the map
+  facing byte to the engine direction.
 * `0x0051D6F0` sets the sequence timer using the table at `0x007EAF7C`.
   `0x006F9E50` increments the current frame when the timer expires.
   The elapsed-tick helper assumes the actor updates on every game tick.
@@ -28,9 +29,12 @@ The `load_attached` function resolves named building animation keys, such as
 Terrain objects use the theater-specific extension from the original table.
 
 `building_center` returns the original building center in world units from
-cell and foundation dimensions. It does not return a screen anchor or depth.
+cell and foundation dimensions. `main_canvas_origin` converts an already
+computed screen anchor to a main SHP canvas origin. `0x00705E00` sets the
+centered-draw flag, and `0x004AED70` subtracts half the nominal canvas size.
+The caller must still calculate the anchor and depth.
 
-The code does not yet recover map-facing conversion, automatic animation state
+The code does not yet recover automatic animation state
 transitions, fixed-facing changes, building animation overlays, effect timing,
 health-dependent frames, team-color tables, lighting, or shadow compositing.
 Effects accept an explicit SHP frame.

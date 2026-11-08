@@ -18,6 +18,13 @@ bool speed_scaled_delay(std::string_view name) {
     return name == "Idle1" || name == "Idle2" || name == "WetIdle1" || name == "WetIdle2" || name == "Hover" || name == "Cheer";
 }
 }
+unsigned infantry_direction(std::uint8_t map_facing) noexcept {
+    // 0x006F6D94 stores map facing in the high byte of the direction.
+    // 0x00518F52 rounds it to 32 directions and indexes table 0x007EAEFC.
+    static constexpr unsigned facing[32] = {7,7,6,6,6,6,5,5,5,5,4,4,4,4,3,3,
+                                             3,3,2,2,2,2,1,1,1,1,0,0,0,0,7,7};
+    return facing[((unsigned(map_facing) / 4 + 1) / 2) & 31];
+}
 WorldPosition building_center(ra2map::Cell cell, unsigned width,
                               unsigned height, std::int32_t z) {
     if (!width || !height || width > 256 || height > 256)
@@ -122,6 +129,15 @@ std::size_t ActorArt::frame(std::string_view sequence, unsigned direction, unsig
     if (index >= image_.header().frame_count) throw std::runtime_error("sequence exceeds SHP frames");
     return static_cast<std::size_t>(index);
 }
+std::size_t ActorArt::frame_for_map(std::string_view name, std::uint8_t map_facing,
+                                    unsigned step) const {
+    if (kind_ != Kind::Infantry) throw std::runtime_error("map facing supported only for infantry");
+    const auto it = sequences_.find(name);
+    if (it == sequences_.end() || it->second.count <= 0)
+        throw std::runtime_error("infantry sequence unavailable");
+    // 0x00518E18 wraps the sequence frame by its frame count.
+    return frame(name, infantry_direction(map_facing), step % static_cast<unsigned>(it->second.count));
+}
 std::size_t ActorArt::frame_at_tick(std::string_view name, unsigned direction,
                                     std::uint64_t ticks, bool& finished, unsigned adjusted_delay) const {
     const auto it = sequences_.find(name);
@@ -137,6 +153,11 @@ std::size_t ActorArt::frame_at_tick(std::string_view name, unsigned direction,
     finished = delay && elapsed >= static_cast<unsigned>(it->second.count);
     const auto step = std::min<std::uint64_t>(elapsed, static_cast<unsigned>(it->second.count - 1));
     return frame(name, direction, static_cast<unsigned>(step));
+}
+ScreenPoint ActorArt::main_canvas_origin(ScreenPoint anchor) const noexcept {
+    // 0x00705E00 sets flag 0x200 for the main draw; 0x004AED70
+    // subtracts half the nominal SHP dimensions when that flag is set.
+    return {anchor.x - image_.header().width / 2, anchor.y - image_.header().height / 2};
 }
 gfx::RgbaImage ActorArt::draw_frame(std::size_t index, const gfx::Palette& palette) const {
     return image_.decode_frame(index, palette);
