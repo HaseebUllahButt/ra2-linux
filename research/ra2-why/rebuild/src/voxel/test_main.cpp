@@ -7,6 +7,41 @@
 using namespace ra2::voxel;
 int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--shadow-marker-case") {
+      int tile, enabled;
+      std::array<int, 5> starts{};
+      while (std::cin >> tile >> starts[0] >> starts[1] >> starts[2] >>
+             starts[3] >> starts[4] >> enabled) {
+        std::vector<std::optional<bool>> marked(512 * 512, false);
+        base_mark_shadow_casters(marked, starts, {{10, 10, tile, enabled != 0}});
+        for (int y = 0; y < 32; ++y)
+          for (int x = 0; x < 32; ++x)
+            std::cout << (*marked[std::size_t(y) * 512 + x] ? '1' : '0');
+        std::cout << '\n';
+      }
+      return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--bridge-gap-case") {
+      int x1, y1, x2, y2, state, kind, mask;
+      while (std::cin >> x1 >> y1 >> x2 >> y2 >> state >> kind >> mask) {
+        std::vector<std::optional<bool>> bridge(512 * 512, false);
+        std::vector<std::optional<bool>> secondary(512 * 512, false);
+        for (int y = 0; y < 32; ++y)
+          for (int x = 0; x < 32; ++x) {
+            auto i = std::size_t(y) * 512 + x;
+            bridge[i] = (x + y) % 7 == mask;
+            secondary[i] = (x * 3 + y) % 11 == 0;
+          }
+        base_mark_bridge_gaps(secondary, bridge,
+                              {{x1, y1, x2, y2, std::uint8_t(state),
+                                std::uint32_t(kind)}});
+        for (int y = 0; y < 32; ++y)
+          for (int x = 0; x < 32; ++x)
+            std::cout << (*secondary[std::size_t(y) * 512 + x] ? '1' : '0');
+        std::cout << '\n';
+      }
+      return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--flat-part-depth") {
       int source_y, source_height, top, anchor_y, surface_height, projected;
       while (std::cin >> source_y >> source_height >> top >> anchor_y >>
@@ -49,6 +84,22 @@ int main(int argc, char **argv) {
         std::cout << '\n';
       }
       return 0;
+    }
+    {
+      std::vector<std::optional<bool>> bridge(512 * 512, false);
+      std::vector<std::optional<bool>> secondary(512 * 512, false);
+      const auto index = [](int x, int y) { return std::size_t(y) * 512 + x; };
+      bridge[index(10, 11)].reset();
+      secondary[index(8, 11)] = true;
+      base_mark_bridge_gaps(secondary, bridge, {{10, 10, 10, 13, 0, 0}});
+      if (secondary[index(9, 11)].has_value() || !*secondary[index(8, 11)] ||
+          !*secondary[index(9, 12)] || *secondary[index(12, 12)])
+        throw std::runtime_error("bridge gap unknown-state mismatch");
+      try {
+        base_mark_bridge_gaps(secondary, bridge, {{10, 10, 11, 11, 0, 0}});
+        throw std::runtime_error("invalid bridge span accepted");
+      } catch (const std::invalid_argument &) {
+      }
     }
     std::array<FlatDepthCell, 25> flat_cells{};
     for (auto &cell : flat_cells) {

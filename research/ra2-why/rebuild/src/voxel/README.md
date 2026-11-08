@@ -67,6 +67,19 @@ original row inputs. It does not calculate clipping or world Z projection.
 surface. It returns the first source row, row count and first row depth. It
 uses Z base `0x8000` and origin Y zero. Advance the row with
 `base_depth_next_row()`. Clip X in the scene. Supply the projected world Z.
+
+`base_mark_bridge_gaps()` applies the base loader's `0x568B00` gap pass to a
+512 by 512 row-major grid. Supply bridge span records produced by the original
+`0x54FDA0` scan. It marks four cells across each gap, excluding its endpoints.
+Unknown bridge cells produce unknown output where they can affect the result.
+The scene must also track later bridge damage and intact bridge marker flags.
+
+`base_mark_shadow_casters()` applies the original `0x52B8B0` offset table and
+`0x472D20` flag pass. Supply the five group starts and caster tiles from the
+theater loader. The caller must initialize the marker grid with flags from
+other sources, including bridges. A missing caster group is represented by
+zero, matching the loader. The original base TEMPERAT.INI, SNOW.INI and
+URBAN.INI contain no active `ShadowCaster` entries.
 The full adjustment at `0x4C9930` also checks terrain flags, nearby tile
 heights, tile shapes, bridges and object state. These checks remain unsupported.
 `supports_base_flat_vehicle_depth()` checks the narrow tested case. Supply a
@@ -83,6 +96,7 @@ in the parent scene.
 ```
 python3 rebuild/src/voxel/verify_flat_depth_x86.py /tmp/voxel_test
 python3 rebuild/src/voxel/verify_part_depth_x86.py /tmp/voxel_test
+python3 rebuild/src/voxel/verify_static_flags_x86.py /tmp/voxel_test
 ```
 
 This executes `0x4C9930` and its original map checks for 640 vehicle height,
@@ -92,6 +106,8 @@ Two cells contain unit-list pointers. The checked path does not read those
 lists. Only cell lookup, object position, facing and fixture access use stubs.
 The second test executes the original part blitter and clipping code for 256
 part positions, source bounds, projected heights and map-edge clips.
+The third test checks bridge gaps, the complete ShadowCaster offset table,
+and the three shipped base theater settings against original x86 and assets.
 
 The following test compares 256 record 2 cases and five raw blits with the
 original base-game x86 instructions. It checks transparent pixels, ties,

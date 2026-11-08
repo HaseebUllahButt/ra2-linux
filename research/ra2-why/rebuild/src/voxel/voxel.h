@@ -111,6 +111,27 @@ struct FlatDepthVehicleState {
 };
 bool supports_base_flat_vehicle_depth(const std::array<FlatDepthCell, 25> &,
                                       const FlatDepthVehicleState &);
+// The base map loader's bridge record, 0x54FDA0. Coordinates use the
+// original 512 by 512 cell grid. Unknown bridge bits remain unknown.
+struct BaseBridgeSpan {
+  int start_x, start_y, end_x, end_y;
+  std::uint8_t state;
+  std::uint32_t kind;
+};
+void base_mark_bridge_gaps(
+    std::vector<std::optional<bool>> &secondary_bridge,
+    const std::vector<std::optional<bool>> &bridge,
+    const std::vector<BaseBridgeSpan> &spans);
+struct BaseShadowCaster {
+  int x, y, tile_index;
+  bool enabled; // ShadowCaster=true and ShadowTiles is nonzero.
+};
+// Original default table at 0x52B8B0 and map pass at 0x472D20. Values are
+// the absolute first tile indexes of the five original ShadowCaster groups.
+void base_mark_shadow_casters(
+    std::vector<std::optional<bool>> &marked_terrain,
+    const std::array<int, 5> &group_starts,
+    const std::vector<BaseShadowCaster> &casters);
 void base_depth_next_row(BaseDepthRow &);
 // Original raw blitter 0x488870: transparent pixels and equal depths fail.
 bool base_depth_visible(std::uint8_t pixel, int row_depth,

@@ -49,6 +49,100 @@ bool supports_base_flat_vehicle_depth(const std::array<FlatDepthCell, 25> &cells
       return false;
   return true;
 }
+void base_mark_bridge_gaps(std::vector<std::optional<bool>> &secondary,
+                           const std::vector<std::optional<bool>> &bridge,
+                           const std::vector<BaseBridgeSpan> &spans) {
+  constexpr std::size_t grid_size = 512 * 512;
+  if (secondary.size() != grid_size || bridge.size() != grid_size)
+    throw std::invalid_argument("invalid bridge grid");
+  auto in_grid = [](int x, int y) {
+    return x >= 0 && x < 512 && y >= 0 && y < 512;
+  };
+  auto index = [](int x, int y) { return std::size_t(y) * 512 + x; };
+  for (const auto &span : spans) {
+    if (!in_grid(span.start_x, span.start_y) ||
+        !in_grid(span.end_x, span.end_y) ||
+        (span.start_x != span.end_x && span.start_y != span.end_y) ||
+        (!span.state && !span.kind && span.start_x == span.end_x &&
+         span.start_y == span.end_y))
+      throw std::invalid_argument("invalid bridge span");
+  }
+  for (const auto &span : spans) {
+    if (span.state || span.kind)
+      continue;
+    const bool vertical = span.start_x == span.end_x;
+    const int distance = vertical ? span.end_y - span.start_y
+                                  : span.end_x - span.start_x;
+    if (distance == 0)
+      continue;
+    const int step = distance > 0 ? 1 : -1;
+    for (int offset = step; offset != distance; offset += step) {
+      const int x = span.start_x + (vertical ? 0 : offset);
+      const int y = span.start_y + (vertical ? offset : 0);
+      const auto present = bridge[index(x, y)];
+      if (present && *present)
+        continue;
+      for (int cross = -2; cross <= 1; ++cross) {
+        const int target_x = x + (vertical ? cross : 0);
+        const int target_y = y + (vertical ? 0 : cross);
+        if (!in_grid(target_x, target_y))
+          continue;
+        auto &out = secondary[index(target_x, target_y)];
+        if (present)
+          out = true;
+        else if (!out || !*out)
+          out.reset();
+      }
+    }
+  }
+}
+void base_mark_shadow_casters(std::vector<std::optional<bool>> &marked,
+                              const std::array<int, 5> &starts,
+                              const std::vector<BaseShadowCaster> &casters) {
+  if (marked.size() != 512 * 512)
+    throw std::invalid_argument("invalid shadow marker grid");
+  // Entries 0..19 and 33..39 terminate at the default (0,0) coordinate.
+  static constexpr int offsets[13][5][2] = {
+      {{0,-1},{0,-1},{-1,-2},{0,0},{0,0}},
+      {{0,-1},{0,-1},{-1,-2},{0,0},{0,0}},
+      {{-1,-3},{0,-3},{0,0},{0,0},{0,0}},
+      {{-1,-3},{0,-3},{0,0},{0,0},{0,0}},
+      {{-1,-3},{0,-3},{0,0},{0,0},{0,0}},
+      {{0,-3},{0,0},{0,0},{0,0},{0,0}},
+      {{0,-3},{1,-3},{-1,-3},{-2,-3},{0,0}},
+      {{0,-3},{-1,-3},{-2,-3},{-3,-2},{0,0}},
+      {{0,-3},{-1,-3},{-2,-3},{0,0},{0,0}},
+      {{0,-3},{-1,-3},{-2,-3},{0,0},{0,0}},
+      {{-2,-3},{0,0},{0,0},{0,0},{0,0}},
+      {{-2,-3},{0,0},{0,0},{0,0},{0,0}},
+      {{0,-3},{0,0},{0,0},{0,0},{0,0}},
+  };
+  for (const auto &caster : casters) {
+    if (caster.x < 0 || caster.x >= 512 || caster.y < 0 || caster.y >= 512)
+      throw std::invalid_argument("invalid shadow caster cell");
+  }
+  for (const auto &caster : casters) {
+    if (!caster.enabled)
+      continue;
+    int local = -1;
+    for (int start : starts) {
+      auto index = std::int64_t(caster.tile_index) - start;
+      if (index >= 0 && index < 40) {
+        local = int(index);
+        break;
+      }
+    }
+    if (local < 20 || local > 32)
+      continue;
+    for (const auto &point : offsets[local - 20]) {
+      if (!point[0] && !point[1])
+        break;
+      const int x = caster.x + point[0], y = caster.y + point[1];
+      if (x >= 0 && x < 512 && y >= 0 && y < 512)
+        marked[std::size_t(y) * 512 + x] = true;
+    }
+  }
+}
 void base_depth_next_row(BaseDepthRow &row) {
   if (++row.phase >= 3) {
     row.phase -= 3;
