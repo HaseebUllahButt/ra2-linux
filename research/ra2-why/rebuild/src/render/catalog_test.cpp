@@ -60,6 +60,8 @@ int main(int argc, char** argv) {
                         tile.diamond.bitmap.rgba.size() != 60 * 30 * 4)
                         throw std::runtime_error("Wrong original tile dimensions");
                     const auto translated = art.translate_map_index(index);
+                    if (&tile != &art.resolved_tile(translated, subtile))
+                        throw std::runtime_error("Live tile drawing applied wire translation twice");
                     if (translated != 0xffff &&
                         &art.metadata(index, subtile) != &art.resolved_metadata(translated, subtile))
                         throw std::runtime_error("Resolved metadata translated the wire index twice");

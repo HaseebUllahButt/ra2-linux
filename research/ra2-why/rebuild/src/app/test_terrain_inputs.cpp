@@ -55,6 +55,18 @@ int main(int argc, char** argv) {
         if (!direct || !wrapped || !direct->valid_subtile || wrapped->valid_subtile ||
             direct->terrain != wrapped->terrain || direct->ramp != wrapped->ramp)
             throw std::runtime_error("Modulo TMP getters changed raw subtile validation");
+        fixture.tiles[0].index = 0x7fffffff;
+        fixture.tiles[0].subtile = 0;
+        const auto invalid = ra2::app::terrain_inputs(fixture, art).front();
+        if (invalid.tile_index != 0x7fffffff || !invalid.resolved_tile_index ||
+            invalid.tmp_terrain || invalid.ramp_index || invalid.floor_world_height ||
+            catalog.resolved_metadata(*invalid.resolved_tile_index, 0))
+            throw std::runtime_error("Invalid source tile did not reach original initialization");
+        fixture.tiles[0].index = 0;
+        fixture.tiles[0].subtile = 255;
+        const auto invalid_subtile = ra2::app::terrain_inputs(fixture, art).front();
+        if (invalid_subtile.subtile != 255 || !invalid_subtile.resolved_tile_index)
+            throw std::runtime_error("Invalid source subtile was changed before initialization");
         fixture.tiles[0].index = 0xffff;
         fixture.tiles[0].subtile = 99; // No TMP lookup is valid for the sentinel.
         const auto clear = ra2::app::terrain_inputs(fixture, art).front();

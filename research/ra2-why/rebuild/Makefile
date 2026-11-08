@@ -14,7 +14,7 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/pack/map_pack.cpp src/rules/ini_file.cpp src/map/map_file.cpp \
     src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
     src/sim/combat.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp \
-    src/sim/world.cpp src/sim/drive.cpp src/sim/movement.cpp src/voxel/voxel.cpp
+    src/sim/world.cpp src/sim/drive.cpp src/sim/movement.cpp src/sim/replacement.cpp src/voxel/voxel.cpp
 NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
 
 build/native/%.o: %.cpp
@@ -28,18 +28,19 @@ build/native/%.o: %.cpp
 
 all: test
 
-.PHONY: native native-check platform run-platform catalog terrain-inputs scene actors ui audio voxel sim sim-move
+.PHONY: native native-check platform run-platform catalog terrain-inputs scene actors ui audio voxel sim sim-move sim-replacement
 
 FS_OBJECTS = build/native/src/fs/mix_archive.o build/native/src/fs/mix_bootstrap.o build/native/src/fs/filename_hash.o
 GFX_OBJECTS = build/native/src/gfx/palette.o build/native/src/gfx/shp_decode.o
 SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS))
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 
-native-check: native platform terrain-inputs scene actors ui audio voxel sim sim-move
+native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-replacement
 	build/ra2-native --game-dir ../game --frames 3 --headless
 	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless --yuri
+	build/ra2-native --game-dir ../game --map ALL01T.MAP --frames 3 --headless
 
 actors: build/actors_test
 	build/actors_test ../game
@@ -90,11 +91,24 @@ build/native/src/sim/test_inputs.o: src/sim/test_inputs.cpp
 	mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -I src/render -MMD -MP -c $< -o $@
 
+sim-replacement: build/sim_replacement_test
+	build/sim_replacement_test
+
+build/sim_replacement_test: build/native/src/sim/test_replacement.o build/native/src/sim/replacement.o build/native/src/rules/ini_file.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
 scene: build/scene_test
 	build/scene_test ../game ../analysis/extracted/maps/2PEAKS.MAP
 
 build/scene_test: build/native/src/app/scene.o build/native/src/app/vehicle_art.o build/native/src/app/terrain_inputs.o build/native/src/app/test_scene.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
 	mkdir -p build
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
+
+.PHONY: base-move
+base-move: build/base_move_test
+	build/base_move_test ../game
+
+build/base_move_test: build/native/src/app/scene.o build/native/src/app/vehicle_art.o build/native/src/app/terrain_inputs.o build/native/src/app/test_base_move.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 terrain-inputs: build/terrain_inputs_test

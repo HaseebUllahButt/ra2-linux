@@ -19,6 +19,7 @@ class TheaterArt {
 public:
     static TheaterArt load(fs::MixFileSystem& files, std::string_view theater);
     const DecodedTile& tile(std::uint32_t index, std::uint8_t subtile);
+    const DecodedTile& resolved_tile(std::uint32_t index, std::uint8_t subtile);
     const TmpRecord& metadata(std::uint32_t index, std::uint8_t subtile);
     const TmpRecord& resolved_metadata(std::uint32_t index, std::uint8_t subtile);
     std::size_t resolved_subtile_count(std::uint32_t index);
@@ -56,7 +57,8 @@ private:
 
 // Native-resolution terrain artwork, clipped to LocalSize. Includes elevation
 // and TMP extras/depth planes. Does not draw objects, overlays or map lighting.
+enum class TileIndexSpace { PackedMap, LiveCell };
 Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry,
-                      TheaterArt& art);
+                      TheaterArt& art, TileIndexSpace indexes = TileIndexSpace::PackedMap);
 void write_ppm(const Bitmap& image, const std::filesystem::path& path);
 } // namespace ra2::render

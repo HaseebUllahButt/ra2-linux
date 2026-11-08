@@ -117,7 +117,6 @@ std::uint32_t TheaterArt::translate_map_index(std::uint32_t index) const {
             throw RenderError("Tile index translation overflow");
         index += shift;
     }
-    if (index >= filenames_.size()) throw RenderError("Map tile index outside theater catalog: "+std::to_string(index));
     return index;
 }
 
@@ -149,6 +148,12 @@ TmpImage& TheaterArt::container(std::uint32_t index) {
 
 const DecodedTile& TheaterArt::tile(std::uint32_t index, std::uint8_t subtile) {
     const auto key = resolve(index, subtile);
+    return resolved_tile(key.first, key.second);
+}
+
+const DecodedTile& TheaterArt::resolved_tile(std::uint32_t index, std::uint8_t subtile) {
+    if (index == 0xffff || index == 0xffffffff) { index = clear_; subtile = 0; }
+    const auto key = std::make_pair(index, subtile);
     if (const auto found = decoded_.find(key); found != decoded_.end()) return found->second;
     auto& image = container(key.first);
     try { return decoded_.emplace(key, image.decode(key.second, palette_)).first->second; }
@@ -187,7 +192,8 @@ std::int32_t TheaterArt::terrain_land_type(std::uint8_t raw) {
     return table[raw];
 }
 
-Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry, TheaterArt& art) {
+Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry, TheaterArt& art,
+                      TileIndexSpace indexes) {
     const auto& local = geometry.local;
     if (local.width <= 0 || local.height <= 0 || local.width > 512 || local.height > 512 ||
         local.x < 0 || local.y < 0 || local.x > 512 || local.y > 512 ||
@@ -214,7 +220,8 @@ Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry,
         // Cell +11B is signed (00480350). Map records store its raw byte.
         const int level = tile->height < 128 ? int(tile->height) : int(tile->height) - 256;
         const int y = ground_y-level*(th/2)-local.y*th;
-        const auto& decoded = art.tile(tile->index, tile->subtile);
+        const auto& decoded = indexes == TileIndexSpace::LiveCell ?
+            art.resolved_tile(tile->index, tile->subtile) : art.tile(tile->index, tile->subtile);
         auto draw = [&](const TileLayer& layer) {
             const auto& b = layer.bitmap;
             const int left = x+layer.x, top = y+layer.y;
