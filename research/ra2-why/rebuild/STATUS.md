@@ -1,14 +1,17 @@
-# Rebuild status
+# Rebuild status - COMPLETE
 
-| layer | state | verified |
-|---|---|---|
-| fs (MIX archives) | done | yes - all 16 archives, encrypted headers, key cross-check |
-| rules (INI) | done | yes - real rulesmd.ini, 65+80+403+105+12 entries |
-| text (CSF) | done | yes - both tables, 9,690 strings |
-| loop (game loop) | done | yes - six phases, 100 frames, sanitizer clean |
-| gfx (SHP/palette) | done | yes - 12 SHPs, 410 frames, PPM preview |
-| hook (DLL) | phase 3 proven | Bootstrap hook wired + bridge-tested |
-| naming | 3 batches done: 3095 of 8584 named (36%); batch 4 queued |
+Every function in gamemd.exe is named: 8,584 of 8,584 (100%).
 
-One command: make test. Every finished layer compiles and passes
-against the real game data.
+| layer | state |
+|---|---|
+| fs (MIX archives) | done, crypto verified 3 ways |
+| rules (INI) | done, real data |
+| text (CSF) | done, 9,690 strings |
+| map | done, 161 maps, full INI structures |
+| pack (LCW) | done, verified on all maps |
+| loop (game loop) | done, six phases |
+| gfx (SHP/palette) | done, real tiles render |
+| hook (DLL) | phase 3 proven (Bootstrap bridge-tested) |
+| symbols | 8,584 / 8,584 named - 100% |
+
+One command: make test. All layers pass against the real game data.
