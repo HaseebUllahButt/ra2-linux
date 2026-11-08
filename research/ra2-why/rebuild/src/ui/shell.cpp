@@ -332,7 +332,6 @@ Action Menu::select_mode(int id) {
     if (mode==modes_.end() || setup_.game_mode==id) return Action::None;
     setup_.game_mode=id;
     // Original fallback selection is not yet recovered. Require an explicit map.
-    setup_.scenario_index.reset();
     setup_.map_filename.reset();
     setup_.map_archive.reset();
     return Action::SetupChanged;
@@ -348,10 +347,8 @@ Action Menu::select_map(std::size_t index) {
     if (setup_.map_filename==map.filename && setup_.map_archive==archive) return Action::None;
     setup_.map_filename=map.filename;
     setup_.map_archive=archive;
-    // Local file enumeration differs between Windows and Linux.
-    if (map.built_in && index<=static_cast<std::size_t>(std::numeric_limits<int>::max()))
-        setup_.scenario_index=static_cast<int>(index);
-    else setup_.scenario_index.reset();
+    // The saved scenario index uses an unresolved filtered and sorted list.
+    // Preserve it until its original mapping is recovered.
     return Action::SetupChanged;
 }
 Action Menu::select_opponent(std::size_t slot, Opponent value) noexcept {

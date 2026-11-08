@@ -82,15 +82,11 @@ bool skirmish_map_matches_mode(const SkirmishMap& map, const SkirmishMode& mode)
     return false;
 }
 
-std::optional<SkirmishMap> resolve_saved_skirmish_map(const SkirmishSetup& setup,
-    const std::vector<SkirmishMap>& maps, const std::vector<SkirmishMode>& modes) {
-    if (!setup.scenario_index || !setup.game_mode || *setup.scenario_index<0 ||
-        static_cast<std::size_t>(*setup.scenario_index)>=maps.size()) return std::nullopt;
-    const auto& map=maps[static_cast<std::size_t>(*setup.scenario_index)];
-    if (!map.built_in || !map.available) return std::nullopt;
-    const auto mode=std::find_if(modes.begin(),modes.end(),[&](const auto& m){return m.id==*setup.game_mode;});
-    if (mode==modes.end() || !skirmish_map_matches_mode(map,*mode)) return std::nullopt;
-    return map;
+std::optional<SkirmishMap> resolve_saved_skirmish_map(const SkirmishSetup&,
+    const std::vector<SkirmishMap>&, const std::vector<SkirmishMode>&) {
+    // 0x00697F10 reads ScenIndex. The list order used to resolve it is not
+    // yet verified. Catalog order is not a safe substitute for that order.
+    return std::nullopt;
 }
 
 std::optional<int> credit_from_slider_pointer(int local_x, int width,

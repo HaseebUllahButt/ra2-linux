@@ -38,6 +38,7 @@ struct OpponentSlot {
     int color = -2;
 };
 struct SkirmishSetup {
+    // scenario_index is the preserved saved value, not the selected catalog index.
     std::optional<int> game_mode, scenario_index, game_speed, credits, unit_count;
     int min_credits=2500, max_credits=10000, credit_increment=100;
     std::optional<bool> short_game, super_weapons, build_off_ally, mcv_repacks, crates;
@@ -60,8 +61,7 @@ std::vector<SkirmishMode> load_skirmish_modes(const fs::MixFileSystem& files,
                                                const ra2text::CsfFile& strings);
 // Tests the original map mode filter, including the default standard mode.
 bool skirmish_map_matches_mode(const SkirmishMap& map, const SkirmishMode& mode);
-// Returns a saved built-in map only when it exists and matches the mode.
-// Local Windows enumeration order and original fallback rules remain unknown.
+// Returns nullopt until the original saved-index ordering is recovered.
 std::optional<SkirmishMap> resolve_saved_skirmish_map(const SkirmishSetup& setup,
     const std::vector<SkirmishMap>& maps, const std::vector<SkirmishMode>& modes);
 struct SkirmishCountry {

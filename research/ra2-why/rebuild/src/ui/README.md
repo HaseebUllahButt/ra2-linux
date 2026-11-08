@@ -56,9 +56,8 @@ loose PKT and MMX/YRO packet entries. Local entries use sorted Linux order;
 the original Windows enumeration order is not guaranteed. YRM entries and
 fallback selection for the active game mode are not yet implemented. A saved
 scenario index is therefore not guaranteed to resolve to the same map.
-`load_skirmish_modes` reads the original mode declarations. The conservative
-`resolve_saved_skirmish_map` resolves only an available built-in map that
-matches its saved mode. It does not emulate the original fallback.
+`load_skirmish_modes` reads the original mode declarations. `resolve_saved_skirmish_map` returns no map until the original saved-index
+ordering and fallback are recovered.
 `load_skirmish_countries` returns the original random entry and selectable
 country IDs and names in rules order. Country controls are not editable yet.
 `load_skirmish_colors` returns the original random entry, eight color IDs,
@@ -95,7 +94,7 @@ MIX reader for local testing.
 `Menu::configure_maps` accepts the original map and mode catalogs from the
 prepared filesystem. `select_mode` and `select_map` validate programmatic
 selection. Explicit map selection stores its file and source archive in
-`setup()`. Local archive order differs from Windows, so local selections do not
-set the saved scenario index. Changing mode clears the selection until the
-original fallback is recovered. The on-screen map picker and dropdowns remain
+`setup()`. The saved scenario index is preserved as a saved value. Selection
+does not update it because the original filtered and sorted index is unknown.
+Changing mode clears the selected file until the original fallback is recovered. The on-screen map picker and dropdowns remain
 unimplemented. Match Start remains disabled.

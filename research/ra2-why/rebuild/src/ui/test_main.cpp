@@ -133,7 +133,7 @@ int main(int argc,char** argv) {
     assert(std::any_of(expansion_maps.begin(),expansion_maps.end(),[](const auto& map){return map.available;}));
     ui::SkirmishSetup known_map; known_map.game_mode=1; known_map.scenario_index=0;
     const auto resolved=ui::resolve_saved_skirmish_map(known_map,base_maps,base_modes);
-    assert(resolved && resolved->filename=="MP02T2.MAP");
+    assert(!resolved);
     known_map.game_mode=8;
     assert(!ui::resolve_saved_skirmish_map(known_map,base_maps,base_modes));
     known_map.game_mode=1; known_map.scenario_index=static_cast<int>(base_maps.size());
@@ -248,11 +248,12 @@ int main(int argc,char** argv) {
     assert(menu.setup().short_game && *menu.setup().short_game!=*previous_short_game);
     menu.pointer_down(short_x,short_y); assert(menu.pointer_up(short_x,short_y)==ui::Action::SetupChanged);
     assert(menu.setup().short_game==previous_short_game);
+    const auto saved_scenario=menu.setup().scenario_index;
     menu.configure_maps(base_maps,base_modes);
     assert(menu.select_mode(99999)==ui::Action::None);
     if (menu.setup().game_mode!=1) assert(menu.select_mode(1)==ui::Action::SetupChanged);
     assert(menu.select_map(0)==ui::Action::SetupChanged);
-    assert(menu.setup().map_filename=="MP02T2.MAP" && menu.setup().scenario_index==0);
+    assert(menu.setup().map_filename=="MP02T2.MAP" && menu.setup().scenario_index==saved_scenario);
     assert(menu.select_map(0)==ui::Action::None);
     assert(menu.select_map(base_maps.size())==ui::Action::None);
     auto local=std::find_if(base_maps.begin(),base_maps.end(),[](const auto& map){
@@ -261,9 +262,9 @@ int main(int argc,char** argv) {
     assert(local!=base_maps.end());
     assert(menu.select_map(static_cast<std::size_t>(local-base_maps.begin()))==ui::Action::SetupChanged);
     assert(menu.setup().map_filename==local->filename && menu.setup().map_archive=="Grinder.mmx");
-    assert(!menu.setup().scenario_index);
+    assert(menu.setup().scenario_index==saved_scenario);
     assert(menu.select_mode(8)==ui::Action::SetupChanged);
-    assert(!menu.setup().map_filename && !menu.setup().scenario_index);
+    assert(!menu.setup().map_filename && menu.setup().scenario_index==saved_scenario);
     assert(menu.select_map(0)==ui::Action::None);
     assert(menu.select_mode(1)==ui::Action::SetupChanged);
     menu.select_opponent(1,ui::Opponent::Easy);
