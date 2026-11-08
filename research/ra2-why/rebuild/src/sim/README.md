@@ -849,3 +849,26 @@ It matches 256 complete graph/table/query hashes per edition.
 The same checks pass with address and undefined-behavior sanitizers.
 All 25,606 existing hierarchy-route checks still pass after the compatibility table is shared.
 The Foot goal wrapper remains the next integration dependency.
+
+## Ground goal-wrapper control
+
+`run_original_ground_goal()` ports base 0042A1D0 and expansion 0042C900 after resolved map/type queries for an ordinary Unit.
+Its checked profile uses search mark mode zero. Other mark modes still need 004285D0/0042ACF0 state recovery.
+The inputs retain both movement components and the lazy hierarchy guards.
+Unknown required fields return NeedsInput. Guards that the original skips can remain unknown.
+Callbacks operate on private search state and supply hierarchy, regular-search, reset, and retry results.
+
+The control preserves the initial reset, three blocked-list clears, hierarchy fallback, and retry ordering.
+Only expansion limit -1 permits five attempts. Every other value permits one, including other negative values.
+A failed final regular attempt still runs retry and reset before the limit check.
+Only the initial hierarchy failure falls back to regular search. A later hierarchy failure ends the wrapper.
+The result records callback order and the final Search +38 permission flag.
+Native Unsupported and NeedsInput results stop immediately instead of becoming a false no-path answer.
+
+`original_goal_control_check.py executable [--base] --vectors` executes the original wrapper branches.
+Map/type queries and search/retry answers are explicit adapters in this control test.
+Both editions match 512 complete callback traces, permission states, and returned success flags.
+`test_goal_control.sh` passes 527 checks, including unresolved callbacks and mark-mode errors.
+The same checks pass with address and undefined-behavior sanitizers.
+The native hierarchy and regular-search primitives still need a checked world adapter for this controller.
+Retry decision bodies at 0042A590/0042CCD0 and their local reachability helpers remain separate recovery work.
