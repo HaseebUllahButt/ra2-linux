@@ -1,5 +1,6 @@
 #include "platform.h"
 #include "terrain_inputs.h"
+#include "scene.h"
 #include "../loop/game_loop.h"
 #include "../render/minimap.h"
 #include "../sim/sim.h"
@@ -69,15 +70,19 @@ public:
 
 // This client checks the real terrain and Linux platform boundary. It does
 // not substitute generic unit behavior for the unfinished original simulation.
-class TerrainPresenter final : public ra2::loop::Renderer {
+class ScenePresenter final : public ra2::loop::Renderer {
     ra2::app::Window& window_;
     const ra2::render::Bitmap& map_;
+    ra2::app::Scene& scene_;
+    const ra2::sim::Simulation& simulation_;
     ra2::render::Bitmap frame_{1024, 768, std::vector<std::uint8_t>(1024 * 768 * 4)};
     int camera_x_ = 0, camera_y_ = 0;
 public:
     std::size_t presented = 0;
-    TerrainPresenter(ra2::app::Window& window, const ra2::render::Bitmap& map)
-        : window_(window), map_(map) {
+    std::size_t actors_drawn = 0, actor_gaps = 0;
+    ScenePresenter(ra2::app::Window& window, const ra2::render::Bitmap& map,
+                   ra2::app::Scene& scene, const ra2::sim::Simulation& simulation)
+        : window_(window), map_(map), scene_(scene), simulation_(simulation) {
         camera_x_ = std::max(0, (map.width - frame_.width) / 2);
         camera_y_ = std::max(0, (map.height - frame_.height) / 2);
     }
@@ -86,16 +91,11 @@ public:
         camera_y_ = std::clamp(camera_y_ + y, 0, std::max(0, map_.height - frame_.height));
     }
     void present(const ra2::loop::State&) override {
-        std::fill(frame_.rgba.begin(), frame_.rgba.end(), 0);
-        const int width = std::min(frame_.width, map_.width - camera_x_);
-        const int height = std::min(frame_.height, map_.height - camera_y_);
-        for (int row = 0; row < height; ++row) {
-            const auto source = (std::size_t(camera_y_ + row) * map_.width + camera_x_) * 4;
-            const auto target = std::size_t(row) * frame_.width * 4;
-            std::copy_n(map_.rgba.begin() + source, width * 4, frame_.rgba.begin() + target);
-        }
-        // The window receives an opaque final frame, including unused terrain.
-        for (std::size_t p = 3; p < frame_.rgba.size(); p += 4) frame_.rgba[p] = 255;
+        auto rendered = scene_.render(map_, simulation_.snapshot(),
+            {camera_x_, camera_y_, frame_.width, frame_.height});
+        actors_drawn = rendered.drawn;
+        actor_gaps = rendered.gaps.size();
+        frame_ = std::move(rendered.image);
         window_.present(frame_.rgba.data(), frame_.width, frame_.height, frame_.rgba.size());
         ++presented;
     }
@@ -103,7 +103,7 @@ public:
         int width = 0, height = 0;
         const auto actual = window_.capture(width, height);
         if (width != frame_.width || height != frame_.height || actual != frame_.rgba)
-            throw std::runtime_error("Native output differs from the original terrain frame");
+            throw std::runtime_error("Native output differs from the composed scene frame");
     }
 };
 }
@@ -129,10 +129,17 @@ int main(int argc, char** argv) {
         ra2::rules::IniFile rules;
         rules.parse(std::string_view(reinterpret_cast<const char*>(rules_bytes->data()), rules_bytes->size()));
         ra2::sim::Simulation simulation(rules, ini, 0, cells);
+        const auto art_name = args.variant == ra2::fs::GameVariant::RedAlert2 ? "ART.INI" : "ARTMD.INI";
+        const auto actor_bytes = files.read_file(art_name);
+        if (!actor_bytes) throw std::runtime_error(std::string("Missing original ") + art_name);
+        ra2::rules::IniFile actor_art;
+        actor_art.parse(std::string_view(reinterpret_cast<const char*>(actor_bytes->data()), actor_bytes->size()));
+        ra2::app::Scene scene(files, std::move(actor_art), ra2::app::overlay_rules(rules, ini),
+            geometry, cells, ini.read_string("Map", "Theater"));
         const auto battlefield = ra2::render::render_minimap(terrain, geometry, art);
-        ra2::app::Window window("Red Alert 2 native rebuild: terrain", 1024, 768, !args.headless);
+        ra2::app::Window window("Red Alert 2 native rebuild: scene checks", 1024, 768, !args.headless);
         NativePump pump(window, args.headless);
-        TerrainPresenter presenter(window, battlefield);
+        ScenePresenter presenter(window, battlefield, scene, simulation);
         ra2::loop::SteadyClock clock;
         ra2::loop::Hooks hooks;
         hooks.update = [&](ra2::loop::State&) {
@@ -149,9 +156,11 @@ int main(int argc, char** argv) {
         const auto snapshot = simulation.snapshot();
         if (args.headless && snapshot.frame != loop.state().frame_counter)
             throw std::runtime_error("Native simulation and frame loop diverged");
-        std::cout << "Native terrain client: " << terrain.tiles.size() << " original tiles, "
+        std::cout << "Native scene client: " << terrain.tiles.size() << " original tiles, "
                   << presenter.presented << " frames presented, " << snapshot.entities.size()
-                  << " map objects, " << snapshot.frame << " simulation ticks.\n";
+                  << " map objects, " << snapshot.frame << " simulation ticks, "
+                  << presenter.actors_drawn << " visible SHP actors, " << presenter.actor_gaps
+                  << " unsupported actor cases.\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

@@ -103,7 +103,7 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
         std::vector<std::uint8_t>(std::size_t(viewport.width) * viewport.height * 4)};
     const int copy_width = std::max(0, std::min(viewport.width, terrain.width - viewport.x));
     const int copy_height = std::max(0, std::min(viewport.height, terrain.height - viewport.y));
-    for (int y = 0; y < copy_height; ++y)
+    for (int y = 0; copy_width > 0 && y < copy_height; ++y)
         std::copy_n(terrain.rgba.begin() + (std::size_t(y + viewport.y) * terrain.width + viewport.x) * 4,
             std::size_t(copy_width) * 4, result.image.rgba.begin() + std::size_t(y) * viewport.width * 4);
 
