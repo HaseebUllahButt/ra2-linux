@@ -102,6 +102,13 @@ int main(int argc,char** argv) {
         }
     }
     auto unhovered=menu.render();
+    bool heading_changed=false;
+    for (int y=8;y<25;++y) for(int x=632;x<800;++x) {
+        auto p=(static_cast<std::size_t>(y)*800+x)*4;
+        if (!std::equal(unhovered.pixels.begin()+p,unhovered.pixels.begin()+p+4,
+                        base_shell.pixels.begin()+p)) heading_changed=true;
+    }
+    assert(heading_changed);
     menu.pointer_down(645,536); assert(menu.pointer_up(645,536)==ui::Action::None);
     assert(menu.confirming_exit());
     auto confirm=menu.render(); assert(confirm.pixels!=unhovered.pixels);

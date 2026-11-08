@@ -34,7 +34,7 @@ itself reconstruct the original dialog screens.
 `Menu` draws the main and single-player shell buttons and captions at 800x600.
 It uses original frames 2, 3, and 4 for normal, hover, and pressed states
 (`0x00612EAA`). Unsupported actions are disabled. Skirmish Start is disabled.
-Skirmish setup controls, page headings, other screen sizes, sounds, and
+Skirmish setup controls, other screen sizes, sounds, and
 other keyboard input are not yet implemented. The menu uses the 300x163 calibration
 of the 200x100 dialog-unit reference at `0x00775BC0`. For these button rows,
 the result stays the same for reference font heights from 8 to 24 pixels.

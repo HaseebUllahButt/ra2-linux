@@ -207,9 +207,22 @@ gfx::RgbaImage Menu::render() const {
         behind.hovered_.reset(); behind.held_.reset();
         image = behind.render();
         blit(image, popup_, 175, 137, 451, 326);
-        const int prompt_width = static_cast<int>(font_.text_width(exit_prompt_));
-        font_.draw_text(image, exit_prompt_, 235 + (330 - prompt_width) / 2, 234,
-                        {255,255,0,255});
+        // Resource 288 uses a left-aligned static control at (40,40).
+        // 0x00615A91 selects left alignment and 0x00615DF7 selects yellow.
+        font_.draw_text(image, exit_prompt_, 235, 202, {255,255,0,255});
+    } else {
+        const Dialog* dialog = &main_;
+        if (page() == Page::SinglePlayer) dialog = &single_;
+        if (page() == Page::Skirmish) dialog = &skirmish_;
+        for (const auto& control : dialog->controls) {
+            if (control.id != 1684 || control.label.empty()) continue;
+            // 0x0060B1D0 centers the heading in the 168-pixel panel;
+            // 0x0060B950 adds seven pixels to its normalized Y.
+            const int width = static_cast<int>(font_.text_width(control.label));
+            font_.draw_text(image, control.label, 716 - width / 2, 8,
+                            {255,255,0,255});
+            break;
+        }
     }
     for (const auto& b : buttons()) {
         const bool hot = b.enabled && hovered_ == b.id;
