@@ -127,6 +127,31 @@ int main(int argc, char** argv) {
                 ++tree_checked;
             }
             require(tree_checked > 100, "Original tree pixel check was empty");
+            if (!expansion) {
+                auto tank = building;
+                tank.kind = sim::Kind::Unit; tank.type = "HTNK"; tank.facing = 64;
+                tank.position = sim::Coord{80*256+128,96*256+128,0};
+                state.entities = {tank};
+                const auto tank_output = fixture.render(empty, state, view);
+                if (!tank_output.gaps.empty()) throw std::runtime_error(tank_output.gaps.front());
+                require(tank_output.drawn == 1, "Original tank did not reach the native scene");
+                auto tank_art = app::VehicleArt::load(files, art, rules, "HTNK");
+                const auto& tank_sprite = tank_art.draw(64);
+                std::size_t tank_checked = 0;
+                for (int y = 0; y < tank_sprite.image.height; ++y)
+                    for (int x = 0; x < tank_sprite.image.width; ++x) {
+                        const auto source = (std::size_t(y)*tank_sprite.image.width+x)*4;
+                        if (!tank_sprite.image.pixels[source+3]) continue;
+                        const int dx = 250+tank_sprite.left+x, dy = 215+tank_sprite.top+y;
+                        require(dx>=0 && dy>=0 && dx<500 && dy<400, "Original tank fixture was clipped");
+                        const auto target = (std::size_t(dy)*500+dx)*4;
+                        require(std::equal(tank_sprite.image.pixels.begin()+source,
+                            tank_sprite.image.pixels.begin()+source+4, tank_output.image.rgba.begin()+target),
+                            "Tank pixels lost their original screen offset");
+                        ++tank_checked;
+                    }
+                require(tank_checked == 1052, "Original default HTNK pose pixel count changed");
+            }
             // A view beyond the map must not create an out-of-range iterator.
             require(fixture.render(empty, {}, {1000000, 0, 1, 1}).image.rgba.size() == 4,
                     "Empty outside-map view failed");

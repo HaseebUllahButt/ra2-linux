@@ -48,8 +48,14 @@ sim::TheaterInputs theater_inputs(render::TheaterArt& art) {
     result.resolved_metadata = [&art](std::uint32_t index, std::uint8_t subtile)
         -> std::optional<sim::TileMetadata> {
         try {
-            const auto& record = art.resolved_metadata(index, subtile);
-            return sim::TileMetadata{record.terrain, record.ramp};
+            const auto count = art.resolved_subtile_count(index);
+            if (!count) return std::nullopt;
+            const bool valid = art.resolved_subtile_present(index, subtile);
+            const auto normalized = static_cast<std::uint8_t>(subtile % count);
+            if (!art.resolved_subtile_present(index, normalized))
+                return sim::TileMetadata{0,0,false};
+            const auto& record = art.resolved_metadata(index, normalized);
+            return sim::TileMetadata{record.terrain, record.ramp, valid};
         } catch (const render::RenderError&) { return std::nullopt; }
     };
     return result;

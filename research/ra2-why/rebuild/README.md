@@ -5,10 +5,11 @@ the main target. Keep Yuri's Revenge behavior separate where the games differ.
 
 The game is incomplete. The Linux client shows original menu buttons and page
 changes. The scene check shows original terrain, trees, full-health building
-main images, and standing infantry. It advances the recovered native state. Full
+main images, standing infantry, and flat base HTNK, MTNK, and 4TNK models.
+It advances the recovered native state. Full
 movement, combat, production, AI, campaigns, saves, multiplayer, and menus still
 need work. The scene also needs pixel depth, shadows, lighting,
-house colors, vehicle assembly, and other actor states.
+house colors, other vehicle models, and other actor states.
 
 Build with a C++17 compiler, make, pkg-config, SDL2 development files, and the
 LZO2 runtime library. Keep the owned game assets in `game/` at the project root.
@@ -21,9 +22,11 @@ make native
 make native-check
 build/ra2-native --game-dir ../game
 build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP
+build/ra2-native --game-dir ../game --map ALL01T.MAP
 ```
 
 Omit `--map` to open the original menu. The supported buttons change pages.
+Maps can be local files or original map names inside mounted game archives.
 Match start stays disabled. Use `--yuri` to select expansion assets and rules.
 Use arrow keys to move the temporary scene viewer. Press Escape to exit. These viewer controls do not
 establish the original game input behavior. This is not yet a playable match.

@@ -3,6 +3,7 @@
 #include "../actors/actors.h"
 #include "../render/minimap.h"
 #include "../sim/sim.h"
+#include "vehicle_art.h"
 #include <map>
 #include <string>
 
@@ -17,9 +18,9 @@ struct SceneFrame {
     std::vector<std::string> gaps;
 };
 
-// Native scene integration for recovered stationary SHP actors. This composes
-// main images in original object order. Pixel depth, shadows, house colors,
-// lighting, damaged states, and attached animations are not yet composed.
+// Native scene integration for stationary SHP actors and flat base tanks.
+// Main images use original object order. Pixel depth, shadows, house colors,
+// world lighting, damaged states, and attached animations remain separate.
 class Scene {
 public:
     Scene(const fs::MixFileSystem& files, rules::IniFile art, rules::IniFile rules,
@@ -41,6 +42,7 @@ private:
     char theater_;
     std::map<std::uint32_t, sim::TerrainCell> cells_;
     std::map<std::pair<actors::Kind, std::string>, Asset> assets_;
+    std::map<std::string, VehicleArt> vehicles_;
     std::vector<ra2map::TerrainObject> terrain_objects_;
 };
 } // namespace ra2::app

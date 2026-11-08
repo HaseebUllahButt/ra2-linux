@@ -22,6 +22,21 @@ void valid_image(const render::Bitmap& image) {
         image.rgba.size() != std::size_t(image.width) * image.height * 4)
         throw std::runtime_error("Invalid scene terrain image");
 }
+bool blit(render::Bitmap& target, const gfx::RgbaImage& sprite, actors::ScreenPoint origin) {
+    const auto x0 = std::max<std::int64_t>(0, -origin.x);
+    const auto y0 = std::max<std::int64_t>(0, -origin.y);
+    const auto x1 = std::min<std::int64_t>(sprite.width, target.width - origin.x);
+    const auto y1 = std::min<std::int64_t>(sprite.height, target.height - origin.y);
+    bool drawn = false;
+    for (auto y = y0; y < y1; ++y) for (auto x = x0; x < x1; ++x) {
+        const auto source = (std::size_t(y) * sprite.width + x) * 4;
+        if (!sprite.pixels[source + 3]) continue;
+        const auto dest = (std::size_t(y + origin.y) * target.width + x + origin.x) * 4;
+        std::copy_n(sprite.pixels.begin() + source, 4, target.rgba.begin() + dest);
+        drawn = true;
+    }
+    return drawn;
+}
 }
 
 rules::IniFile overlay_rules(const rules::IniFile& base, const rules::IniFile& map) {
@@ -83,6 +98,11 @@ actors::WorldPosition Scene::position(const sim::Entity& entity) const {
         throw std::runtime_error("Actor floor metadata is outside original bounds");
     if (entity.kind == sim::Kind::Structure)
         return actors::building_draw_position(entity.cell, *cell.floor_world_height);
+    if (entity.kind == sim::Kind::Unit) {
+        if (!entity.position) throw std::runtime_error("Vehicle world position is unresolved");
+        if (*cell.ramp_index != 0) throw std::runtime_error("Vehicle slope drawing is unresolved");
+        return {entity.position->x, entity.position->y, entity.position->z};
+    }
     if (entity.kind != sim::Kind::Infantry)
         throw std::runtime_error("Vehicle and aircraft scene drawing is unresolved");
     if (entity.subcell < 0 || entity.subcell >= 5)
@@ -150,6 +170,23 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
     for (const auto& draw : draws) {
         const auto label = draw.entity ? "Entity " + std::to_string(draw.entity->id) : "Terrain " + draw.terrain->type;
         try {
+            auto anchor = actors::project_world(draw.position, map_camera_);
+            anchor.x -= viewport.x;
+            anchor.y -= viewport.y;
+            if (draw.entity && draw.entity->kind == sim::Kind::Unit) {
+                const auto& entity = *draw.entity;
+                if (entity.map_health != 256)
+                    throw std::runtime_error("Damaged vehicle drawing states are unresolved");
+                if (entity.facing < 0 || entity.facing > 255)
+                    throw std::runtime_error("Vehicle map facing is outside its original byte range");
+                auto asset = vehicles_.find(entity.type);
+                if (asset == vehicles_.end())
+                    asset = vehicles_.emplace(entity.type, VehicleArt::load(files_, art_, rules_, entity.type)).first;
+                const auto& sprite = asset->second.draw(static_cast<std::uint8_t>(entity.facing));
+                result.drawn += blit(result.image, sprite.image,
+                    {anchor.x + sprite.left, anchor.y + sprite.top});
+                continue;
+            }
             const auto kind = !draw.entity ? actors::Kind::Terrain :
                 draw.entity->kind == sim::Kind::Structure ? actors::Kind::Building : actors::Kind::Infantry;
             const auto& type = draw.entity ? draw.entity->type : draw.terrain->type;
@@ -171,24 +208,9 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
             if (image == asset.frames.end())
                 image = asset.frames.emplace(frame, asset.art.draw_frame(frame,
                     kind == actors::Kind::Terrain ? terrain_palette_ : palette_)).first;
-            auto anchor = actors::project_world(draw.position, map_camera_);
-            anchor.x -= viewport.x;
-            anchor.y -= viewport.y;
             const auto origin = asset.art.main_canvas_origin(anchor);
             const auto& sprite = image->second;
-            const auto x0 = std::max<std::int64_t>(0, -origin.x);
-            const auto y0 = std::max<std::int64_t>(0, -origin.y);
-            const auto x1 = std::min<std::int64_t>(sprite.width, viewport.width - origin.x);
-            const auto y1 = std::min<std::int64_t>(sprite.height, viewport.height - origin.y);
-            bool drawn = false;
-            for (auto y = y0; y < y1; ++y) for (auto x = x0; x < x1; ++x) {
-                const auto source = (std::size_t(y) * sprite.width + x) * 4;
-                if (!sprite.pixels[source + 3]) continue;
-                const auto target = (std::size_t(y + origin.y) * viewport.width + x + origin.x) * 4;
-                std::copy_n(sprite.pixels.begin() + source, 4, result.image.rgba.begin() + target);
-                drawn = true;
-            }
-            result.drawn += drawn;
+            result.drawn += blit(result.image, sprite, origin);
         } catch (const std::exception& error) {
             result.gaps.push_back(label + ": " + error.what());
         }

@@ -169,6 +169,15 @@ const TmpRecord& TheaterArt::resolved_metadata(std::uint32_t index, std::uint8_t
     return records[subtile];
 }
 
+std::size_t TheaterArt::resolved_subtile_count(std::uint32_t index) {
+    return container(index).records().size();
+}
+
+bool TheaterArt::resolved_subtile_present(std::uint32_t index, std::uint8_t subtile) {
+    const auto& records = container(index).records();
+    return subtile < records.size() && records[subtile].present;
+}
+
 std::int32_t TheaterArt::terrain_land_type(std::uint8_t raw) {
     // Read from the original initialized table at 008288E4.
     static constexpr std::array<std::int32_t, 16> table{

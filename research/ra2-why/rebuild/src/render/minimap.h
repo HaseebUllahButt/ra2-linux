@@ -21,6 +21,8 @@ public:
     const DecodedTile& tile(std::uint32_t index, std::uint8_t subtile);
     const TmpRecord& metadata(std::uint32_t index, std::uint8_t subtile);
     const TmpRecord& resolved_metadata(std::uint32_t index, std::uint8_t subtile);
+    std::size_t resolved_subtile_count(std::uint32_t index);
+    bool resolved_subtile_present(std::uint32_t index, std::uint8_t subtile);
     // Wire-to-runtime translation. Preserve the original clear sentinel.
     std::uint32_t translate_map_index(std::uint32_t index) const;
     const std::vector<TileSetRange>& tile_sets() const noexcept { return tile_sets_; }

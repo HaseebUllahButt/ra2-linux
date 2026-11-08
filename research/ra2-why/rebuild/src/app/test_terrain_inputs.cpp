@@ -45,6 +45,16 @@ int main(int argc, char** argv) {
         if (catalog.theater_name != "TEMPERATE" || catalog.tile_sets.empty() ||
             !catalog.resolved_metadata || catalog.resolved_metadata(0xffff, 0))
             throw std::runtime_error("Original theater callback did not preserve the clear sentinel");
+        const auto clear_set = static_cast<std::size_t>(catalog.settings.read_integer("General", "ClearTile", 0));
+        const auto live_clear = catalog.tile_sets.at(clear_set).first;
+        const auto subtile_count = art.resolved_subtile_count(live_clear);
+        if (!subtile_count || subtile_count > 255)
+            throw std::runtime_error("Original clear TMP no longer supplies the modulo fixture");
+        const auto direct = catalog.resolved_metadata(live_clear, 0);
+        const auto wrapped = catalog.resolved_metadata(live_clear, static_cast<std::uint8_t>(subtile_count));
+        if (!direct || !wrapped || !direct->valid_subtile || wrapped->valid_subtile ||
+            direct->terrain != wrapped->terrain || direct->ramp != wrapped->ramp)
+            throw std::runtime_error("Modulo TMP getters changed raw subtile validation");
         fixture.tiles[0].index = 0xffff;
         fixture.tiles[0].subtile = 99; // No TMP lookup is valid for the sentinel.
         const auto clear = ra2::app::terrain_inputs(fixture, art).front();

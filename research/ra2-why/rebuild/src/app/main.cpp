@@ -188,10 +188,17 @@ int main(int argc, char** argv) {
         files.bootstrap(args.variant);
         files.mount_overlays();
         if (args.map.empty()) return run_menu(args, files);
-        const auto ini = ra2::rules::IniFile::from_file(args.map.string());
+        files.mount_resources();
+        ra2::rules::IniFile ini;
+        if (std::filesystem::is_regular_file(args.map))
+            ini = ra2::rules::IniFile::from_file(args.map.string());
+        else {
+            const auto original_map = files.read_file(args.map.generic_string());
+            if (!original_map) throw std::runtime_error("Original map is missing: " + args.map.string());
+            ini.parse(std::string_view(reinterpret_cast<const char*>(original_map->data()), original_map->size()));
+        }
         const auto terrain = ra2::pack::load_terrain(ini);
         const auto geometry = ra2::render::MapGeometry::from_ini(ini);
-        files.mount_resources();
         auto art = ra2::render::TheaterArt::load(files, ini.read_string("Map", "Theater"));
         const auto cells = ra2::app::terrain_inputs(terrain, art);
         const auto rules_name = args.variant == ra2::fs::GameVariant::RedAlert2 ? "RULES.INI" : "RULESMD.INI";
@@ -234,7 +241,7 @@ int main(int argc, char** argv) {
         std::cout << "Native scene client: " << terrain.tiles.size() << " original tiles, "
                   << presenter.presented << " frames presented, " << snapshot.entities.size()
                   << " map objects, " << snapshot.frame << " simulation ticks, "
-                  << presenter.actors_drawn << " visible SHP actors, " << presenter.actor_gaps
+                  << presenter.actors_drawn << " visible actors, " << presenter.actor_gaps
                   << " unsupported actor cases.\n";
         return 0;
     } catch (const std::exception& error) {
