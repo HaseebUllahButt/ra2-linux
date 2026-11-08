@@ -2,10 +2,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace ra2::sim { class Random; class OriginalDistance; }
 namespace ra2::session {
+// Candidate order follows the resolved General/BaseUnit list. An unknown Owner
+// mask blocks selection because it could be the first matching candidate.
+struct BaseUnitCandidate { std::string type; std::optional<std::uint32_t> owner_mask; };
+std::optional<std::size_t> select_base_unit(const std::vector<BaseUnitCandidate>& candidates,
+                                            unsigned country_index);
 // Original waypoint cell coordinates are signed 16-bit values.
 struct StartPoint { std::int16_t x, y; };
 // Returns a point index and marks it used. The RNG is the simulation's shared

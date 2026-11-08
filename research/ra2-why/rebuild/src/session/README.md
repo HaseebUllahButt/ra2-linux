@@ -13,7 +13,12 @@ sum of distances to occupied points. Equal sums keep the first point.
 Observer handling and waypoint fallback need separate work. The legacy helper
 `0x005EE6F0` has different rules and is not used here.
 
-This is not a complete skirmish session. House creation, credits, initial
+`select_base_unit` selects the first BaseUnit with the resolved country bit.
+The mode calls `0x005D7030`, which uses `0x00505310`. The caller supplies
+fully resolved Owner masks. An unknown earlier mask prevents selection. Real
+rules select AMCV for Americans, SMCV for Russians, and Yuri PCV in expansion.
+
+This is not a complete skirmish session. House creation, credits, additional
 units, placement, observer handling, random waypoint fallback, and RNG state
 handoff to `Simulation` are not implemented. Start must remain disabled.
 
@@ -30,3 +35,8 @@ For the optional original x86 comparison, build `chooser_cases.cpp` with
 It needs Python Unicorn and `sim/original_image.py`. It runs 502 cases per
 edition. It compares the selected point, flags, random indexes, and all random
 state words. It replaces only debug logging.
+
+`original_base_unit_check.py` compares the native BaseUnit choice with the
+original selector. Build `base_unit_cases.cpp` with `session.cpp` and the same
+simulation sources. It runs 320 cases per edition. The country resolver is
+stubbed to provide the already resolved country index. The selector itself runs.

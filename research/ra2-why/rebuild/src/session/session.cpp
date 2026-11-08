@@ -5,6 +5,18 @@
 #include <limits>
 
 namespace ra2::session {
+std::optional<std::size_t> select_base_unit(const std::vector<BaseUnitCandidate>& candidates,
+                                            unsigned country_index) {
+    // 005D7030 passes RulesClass BaseUnit to 00505310. The latter scans
+    // candidates in order and tests the resolved country ownership bit.
+    if (country_index>=32) return std::nullopt;
+    const std::uint32_t bit=std::uint32_t{1}<<country_index;
+    for (std::size_t i=0;i<candidates.size();++i) {
+        if (!candidates[i].owner_mask || candidates[i].type.empty()) return std::nullopt;
+        if (*candidates[i].owner_mask & bit) return i;
+    }
+    return std::nullopt;
+}
 namespace {
 std::optional<int> point_distance(StartPoint a, StartPoint b, const sim::OriginalDistance& distance) {
     // Base 005B7920 and expansion 005D6890 narrow the differences and result to signed 16-bit values.

@@ -48,6 +48,50 @@ int main(int argc, char** argv) {
     assert(!session::choose_start_point(invalid,used,random,base));
     assert(!used[1] && !used[2] && !used[3]);
 
+    // Resolve the original BaseUnit order and ownership from each edition.
+    for (const auto variant : {fs::GameVariant::RedAlert2,fs::GameVariant::YurisRevenge}) {
+        fs::MixFileSystem source(root);
+        source.bootstrap(variant);
+        const auto base_bytes=source.read_file("RULES.INI"); assert(base_bytes);
+        rules::IniFile rules;
+        rules.parse(std::string_view(reinterpret_cast<const char*>(base_bytes->data()),base_bytes->size()));
+        rules::IniFile overlay;
+        if (variant==fs::GameVariant::YurisRevenge) {
+            const auto data=source.read_file("RULESMD.INI"); assert(data);
+            overlay.parse(std::string_view(reinterpret_cast<const char*>(data->data()),data->size()));
+        }
+        const auto* countries=overlay.find_section("Countries");
+        if (!countries) countries=rules.find_section("Countries");
+        assert(countries && countries->entries.size()<=32);
+        auto names=rules.read_list("General","BaseUnit");
+        if (overlay.find("General","BaseUnit")) names=overlay.read_list("General","BaseUnit");
+        std::vector<session::BaseUnitCandidate> candidates;
+        for (const auto& name : names) {
+            auto owners=rules.read_list(name,"Owner");
+            if (overlay.find(name,"Owner")) owners=overlay.read_list(name,"Owner");
+            std::uint32_t mask=0;
+            for (std::size_t i=0;i<countries->entries.size();++i)
+                if (std::find(owners.begin(),owners.end(),countries->entries[i].value)!=owners.end()) mask|=std::uint32_t{1}<<i;
+            candidates.push_back({name,mask});
+        }
+        auto for_country=[&](const char* name) {
+            const auto c=std::find_if(countries->entries.begin(),countries->entries.end(),
+                                      [name](const auto& entry){return entry.value==name;});
+            assert(c!=countries->entries.end());
+            return session::select_base_unit(candidates,static_cast<unsigned>(c-countries->entries.begin()));
+        };
+        const auto allied=for_country("Americans"), soviet=for_country("Russians");
+        assert(allied && candidates[*allied].type=="AMCV");
+        assert(soviet && candidates[*soviet].type=="SMCV");
+        if (variant==fs::GameVariant::YurisRevenge) {
+            const auto yuri_unit=for_country("YuriCountry");
+            assert(yuri_unit && candidates[*yuri_unit].type=="PCV");
+        }
+        assert(!session::select_base_unit(candidates,32));
+        candidates[0].owner_mask.reset();
+        assert(!session::select_base_unit(candidates,0));
+    }
+
     // Real original standard map points, read through the base MIX filesystem.
     fs::MixFileSystem files(root);
     files.mount_language(fs::GameVariant::RedAlert2);
