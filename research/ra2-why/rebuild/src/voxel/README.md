@@ -34,6 +34,32 @@ VXL layout follows the original loader at `0x755DB0`. HVA loading follows `0x5BD
 
 `raster_section_depth()` returns indexed color and depth planes and their screen-relative origin. Both planes are 256 by 256. It implements the base-game depth-enabled section raster, including its strict depth comparison and two-pixel writes. These depth bytes are relative to the section raster. Their conversion to the terrain's map-wide depth surface remains open. The function does not accept a pre-existing terrain depth plane.
 
+The normal base-game vehicle raw blitter uses a separate terrain depth test.
+`base_depth_row()` reproduces gradient record 2 at `0x434C64`.
+Use the original Z-buffer base, buffer Y origin, destination Y, clipped source Y,
+clipped height, and caller adjustment. Call `base_depth_next_row()` after each
+screen row. `base_depth_visible()` applies the raw blitter test at `0x488870`.
+It draws a nonzero pixel only when the row value is less than the terrain word.
+It does not update the terrain word. For a reversed terrain buffer `C - Z`,
+the corresponding vehicle value is `C - row.value`; it must be strictly greater
+than the stored terrain value. Both values must use the same `C`.
+
+`0x6D27AD` calls the vehicle's gradient selector. `0x4C9A10` returns record 2
+when there is no locomotor; a locomotor can select another record. The caller
+adjustment comes from `0x4C9930`. Its full map inputs and the shared constant
+`C` are not yet recovered. Do not use section-local depth bytes as terrain
+depth. The RLE depth reader uses a different drawing path.
+The locomotor interface table at `0x7A31EC` selects gradient 2 through
+`0x53D4B0` and contributes zero to the adjustment through `0x53D4A0`.
+
+The following test compares 256 record 2 cases and five raw blits with the
+original base-game x86 instructions. It checks transparent pixels, ties,
+depth limits, row progression, and that the terrain buffer stays unchanged.
+
+```
+python3 rebuild/src/voxel/verify_map_depth_x86.py /tmp/voxel_test
+```
+
 Run the full original x86 sweep with Unicorn and the compiled test executable:
 
 ```

@@ -7,6 +7,26 @@
 using namespace ra2::voxel;
 int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--depth-visible") {
+      int pixel, row, terrain;
+      while (std::cin >> pixel >> row >> terrain)
+        std::cout << base_depth_visible(static_cast<std::uint8_t>(pixel), row,
+                                        static_cast<std::uint16_t>(terrain))
+                  << '\n';
+      return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--depth-rows") {
+      int base, origin, destination, clip, height, adjustment;
+      while (std::cin >> base >> origin >> destination >> clip >> height >> adjustment) {
+        auto row = base_depth_row(base, origin, destination, clip, height, adjustment);
+        for (int i = 0; i != 8; ++i) {
+          std::cout << row.value << ' ' << row.phase << ' ';
+          base_depth_next_row(row);
+        }
+        std::cout << '\n';
+      }
+      return 0;
+    }
     ra2::fs::MixFileSystem fs("/path/to/user/ra2/game");
     fs.bootstrap();
     fs.mount("conquer.mix", false);

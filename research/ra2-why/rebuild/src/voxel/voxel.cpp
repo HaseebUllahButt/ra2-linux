@@ -5,6 +5,34 @@
 #include <limits>
 #include <stdexcept>
 namespace ra2::voxel {
+BaseDepthRow base_depth_row(int z_base, int z_origin_y, int destination_y,
+                            int clipped_y, int clipped_height, int adjustment) {
+  if (clipped_height < 0 || clipped_height > 65535 ||
+      adjustment < -65535 || adjustment > 65535)
+    throw std::invalid_argument("invalid base depth inputs");
+  const auto wrapped = static_cast<std::uint16_t>(
+      std::int64_t(z_base) + z_origin_y - clipped_height - clipped_y -
+      destination_y + 1);
+  const int phase_remainder = clipped_height % 3;
+  BaseDepthRow result{((int(wrapped) + adjustment) / 3) * 3 -
+                          clipped_height / 3,
+                      3 - phase_remainder};
+  if (result.phase == 3) {
+    result.phase = 0;
+    ++result.value;
+  }
+  return result;
+}
+void base_depth_next_row(BaseDepthRow &row) {
+  if (++row.phase >= 3) {
+    row.phase -= 3;
+    ++row.value;
+  }
+}
+bool base_depth_visible(std::uint8_t pixel, int row_depth,
+                        std::uint16_t terrain_depth) {
+  return pixel != 0 && row_depth < int(terrain_depth);
+}
 namespace {
 #include "base_facing.inc"
 #include "base_tilt.inc"

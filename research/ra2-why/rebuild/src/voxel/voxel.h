@@ -72,6 +72,18 @@ struct DepthRaster {
   std::vector<std::uint8_t> depths;
   int left = 0, top = 0;
 };
+// Base game raw-surface gradient record 2 (0x434C64, 0x434F33).
+// Input coordinates and depth base are the original Z-buffer values.
+struct BaseDepthRow {
+  int value;
+  int phase;
+};
+BaseDepthRow base_depth_row(int z_base, int z_origin_y, int destination_y,
+                            int clipped_y, int clipped_height, int adjustment);
+void base_depth_next_row(BaseDepthRow &);
+// Original raw blitter 0x488870: transparent pixels and equal depths fail.
+bool base_depth_visible(std::uint8_t pixel, int row_depth,
+                        std::uint16_t terrain_depth);
 // Original depth-enabled section raster. Both planes are 256 by 256.
 DepthRaster raster_section_depth(
     const Section &, const std::array<float, 12> &matrix,
