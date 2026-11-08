@@ -12,9 +12,24 @@ static std::vector<std::uint8_t> read(const std::string& path) {
     return {std::istreambuf_iterator<char>(f),{}};
 }
 template<class F> void fails(F f) {bool caught=false;try{f();}catch(const std::runtime_error&){caught=true;}assert(caught);}
+static void check_blit(const gfx::RgbaImage& output, const gfx::RgbaImage& source, int x, int y) {
+    std::size_t checked=0;
+    for (int sy=0;sy<source.height && y+sy<output.height;++sy)
+        for (int sx=0;sx<source.width && x+sx<output.width;++sx) {
+            auto s=(static_cast<std::size_t>(sy)*source.width+sx)*4;
+            auto d=(static_cast<std::size_t>(y+sy)*output.width+x+sx)*4;
+            if(source.pixels[s+3]) {
+                assert(std::equal(source.pixels.begin()+s,source.pixels.begin()+s+4,output.pixels.begin()+d));
+                ++checked;
+            }
+        }
+    assert(checked>0);
+}
 int main(int argc,char** argv) {
     if(argc!=2)return 2;
     fs::MixFileSystem files(argv[1]); files.bootstrap(); files.mount("langmd.mix");
+    // The original shell mounts these archives at 0x00534E50.
+    files.mount("ntrlmd.mix"); files.mount("neutral.mix");
     auto csf=files.read_file("ra2md.csf"), title=files.read_file("TITLE.PCX");
     auto fontdata=files.read_file("GAME.FNT"); assert(csf && title && fontdata);
     ra2text::CsfFile strings;strings.parse(csf->data(),csf->size());
@@ -44,8 +59,40 @@ int main(int argc,char** argv) {
     fails([&]{font.draw_text(canvas,"\xff",0,0,{255,0,0,255});});
     auto invalid_font=*fontdata; invalid_font.resize(50); fails([&]{ui::GameFont::parse(invalid_font);});
     auto img=ui::decode_pcx(*title); assert(img.width==640 && img.height==480 && img.pixels.size()==640*480*4);
+    auto shell=ui::draw_shell_background(files,800,600);
+    assert(shell.width==800 && shell.height==600 && shell.pixels.size()==800*600*4);
+    auto palbytes=files.read_file("SHELL.PAL"); auto bgbytes=files.read_file("MNSCRNL.SHP");
+    auto btnbytes=files.read_file("SDBTNANM.SHP"); auto bottombytes=files.read_file("SDBTM.SHP");
+    assert(palbytes && bgbytes && btnbytes && bottombytes);
+    auto pal=gfx::Palette::from_bytes(*palbytes);
+    auto bg=gfx::ShpImage::parse(*bgbytes).decode_frame(0,pal);
+    auto buttonpal=files.read_file("SDBTNANM.PAL"); assert(buttonpal);
+    auto cell=gfx::ShpImage::parse(*btnbytes).decode_frame(10,gfx::Palette::from_bytes(*buttonpal));
+    auto bottom=gfx::ShpImage::parse(*bottombytes).decode_frame(0,pal);
+    check_blit(shell,bg,0,0); check_blit(shell,cell,644,199);
+    check_blit(shell,cell,644,535); check_blit(shell,bottom,632,577);
+    ui::MenuNavigation nav;
+    assert(nav.activate(1559)==ui::Action::None && nav.page()==ui::Page::Main);
+    assert(nav.activate(1667)==ui::Action::PageChanged && nav.page()==ui::Page::SinglePlayer);
+    assert(nav.activate(1401)==ui::Action::PageChanged && nav.page()==ui::Page::Skirmish);
+    assert(nav.activate(1559)==ui::Action::None && nav.page()==ui::Page::Skirmish);
+    assert(nav.activate(1472)==ui::Action::PageChanged && nav.page()==ui::Page::SinglePlayer);
+    assert(nav.activate(1670)==ui::Action::PageChanged && nav.page()==ui::Page::Main);
+    fs::MixFileSystem base(argv[1]);
+    base.bootstrap(fs::GameVariant::RedAlert2); base.mount_language(fs::GameVariant::RedAlert2);
+    base.mount("neutral.mix");
+    auto basecsf=base.read_file("ra2.csf"); assert(basecsf);
+    ra2text::CsfFile base_strings; base_strings.parse(basecsf->data(),basecsf->size());
+    auto base_exe=read(std::string(argv[1])+"/game.exe");
+    auto base_main=ui::load_dialog(base_exe,ui::Page::Main,base_strings);
+    auto base_single=ui::load_dialog(base_exe,ui::Page::SinglePlayer,base_strings);
+    auto base_skirmish=ui::load_dialog(base_exe,ui::Page::Skirmish,base_strings);
+    assert(base_main.controls.size()==11 && base_single.controls.size()==8 && base_skirmish.controls.size()==51);
+    auto base_shell=ui::draw_shell_background(base,800,600);
+    assert(base_shell.width==800 && base_shell.height==600);
+    fails([&]{ui::draw_shell_background(files,640,480);});
     auto damaged=*title;damaged.resize(140); fails([&]{ui::decode_pcx(damaged);});
     damaged=*title;damaged[0]=0;fails([&]{ui::decode_pcx(damaged);});
     auto broken=exe;broken.resize(128);fails([&]{ui::load_dialog(broken,ui::Page::Main,strings);});
-    std::cout<<"original dialogs, labels, hit bounds and title PCX passed\n";
+    std::cout<<"original dialogs, labels, hit bounds, title PCX and shell background passed\n";
 }

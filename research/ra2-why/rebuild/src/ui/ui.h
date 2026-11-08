@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+namespace ra2::fs { class MixFileSystem; }
 namespace ra2::ui {
 // Original dialog resource units. Convert using the actual UI font metrics.
 struct Rect { int x, y, width, height; };
@@ -20,6 +21,15 @@ struct Control {
     std::string label_key, label;
 };
 enum class Page { Main, SinglePlayer, Skirmish };
+enum class Action { None, PageChanged };
+// Activates only the supported page changes. IDs are from the original dialog.
+class MenuNavigation {
+public:
+    Page page() const noexcept { return page_; }
+    Action activate(std::uint32_t control_id) noexcept;
+private:
+    Page page_ = Page::Main;
+};
 struct Dialog {
     std::uint16_t resource_id;
     Rect bounds;
@@ -51,4 +61,7 @@ private:
 };
 // Decodes the original 8-bit, single-plane PCX variant to opaque RGBA.
 gfx::RgbaImage decode_pcx(const std::vector<std::uint8_t>& bytes);
+// Static shell background at the original 800x600 resolution. Mount NTRLMD.MIX
+// and NEUTRAL.MIX before calling. Other resolutions are not yet implemented.
+gfx::RgbaImage draw_shell_background(const fs::MixFileSystem& files, unsigned width, unsigned height);
 }
