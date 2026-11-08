@@ -6,8 +6,11 @@ The API is in `weapons.h`. Run the native checks from the project root:
 make -C rebuild weapons
 python3 rebuild/src/weapons/verify_base_x86.py rebuild/build/weapons_test
 python3 rebuild/src/weapons/verify_trace_x86.py rebuild/build/weapons_test
+python3 rebuild/src/weapons/verify_object_x86.py rebuild/build/weapons_test
+python3 rebuild/src/weapons/verify_tick_x86.py rebuild/build/weapons_test
 
 ```
+
 
 The optional x86 check needs Python Unicorn and the owned base executable at
 `game/game.exe`. The asset check reads the base archives. No image is produced.
@@ -54,6 +57,22 @@ object collision and the complete projectile tick remain outside this API.
 `verify_trace_x86.py` checks the full original function with resolved map and
 object stubs. It covers 4,117 cases, including the distance boundary and cell
 coordinate wrap.
+
+`base_projectile_object_collision()` selects from the ground cell's original
+object list order. The cell list, object positions, eligibility flags and
+alliances must be resolved by the caller. A source or allied object can mask
+another object because selection occurs before those checks.
+
+`base_flat_cannon_tick()` connects movement, target proximity, object
+collision, map bounds and the terrain impact decision for a guarded slice. It
+returns typed decisions and does not change simulation state. It needs the
+original cell snapshots, building-interception result and terrain lookup.
+Near-ground motion, bridge crossings, building interception and slow starting
+velocity return `NeedsInput`. Other projectile types, visual effects, damage
+dispatch and the full lifecycle are outside this slice. The test compares
+1,536 connected base x86 cases. The original floor, map, building, alliance,
+height and terrain trace results use resolved stubs. A separate test compares
+2,048 object selection and collision cases against the original functions.
 
 `base_area_impact_enabled()` matches the original area-damage entry gate.
 `base_resolved_impact_recipient()` matches the final recipient checks and returns

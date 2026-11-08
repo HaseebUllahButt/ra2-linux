@@ -6,6 +6,74 @@
 using namespace ra2::weapons;
 int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--flat-tick") {
+      const auto distance = ra2::sim::OriginalDistance::from_executable(
+          "/path/to/user/ra2/game/game.exe");
+      FlatCannonTickInput input{};
+      int map_valid, preserve, count, trace_hit;
+      std::uint32_t building, target_building;
+      while (std::cin >> input.arc.position[0] >> input.arc.position[1] >>
+             input.arc.position[2] >> input.arc.velocity[0] >> input.arc.velocity[1] >>
+             input.arc.velocity[2] >> input.arc.gravity >> input.target.x >>
+             input.target.y >> input.target.z >> input.height_before >> input.height_after >>
+             input.height_unit >> input.source_id >> preserve >> building >>
+             target_building >> map_valid >> trace_hit >> count) {
+        input.preserve_object_position = preserve;
+        input.proposed_building_id = building;
+        input.target_building_id = target_building;
+        input.position_in_map = map_valid != 0;
+        input.building_intercepts = false;
+        input.cell_objects = std::vector<ProjectileCellObject>{};
+        for (int i = 0; i < count; ++i) {
+          ProjectileCellObject object{};
+          int eligible, allied;
+          std::cin >> object.id >> object.virtual_position.x >> object.virtual_position.y >>
+              object.virtual_position.z >> object.stored_position.x >>
+              object.stored_position.y >> object.stored_position.z >> eligible >> allied;
+          object.eligible_flag = eligible;
+          object.allied_to_source = allied;
+          input.cell_objects->push_back(object);
+        }
+        input.terrain.destination_cell_id = 2;
+        input.terrain.checks_cliffs = true;
+        const auto result = base_flat_cannon_tick(input, [trace_hit](std::int16_t, std::int16_t) {
+          return std::optional<TerrainTraceCell>(TerrainTraceCell{1, trace_hit ? 4 : 0, false, false, false});
+        }, distance);
+        std::cout << static_cast<int>(result.status) << ' ' << result.object_id;
+        for (auto value : result.state.position) std::cout << ' ' << value;
+        std::cout << std::setprecision(17);
+        for (auto value : result.state.velocity) std::cout << ' ' << value;
+        std::cout << '\n';
+      }
+      return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--object-collision") {
+      const auto distance = ra2::sim::OriginalDistance::from_executable(
+          "/path/to/user/ra2/game/game.exe");
+      ra2::sim::Coord position{};
+      std::uint32_t source;
+      int preserve, count;
+      while (std::cin >> position.x >> position.y >> position.z >> source >>
+             preserve >> count) {
+        std::vector<ProjectileCellObject> objects;
+        for (int i = 0; i < count; ++i) {
+          ProjectileCellObject object{};
+          int eligible, allied;
+          std::cin >> object.id >> object.virtual_position.x >> object.virtual_position.y >>
+              object.virtual_position.z >> object.stored_position.x >>
+              object.stored_position.y >> object.stored_position.z >> eligible >> allied;
+          object.eligible_flag = eligible;
+          object.allied_to_source = allied;
+          objects.push_back(object);
+        }
+        const auto result = base_projectile_object_collision(
+            position, source, preserve, objects, distance);
+        std::cout << result.selected_id << ' ' << result.collision << ' '
+                  << result.position.x << ' ' << result.position.y << ' '
+                  << result.position.z << '\n';
+      }
+      return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--trace-full") {
       int cliffs, walls, sample_floor, same, wall, rule, owner, allied;
       TerrainTraceInput input{};
@@ -207,6 +275,24 @@ int main(int argc, char **argv) {
           -> std::optional<TerrainTraceCell> { return std::nullopt; });
       if (missing.status != TerrainTraceStatus::NeedsCell || missing.cell_id != 0)
         throw std::runtime_error("unresolved terrain cell accepted");
+    }
+    {
+      const auto distance = ra2::sim::OriginalDistance::from_executable(
+          "/path/to/user/ra2/game/game.exe");
+      FlatCannonTickInput input{};
+      input.arc.position = {0, 0, 500};
+      input.arc.velocity = {20, 0, 0};
+      input.height_unit = 104;
+      const TerrainTraceLookup lookup = [](std::int16_t, std::int16_t) {
+        return std::optional<TerrainTraceCell>(TerrainTraceCell{1, 0, false, false, false});
+      };
+      if (base_flat_cannon_tick(input, lookup, distance).status !=
+          FlatCannonTickStatus::NeedsInput)
+        throw std::runtime_error("unresolved tick inputs accepted");
+      input.old_cell_bridge_100 = true;
+      if (base_flat_cannon_tick(input, lookup, distance).status !=
+          FlatCannonTickStatus::NeedsInput)
+        throw std::runtime_error("unresolved bridge tick accepted");
     }
     ra2::sim::CandidatePrefix prefix;
     if (assess_target_for_scan(prefix).status != ra2::sim::CandidateStatus::NeedsInput)

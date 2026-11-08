@@ -320,6 +320,103 @@ TerrainTraceResult base_trace_terrain(const TerrainTraceInput &input,
   return {TerrainTraceStatus::Hit, cell->id};
 }
 
+ProjectileObjectCollision base_projectile_object_collision(
+    sim::Coord position, std::uint32_t source_id, bool preserve_position,
+    const std::vector<ProjectileCellObject> &objects,
+    const sim::OriginalDistance &distance) {
+  const ProjectileCellObject *selected = nullptr;
+  int nearest = 0;
+  for (const auto &object : objects) {
+    if (!object.id)
+      throw std::invalid_argument("projectile cell object ID zero");
+    if (!object.eligible_flag)
+      continue;
+    const auto x = static_cast<std::uint32_t>(object.virtual_position.x) & 255u;
+    const auto y = static_cast<std::uint32_t>(object.virtual_position.y) & 255u;
+    const int score = static_cast<int>(distance.square_root(double(x * x + y * y)));
+    if (!selected || score < nearest) {
+      selected = &object;
+      nearest = score;
+    }
+  }
+  if (!selected)
+    return {0, false, position};
+  if (selected->id == source_id ||
+      (source_id && selected->allied_to_source) ||
+      distance.between(position, selected->stored_position) >= 128)
+    return {selected->id, false, position};
+  return {selected->id, true,
+          preserve_position ? position : selected->stored_position};
+}
+
+FlatCannonTickResult base_flat_cannon_tick(const FlatCannonTickInput &input,
+                                           const TerrainTraceLookup &lookup,
+                                           const sim::OriginalDistance &distance) {
+  const ArcProposal old{input.arc.position, input.arc.velocity};
+  const auto unknown = [&] { return FlatCannonTickResult{
+      FlatCannonTickStatus::NeedsInput, old, 0}; };
+  if (input.height_unit <= 0 || input.height_unit > std::numeric_limits<int>::max() / 4)
+    throw std::invalid_argument("invalid projectile height unit");
+  if (input.old_cell_bridge_100 || input.proposed_cell_bridge_100)
+    return unknown();
+  const auto speed = [&distance](const std::array<double, 3> &v) {
+    const double square = sim::fp::add(sim::fp::add(sim::fp::multiply(v[0], v[0]),
+                                                    sim::fp::multiply(v[1], v[1])),
+                                        sim::fp::multiply(v[2], v[2]));
+    if (square > 0.0 && square < 1.0)
+      return std::optional<float>{};
+    return std::optional<float>{distance.square_root(square)};
+  };
+  const auto old_speed = speed(input.arc.velocity);
+  if (!old_speed || *old_speed < 8.0f)
+    return unknown();
+  ArcProposal proposed = base_arc_proposal(input.arc);
+  const double exact_z = sim::fp::add(input.arc.position[2], proposed.velocity[2]);
+  if (exact_z <= static_cast<double>(input.proposed_floor) + 150.0)
+    return unknown();
+  if (!input.proposed_building_id || !input.target_building_id ||
+      !input.building_intercepts || *input.building_intercepts)
+    return unknown();
+  const auto same_cell = [](int a, int b) {
+    return (static_cast<std::uint32_t>(a / 256) & 0xffffu) ==
+           (static_cast<std::uint32_t>(b / 256) & 0xffffu);
+  };
+  const bool same_target_cell = same_cell(proposed.position[0], input.target.x) &&
+                                same_cell(proposed.position[1], input.target.y);
+  const bool same_building = *input.proposed_building_id &&
+      *input.proposed_building_id == *input.target_building_id;
+  if ((same_target_cell || same_building) && input.height_before < input.height_unit * 2)
+    return {FlatCannonTickStatus::Impact, {proposed.position, old.velocity}, 0};
+  if (!input.cell_objects)
+    return unknown();
+  const sim::Coord position{proposed.position[0], proposed.position[1], proposed.position[2]};
+  const auto object = base_projectile_object_collision(position, input.source_id,
+      input.preserve_object_position, *input.cell_objects, distance);
+  if (object.collision)
+    return {FlatCannonTickStatus::Impact,
+            {{object.position.x, object.position.y, object.position.z}, old.velocity},
+            object.selected_id};
+  if (!input.position_in_map)
+    return unknown();
+  if (!*input.position_in_map)
+    return {FlatCannonTickStatus::Remove, old, 0};
+  const auto next_speed = speed(proposed.velocity);
+  if (!next_speed)
+    return unknown();
+  if (*next_speed < 10.0f && input.height_before < 10)
+    return {FlatCannonTickStatus::Impact, proposed, 0};
+  auto terrain = input.terrain;
+  terrain.position = proposed.position;
+  const auto trace = base_trace_terrain(terrain, lookup);
+  if (trace.status == TerrainTraceStatus::NeedsCell)
+    return unknown();
+  const auto impact = base_cannon_impact({trace.status == TerrainTraceStatus::Hit,
+                                          input.height_after, input.height_unit});
+  return {impact == ImpactStatus::Impact ? FlatCannonTickStatus::Impact
+                                         : FlatCannonTickStatus::Continue,
+          proposed, 0};
+}
+
 bool base_area_impact_enabled(int raw_damage, bool scenario_blocks_damage,
                               bool warhead_present) {
   return raw_damage != 0 && !scenario_blocks_damage && warhead_present;

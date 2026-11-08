@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace ra2::weapons {
 // This is a target-scan prefix, not a firing decision. Continue does not
@@ -148,6 +149,52 @@ using TerrainTraceLookup =
     std::function<std::optional<TerrainTraceCell>(std::int16_t, std::int16_t)>;
 TerrainTraceResult base_trace_terrain(const TerrainTraceInput &,
                                       const TerrainTraceLookup &);
+
+// Base 0x471660 and 0x4608B1..0x4609DF. Objects are the resolved ground
+// cell list in original linked-list order. Selection uses the low bytes of
+// the virtual position. Collision uses the separate stored position.
+struct ProjectileCellObject {
+  std::uint32_t id;
+  sim::Coord virtual_position, stored_position;
+  bool eligible_flag, allied_to_source;
+};
+struct ProjectileObjectCollision {
+  std::uint32_t selected_id; // Zero means no eligible object.
+  bool collision;
+  sim::Coord position; // Snaps to the object unless preserve_position is set.
+};
+ProjectileObjectCollision base_projectile_object_collision(
+    sim::Coord position, std::uint32_t source_id, bool preserve_position,
+    const std::vector<ProjectileCellObject> &, const sim::OriginalDistance &);
+
+// A guarded, flat-ground Cannon tick. The caller resolves map and object
+// snapshots at the proposed position. Empty optionals mean unknown state.
+struct FlatCannonTickInput {
+  ArcInput arc;
+  sim::Coord target;
+  int height_before, height_after, height_unit, proposed_floor;
+  bool old_cell_bridge_100, proposed_cell_bridge_100;
+  std::uint32_t source_id;
+  bool preserve_object_position;
+  std::optional<std::uint32_t> proposed_building_id, target_building_id;
+  std::optional<bool> position_in_map;
+  // Whether the original building-interception path absorbs the projectile
+  // after movement. Resolve at the final position, including object snaps.
+  std::optional<bool> building_intercepts;
+  std::optional<std::vector<ProjectileCellObject>> cell_objects;
+  TerrainTraceInput terrain;
+};
+enum class FlatCannonTickStatus { Continue, Impact, Remove, NeedsInput };
+struct FlatCannonTickResult {
+  FlatCannonTickStatus status;
+  ArcProposal state;
+  std::uint32_t object_id;
+};
+// Near-ground, bridge, interception and slow initial-velocity paths remain
+// unresolved. Impact means a detonation decision, not damage dispatch.
+FlatCannonTickResult base_flat_cannon_tick(const FlatCannonTickInput &,
+                                           const TerrainTraceLookup &,
+                                           const sim::OriginalDistance &);
 
 // Original area-damage entry checks at 0x47E2E8..0x47E31B.
 bool base_area_impact_enabled(int raw_damage, bool scenario_blocks_damage,
