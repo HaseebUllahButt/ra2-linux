@@ -10,7 +10,7 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/render/tmp_decode.cpp src/render/minimap.cpp src/loop/game_loop.cpp \
     src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp src/fs/filename_hash.cpp \
     src/gfx/palette.cpp src/gfx/shp_decode.cpp src/actors/actors.cpp \
-    src/session/session.cpp src/session/map_geometry.cpp src/session/placement_terrain.cpp src/weapons/weapons.cpp src/weapons/occupant_order.cpp src/weapons/object_damage.cpp \
+    src/session/session.cpp src/session/map_geometry.cpp src/session/placement_terrain.cpp src/session/world/world.cpp src/weapons/weapons.cpp src/weapons/occupant_order.cpp src/weapons/object_damage.cpp \
     src/ui/ui.cpp src/ui/shell.cpp src/ui/skirmish.cpp src/text/csf.cpp \
     src/pack/map_pack.cpp src/rules/ini_file.cpp src/map/map_file.cpp \
     src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
@@ -23,7 +23,7 @@ build/native/%.o: %.cpp
 	$(CXX) $(CXXFLAGS) -I src $(shell pkg-config --cflags sdl2) -MMD -MP -c $< -o $@
 
 # Include dependencies for test objects as well as the native client.
--include $(wildcard build/native/src/*/*.d)
+-include $(wildcard build/native/src/*/*.d build/native/src/session/world/*.d)
 
 .PHONY: all test clean fs rules text map pack loop gfx hook run-fs run-rules run-text run-map run-pack run-loop run-gfx run-hook
 
@@ -37,7 +37,7 @@ SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS))
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 SESSION_OBJECTS = build/native/src/session/session.o build/native/src/session/map_geometry.o build/native/src/session/placement_terrain.o
 
-native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-postprocessed-path sim-filtered-path sim-smoothing sim-full-smoothing sim-entry-height sim-category sim-regions sim-movement-regions sim-hierarchy sim-hierarchy-route sim-replacement sim-world sim-build-time sim-production session session-terrain weapons
+native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-postprocessed-path sim-filtered-path sim-smoothing sim-full-smoothing sim-entry-height sim-category sim-regions sim-movement-regions sim-hierarchy sim-hierarchy-route sim-replacement sim-world sim-build-time sim-production session session-terrain session-world weapons
 	build/ra2-native --game-dir ../game --frames 3 --headless
 	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
@@ -214,6 +214,28 @@ session: build/session_test
 
 build/session_test: $(SESSION_OBJECTS) build/native/src/session/test_main.o build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/rules/ini_file.o $(FS_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@
+
+SESSION_WORLD_OBJECTS = build/native/src/session/world/world.o $(SESSION_OBJECTS) build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/sim/coarse_category.o build/native/src/weapons/occupant_order.o
+
+.PHONY: session-world
+session-world: build/session_world_snapshot_test build/session_world_map_test
+	build/session_world_snapshot_test
+	build/session_world_map_test ../game
+
+build/session_world_snapshot_test: build/native/src/session/world/test_snapshot.o $(SESSION_WORLD_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/session_world_house_cases: build/native/src/session/world/house_case.o $(SESSION_WORLD_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/session_world_constructor_cases: build/native/src/session/world/constructor_case.o $(SESSION_WORLD_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/session_world_placement_cases: build/native/src/session/world/placement_case.o $(SESSION_WORLD_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/session_world_map_test: build/native/src/session/world/real_map_case.o build/native/src/sim/test_inputs.o $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 .PHONY: session-terrain
 session-terrain: build/session_terrain_test
