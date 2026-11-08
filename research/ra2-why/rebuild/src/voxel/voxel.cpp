@@ -942,6 +942,22 @@ std::vector<SceneImage> draw_vehicle_parts(const VehiclePose &vehicle,
     layers.push_back(draw_scene({part}, lighting));
   return layers;
 }
+FlatPartDepth base_flat_part_depth(const SceneImage &part, int anchor_y,
+                                   int surface_height, int projected_height) {
+  if (surface_height <= 0 || part.source_y < 0 || part.source_height <= 0 ||
+      part.source_y + std::int64_t(part.source_height) > part.image.height)
+    throw std::invalid_argument("invalid part depth bounds");
+  const auto top = std::int64_t(anchor_y) + part.top + part.source_y;
+  const auto begin = std::max<std::int64_t>(0, top);
+  const auto end = std::min<std::int64_t>(surface_height, top + part.source_height);
+  if (begin >= end)
+    return {};
+  const int source_y = part.source_y + int(begin - top);
+  const int row_count = int(end - begin);
+  return {base_flat_vehicle_depth_row({0x8000, 0, 0, int(begin), row_count,
+                                       projected_height}),
+          source_y, row_count};
+}
 SceneImage draw_vehicle(const VehiclePose &vehicle, const Lighting &lighting) {
   auto layers = draw_vehicle_parts(vehicle, lighting);
   int min_x = 1000000, min_y = 1000000, max_x = -1000000, max_y = -1000000;

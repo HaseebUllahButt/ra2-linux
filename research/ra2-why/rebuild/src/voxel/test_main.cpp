@@ -7,6 +7,19 @@
 using namespace ra2::voxel;
 int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--flat-part-depth") {
+      int source_y, source_height, top, anchor_y, surface_height, projected;
+      while (std::cin >> source_y >> source_height >> top >> anchor_y >>
+             surface_height >> projected) {
+        SceneImage part{{256, 256, {}}, 0, top};
+        part.source_y = source_y;
+        part.source_height = source_height;
+        auto depth = base_flat_part_depth(part, anchor_y, surface_height, projected);
+        std::cout << depth.source_y << ' ' << depth.row_count << ' '
+                  << depth.row.value << ' ' << depth.row.phase << '\n';
+      }
+      return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--flat-depth-adjust") {
       int height;
       while (std::cin >> height)

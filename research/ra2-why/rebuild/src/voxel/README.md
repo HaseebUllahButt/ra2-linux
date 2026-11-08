@@ -63,18 +63,26 @@ On clear, flat ground with the tested locomotor,
 `-projected_height - 1`. The input is the original `0x6A2970` result for
 world Z. `base_flat_vehicle_depth_row()` combines this adjustment with the
 original row inputs. It does not calculate clipping or world Z projection.
+`base_flat_part_depth()` clips one part vertically against a full-map terrain
+surface. It returns the first source row, row count and first row depth. It
+uses Z base `0x8000` and origin Y zero. Advance the row with
+`base_depth_next_row()`. Clip X in the scene. Supply the projected world Z.
 The full adjustment at `0x4C9930` also checks terrain flags, nearby tile
 heights, tile shapes, bridges and object state. These checks remain unsupported.
-The flat test supplies a screen-height factor of 15/256; it does not establish
-that factor for every original game configuration.
+The flat test executes the base game's default scale initialization. The
+result is 0.14350360082660085, the same scale used by `actors::projected_height()`
+in the parent scene.
 
 ```
 python3 rebuild/src/voxel/verify_flat_depth_x86.py /tmp/voxel_test
+python3 rebuild/src/voxel/verify_part_depth_x86.py /tmp/voxel_test
 ```
 
 This executes `0x4C9930` and its original map checks for five vehicle heights
 and 32 facings. The synthetic map supplies identical flat cells and a 60 by 30
 tile. Only cell lookup, object position, facing and fixture access use stubs.
+The second test executes the original part blitter and clipping code for 256
+part positions, source bounds, projected heights and map-edge clips.
 
 The following test compares 256 record 2 cases and five raw blits with the
 original base-game x86 instructions. It checks transparent pixels, ties,

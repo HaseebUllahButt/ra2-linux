@@ -10,6 +10,7 @@ from unicorn.x86_const import (
     UC_X86_REG_ECX,
     UC_X86_REG_EIP,
     UC_X86_REG_ESP,
+    UC_X86_REG_FPCW,
 )
 
 b = open("/path/to/user/ra2/game/game.exe", "rb").read()
@@ -64,8 +65,14 @@ w(base + 0xB000, 1)
 w(base + 0xB004, 1)
 w(base + 0xB008, 60)
 w(base + 0xB00C, 30)
-w(0x7D8964, 0xF7F)
-u.mem_write(0xABE490, struct.pack("<d", 15 / 256))
+# Execute the game's default scale initialization with normal x87 precision.
+u.reg_write(UC_X86_REG_FPCW, 0x27F)
+for address in (0x6A20E0, 0x6A2170, 0x6A2440):
+    w(stack, stop)
+    u.reg_write(UC_X86_REG_ESP, stack)
+    u.emu_start(address, stop, count=1000000)
+scale = struct.unpack("<d", u.mem_read(0xABE490, 8))[0]
+assert scale == 0.14350360082660085
 
 
 def hook(cpu, address, size, unused):
@@ -95,7 +102,7 @@ for altitude in (0, 256, 512, 768, 1024):
         u.reg_write(UC_X86_REG_ECX, obj)
         u.emu_start(0x4C9930, stop, count=1000000)
         actual = struct.unpack("<i", struct.pack("<I", u.reg_read(UC_X86_REG_EAX)))[0]
-        expected = -(int(altitude * 15 / 256 + (altitude >= 728) + 0.5)) - 1
+        expected = -(int(altitude * scale + (altitude >= 728) + 0.5)) - 1
         assert actual == expected, (altitude, facing, actual, expected)
         projected_heights.append(-expected - 1)
         expected_results.append(actual)

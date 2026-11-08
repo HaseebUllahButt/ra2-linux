@@ -171,6 +171,15 @@ SceneImage draw_vehicle(const VehiclePose &, const Lighting &);
 // Parts remain in original draw order. Each rectangle is relative to its own
 // 256x256 surface. Use the separate rectangle for terrain depth clipping.
 std::vector<SceneImage> draw_vehicle_parts(const VehiclePose &, const Lighting &);
+struct FlatPartDepth {
+  BaseDepthRow row{0, 0};
+  int source_y = 0;
+  int row_count = 0;
+};
+// Full-map terrain surface: original base 0x8000, origin Y 0. Clip the
+// part vertically, and return the first source row and its original depth.
+FlatPartDepth base_flat_part_depth(const SceneImage &, int anchor_y,
+                                   int surface_height, int projected_height);
 // Convert the original 256x256 lit indexed raster to RGBA.
 Image raster_rgba(const Section &, const std::array<float, 12> &matrix,
                   const Lighting &,
