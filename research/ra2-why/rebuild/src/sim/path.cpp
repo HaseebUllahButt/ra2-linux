@@ -1,4 +1,5 @@
 #include "path.h"
+#include "path_smoothing.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -22,7 +23,7 @@ struct Node { std::size_t cell,parent; float cost,priority; unsigned depth; };
 constexpr std::size_t none=static_cast<std::size_t>(-1);
 }
 PathResult find_original_ground_path(ra2map::Cell source,ra2map::Cell goal,
-    const std::vector<ResolvedGroundPathCell>& cells,const OriginalDistance& distance,int limit,const PathHierarchyFilter* filter) {
+    const std::vector<ResolvedGroundPathCell>& cells,const OriginalDistance& distance,int limit,const PathHierarchyFilter* filter,const PathPostprocessing* postprocessing) {
     PathResult result; result.end=source;
     std::map<int,std::size_t> lookup;
     for (std::size_t i=0;i<cells.size();++i) {
@@ -114,6 +115,14 @@ PathResult find_original_ground_path(ra2map::Cell source,ra2map::Cell goal,
             if (entry!=0 && entry!=7) {
                 result.status=PathStatus::Unsupported; result.evidence="00429830: cell-entry cost requires unrecovered occupant inputs"; return result;
             }
+            if (entry==0) {
+                if (postprocessing && !cells[next].marked_40000) {
+                    result.status=PathStatus::NeedsInput; result.evidence="00429830: regular-search marked-cell input is unresolved"; return result;
+                }
+                if (cells[next].marked_40000.value_or(false)) {
+                    result.status=PathStatus::Unsupported; result.evidence="00429830: marked-cell regular-search cost is not recovered"; return result;
+                }
+            }
             if (entry==7) {
                 if (same(cells[next].cell,goal) && std::abs(static_cast<int>(height.source->level)-goal_height->level)<2) { stopped_at_blocked_goal=true; break; }
                 continue;
@@ -157,11 +166,43 @@ PathResult find_original_ground_path(ra2map::Cell source,ra2map::Cell goal,
     }
     std::reverse(result.directions.begin(),result.directions.end());
     const auto direct_steps=static_cast<std::size_t>(std::max(std::abs(static_cast<int>(result.end.x)-source.x),std::abs(static_cast<int>(result.end.y)-source.y)));
-    if ((x_positive && x_negative) || (y_positive && y_negative) || result.directions.size()>direct_steps) {
+    if ((x_positive && x_negative) || (y_positive && y_negative)) {
         result.status=PathStatus::Unsupported; result.evidence="0042B210/0042B7F0: path smoothing and nonmonotone postprocessing are not recovered"; return result;
     }
+    if (result.directions.size()>direct_steps) {
+        if (!postprocessing) {
+            result.status=PathStatus::Unsupported; result.evidence="0042B7F0: monotone smoothing needs explicit actor and cell inputs"; return result;
+        }
+        std::vector<std::optional<int>> layers;
+        auto at=source;
+        for (const auto direction:result.directions) {
+            layers.push_back(cells[lookup.at(key(at))].height->level);
+            at={static_cast<std::uint16_t>(at.x+directions[direction][0]),static_cast<std::uint16_t>(at.y+directions[direction][1])};
+        }
+        bool unsupported_bridge=false;
+        const auto probe=[&](const SmoothingQuery& query)->std::optional<SmoothingCell> {
+            const auto destination=lookup.find(key(query.destination));
+            const auto previous=lookup.find(key(query.destination)-offsets[query.direction]);
+            if (destination==lookup.end() || previous==lookup.end()) return {};
+            const auto& target=cells[destination->second]; const auto& origin=cells[previous->second];
+            if (!target.height || !origin.height) return {};
+            if (target.height->flag_100 || origin.height->flag_100) { unsupported_bridge=true; return {}; }
+            HeightEntryInputs height;
+            height.destination=*target.height; height.source=origin.height;
+            height.direction=static_cast<int>(query.direction); height.layer_height=query.layer_height;
+            const auto status=original_height_entry(height).status;
+            const auto entry=status==7?std::optional<int>(7):target.entry_status;
+            return SmoothingCell{entry,target.height->level,target.height->flag_100,target.marked_40000};
+        };
+        const auto smoothed=smooth_original_monotone_path(source,result.directions,layers,postprocessing->actor_threat_weight,probe);
+        if (smoothed.status!=SmoothingStatus::Complete) {
+            result.status=unsupported_bridge || smoothed.status==SmoothingStatus::Unsupported?PathStatus::Unsupported:PathStatus::NeedsInput;
+            result.evidence=unsupported_bridge?"0042BE20: shortcut bridge entry state is not recovered":smoothed.detail; return result;
+        }
+        result.directions=smoothed.directions;
+        result.evidence="00429A90/0042B7F0: original regular search and monotone smoothing with resolved zero threat";
+    } else result.evidence="00429A90/0042A460: resolved regular search and unchanged shortest monotone postprocessing";
     result.status=stopped_at_blocked_goal?PathStatus::Partial:PathStatus::Found;
-    result.evidence="00429A90/0042A460: resolved regular search and unchanged shortest monotone postprocessing";
     return result;
 }
 PathResult find_original_flat_path(ra2map::Cell source,ra2map::Cell goal,

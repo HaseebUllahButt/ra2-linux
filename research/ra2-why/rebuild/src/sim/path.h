@@ -19,8 +19,10 @@ struct ResolvedGroundPathCell {
     std::optional<int> entry_status;
     std::optional<EntryHeightCell> height;
     std::optional<std::uint16_t> hierarchy_zone=std::nullopt;
+    std::optional<bool> marked_40000=std::nullopt; // Required with explicit postprocessing; true regular-search costs remain unsupported.
     std::optional<std::uint8_t> occupancy_neighbors=std::nullopt; // Original Cell +122, read only outside allowed zones.
 };
+struct PathPostprocessing { std::optional<double> actor_threat_weight; };
 struct PathHierarchyFilter { std::vector<bool> allowed_zones; };
 enum class PathStatus { Found, Partial, NoPath, NeedsInput, Unsupported };
 struct PathResult {
@@ -33,9 +35,9 @@ struct PathResult {
 };
 // Base 00427370, 00427D40; expansion 00429A90, 0042A460.
 // Preserves the original direction order, open-list ties, float storage, and lookup heuristic.
-// Path smoothing and nonmonotone postprocessing remain explicit until 0042B210/0042B7F0 is ported.
+// Monotone smoothing needs explicit postprocessing state. Nonmonotone paths remain unsupported.
 PathResult find_original_ground_path(ra2map::Cell source,ra2map::Cell goal,
-    const std::vector<ResolvedGroundPathCell>&,const OriginalDistance&,int expansion_limit=-1,const PathHierarchyFilter* filter=nullptr);
+    const std::vector<ResolvedGroundPathCell>&,const OriginalDistance&,int expansion_limit=-1,const PathHierarchyFilter* filter=nullptr,const PathPostprocessing* postprocessing=nullptr);
 PathResult find_original_flat_path(ra2map::Cell source,ra2map::Cell goal,
     const std::vector<ResolvedFlatPathCell>&,const OriginalDistance&,int expansion_limit=-1);
 }

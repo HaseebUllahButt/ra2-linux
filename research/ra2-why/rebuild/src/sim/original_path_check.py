@@ -67,7 +67,7 @@ def run(goal,walls=(),scenario=0,hierarchy_profile=None):
     m.word(m.VT+(0x198 if base else 0x1b0),0x4c8730 if base else 0x4d9c60)
     m.word(m.FOOT+(0x564 if base else 0x674),m.LOCO+4)
     m.word(m.TYPE+(0xb94 if base else 0xdfc),-1)
-    m.virtual(0x2f4 if base else 0x320,0,m.ret(0))
+    m.word(m.VT+(0x2f4 if base else 0x320),0x4c8ca0 if base else 0x4da1d0)
     m.bind(0x55a740 if base else 0x578540,8,m.ret(1))
     for y in range(65,74):
         for x in range(50,59):
@@ -82,9 +82,10 @@ def run(goal,walls=(),scenario=0,hierarchy_profile=None):
             cpu.mem_write(cell+0x116,struct.pack('<h',-1))
             zone=2 if hierarchy_profile is not None and x>54 else 1
             neighbors=0
-            if hierarchy_profile==21 and y==67 and x>54: neighbors=1
+            if hierarchy_profile in (21,22) and y==67 and x>54: neighbors=1
             if hierarchy_profile==24: neighbors=255
             cpu.mem_write(cell+0x122,bytes([neighbors]))
+            m.word(cell+0x140,0x40000 if hierarchy_profile==22 and (x,y)==(55,68) else 0)
             cpu.mem_write(regions+(y*512+x)*10,struct.pack('<h',zone))
     invoke(0x427e90 if base else 0x42a5b0,SEARCH)
     if hierarchy_profile is not None:

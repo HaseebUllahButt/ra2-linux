@@ -13,7 +13,7 @@ m=r.m; cpu=m.cpu; base=m.base
 r.setup((0,),15)
 m.word(m.VT+(0x198 if base else 0x1b0),0x4c8730 if base else 0x4d9c60)
 m.word(m.FOOT+(0x564 if base else 0x674),m.LOCO+4)
-m.virtual(0x2f4 if base else 0x320,0,m.ret(0))
+m.word(m.VT+(0x2f4 if base else 0x320),0x4c8ca0 if base else 0x4da1d0)
 m.bind(0x55a740 if base else 0x578540,8,m.ret(1))
 source=m.cell_for(54,69); destination=m.cell_for(54,68)
 for x in range(52,57):

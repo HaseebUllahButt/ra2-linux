@@ -573,7 +573,8 @@ The result distinguishes Found, Partial, NoPath, NeedsInput, and Unsupported.
 The native command layer does not yet call this search. The original Foot wrapper and cell eligibility remain required.
 
 Shortest monotone paths keep their original reconstructed direction list.
-Paths that reverse an axis or use extra steps require the unported 0042B210/0042B7F0 postprocessing and return Unsupported.
+Paths that reverse an axis require unported postprocessing and return Unsupported.
+Extra-step monotone paths need explicit PathPostprocessing state for the recovered smoothing pass.
 The original default expansion limit is 0xFFF7. The original 10,000-expansion failure case is also preserved.
 The original 65,536-node storage bound produces an explicit native error before overflow.
 
@@ -731,18 +732,19 @@ The native code tests the zone before it tests the entry state, matching the ori
 An unused neighbor byte can remain unknown when the zone is allowed.
 Unknown required zones, marks, or neighbor bytes return NeedsInput.
 
-`original_filtered_path_check.py executable [--base] --vectors` executes twenty original cases per edition.
+`original_filtered_path_check.py executable [--base] --vectors` executes twenty-five original cases per edition.
 It supplies selected zone marks and zero, one, or 255 in Cell +122.
 Both editions return identical paths and search cost bits.
-`test_filtered_path.sh` passes 48 checks, also with address and undefined-behavior sanitizers.
-Thirty-eight cases match the original supported path result, two reject a required shortcut, and eight check unknown inputs.
+`test_filtered_path.sh` passes 118 checks, also with address and undefined-behavior sanitizers.
+It tests each fixture with and without explicit smoothing state, plus missing-state and unsupported-domain cases.
 The existing regular-path checks still pass all 184 cases. Their original 88 vectors per edition are unchanged.
 
 The new fixture proves monotone paths can need smoothing too.
 For a restricted zone with a permitted endpoint row, the original shortens directions north, northeast, east to two northeast steps.
 Its reported search cost still describes the three unsmoothed steps.
-The native API now rejects extra-step monotone paths until 0042B7F0 and its callbacks are recovered.
-It does not return the unsmoothed path as a verified original route.
+Without PathPostprocessing, the native API rejects extra-step monotone paths.
+With resolved zero actor threat weight and required cell state, it runs the recovered smoothing checks.
+It does not return an unchecked unsmoothed path as a verified original route.
 
 ## Monotone path smoothing
 
@@ -760,4 +762,23 @@ It supplies resolved virtual-entry answers and cell lookups, and records every o
 Both editions match all 256 paths, returned lengths, query orders, headings, and layer values.
 The fixtures cover all four monotone quadrants, blocked cells, marked cells, bridge flags, changing levels, and paths beyond twenty slots.
 `test_smoothing.sh` passes 266 checks, also with address and undefined-behavior sanitizers.
-This primitive is separate from regular search until the caller provides its required actor and cell state.
+Regular search enables this primitive only when the caller supplies its required actor and cell state.
+
+
+## Smoothing integration and original Unit guard
+
+`PathPostprocessing` provides an optional resolved actor threat weight to `find_original_ground_path()`.
+The supported smoothing profile requires an explicit zero.
+Its ground records also supply optional Cell flag 0x40000.
+Unknown required marks, shortcut cells, or levels return NeedsInput. Nonzero threat and shortcut bridge states remain unsupported.
+The integrated path retains the original search cost after smoothing changes its directions.
+Marked shortcut cells can reject a replacement and keep the original longer route.
+An explored marked cell still needs its unported regular-search cost and returns Unsupported.
+Callers that omit PathPostprocessing keep the existing shortest-monotone profile.
+Link `path_smoothing.cpp` with `path.cpp`.
+
+The Unit-entry oracles now execute base 004C8CA0 and expansion 004DA1D0 at virtual slots +2F4 and +320.
+They no longer replace that guard with a constant result.
+Both editions preserve all 4,608 empty-entry decisions, hash 28ABC0F5, and all 88 earlier regular-path vectors.
+The expanded filtered oracle checks ordinary shortcuts and marked shortcut rejection through the real Unit entry chain.
+The core test still passes 2,511 checks. Live-world hierarchy binding and the Foot retry wrapper remain unimplemented.
