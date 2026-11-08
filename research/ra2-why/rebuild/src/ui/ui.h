@@ -46,6 +46,13 @@ struct SkirmishMap {
     std::vector<std::string> modes;
     bool available = false;
 };
+struct SkirmishCountry {
+    int index;
+    std::string id, name, name_key;
+};
+// Original country order and random option, from the edition's rules.
+std::vector<SkirmishCountry> load_skirmish_countries(const fs::MixFileSystem& files,
+                                                       const ra2text::CsfFile& strings);
 // Built-in packet order, followed by local PKT and MMX/YRO entries. Local
 // archive order is sorted; Windows enumeration order is not specified.
 std::vector<SkirmishMap> load_skirmish_maps(const fs::MixFileSystem& files,

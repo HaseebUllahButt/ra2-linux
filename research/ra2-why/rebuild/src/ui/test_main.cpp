@@ -104,6 +104,13 @@ int main(int argc,char** argv) {
     assert(base_shell.width==800 && base_shell.height==600);
     auto base_maps=ui::load_skirmish_maps(base,base_strings);
     auto expansion_maps=ui::load_skirmish_maps(files,strings);
+    auto base_countries=ui::load_skirmish_countries(base,base_strings);
+    auto expansion_countries=ui::load_skirmish_countries(files,strings);
+    assert(base_countries.size()==10 && expansion_countries.size()==11);
+    assert(base_countries.front().index==-2 && base_countries[1].id=="Americans");
+    assert(expansion_countries.back().id=="YuriCountry" && expansion_countries.back().index==9);
+    for (const auto& country : base_countries) assert(!country.name.empty());
+    for (const auto& country : expansion_countries) assert(!country.name.empty());
     assert(base_maps.size()>=137 && expansion_maps.size()>=161);
     assert(base_maps[0].id=="MP02T2" && base_maps[0].filename=="MP02T2.MAP" && !base_maps[0].name.empty());
     assert(expansion_maps[0].id=="XMP29U2" && !expansion_maps[0].name.empty());

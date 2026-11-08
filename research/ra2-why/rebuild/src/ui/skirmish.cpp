@@ -43,6 +43,45 @@ std::optional<int> credit_from_slider_pointer(int local_x, int width,
     return static_cast<int>(value);
 }
 
+std::vector<SkirmishCountry> load_skirmish_countries(const fs::MixFileSystem& files,
+                                                       const ra2text::CsfFile& strings) {
+    auto parse = [](const std::vector<std::uint8_t>& data) {
+        rules::IniFile ini;
+        ini.parse(std::string_view(reinterpret_cast<const char*>(data.data()),data.size()));
+        return ini;
+    };
+    const auto base_data=files.read_file("RULES.INI");
+    if (!base_data) throw std::runtime_error("Missing original RULES.INI");
+    auto base=parse(*base_data);
+    rules::IniFile expansion;
+    if (files.variant()==fs::GameVariant::YurisRevenge) {
+        if (const auto data=files.read_file("RULESMD.INI")) expansion=parse(*data);
+    }
+    const auto* entries=expansion.find_section("Countries");
+    if (!entries) entries=base.find_section("Countries");
+    if (!entries) throw std::runtime_error("Missing original Countries section");
+    std::vector<SkirmishCountry> result;
+    const auto* random=strings.find("GUI:RandomEx");
+    result.push_back({-2,"<random>",random ? random->text : std::string{},"GUI:RandomEx"});
+    // 0x005113F0 assigns registry indices in creation order. 0x004E3A00
+    // offers only the first ten multiplayer-enabled types with a UI name.
+    int index=0;
+    for (const auto& entry : entries->entries) {
+        if (index>=10) break;
+        const auto id=entry.value;
+        bool multiplayer=base.read_bool(id,"Multiplay",false);
+        multiplayer=expansion.read_bool(id,"Multiplay",multiplayer);
+        auto key=base.read_string(id,"UIName");
+        key=expansion.read_string(id,"UIName",key);
+        if (multiplayer && !key.empty()) {
+            const auto* name=strings.find(key);
+            result.push_back({index,id,name ? name->text : std::string{},key});
+        }
+        ++index;
+    }
+    return result;
+}
+
 std::vector<SkirmishMap> load_skirmish_maps(const fs::MixFileSystem& files,
                                              const ra2text::CsfFile& strings) {
     // 0x006999D9 reads the MultiMaps section of the edition's original PKT.
