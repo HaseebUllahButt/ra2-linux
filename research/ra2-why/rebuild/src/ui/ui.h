@@ -62,6 +62,9 @@ struct SkirmishControls {
 SkirmishSetup read_skirmish_setup(const rules::IniFile& preferences,
                                   const rules::IniFile* base_rules = nullptr,
                                   const rules::IniFile* expansion_rules = nullptr);
+// Original horizontal credits slider mapping. Invalid ranges return nullopt.
+std::optional<int> credit_from_slider_pointer(int local_x, int control_width,
+                                              int minimum, int maximum, int increment) noexcept;
 // Activates only the supported page changes. IDs are from the original dialog.
 class MenuNavigation {
 public:
@@ -122,11 +125,15 @@ private:
     struct Button { std::uint32_t id; Rect bounds; std::string label; bool enabled; };
     std::vector<Button> buttons() const;
     std::vector<Button> checks() const;
+    std::optional<Rect> credit_bounds() const;
+    void move_credit(int x);
     gfx::RgbaImage background_, normal_, hover_, pressed_;
     gfx::RgbaImage popup_, popup_normal_, popup_hover_, popup_pressed_;
     gfx::RgbaImage check_on_, check_off_;
+    gfx::RgbaImage slider_grip_, slider_left_, slider_middle_, slider_right_;
     std::string exit_prompt_, exit_ok_, exit_cancel_;
     bool confirming_exit_ = false;
+    bool credit_changed_ = false;
     SkirmishSetup setup_;
     GameFont font_;
     Dialog main_, single_, skirmish_;

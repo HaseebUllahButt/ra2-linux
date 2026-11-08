@@ -2,6 +2,7 @@
 #include "../fs/mix_bootstrap.h"
 #include "../rules/ini_file.h"
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 
 namespace ra2::ui {
@@ -49,6 +50,19 @@ void blit(gfx::RgbaImage& dst, const gfx::RgbaImage& src, int x, int y,
             const auto di = (static_cast<std::size_t>(dy) * dst.width + dx) * 4;
             std::copy_n(src.pixels.begin() + si, 4, dst.pixels.begin() + di);
         }
+    }
+}
+void blit_strip(gfx::RgbaImage& dst, const gfx::RgbaImage& src, int x, int y, int width) {
+    if (!src.width || width<=0) return;
+    const int start=src.width>width ? (src.width-width)/2 : 0;
+    for (int sy=0;sy<src.height;++sy) for (int dx=0;dx<width;++dx) {
+        const int xx=x+dx, yy=y+sy;
+        if (xx<0 || yy<0 || xx>=dst.width || yy>=dst.height) continue;
+        const int sx=src.width>width ? start+dx : dx%src.width;
+        const auto s=(static_cast<std::size_t>(sy)*src.width+sx)*4;
+        if (!src.pixels[s+3]) continue;
+        const auto d=(static_cast<std::size_t>(yy)*dst.width+xx)*4;
+        std::copy_n(src.pixels.begin()+s,4,dst.pixels.begin()+d);
     }
 }
 } // namespace
@@ -113,6 +127,10 @@ Menu Menu::load(const fs::MixFileSystem& files, const std::vector<std::uint8_t>&
     result.font_ = GameFont::parse(required(files, "GAME.FNT"));
     result.check_on_ = decode_pcx(required(files, "cce_i.pcx"));
     result.check_off_ = decode_pcx(required(files, "cue_i.pcx"));
+    result.slider_grip_ = decode_pcx(required(files, "trakgrip.pcx"));
+    result.slider_left_ = decode_pcx(required(files, "trofl.pcx"));
+    result.slider_middle_ = decode_pcx(required(files, "trofm.pcx"));
+    result.slider_right_ = decode_pcx(required(files, "trofr.pcx"));
     rules::IniFile preferences;
     auto saved = files.read_file(files.variant() == fs::GameVariant::RedAlert2 ? "RA2.INI" : "RA2MD.INI");
     if (saved) preferences.parse(std::string_view(reinterpret_cast<const char*>(saved->data()), saved->size()));
@@ -207,7 +225,31 @@ std::vector<Menu::Button> Menu::checks() const {
     return result;
 }
 
+std::optional<Rect> Menu::credit_bounds() const {
+    if (confirming_exit_ || page()!=Page::Skirmish || !setup_.credits ||
+        setup_.min_credits<0 || setup_.max_credits>65535 ||
+        setup_.min_credits>=setup_.max_credits || setup_.credit_increment<=0) return std::nullopt;
+    for (const auto& control : skirmish_.controls) {
+        if (control.id!=SkirmishControls::credits || !(control.style&0x10000000u) ||
+            (control.style&0x08000000u)) continue;
+        return Rect{(control.bounds.x*3+1)/2, (control.bounds.y*163+50)/100,
+                    (control.bounds.width*3+1)/2+1, (control.bounds.height*163+50)/100+1};
+    }
+    return std::nullopt;
+}
+void Menu::move_credit(int x) {
+    const auto bounds=credit_bounds();
+    if (!bounds) return;
+    const auto local=std::clamp<std::int64_t>(std::int64_t(x)-bounds->x,
+                                              std::numeric_limits<int>::min(),std::numeric_limits<int>::max());
+    const auto next=credit_from_slider_pointer(static_cast<int>(local),bounds->width,
+                                                setup_.min_credits,setup_.max_credits,
+                                                setup_.credit_increment);
+    if (next && setup_.credits!=next) {setup_.credits=next; credit_changed_=true;}
+}
+
 void Menu::pointer_move(int x, int y) {
+    if (held_==SkirmishControls::credits) move_credit(x);
     hovered_.reset();
     for (const auto& b : buttons()) {
         if (b.enabled && x >= b.bounds.x && y >= b.bounds.y &&
@@ -227,9 +269,22 @@ void Menu::pointer_move(int x, int y) {
 void Menu::pointer_down(int x, int y) {
     pointer_move(x, y);
     held_ = hovered_;
+    const auto slider=credit_bounds();
+    if (slider && x>=slider->x && x<slider->x+slider->width-50 &&
+        y>slider->y+slider->height-18 && y<slider->y+slider->height) {
+        held_=SkirmishControls::credits;
+        credit_changed_=false;
+        move_credit(x);
+    }
 }
 Action Menu::pointer_up(int x, int y) {
     pointer_move(x, y);
+    if (held_==SkirmishControls::credits) {
+        held_.reset();
+        const bool changed=credit_changed_;
+        credit_changed_=false;
+        return changed ? Action::SetupChanged : Action::None;
+    }
     const auto activated = held_ && hovered_ && *held_ == *hovered_ ? held_ : std::nullopt;
     held_.reset();
     if (!activated) return Action::None;
@@ -332,6 +387,23 @@ gfx::RgbaImage Menu::render() const {
             const int x=(control.bounds.x*3+1)/2;
             const int y=(control.bounds.y*163+50)/100;
             font_.draw_text(image,control.label,x,y,{255,255,0,255});
+        }
+        if (const auto slider=credit_bounds()) {
+            // 0x0061DE9E draws the original value trough. 0x0061E042
+            // draws the 12-pixel grip at the scaled current value.
+            const int value_x=slider->x+slider->width-49;
+            blit_strip(image,slider_middle_,value_x,slider->y-1,50);
+            blit(image,slider_left_,value_x,slider->y-1);
+            blit(image,slider_right_,slider->x+slider->width-slider_right_.width+1,slider->y-1);
+            const auto value=std::clamp(*setup_.credits,setup_.min_credits,setup_.max_credits);
+            const auto travel=slider->width-63;
+            const auto position=static_cast<int>(std::int64_t(travel)*(value-setup_.min_credits)/
+                                                  (setup_.max_credits-setup_.min_credits));
+            blit(image,slider_grip_,slider->x+1+position,slider->y);
+            const auto text=std::to_string(value/setup_.credit_increment*setup_.credit_increment);
+            const int text_x=value_x+(50-static_cast<int>(font_.text_width(text)))/2;
+            const int text_y=slider->y+(slider->height-static_cast<int>(font_.line_height()))/2;
+            font_.draw_text(image,text,text_x,text_y,{255,255,0,255});
         }
     }
     return image;

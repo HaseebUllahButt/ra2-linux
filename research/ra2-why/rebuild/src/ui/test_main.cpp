@@ -126,6 +126,11 @@ int main(int argc,char** argv) {
     auto rules_setup=ui::read_skirmish_setup(defaults,&defaults_rules);
     assert(rules_setup.credits==7000 && rules_setup.short_game==true);
     assert(rules_setup.min_credits==1000 && rules_setup.max_credits==10000 && rules_setup.credit_increment==250);
+    assert(ui::credit_from_slider_pointer(6,128,5000,10000,100)==5000);
+    assert(ui::credit_from_slider_pointer(38,128,5000,10000,100)==7400);
+    assert(ui::credit_from_slider_pointer(71,128,5000,10000,100)==10000);
+    assert(!ui::credit_from_slider_pointer(5,63,5000,10000,100));
+    assert(!ui::credit_from_slider_pointer(5,128,5000,10000,0));
     rules::IniFile saved; saved.parse("[MultiPlayer]\nSide=Russians\nColor=2\n[Skirmish]\nCredits=10000\nSlot01=4,-2,-2\n");
     auto setup=ui::read_skirmish_setup(saved);
     assert(setup.country=="Russians" && setup.color==2 && setup.credits==10000);
@@ -180,6 +185,21 @@ int main(int argc,char** argv) {
             label_pixel=true;
     }
     assert(label_pixel);
+    auto credit_control=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
+                                     [](const auto& c){return c.id==ui::SkirmishControls::credits;});
+    assert(credit_control!=base_skirmish.controls.end());
+    const int credit_x=(credit_control->bounds.x*3+1)/2;
+    const int credit_y=(credit_control->bounds.y*163+50)/100;
+    const int credit_width=(credit_control->bounds.width*3+1)/2+1;
+    const int left_value=*ui::credit_from_slider_pointer(6,credit_width,menu.setup().min_credits,
+                                                        menu.setup().max_credits,menu.setup().credit_increment);
+    menu.pointer_down(credit_x+6,credit_y+10);
+    menu.pointer_up(credit_x+6,credit_y+10);
+    assert(menu.setup().credits==left_value);
+    menu.pointer_down(credit_x+6,credit_y+10);
+    menu.pointer_move(credit_x+credit_width+100,credit_y+10);
+    assert(menu.pointer_up(credit_x+credit_width+100,credit_y+10)==ui::Action::SetupChanged);
+    assert(menu.setup().credits==menu.setup().max_credits);
     const auto previous_short_game=menu.setup().short_game; assert(previous_short_game);
     auto short_control=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
                                     [](const auto& c){return c.id==1358;});

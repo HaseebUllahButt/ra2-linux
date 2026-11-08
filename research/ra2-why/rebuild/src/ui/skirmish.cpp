@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
+#include <limits>
 #include <stdexcept>
 
 namespace ra2::ui {
@@ -27,6 +28,20 @@ std::optional<Opponent> opponent(int value) {
     }
 }
 } // namespace
+
+std::optional<int> credit_from_slider_pointer(int local_x, int width,
+                                              int minimum, int maximum, int increment) noexcept {
+    // 0x0061DA52 reserves 50 pixels for the value and 13 for the grip.
+    // 0x0061E545 clamps the pointer and quantizes the absolute value.
+    if (width<=63 || width>65535 || minimum>maximum || increment<=0) return std::nullopt;
+    const std::int64_t travel=width-63;
+    const std::int64_t range=std::int64_t(maximum)-minimum;
+    const auto pointer=std::clamp<std::int64_t>(std::int64_t(local_x)-5,1,travel+1);
+    const auto offset=std::min(range,(pointer-1)*(range+1)/travel);
+    const auto value=(std::int64_t(minimum)+offset)/increment*increment;
+    if (value<std::numeric_limits<int>::min() || value>std::numeric_limits<int>::max()) return std::nullopt;
+    return static_cast<int>(value);
+}
 
 std::vector<SkirmishMap> load_skirmish_maps(const fs::MixFileSystem& files,
                                              const ra2text::CsfFile& strings) {
