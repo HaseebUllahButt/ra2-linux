@@ -5,7 +5,7 @@ import struct
 import subprocess
 import sys
 from unicorn import UC_HOOK_CODE
-from unicorn.x86_const import UC_X86_REG_ECX, UC_X86_REG_ESP
+from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_ESP
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / 'sim'))
 from original_image import load_original
 
@@ -25,10 +25,13 @@ def put(address,*values):
     cpu.mem_write(address,struct.pack('<'+'I'*len(values),*(value&0xffffffff for value in values)))
 def get(address,n=1): return struct.unpack('<'+'I'*n,cpu.mem_read(address,4*n))
 put(global_scenario,scenario); put(frame,1234)
-cpu.mem_write(parent,b'\xb8\x01\x00\x00\x00\xc2\x08\x00')
+cpu.mem_write(parent,b'\xc2\x08\x00')
 cpu.mem_write(turn,b'\xc2\x04\x00')
 seen=[]
+success=False
 def hook(machine,address,size,user):
+    if address==parent:
+        machine.reg_write(UC_X86_REG_EAX,int(success))
     if address==turn:
         esp=machine.reg_read(UC_X86_REG_ESP)
         address_arg=get(esp+4)[0]
@@ -46,6 +49,16 @@ for line in lines:
     cpu.mem_write(unit+unit_flag,bytes([bool(flags&1)]))
     cpu.mem_write(unit+suppress,bytes([bool(flags&2)]))
     cpu.mem_write(unit_type+type_flag,bytes([bool(flags&4),bool(flags&8)]))
+    put(stack,end,point,facing)
+    original_unit=bytes(cpu.mem_read(unit,0x1000))
+    original_rng=bytes(cpu.mem_read(scenario+0x218,1012))
+    success=False
+    cpu.reg_write(UC_X86_REG_ECX,unit);cpu.reg_write(UC_X86_REG_ESP,stack)
+    seen.clear();cpu.emu_start(entry,end,count=100000)
+    assert cpu.reg_read(UC_X86_REG_EAX)&0xff==0 and not seen
+    assert bytes(cpu.mem_read(unit,0x1000))==original_unit
+    assert bytes(cpu.mem_read(scenario+0x218,1012))==original_rng
+    success=True
     put(stack,end,point,facing)
     cpu.reg_write(UC_X86_REG_ECX,unit);cpu.reg_write(UC_X86_REG_ESP,stack)
     seen.clear();cpu.emu_start(entry,end,count=100000)

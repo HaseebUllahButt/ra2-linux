@@ -96,7 +96,7 @@ The house field copy still uses the selected color before that conversion.
 succeeds. It returns the facing argument, conditional status, and timer. The
 timer can consume a shared random draw. The parent placement and facing
 handler are still required. `original_unlimbo_check.py` checks 320 cases per
-edition, supplying success for the parent and observing the facing argument.
+edition. It supplies both parent outcomes and observes the facing argument.
 
 For the optional original x86 comparison, build `chooser_cases.cpp` with
 `session.cpp`, `sim/random.cpp`, and `sim/distance.cpp`. Run
