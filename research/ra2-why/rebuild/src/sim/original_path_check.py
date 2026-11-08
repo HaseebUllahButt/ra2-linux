@@ -59,7 +59,7 @@ def can_enter():
 # The C runtime exit-registration callback does not affect the search output.
 m.bind(0x78298a if base else 0x7c978a,0,m.ret(0))
 
-def run(goal,walls=(),scenario=0):
+def run(goal,walls=(),scenario=0,hierarchy_profile=None):
     global blocked,last_cost
     last_cost=0
     r.setup((0,),15); blocked=set(walls)
@@ -80,11 +80,20 @@ def run(goal,walls=(),scenario=0):
             cpu.mem_write(cell+0x11b,struct.pack('<bB',level,ramp))
             m.word(cell+0x54,-1); m.word(cell+0x58,-1)
             cpu.mem_write(cell+0x116,struct.pack('<h',-1))
-            cpu.mem_write(regions+(y*512+x)*10,struct.pack('<h',1))
+            zone=2 if hierarchy_profile is not None and x>54 else 1
+            neighbors=0
+            if hierarchy_profile==21 and y==67 and x>54: neighbors=1
+            if hierarchy_profile==24: neighbors=255
+            cpu.mem_write(cell+0x122,bytes([neighbors]))
+            cpu.mem_write(regions+(y*512+x)*10,struct.pack('<h',zone))
     invoke(0x427e90 if base else 0x42a5b0,SEARCH)
+    if hierarchy_profile is not None:
+        marks=m.read(SEARCH+0x40); cpu.mem_write(marks,bytes(16))
+        m.word(marks+4,m.read(SEARCH+0x28))
+        if hierarchy_profile==23: m.word(marks+8,m.read(SEARCH+0x28))
     start=0x100d020; end=0x100d024; output=0x100e000
     m.word(start,54|(69<<16)); m.word(end,goal[0]|(goal[1]<<16))
-    result=invoke(0x427370 if base else 0x429a90,SEARCH,start,end,m.FOOT,output,-1,0)
+    result=invoke(0x427370 if base else 0x429a90,SEARCH,start,end,m.FOOT,output,-1,int(hierarchy_profile is not None))
     if not result: return None
     count=m.read(result+8)
     assert count<1000,count

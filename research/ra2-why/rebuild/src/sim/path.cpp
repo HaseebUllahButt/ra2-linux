@@ -22,7 +22,7 @@ struct Node { std::size_t cell,parent; float cost,priority; unsigned depth; };
 constexpr std::size_t none=static_cast<std::size_t>(-1);
 }
 PathResult find_original_ground_path(ra2map::Cell source,ra2map::Cell goal,
-    const std::vector<ResolvedGroundPathCell>& cells,const OriginalDistance& distance,int limit) {
+    const std::vector<ResolvedGroundPathCell>& cells,const OriginalDistance& distance,int limit,const PathHierarchyFilter* filter) {
     PathResult result; result.end=source;
     std::map<int,std::size_t> lookup;
     for (std::size_t i=0;i<cells.size();++i) {
@@ -80,6 +80,18 @@ PathResult find_original_ground_path(ra2map::Cell source,ra2map::Cell goal,
             const auto found=lookup.find(key(cell)+offsets[direction]);
             if (found==lookup.end()) continue;
             const auto next=found->second;
+            if (filter) {
+                const auto zone=cells[next].hierarchy_zone;
+                if (!zone || *zone>=filter->allowed_zones.size()) {
+                    result.status=PathStatus::NeedsInput; result.evidence="00429A90: hierarchy zone or allowed-zone mark is unresolved"; return result;
+                }
+                if (!filter->allowed_zones[*zone]) {
+                    if (!cells[next].occupancy_neighbors) {
+                        result.status=PathStatus::NeedsInput; result.evidence="00429A90: Cell +122 outside the hierarchy route is unresolved"; return result;
+                    }
+                    if (!*cells[next].occupancy_neighbors) continue;
+                }
+            }
             // The original marks nodes when generated and never decreases their stored cost.
             // For the side-effect-free resolved 0/7 adapter, an existing mark cannot add a node.
             if (seen[next]) continue;
@@ -144,11 +156,12 @@ PathResult find_original_ground_path(ra2map::Cell source,ra2map::Cell goal,
         x_positive|=dx>0; x_negative|=dx<0; y_positive|=dy>0; y_negative|=dy<0;
     }
     std::reverse(result.directions.begin(),result.directions.end());
-    if ((x_positive && x_negative) || (y_positive && y_negative)) {
-        result.status=PathStatus::Unsupported; result.evidence="0042B210/0042B7F0: nonmonotone path postprocessing is not recovered"; return result;
+    const auto direct_steps=static_cast<std::size_t>(std::max(std::abs(static_cast<int>(result.end.x)-source.x),std::abs(static_cast<int>(result.end.y)-source.y)));
+    if ((x_positive && x_negative) || (y_positive && y_negative) || result.directions.size()>direct_steps) {
+        result.status=PathStatus::Unsupported; result.evidence="0042B210/0042B7F0: path smoothing and nonmonotone postprocessing are not recovered"; return result;
     }
     result.status=stopped_at_blocked_goal?PathStatus::Partial:PathStatus::Found;
-    result.evidence="00429A90/0042A460: resolved flat regular search and unchanged monotone postprocessing";
+    result.evidence="00429A90/0042A460: resolved regular search and unchanged shortest monotone postprocessing";
     return result;
 }
 PathResult find_original_flat_path(ra2map::Cell source,ra2map::Cell goal,

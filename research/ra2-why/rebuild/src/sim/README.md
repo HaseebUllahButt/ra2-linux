@@ -572,8 +572,8 @@ Blocked goals can return a partial path that stops short of the requested cell.
 The result distinguishes Found, Partial, NoPath, NeedsInput, and Unsupported.
 The native command layer does not yet call this search. The original Foot wrapper and cell eligibility remain required.
 
-Monotone paths keep their original reconstructed direction list.
-Paths that reverse an axis require the unported 0042B210/0042B7F0 postprocessing and return Unsupported.
+Shortest monotone paths keep their original reconstructed direction list.
+Paths that reverse an axis or use extra steps require the unported 0042B210/0042B7F0 postprocessing and return Unsupported.
 The original default expansion limit is 0xFFF7. The original 10,000-expansion failure case is also preserved.
 The original 65,536-node storage bound produces an explicit native error before overflow.
 
@@ -719,3 +719,27 @@ Base executes 12,288 searches. Expansion executes 13,312 searches.
 `test_hierarchy_route.sh` checks all 25,600 routes, allowed marks, generated-node cost bits, and six invalid-input cases.
 The same 25,606 checks pass with address and undefined-behavior sanitizers.
 Threat weighting, Foot wrapper retries, regular-search hierarchy filtering, and live-world inputs remain separate recovery work.
+
+
+## Regular-search hierarchy filtering
+
+`find_original_ground_path()` accepts an optional `PathHierarchyFilter` with the original allowed-zone marks.
+Each ground record then supplies its optional level-zero hierarchy zone and Cell +122 byte.
+Base 00427370 and expansion 00429A90 skip outside-route cells only when that byte is zero.
+A nonzero byte can admit such a cell. It does not prove the later Unit entry decision succeeds.
+The native code tests the zone before it tests the entry state, matching the original branch order.
+An unused neighbor byte can remain unknown when the zone is allowed.
+Unknown required zones, marks, or neighbor bytes return NeedsInput.
+
+`original_filtered_path_check.py executable [--base] --vectors` executes twenty original cases per edition.
+It supplies selected zone marks and zero, one, or 255 in Cell +122.
+Both editions return identical paths and search cost bits.
+`test_filtered_path.sh` passes 48 checks, also with address and undefined-behavior sanitizers.
+Thirty-eight cases match the original supported path result, two reject a required shortcut, and eight check unknown inputs.
+The existing regular-path checks still pass all 184 cases. Their original 88 vectors per edition are unchanged.
+
+The new fixture proves monotone paths can need smoothing too.
+For a restricted zone with a permitted endpoint row, the original shortens directions north, northeast, east to two northeast steps.
+Its reported search cost still describes the three unsmoothed steps.
+The native API now rejects extra-step monotone paths until 0042B7F0 and its callbacks are recovered.
+It does not return the unsmoothed path as a verified original route.
