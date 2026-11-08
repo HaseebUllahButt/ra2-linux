@@ -2,6 +2,7 @@
 #include "../gfx/palette.h"
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 namespace ra2::voxel {
@@ -66,6 +67,27 @@ std::vector<std::uint8_t>
 raster_section(const Section &, const std::array<float, 12> &matrix,
                const Lighting *lighting = nullptr,
                const std::array<std::uint8_t, 256> *normal_light = nullptr);
+struct DepthRaster {
+  std::vector<std::uint8_t> pixels;
+  std::vector<std::uint8_t> depths;
+  int left = 0, top = 0;
+};
+// Original depth-enabled section raster. Both planes are 256 by 256.
+DepthRaster raster_section_depth(
+    const Section &, const std::array<float, 12> &matrix,
+    const Lighting *lighting = nullptr,
+    const std::array<std::uint8_t, 256> *normal_light = nullptr);
+struct ShadowMask {
+  int left, top;
+  std::vector<std::uint8_t> pixels; // 256 by 256; nonzero marks shadow.
+};
+// Return true when the original surface pixel blocks a shadow.
+using ShadowOcclusion = std::function<bool(int x, int y)>;
+// surface_x/y are the original caller's surface offsets, before adding center.
+ShadowMask base_shadow_section(const Section &,
+                               const std::array<float, 12> &section_matrix,
+                               const ShadowOcclusion &occluded = {},
+                               int surface_x = 0, int surface_y = 0);
 struct Image {
   unsigned width, height;
   std::vector<ra2::gfx::Rgba> pixels;

@@ -25,6 +25,10 @@ if len(sys.argv) < 2:
     raise SystemExit("usage: verify_vehicle_x86.py voxel_test [0|16]")
 test = sys.argv[1]
 turret_offset = int(sys.argv[2]) if len(sys.argv) > 2 else 16
+model = sys.argv[3] if len(sys.argv) > 3 else "htnk"
+facing = int(sys.argv[4]) if len(sys.argv) > 4 else 64
+if not (0 <= facing <= 255):
+    raise SystemExit("invalid facing")
 if turret_offset not in (0, 16):
     raise SystemExit("offset must be 0 or 16")
 
@@ -74,7 +78,7 @@ for i, value in enumerate(ident):
 
 
 def face_hook(cpu, address, size, unused):
-    w(faceptr, 0x4000)
+    w(faceptr, 0x4000 if cpu.reg_read(UC_X86_REG_ECX) == obj + 0x2C8 else facing << 8)
     sp = cpu.reg_read(UC_X86_REG_ESP)
     ret = struct.unpack("<I", cpu.mem_read(sp, 4))[0]
     cpu.reg_write(UC_X86_REG_EAX, faceptr)
@@ -92,10 +96,16 @@ barrel = struct.unpack("<12f", u.mem_read(stack + 0x88, 48))
 w(base + 0x6000 + 8, obj)
 call(0x53D030, args=(base + 0x6000, base + 0x6100, 0))
 hull = struct.unpack("<12f", u.mem_read(base + 0x6100, 48))
-locals_by_name = {"htnk": hull, "htnktur": turret, "htnkbarl": barrel}
+locals_by_name = {model: hull, model + "tur": turret, model + "barl": barrel}
 
 screen = {}
-for name, offset in [("htnk", 0), ("htnktur", 2), ("htnkbarl", 2)]:
+quadrant = (((facing << 8) >> 13) + 1) >> 1 & 3
+part_names = (
+    [model, model + "barl", model + "tur"]
+    if quadrant in (0, 3)
+    else [model, model + "tur", model + "barl"]
+)
+for name in part_names:
     b = asset(name + ".vxl")
     header = 32 + struct.unpack_from("<I", b, 16)[0] * 770
     body = header + 28
@@ -141,7 +151,17 @@ for name, offset in [("htnk", 0), ("htnktur", 2), ("htnkbarl", 2)]:
         ),
     )
     call(0x7171D0)
-    call(0x7174C0, base, 0, (0, base + 0x800))
+    # The original loader scales HVA translations by the first section scale.
+    animation = asset(name + ".hva")
+    assert struct.unpack_from("<II", animation, 16) == (1, 1)
+    motion = list(struct.unpack_from("<12f", animation, 40))
+    scale = struct.unpack_from("<f", b, tail + 12)[0]
+    for index in (3, 7, 11):
+        motion[index] *= scale
+    for i, value in enumerate(motion):
+        f(base + 0x900 + i * 4, value)
+    call(0x591180, base + 0x950, base + 0x800, (base + 0x900,))
+    call(0x7174C0, base, 0, (0, base + 0x950))
     call(0x7178E0, base + 0xA00)
     rx, ry, sx, sy, ww, hh = struct.unpack("<6i", u.mem_read(base + 0xA00, 24))
     buf = bytes(u.mem_read(0xAE3408, 65536))
@@ -154,7 +174,7 @@ for name, offset in [("htnk", 0), ("htnktur", 2), ("htnkbarl", 2)]:
                 if color:
                     screen[(rx + x, ry + y)] = color
 p = subprocess.check_output(
-    [test, "--vehicle-zero" if turret_offset == 0 else "--vehicle"]
+    [test, "--vehicle-case", model, str(facing), str(turret_offset)]
 )
 left, top = struct.unpack_from("<2i", p)
 pix = p[8:]
@@ -171,5 +191,5 @@ allxy = set(original) | set(native)
 mism = [xy for xy in allxy if original.get(xy) != native.get(xy)]
 assert not mism, f"{len(mism)} visible pixels differ"
 print(
-    f"Base game.exe: full HTNK hull, turret and barrel offset {turret_offset} matches {len(original)} visible RGBA pixels"
+    f"Base game.exe: {model} facing {facing} offset {turret_offset} matches {len(original)} visible RGBA pixels"
 )

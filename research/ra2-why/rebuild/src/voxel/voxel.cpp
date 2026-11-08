@@ -324,10 +324,11 @@ project_ground_corners(const Section &section,
   }
   return result;
 }
-std::vector<std::uint8_t>
-ground_coverage(const Section &section,
-                const std::array<ProjectedCorner, 4> &corners,
-                ProjectedCorner center) {
+static std::vector<std::uint8_t>
+ground_coverage_impl(const Section &section,
+                     const std::array<ProjectedCorner, 4> &corners,
+                     ProjectedCorner center, const ShadowOcclusion &occluded,
+                     int surface_x, int surface_y) {
   if (!section.x || !section.y)
     throw std::runtime_error("invalid VXL dimensions");
   for (const auto &corner : corners)
@@ -365,9 +366,16 @@ ground_coverage(const Section &section,
     for (unsigned x = 0; x < section.x; ++x) {
       if (occupied[std::size_t(y) * section.x + x]) {
         auto offset = std::size_t(y_fixed >> 8) * 256 + (x_fixed >> 8);
-        result[offset] = 1;
+        auto sample_x = std::uint16_t(
+            std::int64_t(std::trunc(double(surface_x) + center[0])) +
+            (x_fixed >> 8));
+        auto sample_y = std::uint16_t(
+            std::int64_t(std::trunc(double(surface_y) + center[1])) +
+            (y_fixed >> 8));
+        result[offset] = !occluded || !occluded(sample_x, sample_y);
         if (offset + 1 < result.size())
-          result[offset + 1] = 1;
+          result[offset + 1] =
+              !occluded || !occluded(int(sample_x) + 1, sample_y);
       }
       x_fixed = static_cast<std::uint16_t>(x_fixed + dx_x);
       y_fixed = static_cast<std::uint16_t>(y_fixed + dx_y);
@@ -376,6 +384,12 @@ ground_coverage(const Section &section,
     y0 = static_cast<std::uint16_t>(y0 + dy_y);
   }
   return result;
+}
+std::vector<std::uint8_t>
+ground_coverage(const Section &section,
+                const std::array<ProjectedCorner, 4> &corners,
+                ProjectedCorner center) {
+  return ground_coverage_impl(section, corners, center, {}, 0, 0);
 }
 static std::vector<std::uint8_t>
 raster_section_impl(const Section &section, const std::array<float, 12> &matrix,
@@ -484,6 +498,141 @@ raster_section_impl(const Section &section, const std::array<float, 12> &matrix,
   }
   return result;
 }
+DepthRaster
+raster_section_depth(const Section &section,
+                     const std::array<float, 12> &matrix,
+                     const Lighting *lighting,
+                     const std::array<std::uint8_t, 256> *normal_light) {
+  if ((lighting == nullptr) != (normal_light == nullptr) || !section.x ||
+      !section.y || !section.z)
+    throw std::runtime_error("invalid depth raster input");
+  std::array<std::array<float, 3>, 8> corners{};
+  for (unsigned i = 0; i < 8; ++i) {
+    float x = (i == 0 || i == 1 || i == 4 || i == 5) ? section.max[0]
+                                                     : section.min[0];
+    float y = (i == 0 || i == 3 || i == 4 || i == 7) ? section.max[1]
+                                                     : section.min[1];
+    float z = i < 4 ? section.min[2] : section.max[2];
+    for (unsigned row = 0; row < 3; ++row) {
+      corners[i][row] = matrix[row * 4] * x + matrix[row * 4 + 1] * y +
+                        matrix[row * 4 + 2] * z + matrix[row * 4 + 3];
+      if (!std::isfinite(corners[i][row]) || std::abs(corners[i][row]) > 100000)
+        throw std::runtime_error("invalid depth raster matrix");
+    }
+    corners[i][1] = -corners[i][1];
+  }
+  std::array<float, 3> center{};
+  unsigned nearest = 0;
+  for (unsigned axis = 0; axis < 3; ++axis) {
+    float lo = corners[0][axis], hi = lo;
+    for (auto &corner : corners) {
+      lo = std::min(lo, corner[axis]);
+      hi = std::max(hi, corner[axis]);
+    }
+    center[axis] = (lo + hi) * 0.5f;
+  }
+  for (unsigned i = 1; i < 8; ++i)
+    if (corners[i][2] < corners[nearest][2])
+      nearest = i;
+  static constexpr int order[8][6] = {{0, 3, 1, 4, 1, 1}, {1, 2, 0, 5, 1, 0},
+                                      {2, 1, 3, 6, 0, 0}, {3, 0, 2, 7, 0, 1},
+                                      {4, 7, 5, 0, 1, 1}, {5, 6, 4, 1, 1, 0},
+                                      {6, 5, 7, 2, 0, 0}, {7, 4, 6, 3, 0, 1}};
+  static constexpr int step_x[4] = {-1, -1, 1, 1}, step_y[4] = {-1, 1, 1, -1};
+  const auto &v = order[nearest];
+  auto fixed = [](double n) {
+    return std::uint16_t(std::int64_t(std::trunc(n * 256)));
+  };
+  std::array<std::uint16_t, 3> position{}, dx{}, dy{}, dz{};
+  for (unsigned axis = 0; axis < 3; ++axis) {
+    position[axis] = fixed(double(corners[v[0]][axis]) + 128 - center[axis]);
+    dx[axis] =
+        fixed((double(corners[v[1]][axis]) - corners[v[0]][axis]) / section.x);
+    dy[axis] =
+        fixed((double(corners[v[2]][axis]) - corners[v[0]][axis]) / section.y);
+    dz[axis] =
+        fixed((double(corners[v[3]][axis]) - corners[v[0]][axis]) / section.z);
+  }
+  std::vector<std::vector<Point>> columns(std::size_t(section.x) * section.y);
+  for (auto point : section.points) {
+    if (point.x >= section.x || point.y >= section.y || point.z >= section.z)
+      throw std::runtime_error("invalid voxel point");
+    columns[std::size_t(point.y) * section.x + point.x].push_back(point);
+  }
+  DepthRaster result{
+      std::vector<std::uint8_t>(65536), std::vector<std::uint8_t>(65536),
+      int(std::trunc(center[0])) - 128, int(std::trunc(center[1])) - 128};
+  int start_x = v[4] ? section.x - 1 : 0, start_y = v[5] ? section.y - 1 : 0;
+  for (unsigned y = 0; y < section.y; ++y) {
+    auto cursor = position;
+    for (unsigned x = 0; x < section.x; ++x) {
+      auto &points =
+          columns[std::size_t(start_y + int(y) * step_y[nearest % 4]) *
+                      section.x +
+                  start_x + int(x) * step_x[nearest % 4]];
+      if (nearest >= 4)
+        std::reverse(points.begin(), points.end());
+      auto p = cursor;
+      unsigned height = 0;
+      for (auto point : points) {
+        if (nearest >= 4)
+          point.z = section.z - 1 - point.z;
+        if (point.z < height)
+          throw std::runtime_error("unsorted voxel points");
+        unsigned skip = point.z - height;
+        for (unsigned axis = 0; axis < 3; ++axis)
+          p[axis] = std::uint16_t(p[axis] + dz[axis] * skip);
+        auto offset = std::size_t(p[1] >> 8) * 256 + (p[0] >> 8);
+        auto depth = std::uint8_t(p[2] >> 8);
+        if (depth > result.depths[offset]) {
+          auto color = point.color;
+          if (lighting) {
+            unsigned level = (*normal_light)[point.normal];
+            if (level >= lighting->tables.size())
+              throw std::runtime_error("light level outside VPL tables");
+            color = lighting->tables[level][color];
+          }
+          result.pixels[offset] = color;
+          result.depths[offset] = depth;
+          if (offset + 1 < result.pixels.size()) {
+            result.pixels[offset + 1] = color;
+            result.depths[offset + 1] = depth;
+          }
+        }
+        for (unsigned axis = 0; axis < 3; ++axis)
+          p[axis] = std::uint16_t(p[axis] + dz[axis]);
+        height = unsigned(point.z) + 1;
+      }
+      for (unsigned axis = 0; axis < 3; ++axis)
+        cursor[axis] = std::uint16_t(cursor[axis] + dx[axis]);
+    }
+    for (unsigned axis = 0; axis < 3; ++axis)
+      position[axis] = std::uint16_t(position[axis] + dy[axis]);
+  }
+  return result;
+}
+
+ShadowMask base_shadow_section(const Section &section,
+                               const std::array<float, 12> &section_matrix,
+                               const ShadowOcclusion &occluded, int surface_x,
+                               int surface_y) {
+  auto corners = project_ground_corners(
+      section, section_matrix, base_game_camera(), {2.9999964237213135f, 0, 0});
+  ProjectedCorner minimum = corners[0], maximum = corners[0];
+  for (const auto &corner : corners)
+    for (unsigned axis = 0; axis < 2; ++axis) {
+      minimum[axis] = std::min(minimum[axis], corner[axis]);
+      maximum[axis] = std::max(maximum[axis], corner[axis]);
+    }
+  if (maximum[0] - minimum[0] > 254 || maximum[1] - minimum[1] > 254)
+    throw std::runtime_error("shadow exceeds voxel surface");
+  ProjectedCorner center{(minimum[0] + maximum[0]) * 0.5f,
+                         (minimum[1] + maximum[1]) * 0.5f};
+  return {int(std::trunc(center[0])) - 128, int(std::trunc(center[1])) - 128,
+          ground_coverage_impl(section, corners, center, occluded, surface_x,
+                               surface_y)};
+}
+
 std::vector<std::uint8_t>
 raster_section(const Section &section, const std::array<float, 12> &matrix,
                const Lighting *lighting,

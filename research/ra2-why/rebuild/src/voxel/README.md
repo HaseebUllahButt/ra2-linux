@@ -29,3 +29,15 @@ The base-game tests cover camera values, all 32 facing and tilt values, turret/b
 VXL layout follows the original loader at `0x755DB0`. HVA loading follows `0x5BD5C0`, and `0x5BD730` scales its translation components. VPL loading follows `0x758A30`. Lighting preserves the original normal vector tables and VPL reserved color range. The loader retains shipped VPL bytes. `make_default_lighting()` can differ by one byte at `-O1` due to a floating-point tie; the documented `-O2` build matches all 8,160 tested nonzero-index bytes.
 
 `raster_section()` implements non-depth indexed section drawing. `raster_rgba()` applies the palette. `ground_coverage()` implements the unoccluded ground-column mask; it clips a second write at the end of the surface. `draw_scene()` accepts explicit part matrices. Multi-part alignment in `draw_scene()` remains unverified; use `draw_vehicle()` for the tested flat vehicle path. The older `draw()` remains experimental.
+
+`base_shadow_section()` returns a 256 by 256 shadow mask and its screen-relative origin. Supply the section matrix before the camera transform. The function applies the base-game camera and original shadow offset. Its optional callback returns true when a surface pixel blocks the shadow. `surface_x` and `surface_y` are the original caller's surface offsets before the projected center is added. The callback coordinates and per-pixel mask match the original base-game surface checks in `0x719C10` for the tested cases. Map-wide terrain surface construction remains open.
+
+`raster_section_depth()` returns indexed color and depth planes and their screen-relative origin. Both planes are 256 by 256. It implements the base-game depth-enabled section raster, including its strict depth comparison and two-pixel writes. These depth bytes are relative to the section raster. Their conversion to the terrain's map-wide depth surface remains open. The function does not accept a pre-existing terrain depth plane.
+
+Run the full original x86 sweep with Unicorn and the compiled test executable:
+
+```
+python3 rebuild/src/voxel/verify_sweep_x86.py /tmp/voxel_test
+```
+
+It checks 32 flat vehicle facings for HTNK, MTNK, and 4TNK. It checks HTNK again with a turret offset of 16. Each vehicle comparison uses the original light and compares all visible pixels and positions. It also checks unoccluded and surface-occluded ground masks at 32 facings for each hull, plus eight depth views for each hull. The shadow sweep tests each first VXL section with its facing matrix; it does not apply its HVA animation. The vehicle sweep applies each shipped HVA matrix and its translation scale.

@@ -23,6 +23,83 @@ int main(int argc, char **argv) {
                       asset.size());
       return std::cout ? 0 : 1;
     }
+    if (argc == 4 && std::string(argv[1]) == "--depth-case") {
+      int direction = std::stoi(argv[3]);
+      if (direction < 0 || direction > 7)
+        throw std::runtime_error("invalid depth direction");
+      auto model = read_vxl(get((std::string(argv[2]) + ".vxl").c_str()));
+      auto lighting = read_vpl(get("voxels.vpl"));
+      std::array<std::uint8_t, 256> levels{};
+      for (unsigned i = 0; i < 256; ++i)
+        levels[i] = i % 32;
+      Matrix matrix = {1,
+                       -1,
+                       0,
+                       0,
+                       .5f,
+                       .5f,
+                       1,
+                       0,
+                       direction & 1 ? -.2f : .2f,
+                       direction & 2 ? -.3f : .3f,
+                       direction & 4 ? -1.f : 1.f,
+                       0};
+      auto raster = raster_section_depth(model.sections.at(0), matrix,
+                                         &lighting, &levels);
+      std::int32_t origin[] = {raster.left, raster.top};
+      std::cout.write(reinterpret_cast<const char *>(origin), sizeof origin);
+      std::cout.write(reinterpret_cast<const char *>(raster.pixels.data()),
+                      raster.pixels.size());
+      std::cout.write(reinterpret_cast<const char *>(raster.depths.data()),
+                      raster.depths.size());
+      return std::cout ? 0 : 1;
+    }
+    if (argc == 4 && (std::string(argv[1]) == "--shadow-case" ||
+                      std::string(argv[1]) == "--shadow-blocked")) {
+      int facing = std::stoi(argv[3]);
+      if (facing < 0 || facing > 255)
+        throw std::runtime_error("invalid map facing");
+      auto model = read_vxl(get((std::string(argv[2]) + ".vxl").c_str()));
+      ShadowOcclusion blocked;
+      if (std::string(argv[1]) == "--shadow-blocked")
+        blocked = [](int x, int y) { return (x + y) % 3 == 0; };
+      auto shadow = base_shadow_section(
+          model.sections.at(0),
+          base_facing_transform(std::uint16_t(facing) << 8, 0), blocked, 1000,
+          2000);
+      std::int32_t origin[] = {shadow.left, shadow.top};
+      std::cout.write(reinterpret_cast<const char *>(origin), sizeof origin);
+      std::cout.write(reinterpret_cast<const char *>(shadow.pixels.data()),
+                      shadow.pixels.size());
+      return std::cout ? 0 : 1;
+    }
+    if (argc == 5 && std::string(argv[1]) == "--vehicle-case") {
+      std::string name(argv[2]);
+      int facing = std::stoi(argv[3]), offset = std::stoi(argv[4]);
+      if (facing < 0 || facing > 255)
+        throw std::runtime_error("invalid map facing");
+      auto hull = read_vxl(get((name + ".vxl").c_str()));
+      auto hull_hva = read_hva(get((name + ".hva").c_str()));
+      auto turret = read_vxl(get((name + "tur.vxl").c_str()));
+      auto turret_hva = read_hva(get((name + "tur.hva").c_str()));
+      auto barrel = read_vxl(get((name + "barl.vxl").c_str()));
+      auto barrel_hva = read_hva(get((name + "barl.hva").c_str()));
+      auto lighting = read_vpl(get("voxels.vpl"));
+      auto input = vehicle_pose_from_map(static_cast<std::uint8_t>(facing));
+      input.turret_offset = offset;
+      input.hull = {&hull, &hull_hva};
+      input.turret = {&turret, &turret_hva};
+      input.barrel = {&barrel, &barrel_hva};
+      auto output = draw_vehicle(input, lighting);
+      std::int32_t origin[] = {output.left, output.top};
+      std::cout.write(reinterpret_cast<const char *>(origin), sizeof origin);
+      for (auto pixel : output.image.pixels) {
+        char rgba[] = {char(pixel.r), char(pixel.g), char(pixel.b),
+                       char(pixel.a)};
+        std::cout.write(rgba, sizeof rgba);
+      }
+      return std::cout ? 0 : 1;
+    }
     if (argc == 2 && (std::string(argv[1]) == "--vehicle" ||
                       std::string(argv[1]) == "--vehicle-hull" ||
                       std::string(argv[1]) == "--vehicle-zero")) {
