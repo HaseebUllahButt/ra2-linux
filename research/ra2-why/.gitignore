@@ -10,3 +10,5 @@ analysis/extracted/ini/
 analysis/gamemd.snap
 __pycache__/
 *.log
+
+rebuild/hook/winmm.dll

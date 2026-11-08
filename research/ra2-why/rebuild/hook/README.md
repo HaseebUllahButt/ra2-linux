@@ -23,3 +23,12 @@ Files:
 - dll_main.cpp - DllMain + install sequence (Windows only).
 - exports.def - winmm export forwards to the real DLL.
 - test_trampoline.cpp - Linux unit test for the patcher.
+
+Build (works on this ARM64 Linux box, no root privileges):
+  sh scripts/build-hook-dll.sh
+The compiler is a private mingw-w64 tree at ~/mingw-root, unpacked
+from Ubuntu .debs (binutils, gcc/g++ i686 posix+win32, mingw-w64
+common+dev). The gcc stdint.h wrappers were patched to point at the
+mingw headers by absolute path (include_next breaks in a relocated
+tree). winmm.dll is a PE32 DLL; its exports forward to
+winmm_real.dll - install = copy both into the game folder.
