@@ -83,6 +83,8 @@ base game. It builds the full cell grid and runs the recovered first terrain
 pass before checking every cell. The boundary comparison tests the adapter;
 `--cases` emits the resolved cells for `original_geometry_check.py`. Both
 original executables match all 15,525 real first-pass cell checks.
+Run `test_real_terrain.sh GAME_DIRECTORY --original` for both comparisons.
+The optional original checks require Python Unicorn.
 
 `original_geometry_check.py` runs original map clipping and map boundary
 instructions for 8,712 cases per edition. Build `geometry_cases.cpp` with
