@@ -36,15 +36,15 @@ unit count. Unknown required inputs and arithmetic overflow return no result.
 `choose_starting_unit` selects one entry from already filtered vehicle and
 infantry lists. It uses the shared RNG and rejects an empty required list.
 
-This is not a complete skirmish session. House creation, final cash, additional
-the complete unit generation loop, actual map and unit placement checks,
-observers, random waypoint fallback, and RNG state
-handoff to `Simulation` are not implemented. Start must remain disabled.
+This is not a complete skirmish session. House creation, final cash, the complete
+unit generation loop, map and unit placement checks, observers, and waypoint
+fallback remain incomplete. Start must remain disabled.
+`Simulation.load_random_state` can restore setup RNG state before ticks or queued
+commands. The complete session setup must supply that state.
 
-For this helper checkout, build the test against the parent simulation headers:
+Run the native checks from the project root:
 
-    c++ -std=c++17 -O0 -Wall -Wextra -Werror -I /path/to/user/ra2/rebuild/src/app rebuild/src/session/{session,test_main}.cpp /path/to/user/ra2/rebuild/src/sim/{random,distance}.cpp /path/to/user/ra2/rebuild/src/rules/ini_file.cpp rebuild/src/fs/{filename_hash,mix_archive,mix_bootstrap}.cpp -o /tmp/session_test
-    /tmp/session_test /path/to/user/ra2/game
+    make -C rebuild session
 
 The test reads the real MP02T2 map from MULTI.MIX and both original executable
 distance tables. It does not write game assets.

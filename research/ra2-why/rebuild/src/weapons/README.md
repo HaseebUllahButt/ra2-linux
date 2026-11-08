@@ -1,24 +1,14 @@
 # Base tank weapon primitives
 
-The API is in `weapons.h`. Build from the parent checkout root after its `sim/`
-files are present:
+The API is in `weapons.h`. Run the native checks from the project root:
 
-```
-g++ -std=c++17 -O2 -Wall -Wextra -Werror -I rebuild/src \
-  rebuild/src/weapons/{weapons,test_main}.cpp \
-  rebuild/src/sim/{combat,target,distance}.cpp -o /tmp/ra2_weapons_test
-/tmp/ra2_weapons_test
-python3 rebuild/src/weapons/verify_base_x86.py /tmp/ra2_weapons_test
-
-g++ -std=c++17 -O2 -Wall -Wextra -Werror -I rebuild/src \
-  rebuild/src/weapons/asset_test.cpp \
-  rebuild/src/fs/{mix_bootstrap,mix_archive,filename_hash}.cpp \
-  rebuild/src/rules/ini_file.cpp -o /tmp/ra2_weapons_assets
-/tmp/ra2_weapons_assets
+```sh
+make -C rebuild weapons
+python3 rebuild/src/weapons/verify_base_x86.py rebuild/build/weapons_test
 ```
 
-The x86 test needs Unicorn and `/path/to/user/ra2/game/game.exe`. Asset tests use
-`/path/to/user/ra2/game`. No image or screenshot is produced.
+The optional x86 check needs Python Unicorn and the owned base executable at
+`game/game.exe`. The asset check reads the base archives. No image is produced.
 
 `assess_target_for_scan()` calls the simulation's original target-scan prefix.
 A continuing prefix does not approve firing. `base_resolved_tank_fire()` emits

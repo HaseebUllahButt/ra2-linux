@@ -3,10 +3,11 @@
 #include <stdexcept>
 #include <string_view>
 #include <iostream>
-int main() {
+int main(int argc, char** argv) {
   try {
-    ra2::fs::MixFileSystem files("/path/to/user/ra2/game");
-    files.bootstrap();
+    if (argc != 2) throw std::runtime_error("Usage: weapons_asset_test <game-dir>");
+    ra2::fs::MixFileSystem files(argv[1]);
+    files.bootstrap(ra2::fs::GameVariant::RedAlert2);
     files.mount("conquer.mix", false);
     auto bytes = files.read_file("rules.ini");
     if (!bytes) throw std::runtime_error("missing base rules.ini");

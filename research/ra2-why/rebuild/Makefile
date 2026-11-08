@@ -10,7 +10,7 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/render/tmp_decode.cpp src/render/minimap.cpp src/loop/game_loop.cpp \
     src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp src/fs/filename_hash.cpp \
     src/gfx/palette.cpp src/gfx/shp_decode.cpp src/actors/actors.cpp \
-    src/session/session.cpp \
+    src/session/session.cpp src/weapons/weapons.cpp \
     src/ui/ui.cpp src/ui/shell.cpp src/ui/skirmish.cpp src/text/csf.cpp \
     src/pack/map_pack.cpp src/rules/ini_file.cpp src/map/map_file.cpp \
     src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
@@ -20,7 +20,7 @@ NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
 
 build/native/%.o: %.cpp
 	mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(shell pkg-config --cflags sdl2) -MMD -MP -c $< -o $@
+	$(CXX) $(CXXFLAGS) -I src $(shell pkg-config --cflags sdl2) -MMD -MP -c $< -o $@
 
 # Include dependencies for test objects as well as the native client.
 -include $(wildcard build/native/src/*/*.d)
@@ -36,7 +36,7 @@ GFX_OBJECTS = build/native/src/gfx/palette.o build/native/src/gfx/shp_decode.o
 SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS))
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 
-native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-replacement sim-world sim-build-time session
+native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-replacement sim-world sim-build-time session weapons
 	build/ra2-native --game-dir ../game --frames 3 --headless
 	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
@@ -138,6 +138,26 @@ build/session_base_unit_cases: build/native/src/session/session.o build/native/s
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/session_house_cases: build/native/src/session/session.o build/native/src/session/house_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/session_budget_cases: build/native/src/session/session.o build/native/src/session/budget_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/session_placement_cases: build/native/src/session/session.o build/native/src/session/placement_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/session_unit_choice_cases: build/native/src/session/session.o build/native/src/session/unit_choice_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+.PHONY: weapons
+weapons: build/weapons_test build/weapons_asset_test
+	build/weapons_test
+	build/weapons_asset_test ../game
+
+build/weapons_test: build/native/src/weapons/weapons.o build/native/src/weapons/test_main.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/weapons_asset_test: build/native/src/weapons/asset_test.o $(FS_OBJECTS) build/native/src/rules/ini_file.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 scene: build/scene_test
