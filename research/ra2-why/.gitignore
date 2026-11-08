@@ -1,0 +1,12 @@
+# Game files and builds stay out of version control.
+game/
+openra/
+*.zip
+analysis/ghdump.rep
+analysis/ghdump.gpr
+analysis/ghidra-proj/
+analysis/extracted/unnamed/
+analysis/extracted/ini/
+analysis/gamemd.snap
+__pycache__/
+*.log
