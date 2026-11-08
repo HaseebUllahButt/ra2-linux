@@ -65,8 +65,10 @@ Result Simulation::start_move(const Command& c) {
     if (source==terrain_index_.end() || destination==terrain_index_.end()) return unsupported("Move cell terrain is missing");
     const auto& from=terrain_[source->second]; const auto& to=terrain_[destination->second];
     for (const auto* cell:{&from,&to}) {
-        if (!cell->land_type || *cell->land_type!=1 || !cell->ramp_index || *cell->ramp_index || !cell->bridge || *cell->bridge || !cell->overlay_type_index || *cell->overlay_type_index!=-1 || !cell->floor_world_height)
-            return unsupported("Move currently supports resolved road flat cells without overlays or bridges");
+        if (!cell->land_type || (*cell->land_type!=0 && *cell->land_type!=1) || !cell->ramp_index || *cell->ramp_index || !cell->bridge || *cell->bridge || !cell->overlay_type_index || *cell->overlay_type_index!=-1 || !cell->floor_world_height)
+            return unsupported("Move currently supports resolved clear or road flat cells without overlays or bridges");
+        if (*cell->land_type==0 && !cell->tile_replacement_resolved)
+            return unsupported("clear-cell Move needs original ordered tile setup through TheaterInputs");
         const auto& land_rules=*cell->land_type==0?clear_fields_:road_fields_;
         for (const auto* category:{"Foot","Track","Wheel"}) {
             const auto multiplier=Ini::double_value(field(land_rules,category));

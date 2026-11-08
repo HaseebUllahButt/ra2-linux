@@ -219,6 +219,9 @@ int main(int argc,char** argv) try {
     const auto location=located.snapshot().entities[vehicle-1].position;
     check(location && location->x==first.cell.x*256+128 && location->y==first.cell.y*256+128 && location->z==0,"world input resolves original unit center");
     check(!a.snapshot().entities[vehicle-1].position,"unknown floor leaves world position explicit");
+    TerrainCell structure_floor=known_floor; structure_floor.cell=snap.entities.front().cell;
+    Simulation other_placement(rules,map,1,TerrainCells{structure_floor});
+    check(snap.entities.front().kind==Kind::Structure && !other_placement.snapshot().entities.front().position,"unrecovered building placement does not become a guessed center");
     const auto distance_table=OriginalDistance::from_executable(root+"/../../game/game.exe");
     check(distance_table.square_root(0)==0,"original zero distance");
     check(distance_table.between({0,0,0},{3,4,0})==5,"original table distance");

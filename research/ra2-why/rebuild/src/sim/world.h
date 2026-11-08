@@ -11,6 +11,7 @@ namespace ra2::sim {
 struct TerrainCell {
     ra2map::Cell cell;
     std::uint32_t tile_index=0; // Raw packed-map index.
+    bool tile_replacement_resolved=false; // Set by the original ordered setup pass.
     std::optional<std::uint32_t> resolved_tile_index; // Live Cell +38; keep the 0xFFFF sentinel.
     std::uint8_t subtile=0;
     std::optional<std::uint8_t> tmp_terrain; // Raw TMP byte, not final Cell LandType.

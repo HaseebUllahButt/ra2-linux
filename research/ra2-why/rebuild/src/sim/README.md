@@ -306,7 +306,8 @@ The optional fourth `Simulation` constructor argument accepts `TerrainCells` fro
 Inputs are copied, and duplicate cell coordinates fail explicitly.
 The raw TMP terrain byte and the final cell LandType are separate fields.
 The decoder may leave final LandType empty until overlay and object changes are known.
-A known floor height makes `Entity.position` available in original world units.
+A known floor height makes supported ground vehicle positions available in original world units.
+Infantry subcell placement, building placement, aircraft placement, and bridge placement remain optional unknown positions.
 Unknown floor height leaves that optional position empty.
 
 `floor.h` exposes the original floor formula for signed height levels and all 20 ramp indices.
@@ -342,7 +343,7 @@ Its initial mission must be Guard or Area Guard. Its map tag must be None.
 Groups, follow links, bridges, naval movement, and retained unknown fields return explicit errors.
 The goal must be one adjacent cell in the vehicle's current eight-way direction.
 Both cells must have resolved flat floors at the same height, road land, and no overlay or terrain object.
-Clear-cell Move returns Unsupported until tile replacement at 0047CA80 is recovered.
+Clear-cell Move requires ordered tile initialization through the optional TheaterInputs constructor argument.
 Foot, Track, and Wheel multipliers must all be one on those cells.
 This avoids guessing the unresolved default SpeedType while preserving these equal original rates.
 The original country SpeedUnitsMult applies. Its constructor default is float one at 005113F0.
@@ -395,8 +396,9 @@ The six height tests use their exact original offsets and order.
 CliffBackImpassability=2 changes eligible land types to rock when a tested neighbor is four levels higher.
 Missing required neighbor heights leave the final land unresolved.
 Overlay cells remain unresolved until their original overlay decisions are recovered.
-Ordinary flat clear or road cells without overlays cannot create the land-10 bridge object.
-Those supported cells therefore receive the original false bridge state.
+Cell construction clears the bridge bit. The supported non-overlay clear/road slice keeps it clear.
+LandType 10 is Tunnel. 00727FD0 creates tube links and writes Cell +116.
+Bridge overlay initialization is separate and remains unrecovered.
 
 `original_land_check.py executable [--base]` checks 4,096 original branch cases in each edition.
 Both produce hash BC614341. The native tests compare the same grid.
@@ -416,4 +418,44 @@ Run `test_replacement.sh` for 19,084 native decisions.
 All three produce hash 60DC1EC1.
 The grid covers all four terrain borders, extra connected groups, and all 20 ramp indexes.
 These numeric indexes are isolated test inputs. They do not assign gameplay values to original maps.
-Map-wide integration still needs the original cell order and both scenario initialization passes.
+Map-wide integration now follows the original cell order and both scenario initialization passes.
+
+## Ordered map initialization
+
+The optional fifth constructor argument is `const TheaterInputs* theater=nullptr`.
+Pass the original theater settings, live TileSet ranges, and static metadata callback.
+The callback reports modulo getter values and the separate raw subtile validity flag.
+The simulation uses it during construction and does not retain it.
+
+`world_init.h` ports the original map cell iterator and the supported Cell setup slice.
+Base 0055A550/0055A490 and expansion 00578350/00578290 use diagonal cell order.
+This differs from packed record order.
+The first pass starts with constructor ramp values of zero.
+It recomputes floor height before loading ground vehicle positions.
+The second pass runs after map objects, matching 00686B20 and 00568BB0.
+The simulation performs exactly two passes. It does not iterate until tile choices stop changing.
+
+Cell setup retains the old TileType receiver after a tile index changes.
+The new tile supplies terrain on the next pass.
+Invalid non-overlay subtiles become clear cells with index 0xFFFF and subtile zero.
+An existing 0xFFFF sentinel preserves its authored subtile and skips metadata lookup.
+Out-of-range positive live indexes become 0xFFFF.
+Missing static metadata and unsupported overlay-specific invalid subtiles produce explicit errors.
+
+`TerrainCell.tile_index` keeps the original packed value.
+`resolved_tile_index` keeps the live value after translation and replacement.
+`tile_replacement_resolved` marks cells processed by the original ordered setup.
+Clear-cell Move requires this flag. Road Move keeps its earlier supported input path.
+`terrain()` returns the final read-only cells for the native renderer.
+The renderer must not translate resolved indexes again.
+
+`original_cell_order_check.py executable [--base]` checks five iterator sizes, including three real map sizes.
+`original_world_check.py executable [--base]` executes the original Cell bodies and metadata getters across two passes.
+It checks six complete snapshots with resolved non-overlay test data.
+These include ramp neighbors, changed terrain, cliff height, invalid indexes, invalid subtiles, and sentinels.
+`test_world_init.sh` compares the native iterator and all six snapshots.
+Both original editions agree with the native output.
+
+Overlay land decisions, bridge/tube objects, map animations, shadow objects, and the passability cache remain gaps.
+Relevant original functions include 0047E040/0047E470, 00727FD0, 00421EA0, 00547370, and 00483C80.
+The Cell index, ramp, floor, and supported non-overlay land decisions do not replace those effects.

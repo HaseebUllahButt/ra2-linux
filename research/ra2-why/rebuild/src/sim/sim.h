@@ -59,7 +59,7 @@ struct Entity {
     std::int32_t facing=0, subcell=0, map_health=0;
     // Unit health scaling recovered from original instructions at 007435DA.
     std::optional<std::int32_t> hp;
-    std::optional<Coord> position; // World coordinates are known only with a resolved floor height.
+    std::optional<Coord> position; // Supported ground vehicle center; other placement and bridge states stay unknown.
     bool dead=false;
 };
 enum class Op { TakeCash, ResolvedDamage, RandomRange, Move, Attack, Produce, Stop };
@@ -94,7 +94,7 @@ struct Capability { std::string name; bool supported; std::string detail; };
 class Simulation {
 public:
     // Map INI overlays the base rules. All input objects are copied.
-    Simulation(const Ini& rules, const Ini& map, std::uint32_t seed,const TerrainCells& terrain={});
+    Simulation(const Ini& rules, const Ini& map, std::uint32_t seed,const TerrainCells& terrain={},const TheaterInputs* theater=nullptr);
     Result issue(const Command&); // Only accepted commands receive a ticket.
     void tick(); // Advance active movement, execute due commands in issue order, then increment frame.
     Snapshot snapshot() const;

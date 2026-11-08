@@ -1,4 +1,5 @@
 #include "sim.h"
+#include "world_init.h"
 #include <algorithm>
 #include <limits>
 #include <sstream>
@@ -34,7 +35,7 @@ bool equal_ascii_case(const std::string& a,const std::string& b) {
     return true;
 }
 }
-Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed,const TerrainCells& terrain):random_(seed),terrain_(terrain) {
+Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed,const TerrainCells& terrain,const TheaterInputs* theater):random_(seed),terrain_(terrain) {
     for (std::size_t i=0;i<terrain_.size();++i) {
         const auto cell=terrain_[i].cell;
         const auto key=static_cast<std::uint32_t>(cell.x)|(static_cast<std::uint32_t>(cell.y)<<16);
@@ -43,7 +44,16 @@ Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed,const T
     // Rules constructor 00665650 gives CliffBackImpassability an initial byte value of zero.
     const auto general_fields=fields(base,map,"General");
     const auto cliff=static_cast<std::uint8_t>(number(general_fields,"CliffBackImpassability").value_or(0));
-    resolve_overlay_free_terrain(terrain_,cliff);
+    int map_width=0,map_height=0;
+    if (theater) {
+        const auto size=map.read_list("Map","Size");
+        if (size.size()!=4) throw std::invalid_argument("original ordered tile setup needs Map.Size");
+        const auto width=Ini::integer_value(size[2]),height=Ini::integer_value(size[3]);
+        if (!width || !height) throw std::invalid_argument("invalid original Map.Size dimensions");
+        map_width=*width; map_height=*height;
+        // 00686B20 runs Cell setup before loading objects. Recompute floor heights now.
+        initialize_original_tile_pass(terrain_,*theater,map_width,map_height,cliff,true);
+    } else resolve_overlay_free_terrain(terrain_,cliff);
     const auto iq_fields=fields(base,map,"IQ");
     guard_area_iq_=number(iq_fields,"GuardArea").value_or(4); // 00665650 constructor, 00674240 reader.
     const auto max_iq=number(iq_fields,"MaxIQLevels").value_or(5);
@@ -127,7 +137,9 @@ Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed,const T
             }
             const auto key=static_cast<std::uint32_t>(e.cell.x)|(static_cast<std::uint32_t>(e.cell.y)<<16);
             const auto floor=terrain_index_.find(key);
-            if (floor!=terrain_index_.end() && terrain_[floor->second].floor_world_height) {
+            // 0051FB00 adds infantry subcell offsets. Other categories have separate placement handlers.
+            // Expose only the ground vehicle center recovered by 00743270 in this map state.
+            if (kind==Kind::Unit && e.map_above_bridge && !*e.map_above_bridge && floor!=terrain_index_.end() && terrain_[floor->second].floor_world_height) {
                 e.position=Coord{e.cell.x*256+128,e.cell.y*256+128,*terrain_[floor->second].floor_world_height};
             }
             if (std::none_of(state_.houses.begin(),state_.houses.end(),[&](const House& h){return h.name==e.house;}))
@@ -151,6 +163,11 @@ Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed,const T
     append(parsed.units(),Kind::Unit);
     append(parsed.infantry(),Kind::Infantry);
     append(parsed.aircraft(),Kind::Aircraft);
+    if (theater) {
+        // 00686B20 later calls 00568BB0, which runs a second setup pass after object loading.
+        initialize_original_tile_pass(terrain_,*theater,map_width,map_height,cliff,false);
+        state_.gaps.push_back("Ordered tile setup excludes overlay land decisions, bridge/tube objects, animations, shadows, and passability cache effects");
+    }
     state_.gaps.push_back("Map missions are loaded, not executed; autonomous object updates are unsupported");
 }
 Result Simulation::issue(const Command& c) {
@@ -224,7 +241,7 @@ std::vector<Capability> Simulation::capabilities() {
         {"ground_primitives",true,"ground.h: guarded destination setter and original curve transforms; no map movement tick"},
         {"damage_primitives",true,"combat.h: 00489180 armor/range arithmetic in explicit precision domain"},
         {"target_primitives",true,"combat.h: resolved candidate maximum and original threat category flags"},
-        {"movement",true,"One aligned adjacent flat drive segment; road terrain, original assets, and resolved inputs required"},
+        {"movement",true,"One aligned adjacent flat drive segment; road or initialized clear terrain; original assets and resolved inputs required"},
         {"target_selection",false,"Threat arithmetic recovered; full 006F7CA0 eligibility and bounded scans remain incomplete"},
         {"combat",false,"Armor/range arithmetic recovered; projectile and derived damage handlers remain incomplete"},
         {"production",false,"Cash-only Factory primitive available; 006F47A0 complete formula and placement unresolved"}

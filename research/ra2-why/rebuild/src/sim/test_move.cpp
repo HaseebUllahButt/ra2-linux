@@ -12,7 +12,7 @@ void require(bool value,const std::string& message) { if (!value) throw std::run
 TerrainCells terrain_inputs(const std::vector<OriginalTestCell>& inputs) {
     TerrainCells cells;
     for (const auto& input:inputs) {
-        TerrainCell cell; cell.cell={input.x,input.y}; cell.tile_index=input.tile; cell.subtile=input.subtile;
+        TerrainCell cell; cell.cell={input.x,input.y}; cell.tile_index=input.tile; cell.resolved_tile_index=input.resolved; cell.subtile=input.subtile;
         cell.tmp_terrain=input.raw; cell.ramp_index=input.ramp;
         const int level=input.height<128?int(input.height):int(input.height)-256;
         cell.height_level=level;
@@ -39,18 +39,26 @@ int main(int argc,char** argv) try {
     const std::string executable=std::string(argv[1])+(base?"/game.exe":"/gamemd.exe");
     auto map=Ini::from_file(root+"/maps/C1A02MD.MAP");
     auto terrain=terrain_inputs(original_test_cells(argv[1],root+"/maps/C1A02MD.MAP",base));
-    Simulation a(rules,map,9,terrain); a.load_ground_assets(executable,art);
+    const auto source_catalog=original_test_catalog(argv[1],root+"/maps/C1A02MD.MAP",base);
+    TheaterInputs theater; theater.theater_name=source_catalog.name; theater.settings.parse(source_catalog.settings);
+    for (const auto& range:source_catalog.ranges) theater.tile_sets.push_back({range.first,range.count});
+    theater.resolved_metadata=[&source_catalog](std::uint32_t index,std::uint8_t subtile)->std::optional<TileMetadata> {
+        const auto metadata=source_catalog.metadata(index,subtile);
+        if (!metadata) return {};
+        return TileMetadata{metadata->terrain,metadata->ramp,metadata->valid};
+    };
+    Simulation a(rules,map,9,terrain,&theater); a.load_ground_assets(executable,art);
     constexpr int directions[][2]={{0,-1},{1,-1},{1,0},{1,1},{0,1},{-1,1},{-1,0},{-1,-1}};
     const auto initial=a.snapshot();
     for (const auto& e:initial.entities) if (e.kind==Kind::Unit && e.facing>=0 && e.facing<256 && e.facing%32==0) {
-        Simulation first(rules,map,9,terrain); first.load_ground_assets(executable,art);
+        Simulation first(rules,map,9,terrain,&theater); first.load_ground_assets(executable,art);
         Command move; move.op=Op::Move; move.entity=e.id;
         const unsigned direction=static_cast<unsigned>(e.facing)/32;
         move.destination={static_cast<std::uint16_t>(e.cell.x+directions[direction][0]),static_cast<std::uint16_t>(e.cell.y+directions[direction][1])};
         require(first.issue(move).error==Error::None,"Move did not queue"); first.tick();
         const auto result=first.snapshot().results.at(0);
         if (result.error!=Error::None) { std::cout<<e.id<<" "<<e.type<<" "<<e.cell.x<<","<<e.cell.y<<" rejected: "<<result.detail<<"\n"; continue; }
-        Simulation replay(rules,map,9,terrain); replay.load_ground_assets(executable,art);
+        Simulation replay(rules,map,9,terrain,&theater); replay.load_ground_assets(executable,art);
         require(replay.issue(move).error==Error::None,"replay did not queue"); replay.tick();
         require(trace(first.snapshot(),e.id)==trace(replay.snapshot(),e.id),"dispatch replay mismatch");
         const auto goal=Coord{move.destination.x*256+128,move.destination.y*256+128,e.position->z};
