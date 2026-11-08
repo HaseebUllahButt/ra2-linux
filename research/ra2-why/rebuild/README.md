@@ -1,7 +1,29 @@
 # RA2 engine rebuild
 
-Mission: rebuild the Yuri engine from the shipped binary,
-so the game outlives its files.
+Rebuild the original Red Alert 2 engine for native Linux. Base Red Alert 2 is
+the main target. Keep Yuri's Revenge behavior separate where the games differ.
+
+The game is incomplete. The Linux client shows original terrain, full-health
+building main images, and standing infantry. It advances the recovered native
+state. Full movement, combat, production, AI, campaigns, saves, multiplayer,
+and menus still need work. The scene also needs pixel depth, shadows, lighting,
+house colors, vehicle assembly, and other actor states.
+
+Build with a C++17 compiler, make, pkg-config, SDL2 development files, and the
+LZO2 runtime library. Keep the owned game assets in `game/` at the project root.
+The native build reads original files. It does not run the Windows executable.
+
+Run from this directory:
+
+```sh
+make native
+make native-check
+build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP
+```
+
+Use `--yuri` to select expansion assets and rules. Use arrow keys to move the
+temporary scene viewer. Press Escape to exit. These viewer controls do not
+establish the original game input behavior. This is not yet a playable match.
 
 ## Why
 
@@ -17,8 +39,8 @@ A rebuild keeps the game alive on any future machine.
    (YR++ and Ares headers document gamd 1.1.001 addresses).
 3. Retype and clean function by function, starting with the core
    loop, the file system, and the rules system.
-4. Build toward a running binary: first as a Windows DLL loaded by
-   the original exe (hook style), later as a full replacement.
+4. Build the native Linux replacement in `src/`. Keep the older Windows hook
+   experiments in `hook/` outside the native executable.
 5. Verify by behavior, not bytes: same maps, same skirmish AI,
    same multiplayer events.
 

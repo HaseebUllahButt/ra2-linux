@@ -19,13 +19,62 @@ build/native/%.o: %.cpp
 	mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(shell pkg-config --cflags sdl2) -MMD -MP -c $< -o $@
 
--include $(NATIVE_OBJECTS:.o=.d) build/native/src/app/test_platform.d
+# Include dependencies for test objects as well as the native client.
+-include $(wildcard build/native/src/*/*.d)
 
 .PHONY: all test clean fs rules text map pack loop gfx hook run-fs run-rules run-text run-map run-pack run-loop run-gfx run-hook
 
 all: test
 
-.PHONY: native platform run-platform catalog terrain-inputs scene
+.PHONY: native native-check platform run-platform catalog terrain-inputs scene actors ui audio voxel sim
+
+FS_OBJECTS = build/native/src/fs/mix_archive.o build/native/src/fs/mix_bootstrap.o build/native/src/fs/filename_hash.o
+GFX_OBJECTS = build/native/src/gfx/palette.o build/native/src/gfx/shp_decode.o
+SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS))
+MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
+
+native-check: native platform terrain-inputs scene actors ui audio voxel sim
+	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
+	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless --yuri
+
+actors: build/actors_test
+	build/actors_test ../game
+
+build/actors_test: build/native/src/actors/test_main.o build/native/src/actors/actors.o $(FS_OBJECTS) $(GFX_OBJECTS) build/native/src/rules/ini_file.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+ui: build/ui_test
+	build/ui_test ../game
+
+build/ui_test: build/native/src/ui/ui.o build/native/src/ui/shell.o build/native/src/ui/test_main.o build/native/src/text/csf.o $(FS_OBJECTS) $(GFX_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+audio: build/audio_test build/audio_integration_test
+	build/audio_test
+	build/audio_integration_test ../game
+
+build/audio_test: build/native/src/audio/audio.o build/native/src/audio/test_main.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/audio_integration_test: build/native/src/audio/audio.o build/native/src/audio/lookup.o build/native/src/audio/integration_test.o $(FS_OBJECTS) build/native/src/rules/ini_file.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+# This legacy test source includes the filesystem header by its short name.
+build/native/src/audio/integration_test.o: src/audio/integration_test.cpp
+	mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -I src/fs -MMD -MP -c $< -o $@
+
+voxel: build/voxel_test
+	build/voxel_test
+
+build/voxel_test: build/native/src/voxel/voxel.o build/native/src/voxel/test_main.o $(FS_OBJECTS) build/native/src/gfx/palette.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+sim: build/sim_test
+	build/sim_test ../analysis/extracted
+
+build/sim_test: build/native/src/sim/test_main.o $(SIM_OBJECTS) $(MAP_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 scene: build/scene_test
 	build/scene_test ../game ../analysis/extracted/maps/2PEAKS.MAP
@@ -63,7 +112,7 @@ build/ra2-native: $(NATIVE_OBJECTS)
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
 
-test: fs rules text map pack loop gfx hook
+test: fs rules text map pack loop gfx hook native-check
 	@echo "== all layer tests passed =="
 
 fs: run-fs
