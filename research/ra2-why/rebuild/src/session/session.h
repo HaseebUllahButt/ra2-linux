@@ -38,6 +38,8 @@ std::optional<StartingUnitChoice> choose_starting_unit(std::int32_t initial_budg
 struct StartPoint { std::int16_t x, y; };
 struct UnitAttemptResult { bool placed; StartPoint cell; };
 struct StartingUnit { std::size_t type_index; StartPoint cell; };
+enum class StartingMission { Guard=5, AreaGuard=11 };
+StartingMission starting_unit_mission(bool human) noexcept;
 struct StartingUnitRun {
     std::vector<StartingUnit> placed;
     std::int32_t remaining_budget;
@@ -94,6 +96,7 @@ struct BattleHousePlan {
     HouseValues initial_values;
     StartPoint start;
     std::int32_t cash_before_units, cash_after_units, cash_after_world;
+    StartingMission extra_unit_mission;
     std::optional<StartingUnit> base_unit;
     std::vector<StartingUnit> extra_units;
 };

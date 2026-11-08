@@ -53,7 +53,7 @@ active houses, starts, and resolved type inputs. The final phase must confirm
 that the staged houses, starts, type inputs, and units remain valid. Any unresolved result
 aborts and leaves the caller RNG unchanged. Only a successful plan commits it.
 
-The callbacks are not implemented here. House creation, unit missions, real
+The callbacks are not implemented here. House creation, base-unit missions, real
 map and unit placement checks, observers, random waypoint fallback, and later
 scenario behavior remain open. A synthetic callback test does not establish a
 playable session. The simulation supports RNG state handoff separately. Start
@@ -112,3 +112,8 @@ unit driver in both editions. It stubs the mode methods and four house updates
 to record their order. It verifies the second start pass precedes the unit
 driver, and that each house gets base unit, extra units, and four updates
 before the final debug draw. It does not verify the stubbed work.
+
+`starting_unit_mission` records Guard for human extra units and Area Guard for
+AI extra units. `original_mission_check.py` verifies both original x86 branches
+in each edition with the house-control flag supplied. The base-unit mission is
+still unresolved.

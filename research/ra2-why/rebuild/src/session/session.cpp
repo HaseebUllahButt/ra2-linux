@@ -115,6 +115,12 @@ std::optional<StartingUnitRun> generate_starting_units(std::int32_t budget,
     return result;
 }
 
+StartingMission starting_unit_mission(bool human) noexcept {
+    // Base 005B838E; expansion 005D740F. Multiplayer house control selects
+    // mission 5 (Guard) for a human, or 11 (Area Guard) for an AI.
+    return human ? StartingMission::Guard : StartingMission::AreaGuard;
+}
+
 std::uint16_t finish_starting_unit_generation(sim::Random& random) {
     // Base 005B7F4B; expansion 005D6FEB. The original draws for a debug log.
     return static_cast<std::uint16_t>(random.ranged(0,65535));
@@ -234,7 +240,8 @@ std::optional<BattlePlan> plan_battle(const BattlePlanInput& input, sim::Random&
     for (std::size_t i=0;i<input.houses.size();++i) {
         const auto& house=input.houses[i];
         plan.houses.push_back({house,initialize_house_values(input.credits,house.raw_color),
-                               input.assigned_starts[i],0,0,0,std::nullopt,{}});
+                               input.assigned_starts[i],0,0,0,starting_unit_mission(house.slot==0),
+                               std::nullopt,{}});
     }
     const auto prepared=prepare_world(plan.houses,working);
     if (!prepared || !prepared->resolved_types_unchanged || prepared->active_slots.size()!=plan.houses.size() ||

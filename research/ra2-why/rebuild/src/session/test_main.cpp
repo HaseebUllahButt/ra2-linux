@@ -263,6 +263,8 @@ int main(int argc, char** argv) {
     assert(planned->houses[0].base_unit && planned->houses[0].base_unit->type_index==0 &&
            planned->houses[1].base_unit && planned->houses[1].base_unit->type_index==1);
     assert(planned->houses[0].extra_units.size()==1 && planned->houses[1].extra_units.size()==2);
+    assert(planned->houses[0].extra_unit_mission==session::StartingMission::Guard &&
+           planned->houses[1].extra_unit_mission==session::StartingMission::AreaGuard);
     assert(planned->houses[0].cash_after_units==5000 && planned->houses[1].cash_after_units==5000 &&
            planned->houses[0].cash_after_world==5000 && planned->houses[1].cash_after_world==5000);
     assert((events==std::vector<std::string>{"prepare","base0","unit0","house0",
