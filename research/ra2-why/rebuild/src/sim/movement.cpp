@@ -119,6 +119,9 @@ Result Simulation::start_move(const Command& c) {
     }
     movements_.emplace(e.id,std::move(*planned));
     completion_missions_[e.id]=idle_mission==DriveIdleMission::Guard?"Guard":"Area Guard";
+    // Keep a distinct turret pose. Do not make it follow the hull without Unit AI evidence.
+    if (!c.path_directions.empty() && std::any_of(c.path_directions.begin(),c.path_directions.end(),[&](unsigned direction){return direction!=c.path_directions.front();}))
+        e.turret_facing.reset();
     e.moving=true; e.move_goal=c.destination; e.mission="Move";
     return {};
 }

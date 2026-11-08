@@ -541,3 +541,15 @@ It checks the original index bounds and the fixed 103-entry separation.
 This preserves draws already consumed by original skirmish setup.
 The tests resume original x86 golden sequences and continue the setup stream through a queued command.
 Invalid indexes and state replacement after command issue or ticks produce explicit errors.
+
+## Separate hull and turret facings
+
+`Entity.facing` follows the drive-written hull facing in 0..255 units.
+`Entity.turret_facing` stores an independent optional value in the same units.
+Base placement 006FC95E and expansion 00737BCC initialize the turret from the original map byte.
+The hull matrix at base 0053D04A reads the drive-facing field at actor +2E0.
+The separate turret field is actor +2F8, or +3A0 in the expansion.
+Straight supported movement preserves the initial turret value.
+A command with a turn clears the value before movement starts.
+Original Unit AI turret updates remain unrecovered. The renderer must keep an unknown turret explicit.
+Other entity kinds have no recovered turret initialization here.

@@ -46,6 +46,8 @@ int main(int argc,char** argv) try {
     check(first.type==row[1] && first.house==row[0],"unit type and owner");
     check(first.cell.x==*Ini::integer_value(row[3]) && first.cell.y==*Ini::integer_value(row[4]),"unit cell");
     check(first.facing==*Ini::integer_value(row[5]) && first.mission==row[6],"unit facing and mission");
+    check(first.turret_facing==(first.facing&255),"original ground map turret facing is separate");
+    for (const auto& entity:snap.entities) if (entity.kind!=Kind::Unit) check(!entity.turret_facing,"unrecovered non-ground turret remains unknown");
     Command c; c.op=Op::ResolvedDamage; c.entity=vehicle; c.amount=weapon.damage.value();
     check(a.issue(c).error==Error::None && b.issue(c).error==Error::None,"damage accepted");
     c.op=Op::RandomRange; c.amount=-10; c.high=17; c.frame=2;

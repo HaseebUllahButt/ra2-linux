@@ -27,6 +27,7 @@ std::string trace(const Snapshot& state,std::uint32_t id) {
     const auto& e=state.entities.at(id-1);
     require(e.position.has_value(),"world position missing");
     std::string out=std::to_string(state.frame)+":"+std::to_string(e.position->x)+":"+std::to_string(e.position->y)+":"+std::to_string(e.position->z)+":"+std::to_string(e.moving)+":"+std::to_string(e.facing)+":"+e.mission;
+    out+=":"+(e.turret_facing?std::to_string(*e.turret_facing):std::string("unknown-turret"));
     for (const auto& result:state.results) out+=":"+std::to_string(result.ticket)+":"+std::to_string(static_cast<int>(result.error))+":"+result.detail;
     return out;
 }
@@ -75,6 +76,7 @@ int main(int argc,char** argv) try {
         require(trace(first.snapshot(),e.id)==trace(replay.snapshot(),e.id),"dispatch replay mismatch");
         const auto goal=Coord{move.destination.x*256+128,move.destination.y*256+128,e.position->z};
         require(base?(e.type=="HTNK" && e.cell.x==114 && e.cell.y==67 && e.facing==128):(e.type=="YTNK" && e.cell.x==113 && e.cell.y==115 && e.facing==0),"real Move fixture changed");
+        require(e.turret_facing==e.facing,"original map turret facing differs");
         require(first.types().at(e.type).speed==6,"real vehicle Speed changed");
         // Original 004B0F20 and base 004A1000 at resolved speed 15, relative to their source.
         const int original_y[]={23,47,70,94,117,141,164,188,212,235,253,256};
@@ -92,6 +94,7 @@ int main(int argc,char** argv) try {
         require(ticks==12,"original movement duration changed");
         require(!final.moving && final.position->x==goal.x && final.position->y==goal.y && final.position->z==goal.z,"Move did not reach the original destination");
         require(final.cell.x==move.destination.x && final.cell.y==move.destination.y,"Move cell mismatch");
+        require(final.turret_facing==e.turret_facing,"straight Move changed the separate turret pose");
         require(final.hp==e.hp && final.house==e.house,"Move changed health or owner");
         const auto expected_mission="Area Guard";
         std::cout<<"original IQ="<<map.read_integer(e.house,"IQ",0)<<" GuardArea="<<rules.read_integer("IQ","GuardArea",4)<<"\n";
@@ -120,6 +123,8 @@ int main(int argc,char** argv) try {
                     route_case.tick(); route_replay.tick();
                     const auto actual=route_case.snapshot().entities.at(routed.id-1);
                     const auto expected=golden.points[step];
+                    if (golden.path[0]==golden.path[1]) require(actual.turret_facing==routed.turret_facing,"straight route changed the separate turret pose");
+                    else require(!actual.turret_facing,"turn invented a turret pose from the hull facing");
                     require(actual.position->x==routed.position->x+expected.x && actual.position->y==routed.position->y+expected.y && actual.position->z==routed.position->z && actual.facing==expected.facing,"real route position or facing differs from original x86");
                     require(actual.moving==(step+1<golden.points.size()),"real route duration differs from original x86");
                     require(trace(route_case.snapshot(),routed.id)==trace(route_replay.snapshot(),routed.id),"real route replay differs");
@@ -136,7 +141,7 @@ int main(int argc,char** argv) try {
                 require(rejected_case.snapshot().results.at(0).error==Error::Unsupported,"invalid or unrecovered route was accepted");
                 if (path==std::vector<unsigned>{4,5}) require(rejected_case.snapshot().results.at(0).detail.find("resolved clear or road")!=std::string::npos,"real curve terrain guard was not reached");
                 const auto unchanged=rejected_case.snapshot().entities.at(routed.id-1);
-                require(!unchanged.moving && unchanged.position->x==routed.position->x && unchanged.position->y==routed.position->y && unchanged.facing==routed.facing && unchanged.mission==routed.mission,"rejected route changed entity state");
+                require(!unchanged.moving && unchanged.position->x==routed.position->x && unchanged.position->y==routed.position->y && unchanged.facing==routed.facing && unchanged.mission==routed.mission && unchanged.turret_facing==routed.turret_facing,"rejected route changed entity state");
             }
             bool moved_on_clear=false;
             for (const auto& candidate:initial.entities) {

@@ -129,6 +129,8 @@ Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed,const T
                 continue;
             }
             e.type=t->first;
+            // Base 006FC95E / Yuri 00737BCC set the separate turret facing from the map byte.
+            if (kind==Kind::Unit) e.turret_facing=e.facing&255;
             object_fields(e,obj);
             if (kind==Kind::Unit && record.size()>11) {
                 e.tag=record[7]; e.map_veterancy=Ini::integer_value(record[8]);

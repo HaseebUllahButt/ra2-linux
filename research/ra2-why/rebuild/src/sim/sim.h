@@ -67,6 +67,7 @@ struct Entity {
     std::optional<std::int32_t> hp;
     std::optional<Coord> position; // Supported ground vehicle center; other placement and bridge states stay unknown.
     bool dead=false;
+    std::optional<std::int32_t> turret_facing; // 0..255; map placement is known, drive-turn updates remain unrecovered.
 };
 enum class Op { TakeCash, ResolvedDamage, RandomRange, Move, Attack, Produce, Stop };
 struct Command {
