@@ -1,0 +1,20 @@
+; winmm proxy exports: forward to the real system winmm.dll.
+; The game only needs a handful; forwarding all keeps compatibility.
+LIBRARY winmm
+EXPORTS
+    PlaySoundA=real_winmm.PlaySoundA
+    PlaySoundW=real_winmm.PlaySoundW
+    timeBeginPeriod=real_winmm.timeBeginPeriod
+    timeEndPeriod=real_winmm.timeEndPeriod
+    timeGetTime=real_winmm.timeGetTime
+    waveOutOpen=real_winmm.waveOutOpen
+    waveOutClose=real_winmm.waveOutClose
+    waveOutWrite=real_winmm.waveOutWrite
+    waveOutPrepareHeader=real_winmm.waveOutPrepareHeader
+    waveOutUnprepareHeader=real_winmm.waveOutUnprepareHeader
+    midiOutOpen=real_winmm.midiOutOpen
+    midiOutClose=real_winmm.midiOutClose
+    midiStreamOpen=real_winmm.midiStreamOpen
+    midiStreamClose=real_winmm.midiStreamClose
+    mixerOpen=real_winmm.mixerOpen
+    mixerClose=real_winmm.mixerClose
