@@ -782,3 +782,27 @@ They no longer replace that guard with a constant result.
 Both editions preserve all 4,608 empty-entry decisions, hash 28ABC0F5, and all 88 earlier regular-path vectors.
 The expanded filtered oracle checks ordinary shortcuts and marked shortcut rejection through the real Unit entry chain.
 The core test still passes 2,511 checks. Live-world hierarchy binding and the Foot retry wrapper remain unimplemented.
+
+## Full no-tube path postprocessing
+
+`smooth_original_path()` adds the complete two-pass sequence with resolved zero actor threat weight.
+The first pass is base 00428AE0 / expansion 0042B210, with corner helper 00428CF0 / 0042B420.
+The second pass keeps the original reversal state, backward windows, first-twenty-slot limit, and final cleanup.
+It preserves direction changes, deleted slots, and both candidate orders.
+The earlier monotone API keeps its narrower input contract.
+
+The corner helper reads one cell ahead after each entry check, including a blocked or final check.
+Its next entry can therefore use the next cell's level rather than the preceding cell's level.
+The API uses a separate read-only metadata lookup to preserve that order.
+An entry-only callback cannot substitute for this lookup.
+The native result keeps the input directions unchanged when required state is unknown.
+Tubes, nonzero threat contribution, and lookups outside the verified 512-square grid remain explicit errors.
+
+`original_smoothing_check.py executable [--base] --full --vectors` runs both original passes and all their helpers.
+Its original house threat table is initialized to zero. Original threat lookups still execute.
+Both editions match all 256 complete direction and entry-query hashes.
+The fixtures include reversals, repeated corners, closed paths, blocked entries, marked cells, and changing levels.
+`test_full_smoothing.sh` passes 266 checks, including required lookahead after a blocked entry.
+These checks pass with address and undefined-behavior sanitizers.
+The original 256 monotone vectors and 266 native monotone checks remain unchanged.
+Regular search still enables only its existing monotone integration until its full postprocessing call is connected.

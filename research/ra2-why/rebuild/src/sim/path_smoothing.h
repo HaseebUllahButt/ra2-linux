@@ -13,6 +13,7 @@ struct SmoothingCell {
     std::optional<bool> bridge_100,marked_40000;
 };
 using SmoothingProbe=std::function<std::optional<SmoothingCell>(const SmoothingQuery&)>;
+using SmoothingLookup=std::function<std::optional<SmoothingCell>(ra2map::Cell)>;
 enum class SmoothingStatus { Complete,NeedsInput,Unsupported };
 struct SmoothingResult {
     SmoothingStatus status=SmoothingStatus::Unsupported;
@@ -25,4 +26,9 @@ struct SmoothingResult {
 // The probe supplies read-only virtual-entry results and Cell state in original query order.
 SmoothingResult smooth_original_monotone_path(ra2map::Cell source,const std::vector<unsigned>& directions,
     const std::vector<std::optional<int>>& layers,std::optional<double> threat_weight,const SmoothingProbe&);
+// Full no-tube sequence: base 00428AE0/004290C0; expansion 0042B210/0042B7F0.
+// The separate lookup supplies metadata for the corner helper's one-cell lookahead.
+SmoothingResult smooth_original_path(ra2map::Cell source,const std::vector<unsigned>& directions,
+    const std::vector<std::optional<int>>& layers,std::optional<double> threat_weight,
+    const SmoothingProbe&,const SmoothingLookup&);
 }

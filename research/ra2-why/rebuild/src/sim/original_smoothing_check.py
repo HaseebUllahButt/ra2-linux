@@ -8,6 +8,8 @@ from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_ESP,UC_X8
 m=r.m; cpu=m.cpu; base=m.base
 DESCRIPTOR,PATH,HEIGHTS=0x100d000,0x100d100,0x100d300
 seed_value=0; queries=[]
+full='--full' in sys.argv
+if full: cpu.mem_map(0x2000000,0x100000)
 
 def reply(x,y,seed):
     status=7 if seed%4!=0 and (x+2*y+seed)%11==0 else 0
@@ -36,10 +38,13 @@ def inputs(seed):
     path=[]
     for i in range(2+seed%27):
         state=(state*1664525+1013904223)&0xffffffff
-        path.append(((seed%4)*2+((state>>16)%3))%8)
+        path.append(((state>>16)%8) if full else ((seed%4)*2+((state>>16)%3))%8)
     if seed==0: path=[0,1,2]
     if seed==1: path=[2,2,0,0]
     if seed==2: path=[1]*25
+    if full:
+        special=([1,7],[1,1,7,7],[7,1,3,5],[0,4,2,6],[0,0,2,4,4,6],[3,3,1,1,7,7,5,5])
+        if seed<6: path=list(special[seed])
     return path
 
 def run(seed):
@@ -47,6 +52,7 @@ def run(seed):
     seed_value=seed; queries=[]; r.setup((0,),15)
     m.virtual(0x194 if base else 0x1ac,20,can_enter)
     cpu.mem_write(m.FOOT+(0x428 if base else 0x530),struct.pack('<d',0.0))
+    if full: m.word(m.FOOT+(0x1b4 if base else 0x21c),0x2000000)
     path=inputs(seed); x,y=54,69; layers=[]
     for direction in path:
         layers.append(reply(x,y,seed)[2]+(4 if seed%5==0 else 0))
@@ -56,7 +62,13 @@ def run(seed):
     cpu.mem_write(HEIGHTS,struct.pack('<'+'i'*len(layers),*layers))
     cpu.reg_write(UC_X86_REG_ECX,0); cpu.reg_write(UC_X86_REG_ESP,0x103f000)
     cpu.mem_write(0x103f000,struct.pack('<3I',0x103e000,DESCRIPTOR,m.FOOT))
-    try: cpu.emu_start(0x4290c0 if base else 0x42b7f0,0x103e000,count=1000000)
+    try:
+        if full:
+            cpu.emu_start(0x428ae0 if base else 0x42b210,0x103e000,count=1000000)
+            assert cpu.reg_read(UC_X86_REG_EIP)==0x103e000,'original corner pass instruction bound exceeded'
+            cpu.reg_write(UC_X86_REG_ECX,0); cpu.reg_write(UC_X86_REG_ESP,0x103f000)
+            cpu.mem_write(0x103f000,struct.pack('<3I',0x103e000,DESCRIPTOR,m.FOOT))
+        cpu.emu_start(0x4290c0 if base else 0x42b7f0,0x103e000,count=1000000)
     except UcError:
         print('unresolved original smoothing dependency',hex(cpu.reg_read(UC_X86_REG_EIP)),[hex(a) for a in m.recent]); raise
     assert cpu.reg_read(UC_X86_REG_EIP)==0x103e000,'original smoothing instruction bound exceeded'
