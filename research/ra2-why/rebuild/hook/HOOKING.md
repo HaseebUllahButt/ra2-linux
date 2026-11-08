@@ -69,6 +69,9 @@ there are **zero stack parameters**. It returns the decompiled 0/1 result in
 EAX with a plain `ret`, preserving the x86 nonvolatile registers through the
 compiler-generated prologue. Its MinGW symbol is `@bootstrap_hook@8`; the
 decoration includes the two register arguments and does not imply `ret 8`.
+The GCC x86 entry also uses `force_align_arg_pointer` to realign a legacy
+four-byte-aligned game stack before calling modern C++ code, then restores
+the original caller stack on return.
 
 Native constructor/resize/destructor calls use fastcall function pointers
 with an extra dummy EDX parameter. ECX carries the native object; filename
@@ -122,7 +125,8 @@ expansions, four nested required archives, both top-level base archives,
 native-list registration, Array growth, all six ownership slots, and
 byte-for-byte preservation of unrelated globals. Fake native callbacks
 model the game's heap/list boundary using 32-bit handles; they do not call
-addresses in the executable. Additional cases cover malformed and missing
+addresses in the executable. A seeded case preserves earlier native list
+nodes, Array entries and language ownership. Additional cases cover malformed and missing
 archives, native constructor failure, vector failure with deletion of the
 unpublished object, and rejection of already-populated ownership slots.
 Movies and overlays present on disk must not be mounted by Bootstrap.
@@ -138,10 +142,11 @@ Verified here:
 
 * Strict C++17 builds with `-Wall -Wextra -Wpedantic -Werror`.
 * Linux bridge tests and the existing trampoline tests pass.
+* The bridge tests also pass with AddressSanitizer and UndefinedBehaviorSanitizer.
 * The Windows DLL cross-compiles as PE32 i386. Its only DLL imports are
   KERNEL32.dll and msvcrt.dll; all 16 listed exports forward to winmm_real.
-* Disassembly confirms the replacement's plain `ret`, EAX result, and EBX
-  save/restore; unused ESI/EDI/EBP are preserved. The native constructor call
+* Disassembly confirms the replacement's plain `ret`, EAX result, stack
+  realignment/restoration and EBX/EDI/EBP save/restore; ESI is untouched. The native constructor call
   loads ECX with its allocation, passes filename/key on the stack, and
   accounts for the callee's eight-byte stack cleanup.
 * The pre-existing filesystem report verifies all 16 installation archives

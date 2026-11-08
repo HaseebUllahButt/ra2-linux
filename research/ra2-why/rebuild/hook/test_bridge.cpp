@@ -184,6 +184,28 @@ void success(const std::filesystem::path& directory) {
     assert(call_entry(directory, api) == 0);
     assert(game.constructions == 9 && game.records.size() == 9 && game.pumps == 2);
 }
+void existing_mounts(const std::filesystem::path& directory) {
+    FakeGame game;
+    constexpr GamePtr prior = 0x9000;
+    GameMix32 node{};
+    node.previous = FakeGame::head;
+    node.next = FakeGame::tail;
+    game.records.emplace(prior, Record{"LANGMD.MIX", node, {}});
+    game.mixes.first.next = game.mixes.last.previous = prior;
+    game.globals.generics[3] = prior;
+    game.globals.array.items = 0x200000;
+    game.globals.array.capacity = 2;
+    game.globals.array.count = 1;
+    game.globals.array.allocated = 1;
+    game.items.push_back(prior);
+    const auto before = game.globals;
+    assert(call_entry(directory, game.api()) == 1);
+    assert(game.globals.array.count == 4 && game.items.front() == prior);
+    assert(game.mixes.first.next == prior && game.records.at(prior).wire.previous == FakeGame::head);
+    assert(game.records.at(prior).wire.next == game.items[1]);
+    assert(game.records.size() == 10 && game.globals.generics[3] == prior);
+    unchanged_except_owned(before, game.globals);
+}
 void failures(const std::filesystem::path& valid, const std::filesystem::path& invalid,
               const std::filesystem::path& missing) {
     for (const auto& directory : {invalid, missing}) {
@@ -221,6 +243,7 @@ int main(int argc, char** argv) {
     fixtures(invalid, false);
     std::filesystem::create_directories(missing);
     success(valid);
+    existing_mounts(valid);
     failures(valid, invalid, missing);
     std::cout << "Bridge tests passed (32-bit globals, native-list simulation, nested mounts, failures).\n";
 }

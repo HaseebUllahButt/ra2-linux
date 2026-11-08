@@ -1,44 +1,43 @@
-# Hook DLL skeleton (rebuild phase 3)
+# Hook DLL (rebuild phase 3)
 
 Goal: run rebuilt engine code next to the original gamemd.exe on
 Windows, one subsystem at a time, and verify each swap in a real game.
 
 Approach: proxy DLL. The game loads WINMM.DLL at startup. Our
-winmm.dll sits in the game folder; Windows loads ours first; every
-export forwards to the real system winmm. At PROCESS_ATTACH we patch
-the game's code in memory: each hook site gets a 5-byte jmp to our
-rebuilt function; the replaced bytes live in a trampoline so the
-original path stays callable.
+winmm.dll sits in the game folder; its listed exports forward to
+winmm_real.dll. At PROCESS_ATTACH we install a 5-byte jump for the
+first enabled replacement, MixFileClass::Bootstrap (0x005301A0).
 
-Status: phase 3 proven. The first real replacement hook is wired
-and bridge-tested.
-
-[ra2hook] Bootstrap success: expansions=3 generics=6 movies=4 eax=1
-Bridge tests passed (32-bit globals, native-list simulation,
-nested mounts, failures).
-
-bootstrap_hook.cpp replaces MixFileClass::Bootstrap (0x005301A0) in
-the live process: it calls the rebuilt ra2::fs layer, fills the
-game's globals (MixFileClass::Array 0x00884D90, Movies 0x00884DE0,
-Generics 0x00884DF8), and returns 1. The bridge test simulates the
-32-bit call convention and the game's DynamicVectorClass ABI.
-The Windows-specific bits (DllMain, export forwarding) compile under
-the private mingw tree; drop-in testing needs a Windows machine.
+Status: Bootstrap bridge implemented, Linux simulation tested, and
+PE32 DLL cross-compiled. Live Windows execution remains pending.
+Read [HOOKING.md](HOOKING.md) for the global/ABI contract, native
+constructor compatibility boundary, verification limits and Windows
+drop-in test procedure. Bootstrap fills Array and six Generics slots;
+Movies is preserved for its later initialization stage. This full
+replacement does not call the overwritten original or use a trampoline.
 
 Files:
 - trampoline.{h,cpp} - x86 jmp-patch writer + trampoline builder
   (portable logic, unit-tested here with a simulated code page).
 - hooks.cpp - the hook table: original address -> rebuild function.
-  Seeded with the verified landmarks; grows as layers land.
+  Bootstrap enabled; other landmarks remain disabled.
+- bootstrap_hook.{h,cpp} - rebuilt Bootstrap entry, fixed-width game
+  layouts, native constructor/vector adapters and debug logging.
 - dll_main.cpp - DllMain + install sequence (Windows only).
 - exports.def - winmm export forwards to the real DLL.
 - test_trampoline.cpp - Linux unit test for the patcher.
+- test_bridge.cpp - Linux global/ownership and call-boundary simulation.
 
-Build (works on this ARM64 Linux box, no root privileges):
-  sh scripts/build-hook-dll.sh
-The compiler is a private mingw-w64 tree at ~/mingw-root, unpacked
-from Ubuntu .debs (binutils, gcc/g++ i686 posix+win32, mingw-w64
-common+dev). The gcc stdint.h wrappers were patched to point at the
-mingw headers by absolute path (include_next breaks in a relocated
-tree). winmm.dll is a PE32 DLL; its exports forward to
-winmm_real.dll - install = copy both into the game folder.
+Build from the repository root:
+
+```sh
+make -C rebuild/hook test
+make -C rebuild/hook windows \
+  WIN_CXX=/path/to/user/mingw-root/usr/bin/i686-w64-mingw32-g++-posix
+```
+
+Use `WIN_CXX=i686-w64-mingw32-g++` with a normal MinGW installation.
+The new output is `build/winmm.dll`; the older `winmm.dll` beside this
+README remains the skeleton artifact. All build products and fixtures
+stay under `build/`. The existing root-level build script is not used
+by this new build.

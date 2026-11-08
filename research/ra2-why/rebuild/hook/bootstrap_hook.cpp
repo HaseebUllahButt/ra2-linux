@@ -144,7 +144,7 @@ void bind_bootstrap_test_target(const std::filesystem::path* directory, const Br
 }
 #endif
 
-extern "C" int RA2_FASTCALL bootstrap_hook(void*, void*) noexcept {
+extern "C" RA2_ALIGN_STACK int RA2_FASTCALL bootstrap_hook(void*, void*) noexcept {
 #ifdef _WIN32
     if (!image) return 0;
     const BridgeApi api{nullptr, at<GameGlobals32*>(0x00884D90),

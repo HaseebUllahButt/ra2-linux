@@ -11,6 +11,12 @@
 #else
 #define RA2_FASTCALL
 #endif
+#if defined(__GNUC__) && defined(__i386__)
+// Original MSVC callers may align ESP to four bytes; modern C++ needs 16.
+#define RA2_ALIGN_STACK __attribute__((force_align_arg_pointer))
+#else
+#define RA2_ALIGN_STACK
+#endif
 
 namespace ra2hook {
 using GamePtr = std::uint32_t;
@@ -73,7 +79,7 @@ int bootstrap_bridge(const std::filesystem::path& directory, const BridgeApi& ap
 
 // Bootstrap is static and takes NO stack arguments. Absorb unspecified ECX
 // and EDX in two unused fastcall registers; return 0/1 in EAX, plain RET.
-extern "C" int RA2_FASTCALL bootstrap_hook(void* unused_ecx, void* unused_edx) noexcept;
+extern "C" RA2_ALIGN_STACK int RA2_FASTCALL bootstrap_hook(void* unused_ecx, void* unused_edx) noexcept;
 
 #ifdef _WIN32
 void configure_bootstrap_hook(std::uint8_t* image_base) noexcept;
