@@ -1,5 +1,6 @@
 #include "placement_terrain.h"
 #include "../sim/test_inputs.h"
+#include "../sim/sim.h"
 #include "../sim/world_init.h"
 #include <cassert>
 #include <iostream>
@@ -53,6 +54,18 @@ int main(int argc, char** argv) {
     const auto cliff=static_cast<std::uint8_t>(rules.read_integer("General","CliffBackImpassability",0));
     sim::initialize_original_tile_pass(cells,theater,geometry->width,geometry->height,cliff,true);
     const auto grid=session::PlacementTerrain::create(*geometry,cells); assert(grid);
+    sim::Random random(123);
+    const auto before=random.state();
+    const auto midpoint=cells[cells.size()/2].cell;
+    const session::StartPoint start{static_cast<std::int16_t>(midpoint.x),static_cast<std::int16_t>(midpoint.y)};
+    const auto unresolved=session::find_initial_placement_checked(start,{0,0,511,511},1,
+        session::PlacementEdition::Base,random,
+        [&](session::StartPoint point,sim::Random&)->std::optional<bool> {
+            return grid->in_map(point,session::PlacementEdition::Base);
+        },[](session::StartPoint,sim::Random& state)->std::optional<bool> {
+            state.next(); return std::nullopt;
+        });
+    assert(!unresolved && random.state().table==before.table && random.first()==before.first && random.second()==before.second);
     unsigned known=0,unknown=0;
     for (const auto& cell:cells) {
         const session::StartPoint point{static_cast<std::int16_t>(cell.cell.x),static_cast<std::int16_t>(cell.cell.y)};

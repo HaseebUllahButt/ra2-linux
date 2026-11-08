@@ -6,8 +6,8 @@ game=${1:-/path/to/user/ra2/game}
 build=$(mktemp -d /tmp/ra2-session-terrain.XXXXXX)
 trap 'rm -rf "$build"' EXIT
 ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared/app" -I "$shared/render" \
-    map_geometry.cpp placement_terrain.cpp real_terrain_test.cpp \
-    "$shared"/sim/{test_inputs,world,world_init,replacement,floor,random}.cpp \
+    session.cpp map_geometry.cpp placement_terrain.cpp real_terrain_test.cpp \
+    "$shared"/sim/{test_inputs,world,world_init,replacement,floor,random,distance}.cpp \
     "$shared"/render/{minimap,tmp_decode}.cpp "$shared/gfx/palette.cpp" \
     "$shared"/fs/{mix_archive,mix_bootstrap,filename_hash}.cpp \
     "$shared/rules/ini_file.cpp" "$shared/map/map_file.cpp" "$shared/pack/map_pack.cpp" \
