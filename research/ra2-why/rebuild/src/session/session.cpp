@@ -70,6 +70,56 @@ std::optional<StartingUnitChoice> choose_starting_unit(std::int32_t initial_budg
     return StartingUnitChoice{vehicle ? StartingUnitGroup::Vehicle : StartingUnitGroup::Infantry,index};
 }
 
+std::optional<StartingUnitRun> generate_starting_units(std::int32_t budget,
+    std::int32_t house_tech_level, std::uint32_t house_bit,
+    const std::vector<StartingUnitType>& types, sim::Random& random, const UnitAttempt& attempt) {
+    // 005D70F0 filters by the current house, then runs the unit budget loop.
+    // Do not invoke unresolved callbacks or accept more than one house bit.
+    if (budget<0 || !house_bit || (house_bit & (house_bit-1)) || !attempt) return std::nullopt;
+    StartingUnitRun result{{},budget,0};
+    if (!budget) return result;
+    std::vector<std::size_t> vehicles, infantry;
+    int minimum_cost=std::numeric_limits<int>::max();
+    for (std::size_t i=0;i<types.size();++i) {
+        const auto& type=types[i];
+        if (!type.allowed) return std::nullopt;
+        if (!*type.allowed) continue;
+        if (!type.owner_mask) return std::nullopt;
+        if (!(*type.owner_mask & house_bit)) continue;
+        if (!type.tech_level) return std::nullopt;
+        if (*type.tech_level>house_tech_level) continue;
+        if (type.vehicle) {
+            if (!type.base_unit) return std::nullopt;
+            if (*type.base_unit) continue;
+        }
+        if (!type.cost || *type.cost<=0) return std::nullopt;
+        minimum_cost=std::min(minimum_cost,*type.cost);
+        (type.vehicle ? vehicles : infantry).push_back(i);
+    }
+    if ((vehicles.empty() && infantry.empty()) ||
+        std::int64_t(budget)/minimum_cost+1>100000) return std::nullopt;
+    auto working=random;
+    while (result.remaining_budget>0 && result.failed_placements<20) {
+        const auto choice=choose_starting_unit(budget,result.remaining_budget,
+                                                vehicles.size(),infantry.size(),working);
+        if (!choice) return std::nullopt;
+        const auto index=choice->group==StartingUnitGroup::Vehicle ?
+                         vehicles[choice->index] : infantry[choice->index];
+        const auto placed=attempt(index,working);
+        if (!placed) return std::nullopt;
+        if (!placed->placed) {++result.failed_placements;continue;}
+        result.placed.push_back({index,placed->cell});
+        result.remaining_budget-=*types[index].cost;
+    }
+    random=working;
+    return result;
+}
+
+std::uint16_t finish_starting_unit_generation(sim::Random& random) {
+    // Base 005B7F4B; expansion 005D6FEB. The original draws for a debug log.
+    return static_cast<std::uint16_t>(random.ranged(0,65535));
+}
+
 namespace {
 std::optional<int> point_distance(StartPoint a, StartPoint b, const sim::OriginalDistance& distance) {
     // Base 005B7920 and expansion 005D6890 narrow the differences and result to signed 16-bit values.

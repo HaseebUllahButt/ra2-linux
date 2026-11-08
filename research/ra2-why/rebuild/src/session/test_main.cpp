@@ -53,6 +53,9 @@ int main(int argc, char** argv) {
     assert(!session::choose_start_point(invalid,used,random,base));
     assert(!used[1] && !used[2] && !used[3]);
 
+    sim::Random finish_rng(451), finish_expected(451);
+    assert(session::finish_starting_unit_generation(finish_rng)==finish_expected.ranged(0,65535));
+    assert(finish_rng.state().table==finish_expected.state().table);
     sim::Random choice_rng(789);
     const auto choice_before=choice_rng.table();
     assert(!session::choose_starting_unit(100,0,2,3,choice_rng));
@@ -65,6 +68,37 @@ int main(int argc, char** argv) {
     assert(choice_rng.table()==choice_before);
 
     using session::StartingUnitType;
+    {
+        const std::vector<StartingUnitType> candidates{
+            {true,1,1,90,true,false},{true,1,1,30,false,false}};
+        sim::Random plan_rng(11);
+        const auto initial_state=plan_rng.table();
+        auto planned=session::generate_starting_units(120,1,1,candidates,plan_rng,
+            [](std::size_t index,sim::Random&) -> std::optional<session::UnitAttemptResult> {
+                return session::UnitAttemptResult{true,{static_cast<std::int16_t>(index+4),8}};
+            });
+        assert(planned && planned->placed.size()==2 && planned->remaining_budget==0 &&
+               planned->failed_placements==0 && planned->placed[0].type_index==0 &&
+               planned->placed[1].type_index==1 && plan_rng.table()==initial_state);
+        int tries=0;
+        auto blocked=session::generate_starting_units(120,1,1,candidates,plan_rng,
+            [&](std::size_t,sim::Random&) -> std::optional<session::UnitAttemptResult> {
+                ++tries;return session::UnitAttemptResult{false,{0,0}};
+            });
+        assert(blocked && blocked->placed.empty() && blocked->failed_placements==20 &&
+               blocked->remaining_budget==120 && tries==20);
+        const auto before_unresolved=plan_rng.table();
+        const auto unresolved=session::generate_starting_units(120,1,1,candidates,plan_rng,
+            [](std::size_t,sim::Random& random) -> std::optional<session::UnitAttemptResult> {
+                random.next();return std::nullopt;
+            });
+        assert(!unresolved && plan_rng.table()==before_unresolved);
+        assert(!session::generate_starting_units(120,1,3,candidates,plan_rng,
+            [](std::size_t,sim::Random&) -> std::optional<session::UnitAttemptResult> {
+                return session::UnitAttemptResult{true,{0,0}};
+            }));
+    }
+
     const std::vector<StartingUnitType> unit_types{
         {true,1,1,100,false,std::nullopt}, {true,3,1,201,false,std::nullopt},
         {true,1,1,3000,true,true}, {false,std::nullopt,std::nullopt,std::nullopt,false,std::nullopt}};

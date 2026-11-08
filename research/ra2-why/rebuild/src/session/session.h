@@ -36,6 +36,21 @@ std::optional<StartingUnitChoice> choose_starting_unit(std::int32_t initial_budg
     sim::Random& random);
 // Original waypoint cell coordinates are signed 16-bit values.
 struct StartPoint { std::int16_t x, y; };
+struct UnitAttemptResult { bool placed; StartPoint cell; };
+struct StartingUnit { std::size_t type_index; StartPoint cell; };
+struct StartingUnitRun {
+    std::vector<StartingUnit> placed;
+    std::int32_t remaining_budget;
+    unsigned failed_placements;
+};
+// The callback must use private scratch state. nullopt means its inputs are
+// unresolved. A failed or unresolved plan must not be applied to the world.
+using UnitAttempt = std::function<std::optional<UnitAttemptResult>(std::size_t, sim::Random&)>;
+std::optional<StartingUnitRun> generate_starting_units(std::int32_t budget,
+    std::int32_t house_tech_level, std::uint32_t house_bit,
+    const std::vector<StartingUnitType>& types, sim::Random& random, const UnitAttempt& attempt);
+// Call once after all houses complete unit generation successfully.
+std::uint16_t finish_starting_unit_generation(sim::Random& random);
 // Inclusive cell bounds and resolved map and object checks. The validation
 // callback runs for every Yuri retry, including the origin. Base runs it only
 // for the initial point. The placement callback resolves occupancy and unit

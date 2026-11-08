@@ -35,12 +35,20 @@ vehicles, average eligible costs with original rounding, and multiply by the
 unit count. Unknown required inputs and arithmetic overflow return no result.
 `choose_starting_unit` selects one entry from already filtered vehicle and
 infantry lists. It uses the shared RNG and rejects an empty required list.
+`generate_starting_units` filters one resolved house's candidates, then runs
+the original budget loop. A callback stages unit placement in private scratch
+state. Unresolved callbacks and unsafe inputs return no plan and preserve the
+caller RNG. The loop limits failed placements to 20. Zero-cost types and plans
+above 100,000 units are unsupported. Add a positive remaining budget to house
+cash only at the original caller's later step. After every house succeeds,
+`finish_starting_unit_generation` consumes the original debug RNG draw.
 
-This is not a complete skirmish session. House creation, final cash, the complete
-unit generation loop, map and unit placement checks, observers, and waypoint
-fallback remain incomplete. Start must remain disabled.
-`Simulation.load_random_state` can restore setup RNG state before ticks or queued
-commands. The complete session setup must supply that state.
+This is not a complete skirmish session. House creation, final cash, additional
+unit missions, actual map and unit placement checks, observers, random waypoint
+fallback, and complete session assembly are not implemented. Start must remain
+disabled. `Simulation.load_random_state` can restore setup RNG state before ticks
+or queued commands. The complete session setup must supply that state.
+
 
 Run the native checks from the project root:
 
@@ -79,3 +87,9 @@ the original filter and arithmetic instructions execute.
 original x86. Build `unit_choice_cases.cpp` with `session.cpp` and the same
 simulation sources. It tests 327 cases per edition, including every RNG word.
 The original decision and RNG execute with supplied filtered candidate lists.
+
+`original_unit_loop_check.py` compares the extra-unit budget loop with the
+original x86 code. Build `unit_loop_cases.cpp` with `session.cpp` and the same
+simulation sources. It checks 27 cases per edition. Creation, Cost, and
+placement results are supplied. Original selection, retry, subtraction, final debug draw, and RNG instructions
+execute.
