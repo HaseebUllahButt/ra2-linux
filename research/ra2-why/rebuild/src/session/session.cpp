@@ -37,6 +37,34 @@ std::optional<int> point_distance(StartPoint a, StartPoint b, const sim::Origina
     return static_cast<int>(value);
 }
 }
+std::optional<StartPoint> find_initial_placement(StartPoint origin, PlacementBounds bounds,
+    PlacementEdition edition, sim::Random& random, const PlacementCheck& valid, const PlacementCheck& place) {
+    // Base 00660B60; expansion 00688ED0. Callers resolve both operations.
+    if (!valid || !place || bounds.left>bounds.right || bounds.top>bounds.bottom) return std::nullopt;
+    if (valid(origin,random) && place(origin,random)) return origin;
+    static constexpr int dx[8]={0,1,1,1,0,-1,-1,-1};
+    static constexpr int dy[8]={-1,-1,0,1,1,1,0,-1};
+    for (int radius=1;radius<32;++radius) {
+        int direction=random.ranged(0,7);
+        for (int pass=0;pass<2;++pass) for (int i=0;i<8;++i) {
+            int x=std::clamp(int(origin.x)+dx[direction]*radius,int(bounds.left),int(bounds.right));
+            int y=std::clamp(int(origin.y)+dy[direction]*radius,int(bounds.top),int(bounds.bottom));
+            if (pass) {
+                const int x_step=random.ranged(0,1);
+                const int x_sign=random.ranged(0,99);
+                x=std::clamp(x+(x_sign<50 ? x_step : -x_step),int(bounds.left),int(bounds.right));
+                const int y_step=random.ranged(0,1);
+                const int y_sign=random.ranged(0,99);
+                y=std::clamp(y+(y_sign<50 ? y_step : -y_step),int(bounds.top),int(bounds.bottom));
+            }
+            const StartPoint point{static_cast<std::int16_t>(x),static_cast<std::int16_t>(y)};
+            const bool cell_valid=edition==PlacementEdition::Base || valid(point,random);
+            if (cell_valid && (point.x!=origin.x || point.y!=origin.y) && place(point,random)) return point;
+            direction=(direction+1)&7;
+        }
+    }
+    return std::nullopt;
+}
 std::optional<std::size_t> choose_start_point(const std::vector<StartPoint>& points,
     std::vector<bool>& used, sim::Random& random,
     const sim::OriginalDistance& distance) {

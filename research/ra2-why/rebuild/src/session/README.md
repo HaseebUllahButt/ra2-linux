@@ -22,8 +22,15 @@ rules select AMCV for Americans, SMCV for Russians, and Yuri PCV in expansion.
 multiplayer house fields. It represents the initial assignment, before later
 map and unit processing. Base `0x004E8300` and expansion `0x004FCE00` match.
 
+`find_initial_placement` implements the original search order from base
+`0x00660B60` and expansion `0x00688ED0`. The caller supplies resolved map
+validation, occupancy, and placement callbacks. Base validates the origin;
+Yuri also validates each retry. The callbacks share the simulation RNG.
+The test compares 21 search traces and complete RNG states per edition against
+the original x86 code. The map and object checks are supplied test inputs.
+
 This is not a complete skirmish session. House creation, final cash, additional
-units, placement, observer handling, random waypoint fallback, and RNG state
+units, actual map and unit placement checks, observers, random waypoint fallback, and RNG state
 handoff to `Simulation` are not implemented. Start must remain disabled.
 
 Run the native checks from the project root:
@@ -48,3 +55,8 @@ stubbed to provide the already resolved country index. The selector itself runs.
 `original_house_check.py` compares the multiplayer house field assignment with
 the original x86 instructions. Build `house_cases.cpp` with `session.cpp` and
 the same simulation sources. It runs 56 cases per edition without stubs.
+
+`original_placement_check.py` compares placement search traces against the
+original code with supplied map and object results. Build `placement_cases.cpp`
+with `session.cpp` and the same simulation sources. The real map occupancy and
+unit placement checks still need integration.
