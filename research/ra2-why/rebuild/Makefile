@@ -14,7 +14,7 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/ui/ui.cpp src/ui/shell.cpp src/ui/skirmish.cpp src/text/csf.cpp \
     src/pack/map_pack.cpp src/rules/ini_file.cpp src/map/map_file.cpp \
     src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
-    src/sim/combat.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp \
+    src/sim/combat.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp src/sim/path.cpp src/sim/cell_entry.cpp \
     src/sim/world.cpp src/sim/world_init.cpp src/sim/drive.cpp src/sim/movement.cpp src/sim/replacement.cpp src/sim/build_time.cpp src/voxel/voxel.cpp
 NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
 
@@ -36,7 +36,7 @@ GFX_OBJECTS = build/native/src/gfx/palette.o build/native/src/gfx/shp_decode.o
 SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS))
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 
-native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-replacement sim-world sim-build-time session weapons
+native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-entry-height sim-replacement sim-world sim-build-time session weapons
 	build/ra2-native --game-dir ../game --frames 3 --headless
 	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
@@ -97,6 +97,19 @@ sim-route: build/sim_route_test
 build/sim_route_test: build/native/src/sim/test_route.o build/native/src/sim/drive.o build/native/src/sim/ground.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
+.PHONY: sim-path sim-entry-height
+sim-path: build/sim_path_test
+	build/sim_path_test ../game/game.exe ../game/gamemd.exe
+
+build/sim_path_test: build/native/src/sim/test_path.o build/native/src/sim/path.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+sim-entry-height: build/sim_entry_height_test
+	build/sim_entry_height_test
+
+build/sim_entry_height_test: build/native/src/sim/test_entry_height.o build/native/src/sim/cell_entry.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
 build/native/src/sim/test_inputs.o: src/sim/test_inputs.cpp
 	mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -I src/render -MMD -MP -c $< -o $@
@@ -147,6 +160,9 @@ build/session_placement_cases: build/native/src/session/session.o build/native/s
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/session_unit_choice_cases: build/native/src/session/session.o build/native/src/session/unit_choice_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/session_unit_loop_cases: build/native/src/session/session.o build/native/src/session/unit_loop_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 .PHONY: weapons
