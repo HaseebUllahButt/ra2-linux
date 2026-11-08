@@ -117,15 +117,8 @@ Rect dialog_to_pixels(Rect rect, unsigned base_width, unsigned base_height) {
     return {convert(rect.x,base_width,4),convert(rect.y,base_height,8),
             convert(rect.width,base_width,4),convert(rect.height,base_height,8)};
 }
-Dialog load_dialog(const Bytes& exe, Page page, const ra2text::CsfFile& strings) {
-    // 0x006040B0 associates these original resource IDs with each page.
-    std::uint16_t id = 0;
-    switch (page) {
-    case Page::Main: id=226; break;
-    case Page::SinglePlayer: id=256; break;
-    case Page::Skirmish: id=258; break;
-    default: throw std::runtime_error("unsupported dialog page");
-    }
+namespace {
+Dialog parse_dialog(const Bytes& exe, std::uint16_t id, const ra2text::CsfFile& strings) {
     auto data=dialog_data(exe,id); Reader r{exe,data.start,data.end};
     require(r.word()==1 && r.word()==0xffff, "unsupported dialog template");
     r.dword();r.dword();auto style=r.dword();auto count=r.word();
@@ -144,6 +137,21 @@ Dialog load_dialog(const Bytes& exe, Page page, const ra2text::CsfFile& strings)
     }
     return out;
 }
+} // namespace
+Dialog load_dialog(const Bytes& exe, Page page, const ra2text::CsfFile& strings) {
+    // 0x006040B0 associates these original resource IDs with each page.
+    switch (page) {
+    case Page::Main: return parse_dialog(exe,226,strings);
+    case Page::SinglePlayer: return parse_dialog(exe,256,strings);
+    case Page::Skirmish: return parse_dialog(exe,258,strings);
+    }
+    throw std::runtime_error("unsupported dialog page");
+}
+Dialog load_map_selection_dialog(const Bytes& exe, const ra2text::CsfFile& strings) {
+    // 0x005E68A0 loads resource 107 for the original map selector.
+    return parse_dialog(exe,107,strings);
+}
+
 std::optional<std::uint32_t> Dialog::hit_test(int x,int y,const std::vector<std::uint32_t>& enabled) const {
     for(auto it=controls.rbegin();it!=controls.rend();++it) {
         const auto& c=*it; const auto& r=c.bounds;

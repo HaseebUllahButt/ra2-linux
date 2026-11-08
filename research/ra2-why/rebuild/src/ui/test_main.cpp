@@ -144,6 +144,15 @@ int main(int argc,char** argv) {
     assert(std::any_of(expansion_maps.begin(),expansion_maps.end(),[](const auto& map){
         return map.source_archive=="DeepFrze.yro" && map.available && map.description_key=="Name:DpFreeze";
     }));
+    for (const auto& dialog : {ui::load_map_selection_dialog(base_exe,base_strings),
+                                ui::load_map_selection_dialog(exe,strings)}) {
+        assert(dialog.resource_id==107);
+        for (auto id : {1771u,1363u,1733u,1472u}) {
+            const auto found=std::find_if(dialog.controls.begin(),dialog.controls.end(),
+                                          [id](const auto& control){return control.id==id;});
+            assert(found!=dialog.controls.end() && found->bounds.width>0 && found->bounds.height>0);
+        }
+    }
     auto menu=ui::Menu::load(base,base_exe,base_strings);
     rules::IniFile defaults;
     auto empty_setup=ui::read_skirmish_setup(defaults);
