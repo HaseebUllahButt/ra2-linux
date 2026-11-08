@@ -442,6 +442,22 @@ bool bind_flat_tick_cells(FlatCannonTickInput &input,
   return true;
 }
 
+std::optional<AreaDamageEvent> base_standard_area_impact(
+    const StandardAreaImpactInput &input) {
+  if (!input.warhead_id || !input.special_warhead || !input.pre_area_effects ||
+      *input.special_warhead || *input.pre_area_effects)
+    return std::nullopt;
+  // 0x462573 uses a 32-bit wrapping multiply, then an arithmetic shift.
+  const std::uint32_t product = static_cast<std::uint32_t>(input.projectile_damage) *
+                                static_cast<std::uint32_t>(input.damage_multiplier);
+  const std::int64_t signed_product = product < 0x80000000u
+      ? static_cast<std::int64_t>(product)
+      : static_cast<std::int64_t>(product) - 0x100000000LL;
+  const int damage = static_cast<int>(signed_product >= 0 ? signed_product / 256
+                                      : -((-signed_product + 255) / 256));
+  return AreaDamageEvent{input.position, input.attacker_id, input.warhead_id, damage};
+}
+
 bool base_area_impact_enabled(int raw_damage, bool scenario_blocks_damage,
                               bool warhead_present) {
   return raw_damage != 0 && !scenario_blocks_damage && warhead_present;

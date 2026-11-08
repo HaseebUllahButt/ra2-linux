@@ -203,6 +203,26 @@ FlatCannonTickResult base_flat_cannon_tick(const FlatCannonTickInput &,
 bool bind_flat_tick_cells(FlatCannonTickInput &, const sim::TerrainCell &old_cell,
                           const sim::TerrainCell &proposed_cell);
 
+// Standard base 0x462110 detonation path. The caller resolves the final
+// impact position and verifies that special warheads and pre-area effects are
+// absent. Special flags are Warhead +153..158, +161 and +162. Earlier effects
+// include Warhead +168..174 random ranges, Bullet +118 radiation, and Projectile
+// +284. Missing or enabled guards return no event. This does not run 0x461DE0
+// target adjustment, projectile removal, visuals, or area recipient collection.
+struct StandardAreaImpactInput {
+  sim::Coord position;
+  std::uint32_t attacker_id, warhead_id;
+  int projectile_damage, damage_multiplier;
+  std::optional<bool> special_warhead, pre_area_effects;
+};
+struct AreaDamageEvent {
+  sim::Coord position;
+  std::uint32_t attacker_id, warhead_id;
+  int damage;
+};
+std::optional<AreaDamageEvent> base_standard_area_impact(
+    const StandardAreaImpactInput &);
+
 // Original area-damage entry checks at 0x47E2E8..0x47E31B.
 bool base_area_impact_enabled(int raw_damage, bool scenario_blocks_damage,
                               bool warhead_present);
