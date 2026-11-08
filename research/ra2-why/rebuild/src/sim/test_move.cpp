@@ -2,6 +2,7 @@
 // Build with test_move.sh and the parent's current read-only renderer sources.
 #include "sim.h"
 #include "floor.h"
+#include "world_init.h"
 #include "test_inputs.h"
 #include <iostream>
 #include <stdexcept>
@@ -25,7 +26,7 @@ TerrainCells terrain_inputs(const std::vector<OriginalTestCell>& inputs) {
 std::string trace(const Snapshot& state,std::uint32_t id) {
     const auto& e=state.entities.at(id-1);
     require(e.position.has_value(),"world position missing");
-    std::string out=std::to_string(state.frame)+":"+std::to_string(e.position->x)+":"+std::to_string(e.position->y)+":"+std::to_string(e.position->z)+":"+std::to_string(e.moving)+":"+e.mission;
+    std::string out=std::to_string(state.frame)+":"+std::to_string(e.position->x)+":"+std::to_string(e.position->y)+":"+std::to_string(e.position->z)+":"+std::to_string(e.moving)+":"+std::to_string(e.facing)+":"+e.mission;
     for (const auto& result:state.results) out+=":"+std::to_string(result.ticket)+":"+std::to_string(static_cast<int>(result.error))+":"+result.detail;
     return out;
 }
@@ -34,12 +35,13 @@ int main(int argc,char** argv) try {
     if (argc<3 || argc>4) throw std::runtime_error("usage: test_move GAME_DIRECTORY EXTRACTED_DIRECTORY [--base]");
     const bool base=argc==4 && std::string(argv[3])=="--base";
     const std::string root=argv[2];
-    auto rules=Ini::from_file(root+"/config/"+(base?"rules.ini":"rulesmd.ini"));
+    Ini rules; if (base) rules.parse(original_test_ini(argv[1],"RULES.INI",true)); else rules=Ini::from_file(root+"/config/rulesmd.ini");
     Ini art; art.parse(original_test_art(argv[1],base));
     const std::string executable=std::string(argv[1])+(base?"/game.exe":"/gamemd.exe");
-    auto map=Ini::from_file(root+"/maps/C1A02MD.MAP");
-    auto terrain=terrain_inputs(original_test_cells(argv[1],root+"/maps/C1A02MD.MAP",base));
-    const auto source_catalog=original_test_catalog(argv[1],root+"/maps/C1A02MD.MAP",base);
+    const auto map_source=base?std::string("ALL02S.MAP"):root+"/maps/C1A02MD.MAP";
+    Ini map; if (base) map.parse(original_test_ini(argv[1],map_source,true)); else map=Ini::from_file(map_source);
+    auto terrain=terrain_inputs(original_test_cells(argv[1],map_source,base));
+    const auto source_catalog=original_test_catalog(argv[1],map_source,base);
     TheaterInputs theater; theater.theater_name=source_catalog.name; theater.settings.parse(source_catalog.settings);
     for (const auto& range:source_catalog.ranges) theater.tile_sets.push_back({range.first,range.count});
     theater.resolved_metadata=[&source_catalog](std::uint32_t index,std::uint8_t subtile)->std::optional<TileMetadata> {
@@ -47,10 +49,20 @@ int main(int argc,char** argv) try {
         if (!metadata) return {};
         return TileMetadata{metadata->terrain,metadata->ramp,metadata->valid};
     };
+    const auto size=map.read_list("Map","Size");
+    auto floor_check=terrain;
+    const auto cliff=static_cast<std::uint8_t>(rules.read_integer("General","CliffBackImpassability",0));
+    initialize_original_tile_pass(floor_check,theater,*Ini::integer_value(size[2]),*Ini::integer_value(size[3]),cliff,true);
+    std::vector<std::optional<int>> first_floors;
+    for (const auto& cell:floor_check) first_floors.push_back(cell.floor_world_height);
+    initialize_original_tile_pass(floor_check,theater,*Ini::integer_value(size[2]),*Ini::integer_value(size[3]),cliff,false);
+    unsigned floor_changes=0;
+    for (std::size_t i=0;i<floor_check.size();++i) if (floor_check[i].floor_world_height!=first_floors[i]) ++floor_changes;
+    std::cout<<map_source<<" second-pass floor changes="<<floor_changes<<"\n";
     Simulation a(rules,map,9,terrain,&theater); a.load_ground_assets(executable,art);
     constexpr int directions[][2]={{0,-1},{1,-1},{1,0},{1,1},{0,1},{-1,1},{-1,0},{-1,-1}};
     const auto initial=a.snapshot();
-    for (const auto& e:initial.entities) if (e.kind==Kind::Unit && e.facing>=0 && e.facing<256 && e.facing%32==0) {
+    for (const auto& e:initial.entities) if (e.id==(base?60u:259u)) {
         Simulation first(rules,map,9,terrain,&theater); first.load_ground_assets(executable,art);
         Command move; move.op=Op::Move; move.entity=e.id;
         const unsigned direction=static_cast<unsigned>(e.facing)/32;
@@ -62,10 +74,10 @@ int main(int argc,char** argv) try {
         require(replay.issue(move).error==Error::None,"replay did not queue"); replay.tick();
         require(trace(first.snapshot(),e.id)==trace(replay.snapshot(),e.id),"dispatch replay mismatch");
         const auto goal=Coord{move.destination.x*256+128,move.destination.y*256+128,e.position->z};
-        require(e.type=="YTNK" && e.cell.x==113 && e.cell.y==115 && e.facing==0,"real Move fixture changed");
-        require(first.types().at(e.type).speed==6,"real YTNK Speed changed");
+        require(base?(e.type=="HTNK" && e.cell.x==114 && e.cell.y==67 && e.facing==128):(e.type=="YTNK" && e.cell.x==113 && e.cell.y==115 && e.facing==0),"real Move fixture changed");
+        require(first.types().at(e.type).speed==6,"real vehicle Speed changed");
         // Original 004B0F20 and base 004A1000 at resolved speed 15, relative to their source.
-        const int original_y[]={-23,-47,-70,-94,-117,-141,-164,-188,-212,-235,-253,-256};
+        const int original_y[]={23,47,70,94,117,141,164,188,212,235,253,256};
         Command health; health.op=Op::ResolvedDamage; health.entity=e.id; health.amount=1; health.frame=1;
         require(first.issue(health).error==Error::None && replay.issue(health).error==Error::None,"health guard did not queue");
         unsigned ticks=0;
@@ -74,20 +86,60 @@ int main(int argc,char** argv) try {
             require(trace(first.snapshot(),e.id)==trace(replay.snapshot(),e.id),"movement replay mismatch");
             if (ticks==1) require(first.snapshot().results.at(0).error==Error::Unsupported,"unrecovered movement damage was accepted");
             const auto position=first.snapshot().entities.at(e.id-1).position.value();
-            require(ticks<=12 && position.x==e.position->x && position.y==e.position->y+original_y[ticks-1],"real map Move differs from original x86 positions");
+            require(ticks<=12 && position.x==e.position->x && position.y==e.position->y+directions[direction][1]*original_y[ticks-1],"real map Move differs from original x86 positions");
         }
         const auto final=first.snapshot().entities.at(e.id-1);
         require(ticks==12,"original movement duration changed");
         require(!final.moving && final.position->x==goal.x && final.position->y==goal.y && final.position->z==goal.z,"Move did not reach the original destination");
         require(final.cell.x==move.destination.x && final.cell.y==move.destination.y,"Move cell mismatch");
         require(final.hp==e.hp && final.house==e.house,"Move changed health or owner");
-        require(final.mission=="Area Guard","completed single Move did not select the original IQ-based idle mission");
+        const auto expected_mission="Area Guard";
+        std::cout<<"original IQ="<<map.read_integer(e.house,"IQ",0)<<" GuardArea="<<rules.read_integer("IQ","GuardArea",4)<<"\n";
+        if (final.mission!=expected_mission) std::cout<<"actual idle mission "<<final.mission<<" owner="<<e.house<<"\n";
+        require(final.mission==expected_mission,"completed single Move did not select the original IQ-based idle mission");
+        for (const auto& cell:first.terrain()) if (cell.cell.x==e.cell.x && (cell.cell.y==e.cell.y || cell.cell.y==move.destination.y))
+            std::cout<<"fixture cell "<<cell.cell.x<<","<<cell.cell.y<<" land="<<cell.land_type.value_or(-1)<<"\n";
+        if (base) {
+            bool moved_on_clear=false;
+            for (const auto& candidate:initial.entities) {
+                if (candidate.kind!=Kind::Unit || candidate.type!="HTNK" || candidate.house!=e.house || !candidate.position || candidate.facing<0 || candidate.facing>=256 || candidate.facing%64) continue;
+                const unsigned facing=static_cast<unsigned>(candidate.facing)/32;
+                const ra2map::Cell target{static_cast<std::uint16_t>(candidate.cell.x+directions[facing][0]),static_cast<std::uint16_t>(candidate.cell.y+directions[facing][1])};
+                bool source_clear=false,target_clear=false;
+                for (const auto& cell:a.terrain()) {
+                    const bool supported=cell.land_type==0 && cell.ramp_index==0 && cell.bridge==false && cell.overlay_type_index==-1 && cell.tile_replacement_resolved;
+                    if (cell.cell.x==candidate.cell.x && cell.cell.y==candidate.cell.y) source_clear=supported;
+                    if (cell.cell.x==target.x && cell.cell.y==target.y) target_clear=supported;
+                }
+                if (!source_clear || !target_clear) continue;
+                require(floor_changes==0,"real base clear fixture needs first-pass placement floors");
+                Simulation clear_case(rules,map,9,a.terrain()),clear_replay(rules,map,9,a.terrain());
+                clear_case.load_ground_assets(executable,art); clear_replay.load_ground_assets(executable,art);
+                Command next; next.op=Op::Move; next.entity=candidate.id; next.destination=target;
+                require(clear_case.issue(next).error==Error::None && clear_replay.issue(next).error==Error::None,"base clear command did not queue");
+                clear_case.tick(); clear_replay.tick();
+                const auto status=clear_case.snapshot().results.at(0);
+                if (status.error!=Error::None) { std::cout<<"clear candidate "<<candidate.id<<" rejected: "<<status.detail<<"\n"; continue; }
+                for (unsigned step=0;step<12;++step) {
+                    clear_case.tick(); clear_replay.tick();
+                    require(trace(clear_case.snapshot(),candidate.id)==trace(clear_replay.snapshot(),candidate.id),"base clear movement replay differs");
+                    const auto actual=clear_case.snapshot().entities.at(candidate.id-1);
+                    require(actual.position->x==candidate.position->x+directions[facing][0]*original_y[step] && actual.position->y==candidate.position->y+directions[facing][1]*original_y[step] && actual.position->z==candidate.position->z,"base clear movement differs from original x86 positions");
+                    require(actual.moving==(step<11),"base clear movement duration differs");
+                }
+                moved_on_clear=true;
+                std::cout<<"real base clear Move passed: entity "<<candidate.id<<" "<<candidate.cell.x<<","<<candidate.cell.y<<" -> "<<target.x<<","<<target.y<<"\n";
+                break;
+            }
+            require(moved_on_clear,"real base map has no completed supported clear-cell Move");
+        }
+        const auto last_completed=first.snapshot().entities.at(e.id-1);
         Command invalid=move; invalid.frame=first.snapshot().frame; invalid.destination.y-=2;
         require(first.issue(invalid).error==Error::None,"unsupported path command did not queue for validation");
         first.tick();
         require(first.snapshot().results.at(0).error==Error::Unsupported,"unrecovered path command was accepted");
         const auto rejected=first.snapshot().entities.at(e.id-1);
-        require(rejected.position->x==goal.x && rejected.position->y==goal.y && !rejected.moving,"failed Move changed position");
+        require(rejected.position->x==last_completed.position->x && rejected.position->y==last_completed.position->y && !rejected.moving,"failed Move changed position");
         std::cout<<"real map Move passed: "<<e.id<<" "<<e.type<<" "<<e.cell.x<<","<<e.cell.y<<" -> "<<move.destination.x<<","<<move.destination.y<<" ticks="<<ticks<<"\n";
         return 0;
     }

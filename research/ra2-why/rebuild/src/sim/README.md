@@ -381,6 +381,12 @@ This optional integration test reads the parent's current renderer sources throu
 Its default is `/path/to/user/ra2-native-integration/rebuild/src`.
 The shared asset reader uses its normal optimized build. SIM_TEST_FLAGS instruments the simulation and its INI/map dependencies.
 It loads original C1A02MD.MAP, the original ART INI, and exact TMP metadata from original MIX archives.
+Add `/path/to/user/ra2/game /path/to/user/ra2/analysis/extracted --base` to test base ALL02S.MAP.
+The base test reads RULES.INI, ART.INI, and the map from original MIX archives.
+Original HTNK entity 60 moves from 114,67 to 114,68 on road in 12 ticks.
+Original HTNK entity 61 moves from 117,67 to 117,68 on clear ground in 12 ticks.
+Both base commands match every original position and deterministic replay.
+The two initialization passes keep all floor heights unchanged on both real fixture maps.
 Original YTNK entity 259 moves from 113,115 to 113,114 in 12 movement ticks.
 Each position matches original x86 output at its real Speed=6, converted to 15.
 The original IQ=3 house makes this YTNK enter Area Guard after arrival.

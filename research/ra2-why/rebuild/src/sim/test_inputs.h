@@ -17,3 +17,5 @@ struct OriginalTestCatalog {
     std::function<std::optional<OriginalTestMetadata>(std::uint32_t,std::uint8_t)> metadata;
 };
 OriginalTestCatalog original_test_catalog(const std::string& game,const std::string& map,bool base);
+
+std::string original_test_ini(const std::string& game,const std::string& name,bool base);
