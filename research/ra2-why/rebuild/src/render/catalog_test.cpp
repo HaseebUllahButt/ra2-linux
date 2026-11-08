@@ -1,4 +1,5 @@
 #include "minimap.h"
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <map>
