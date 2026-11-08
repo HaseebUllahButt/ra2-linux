@@ -65,14 +65,15 @@ struct CellState {
     std::optional<float> land_track;
     std::optional<bool> usable;
     std::optional<std::uint8_t> coarse_category, neighbor_count;
-    std::optional<std::uint32_t> ground_occupancy_124; // Base Cell +124.
+    // Base 004710B5 clears this byte. Unit entry 00703087 reads its bits.
+    std::optional<std::uint8_t> ground_occupancy_124;
     std::optional<bool> cell_flag_100;   // Base Cell +140 bit 100.
     std::optional<bool> cell_flag_40000; // Base Cell +140 bit 40000.
     std::optional<bool> cell_flag_200;   // Separate Cell +140 bit 200.
     std::optional<float> unit_land_speed; // Resolved original locomotor land-table value.
-    // Base Cell +54/+58 and signed +116. Constructors set -1, but the
-    // second map pass can change them. Unknown values are not defaults.
-    std::optional<std::int32_t> tube_field_54, tube_field_58;
+    // Base Cell +54/+58 and signed +116. Constructors set -1, but later
+    // state is not proved. Only +116 is known to index the TubeClass vector.
+    std::optional<std::int32_t> cell_field_54, cell_field_58;
     std::optional<std::int16_t> tube_field_116;
 };
 // An owning snapshot. IDs use zero as null. Original creation order does not

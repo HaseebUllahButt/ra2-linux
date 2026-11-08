@@ -39,7 +39,7 @@ int main(int argc,char** argv) {
         cell.coarse_category=static_cast<std::uint8_t>(category);
         if (flag200>=0) cell.cell_flag_200=flag200!=0;
         if (mark>=0) cell.cell_flag_40000=mark!=0;
-        cell.tube_field_54=-1;cell.tube_field_58=-1;cell.tube_field_116=-1;
+        cell.cell_field_54=-1;cell.cell_field_58=-1;cell.tube_field_116=-1;
     };
     target(center_x,0,1,0);target(center_x+2,2,0,4);
     const auto geometry=real_fixture?PlacementGeometry{100,100,{5,5,90,89}}:

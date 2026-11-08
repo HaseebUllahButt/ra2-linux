@@ -173,8 +173,8 @@ PlacementResult Stage::place_base_unit(std::uint32_t unit_id, StartPoint point,
         !cell->second.usable || !*cell->second.usable ||
         !cell->second.ground_occupancy_124 || *cell->second.ground_occupancy_124!=0 ||
         !cell->second.cell_flag_100 || *cell->second.cell_flag_100 ||
-        !cell->second.tube_field_54 || *cell->second.tube_field_54!=-1 ||
-        !cell->second.tube_field_58 || *cell->second.tube_field_58!=-1 ||
+        !cell->second.cell_field_54 || *cell->second.cell_field_54!=-1 ||
+        !cell->second.cell_field_58 || *cell->second.cell_field_58!=-1 ||
         !cell->second.tube_field_116 || *cell->second.tube_field_116!=-1)
         return PlacementResult::Unresolved;
     const auto& terrain=*cell->second.terrain;

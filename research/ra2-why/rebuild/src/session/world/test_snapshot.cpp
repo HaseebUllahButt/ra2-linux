@@ -104,7 +104,7 @@ int main() {
         cell.ground_occupancy_124=0; cell.cell_flag_100=false;
         cell.usable=true; cell.coarse_category=static_cast<std::uint8_t>(category);
         cell.cell_flag_200=false; cell.cell_flag_40000=false;
-        cell.tube_field_54=-1; cell.tube_field_58=-1; cell.tube_field_116=-1;
+        cell.cell_field_54=-1; cell.cell_field_58=-1; cell.tube_field_116=-1;
     };
     make_target(54,69,0,1.0f,0);
     make_target(56,69,2,0.0f,4);
