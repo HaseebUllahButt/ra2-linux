@@ -101,7 +101,7 @@ build/sim_route_test: build/native/src/sim/test_route.o build/native/src/sim/dri
 sim-path: build/sim_path_test
 	build/sim_path_test ../game/game.exe ../game/gamemd.exe
 
-build/sim_path_test: build/native/src/sim/test_path.o build/native/src/sim/path.o build/native/src/sim/distance.o
+build/sim_path_test: build/native/src/sim/test_path.o build/native/src/sim/path.o build/native/src/sim/cell_entry.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 sim-entry-height: build/sim_entry_height_test
