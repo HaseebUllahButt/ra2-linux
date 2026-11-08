@@ -69,6 +69,13 @@ uses Z base `0x8000` and origin Y zero. Advance the row with
 `base_depth_next_row()`. Clip X in the scene. Supply the projected world Z.
 The full adjustment at `0x4C9930` also checks terrain flags, nearby tile
 heights, tile shapes, bridges and object state. These checks remain unsupported.
+`supports_base_flat_vehicle_depth()` checks the narrow tested case. Supply a
+row-major 5 by 5 neighborhood and the vehicle state. The guard rejects
+unknown tube and terrain-marker values. `bridge` covers cell bit `0x100`,
+`secondary_bridge_flag` covers `0x400`, and `marked_terrain` covers `0x10000`.
+Vehicle state records
+the two unclassified original object bytes and the `Harvester` rule. Unit
+occupancy does not by itself reject this path.
 The flat test executes the base game's default scale initialization. The
 result is 0.14350360082660085, the same scale used by `actors::projected_height()`
 in the parent scene.
@@ -78,9 +85,11 @@ python3 rebuild/src/voxel/verify_flat_depth_x86.py /tmp/voxel_test
 python3 rebuild/src/voxel/verify_part_depth_x86.py /tmp/voxel_test
 ```
 
-This executes `0x4C9930` and its original map checks for five vehicle heights
-and 32 facings. The synthetic map supplies identical flat cells and a 60 by 30
-tile. Only cell lookup, object position, facing and fixture access use stubs.
+This executes `0x4C9930` and its original map checks for 640 vehicle height,
+ground level and facing cases. It also checks 1,080 changes to other cell flag
+bits. The synthetic map supplies distinct flat cells and a 60 by 30 tile.
+Two cells contain unit-list pointers. The checked path does not read those
+lists. Only cell lookup, object position, facing and fixture access use stubs.
 The second test executes the original part blitter and clipping code for 256
 part positions, source bounds, projected heights and map-edge clips.
 

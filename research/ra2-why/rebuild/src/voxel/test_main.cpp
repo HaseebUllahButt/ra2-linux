@@ -50,6 +50,31 @@ int main(int argc, char **argv) {
       }
       return 0;
     }
+    std::array<FlatDepthCell, 25> flat_cells{};
+    for (auto &cell : flat_cells) {
+      cell.known = true;
+      cell.ramp = cell.overlay = cell.tube = cell.bridge =
+          cell.secondary_bridge_flag = cell.marked_terrain =
+              cell.tile_extra_shape = false;
+      cell.tile_width = 60;
+      cell.tile_height = 30;
+    }
+    FlatDepthVehicleState flat_vehicle;
+    flat_vehicle.known = true;
+    flat_vehicle.drive_locomotor = true;
+    if (!supports_base_flat_vehicle_depth(flat_cells, flat_vehicle))
+      throw std::runtime_error("flat depth guard rejected clear ground");
+    flat_cells[0].tube.reset();
+    if (supports_base_flat_vehicle_depth(flat_cells, flat_vehicle))
+      throw std::runtime_error("flat depth guard accepted an unknown tube");
+    flat_cells[0].tube = false;
+    flat_cells[0].marked_terrain = true;
+    if (supports_base_flat_vehicle_depth(flat_cells, flat_vehicle))
+      throw std::runtime_error("flat depth guard accepted marked terrain");
+    flat_cells[0].marked_terrain = false;
+    flat_vehicle.harvester = true;
+    if (supports_base_flat_vehicle_depth(flat_cells, flat_vehicle))
+      throw std::runtime_error("flat depth guard accepted a harvester");
     ra2::fs::MixFileSystem fs("/path/to/user/ra2/game");
     fs.bootstrap();
     fs.mount("conquer.mix", false);

@@ -31,6 +31,24 @@ BaseDepthRow base_flat_vehicle_depth_row(const BaseFlatVehicleDepthInput &input)
                         input.clipped_y, input.clipped_height,
                         base_flat_vehicle_depth_adjustment(input.projected_height));
 }
+bool supports_base_flat_vehicle_depth(const std::array<FlatDepthCell, 25> &cells,
+                                      const FlatDepthVehicleState &vehicle) {
+  if (!vehicle.known || !vehicle.drive_locomotor || vehicle.harvester ||
+      vehicle.object_state_79 || vehicle.object_state_370 || !cells[12].known)
+    return false;
+  const int level = cells[12].level;
+  if (level < 0 || level > 15 || vehicle.world_z != level * 256)
+    return false;
+  for (const auto &cell : cells)
+    if (!cell.known || cell.level != level || cell.ramp.value_or(true) ||
+        cell.overlay.value_or(true) || cell.tube.value_or(true) ||
+        cell.bridge.value_or(true) || cell.secondary_bridge_flag.value_or(true) ||
+        cell.marked_terrain.value_or(true) ||
+        cell.tile_width != 60 || cell.tile_height != 30 ||
+        cell.tile_extra_shape.value_or(true))
+      return false;
+  return true;
+}
 void base_depth_next_row(BaseDepthRow &row) {
   if (++row.phase >= 3) {
     row.phase -= 3;

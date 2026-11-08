@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 namespace ra2::voxel {
@@ -89,6 +90,27 @@ struct BaseFlatVehicleDepthInput {
   int projected_height;
 };
 BaseDepthRow base_flat_vehicle_depth_row(const BaseFlatVehicleDepthInput &);
+// Conservative guard for the tested flat-ground depth path. Supply all cells
+// in row-major order in the 5x5 neighborhood centered on the vehicle.
+// marked_terrain means the
+// original cell flag 0x10000; its higher-level meaning is still unknown.
+struct FlatDepthCell {
+  bool known = false;
+  int level = 0;
+  // Unset means unknown and makes the guard fail.
+  std::optional<bool> ramp, overlay, tube, bridge, secondary_bridge_flag;
+  std::optional<bool> marked_terrain;
+  int tile_width = 0, tile_height = 0;
+  std::optional<bool> tile_extra_shape;
+};
+struct FlatDepthVehicleState {
+  bool known = false, drive_locomotor = false, harvester = false;
+  // Object bytes at +0x79 and +0x370. Their meanings remain open.
+  bool object_state_79 = false, object_state_370 = false;
+  int world_z = 0;
+};
+bool supports_base_flat_vehicle_depth(const std::array<FlatDepthCell, 25> &,
+                                      const FlatDepthVehicleState &);
 void base_depth_next_row(BaseDepthRow &);
 // Original raw blitter 0x488870: transparent pixels and equal depths fail.
 bool base_depth_visible(std::uint8_t pixel, int row_depth,
