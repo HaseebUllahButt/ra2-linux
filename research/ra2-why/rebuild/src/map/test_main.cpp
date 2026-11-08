@@ -1,0 +1,49 @@
+#include "map_file.h"
+
+#include <cstdio>
+#include <fstream>
+#include <iterator>
+#include <vector>
+
+using namespace ra2map;
+
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        std::fprintf(stderr, "usage: map_test <file.map>\n");
+        return 2;
+    }
+    std::ifstream in(argv[1], std::ios::binary);
+    if (!in) {
+        std::fprintf(stderr, "cannot open %s\n", argv[1]);
+        return 1;
+    }
+    const std::string text((std::istreambuf_iterator<char>(in)),
+                           std::istreambuf_iterator<char>());
+    MapFile map;
+    try {
+        map.parse(text);
+    } catch (const std::exception& e) {
+        std::printf("parse failed: %s\n", e.what());
+        return 1;
+    }
+    const auto& st = map.stats();
+    std::printf("sections: %zu, entries: %zu, empty: %zu, ignored: %zu\n",
+                st.section_headers, st.entries, st.empty_entries,
+                st.ignored_lines);
+    std::printf("theater: %s, size: %d,%d,%d,%d\n", map.theater().c_str(),
+                map.size_left(), map.size_top(), map.size_right(),
+                map.size_bottom());
+    std::printf("structures: %zu, units: %zu, infantry: %zu, aircraft: %zu\n",
+                map.structures().size(), map.units().size(),
+                map.infantry().size(), map.aircraft().size());
+    std::printf("terrain: %zu, waypoints: %zu\n", map.terrain().size(),
+                map.waypoints().size());
+    if (!map.waypoints().empty()) {
+        const auto& wp = map.waypoints()[0];
+        std::printf("waypoint[0]: idx=%d cell=%u,%u\n", wp.index,
+                    wp.cell.x, wp.cell.y);
+    }
+    std::printf("iso pack: %zu bytes, overlay pack: %zu bytes\n",
+                map.iso_map_pack5().size(), map.overlay_pack().size());
+    return 0;
+}
