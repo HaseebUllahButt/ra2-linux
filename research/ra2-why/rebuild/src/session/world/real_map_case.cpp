@@ -9,9 +9,10 @@
 // separately by the fixture; this does not reconstruct the full Battle world.
 int main(int argc, char** argv) {
     if (argc!=2) return 2;
-    ra2::rules::IniFile map, rules;
+    ra2::rules::IniFile map, rules, art;
     map.parse(original_test_ini(argv[1],"MP02T2.MAP",true));
     rules.parse(original_test_ini(argv[1],"RULES.INI",true));
+    art.parse(original_test_art(argv[1],true));
     assert(map.read_string("Map","Size")=="0,0,100,100");
     assert(map.read_string("Map","LocalSize")=="5,5,90,89");
     assert(map.key_count("AMCV")==0 && map.key_count("Clear")==0 && map.key_count("Water")==0);
@@ -34,5 +35,13 @@ int main(int argc, char** argv) {
     const auto cells=original_test_cells(argv[1],"MP02T2.MAP",true);
     const auto cell=std::find_if(cells.begin(),cells.end(),[](const auto& item){return item.x==135 && item.y==80;});
     assert(cell!=cells.end() && cell->raw==13 && cell->ramp==0 && cell->height==4 && cell->overlay==-1);
+    // 006E4D60/006E5630 use a one-cell footprint for these original types.
+    // This proves only the Terrain part of the cell history.
+    for (const auto& item:parsed.terrain()) {
+        assert(map.key_count(item.type)==0 && rules.read_string(item.type,"Image").empty());
+        assert(art.read_string(item.type,"Foundation")=="1x1");
+        assert(item.cell.x!=135 || item.cell.y!=80);
+    }
     std::cout<<"MP02T2 waypoint, terrain, rules, and Unit registry match the placement fixture\n";
+    std::cout<<"No authored Terrain footprint covers MP02T2 waypoint 0\n";
 }
