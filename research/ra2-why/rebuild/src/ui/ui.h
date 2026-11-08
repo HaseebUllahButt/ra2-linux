@@ -21,7 +21,8 @@ struct Control {
     std::string label_key, label;
 };
 enum class Page { Main, SinglePlayer, Skirmish };
-enum class Action { None, PageChanged };
+// Quit requests exit. The original confirmation dialog is not implemented.
+enum class Action { None, PageChanged, Quit };
 // Activates only the supported page changes. IDs are from the original dialog.
 class MenuNavigation {
 public:

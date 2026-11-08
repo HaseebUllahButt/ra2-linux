@@ -5,6 +5,8 @@ original images and font glyphs. It does not yet draw a complete main menu,
 skirmish setup, or sidebar. It does not enable gameplay.
 `MenuNavigation` provides the four verified main, single-player and skirmish
 page changes by control ID. It ignores Skirmish Start and unsupported IDs.
+Exit returns `Action::Quit` as a request. The original confirmation dialog
+at `0x0052DDBA` is not implemented.
 
 `load_dialog` reads the original `gamemd.exe` 32-bit PE resource directory.
 It supports the extended dialog templates used by the supplied game. Page IDs

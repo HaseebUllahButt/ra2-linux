@@ -33,6 +33,8 @@ void blit(gfx::RgbaImage& dst, const gfx::RgbaImage& src, int x, int y) {
 
 // 0x006040B0 identifies these controls on dialogs 226, 256 and 258.
 Action MenuNavigation::activate(std::uint32_t id) noexcept {
+    // 0x00532037 maps the main dialog's Exit button to result 6.
+    if (page_ == Page::Main && id == 1006) return Action::Quit;
     if (page_ == Page::Main && id == 1667) page_ = Page::SinglePlayer;
     else if (page_ == Page::SinglePlayer && id == 1401) page_ = Page::Skirmish;
     else if (page_ == Page::SinglePlayer && id == 1670) page_ = Page::Main;
@@ -123,7 +125,7 @@ std::vector<Menu::Button> Menu::buttons() const {
         int row = (pixels_y - 199 + 21) / 42;
         row = std::max(0, std::min(8, row));
         const int y = back ? 535 : 199 + row * 42;
-        const bool enabled = (page() == Page::Main && id == 1667) ||
+        const bool enabled = (page() == Page::Main && (id == 1667 || id == 1006)) ||
                              (page() == Page::SinglePlayer && (id == 1401 || id == 1670)) ||
                              (page() == Page::Skirmish && id == 1472);
         result.push_back({id, {644, y, 156, 42}, control.label, enabled});

@@ -78,6 +78,7 @@ int main(int argc,char** argv) {
     assert(nav.activate(1559)==ui::Action::None && nav.page()==ui::Page::Skirmish);
     assert(nav.activate(1472)==ui::Action::PageChanged && nav.page()==ui::Page::SinglePlayer);
     assert(nav.activate(1670)==ui::Action::PageChanged && nav.page()==ui::Page::Main);
+    assert(nav.activate(1006)==ui::Action::Quit && nav.page()==ui::Page::Main);
     fs::MixFileSystem base(argv[1]);
     base.bootstrap(fs::GameVariant::RedAlert2); base.mount_language(fs::GameVariant::RedAlert2);
     base.mount("neutral.mix");
@@ -101,6 +102,7 @@ int main(int argc,char** argv) {
         }
     }
     auto unhovered=menu.render();
+    menu.pointer_down(645,536); assert(menu.pointer_up(645,536)==ui::Action::Quit);
     menu.pointer_move(644,199);
     auto hovered=menu.render(); assert(hovered.pixels!=unhovered.pixels);
     menu.pointer_down(644,199);
