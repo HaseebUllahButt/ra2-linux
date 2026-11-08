@@ -33,6 +33,16 @@ struct Lighting {
 Model read_vxl(const Bytes &);
 Animation read_hva(const Bytes &);
 Lighting read_vpl(const Bytes &);
+// Match 0x5BD730: multiply matrix translations by the first VXL section scale.
+void scale_hva_translations(Animation &, const Model &);
+// Replace only the VPL reserved range. Lighting tables keep that range
+// separate.
+Lighting make_default_lighting(const Lighting &);
+Lighting team_colors(const Lighting &, const std::array<ra2::gfx::Rgba, 256> &);
+std::array<std::uint8_t, 256> double_light(unsigned normal_type,
+                                           std::array<float, 3> first,
+                                           std::array<float, 3> second,
+                                           float intensity);
 // Original single-light lookup. The caller supplies light in section
 // coordinates.
 std::array<std::uint8_t, 256> single_light(unsigned normal_type,

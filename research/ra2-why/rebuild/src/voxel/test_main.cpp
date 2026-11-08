@@ -39,6 +39,43 @@ int main() {
       std::cout << asset << " points=" << model.sections[0].points.size()
                 << '\n';
     }
+    auto scaled = h;
+    scaled.matrices[0][3] = 12;
+    scaled.matrices[0][7] = -8;
+    scaled.matrices[0][11] = 4;
+    scaled.matrices[0][0] = 3;
+    scale_hva_translations(scaled, v);
+    if (scaled.matrices[0][3] != 12 * v.sections[0].scale ||
+        scaled.matrices[0][7] != -8 * v.sections[0].scale ||
+        scaled.matrices[0][11] != 4 * v.sections[0].scale ||
+        scaled.matrices[0][0] != 3)
+      throw std::runtime_error("HVA scaling mismatch");
+    auto generated = make_default_lighting(p);
+    unsigned equal = 0;
+    for (unsigned row = 0; row < 32; ++row)
+      for (unsigned col = 1; col < 256; ++col) {
+        auto out = generated.tables[row][col];
+        bool source_remap = col >= p.remap_first && col <= p.remap_last;
+        bool dest_remap = out >= p.remap_first && out <= p.remap_last;
+        if (source_remap != dest_remap)
+          throw std::runtime_error("lighting range crossed");
+        equal += out == p.tables[row][col];
+      }
+    if (equal < 8100)
+      throw std::runtime_error("VPL shade table mismatch");
+    std::cout << "matching VPL table bytes=" << equal << "/8160\n";
+    auto colors = p.palette;
+    colors[p.remap_first] = {123, 45, 67, 255};
+    colors[1] = {99, 88, 77, 255};
+    auto team = team_colors(p, colors);
+    if (team.palette[p.remap_first].r != 123 ||
+        team.palette[1].r != p.palette[1].r || team.tables != p.tables)
+      throw std::runtime_error("team range mismatch");
+    auto dark = double_light(2, {0, 0, 0}, {0, 0, 0}, 1);
+    auto opposite = double_light(2, {0.671214f, 0.198492f, -0.714194f},
+                                 {-0.671214f, -0.198492f, 0.714194f}, 1);
+    if (dark[0] != 0 || dark[253] != 16 || opposite[0] != 16)
+      throw std::runtime_error("double light mismatch");
     auto light = single_light(2, {0.671214f, 0.198492f, -0.714194f});
     if (light[0] != 16 || light[253] != 16 || light[254] != 16 ||
         light[255] != 16)

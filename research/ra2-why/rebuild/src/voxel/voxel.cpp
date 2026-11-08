@@ -162,6 +162,113 @@ Lighting read_vpl(const Bytes &b) {
                 l.tables[i].begin());
   return l;
 }
+void scale_hva_translations(Animation &animation, const Model &model) {
+  if (model.sections.empty() || !std::isfinite(model.sections.front().scale))
+    throw std::runtime_error("invalid VXL scale");
+  if (std::uint64_t(animation.frames) * animation.names.size() !=
+      animation.matrices.size())
+    throw std::runtime_error("invalid HVA matrix count");
+  const float scale = model.sections.front().scale;
+  for (auto &matrix : animation.matrices) {
+    for (unsigned i : {3u, 7u, 11u}) {
+      if (!std::isfinite(matrix[i]) || !std::isfinite(matrix[i] * scale))
+        throw std::runtime_error("invalid HVA translation");
+    }
+  }
+  for (auto &matrix : animation.matrices)
+    for (unsigned i : {3u, 7u, 11u})
+      matrix[i] *= scale;
+}
+Lighting make_default_lighting(const Lighting &lighting) {
+  if (lighting.remap_first < 1 || lighting.remap_first > lighting.remap_last ||
+      lighting.remap_last > 255)
+    throw std::runtime_error("invalid VPL remap range");
+  Lighting result = lighting;
+  result.tables.assign(32, {});
+  // 0x758B70 applies these brightness factors. 0x758EA0 searches only
+  // within the source color's reserved or non-reserved range.
+  for (unsigned level = 0; level < 32; ++level) {
+    float factor = level < 16 ? 0.6f + float(level) * 0.0625f * 0.8f
+                              : 0.4f + float(2 * level - 16) * 0.0625f;
+    for (unsigned index = 1; index < 256; ++index) {
+      const auto source = lighting.palette[index];
+      const bool remap =
+          index >= lighting.remap_first && index <= lighting.remap_last;
+      const float r =
+          level < 16 ? source.r * factor : std::min(255.0f, source.r * factor);
+      const float g =
+          level < 16 ? source.g * factor : std::min(255.0f, source.g * factor);
+      const float b =
+          level < 16 ? source.b * factor : std::min(255.0f, source.b * factor);
+      float best = 100000.0f;
+      unsigned nearest = remap ? lighting.remap_first : 1;
+      for (unsigned candidate = 1; candidate < 256; ++candidate) {
+        bool candidate_remap = candidate >= lighting.remap_first &&
+                               candidate <= lighting.remap_last;
+        if (candidate_remap != remap)
+          continue;
+        auto color = lighting.palette[candidate];
+        float dr = r - color.r, dg = g - color.g, db = b - color.b;
+        float distance = dr * dr + dg * dg + db * db;
+        if (distance < best) {
+          best = distance;
+          nearest = candidate;
+        }
+      }
+      result.tables[level][index] = static_cast<std::uint8_t>(nearest);
+    }
+  }
+  return result;
+}
+Lighting team_colors(const Lighting &lighting,
+                     const std::array<ra2::gfx::Rgba, 256> &colors) {
+  if (lighting.remap_first > lighting.remap_last || lighting.remap_last > 255)
+    throw std::runtime_error("invalid VPL remap range");
+  auto result = lighting;
+  for (unsigned i = lighting.remap_first; i <= lighting.remap_last; ++i)
+    result.palette[i] = colors[i];
+  return result;
+}
+std::array<std::uint8_t, 256> double_light(unsigned normal_type,
+                                           std::array<float, 3> first,
+                                           std::array<float, 3> second,
+                                           float intensity) {
+  if ((normal_type != 2 && normal_type != 4) || !std::isfinite(intensity) ||
+      intensity <= 0)
+    throw std::runtime_error("invalid double light");
+  std::array<float, 3> halfway{};
+  float length_squared = 0;
+  for (unsigned axis = 0; axis < 3; ++axis) {
+    if (!std::isfinite(first[axis]) || !std::isfinite(second[axis]))
+      throw std::runtime_error("invalid light direction");
+    halfway[axis] = first[axis] + second[axis];
+    length_squared += halfway[axis] * halfway[axis];
+  }
+  if (!std::isfinite(length_squared))
+    throw std::runtime_error("invalid light direction");
+  if (length_squared > 0) {
+    float length = std::sqrt(length_squared);
+    for (auto &component : halfway)
+      component /= length;
+  }
+  std::array<std::uint8_t, 256> result{};
+  const auto *vectors = normal_type == 2 ? normal2.data() : normal4.data();
+  unsigned count = normal_type == 2 ? normal2.size() : normal4.size();
+  for (unsigned i = 0; i < count; ++i) {
+    float diffuse = 0, specular = 0;
+    for (unsigned axis = 0; axis < 3; ++axis) {
+      diffuse += vectors[i][axis] * first[axis];
+      specular += vectors[i][axis] * halfway[axis];
+    }
+    float denominator = intensity - specular * intensity + specular;
+    float highlight = denominator != 0 ? specular / denominator : 0;
+    float value = std::max(0.0f, diffuse) + std::max(0.0f, highlight);
+    result[i] = static_cast<std::uint8_t>(
+        std::clamp(std::nearbyint(value * 16), 0.0f, 31.0f));
+  }
+  result[253] = result[254] = result[255] = 16;
+  return result;
+}
 std::array<std::uint8_t, 256> single_light(unsigned normal_type,
                                            std::array<float, 3> direction) {
   for (float component : direction)
