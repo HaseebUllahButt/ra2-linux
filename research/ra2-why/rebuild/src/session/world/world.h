@@ -65,6 +65,8 @@ struct CellState {
     std::optional<float> land_track;
     std::optional<bool> usable;
     std::optional<std::uint8_t> coarse_category, neighbor_count;
+    std::optional<std::uint32_t> ground_occupancy_124; // Base Cell +124.
+    std::optional<bool> cell_flag_100;   // Base Cell +140 bit 100.
     std::optional<bool> cell_flag_40000; // Base Cell +140 bit 40000.
     std::optional<bool> cell_flag_200;   // Separate Cell +140 bit 200.
     std::optional<float> unit_land_speed; // Resolved original locomotor land-table value.

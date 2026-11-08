@@ -101,6 +101,7 @@ int main() {
         cell.terrain->bridge=false; cell.terrain->overlay_type_index=-1;
         cell.terrain->land_type=land; cell.terrain->floor_world_height=0;
         cell.unit_land_speed=speed; cell.land_track=speed;
+        cell.ground_occupancy_124=0; cell.cell_flag_100=false;
         cell.usable=true; cell.coarse_category=static_cast<std::uint8_t>(category);
         cell.cell_flag_200=false; cell.cell_flag_40000=false;
         cell.tube_field_54=-1; cell.tube_field_58=-1; cell.tube_field_116=-1;
@@ -115,6 +116,14 @@ int main() {
     profile.type_flag_aa0=false; profile.unit_flag_32c=false; profile.linked_team=false;
     profile.type_flag_205=true; profile.unit_flag_32a=false;
     profile.type_flag_bb0=false; profile.type_flag_bb1=false;
+    auto unknown_occupancy=battle.snapshot();
+    unknown_occupancy.cells.at(69*512+54).ground_occupancy_124.reset();
+    Stage guarded_occupancy(unknown_occupancy);
+    assert(guarded_occupancy.place_base_unit(*battle_unit,{54,69},32,profile)==PlacementResult::Unresolved);
+    auto unknown_bridge_flag=battle.snapshot();
+    unknown_bridge_flag.cells.at(69*512+54).cell_flag_100.reset();
+    Stage guarded_bridge(unknown_bridge_flag);
+    assert(guarded_bridge.place_base_unit(*battle_unit,{54,69},32,profile)==PlacementResult::Unresolved);
     auto missing=profile; missing.linked_team.reset();
     assert(battle.place_base_unit(*battle_unit,{54,69},32,missing)==PlacementResult::Unresolved);
     assert(battle.snapshot().entities[0].on_map==false);

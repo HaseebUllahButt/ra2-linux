@@ -166,9 +166,13 @@ PlacementResult Stage::place_base_unit(std::uint32_t unit_id, StartPoint point,
     if (house==candidate.houses.end() || !house->placed_unit_counts) return PlacementResult::Unresolved;
     const auto key=std::uint32_t(point.y)*512+std::uint32_t(point.x);
     auto cell=candidate.cells.find(key);
+    // Unit entry 00703087 reads Cell +124. Its bridge path at 00703281
+    // reads Cell +140 bit 100. Unknown runtime state cannot mean zero.
     if (cell==candidate.cells.end() || !cell->second.terrain || !cell->second.heads ||
         !cell->second.unit_land_speed || !cell->second.coarse_category ||
         !cell->second.usable || !*cell->second.usable ||
+        !cell->second.ground_occupancy_124 || *cell->second.ground_occupancy_124!=0 ||
+        !cell->second.cell_flag_100 || *cell->second.cell_flag_100 ||
         !cell->second.tube_field_54 || *cell->second.tube_field_54!=-1 ||
         !cell->second.tube_field_58 || *cell->second.tube_field_58!=-1 ||
         !cell->second.tube_field_116 || *cell->second.tube_field_116!=-1)
