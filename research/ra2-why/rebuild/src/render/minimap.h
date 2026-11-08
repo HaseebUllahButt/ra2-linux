@@ -11,6 +11,7 @@ struct MapGeometry {
     Rectangle size, local;
     static MapGeometry from_ini(const rules::IniFile& ini);
 };
+struct TileSetRange { std::uint32_t first, count; };
 
 // Mount onto a dedicated, bootstrapped filesystem for each theater, so files
 // from a previously loaded theater cannot win resource lookups.
@@ -19,6 +20,12 @@ public:
     static TheaterArt load(fs::MixFileSystem& files, std::string_view theater);
     const DecodedTile& tile(std::uint32_t index, std::uint8_t subtile);
     const TmpRecord& metadata(std::uint32_t index, std::uint8_t subtile);
+    const TmpRecord& resolved_metadata(std::uint32_t index, std::uint8_t subtile);
+    // Wire-to-runtime translation. Preserve the original clear sentinel.
+    std::uint32_t translate_map_index(std::uint32_t index) const;
+    const std::vector<TileSetRange>& tile_sets() const noexcept { return tile_sets_; }
+    const rules::IniFile& settings() const noexcept { return settings_; }
+    const std::string& theater_name() const noexcept { return theater_name_; }
     // TileType GetLandType: original 00544BE0 and base 00529300.
     static std::int32_t terrain_land_type(std::uint8_t raw_terrain);
     int tile_width() const noexcept { return 60; }
@@ -34,6 +41,9 @@ private:
     fs::MixFileSystem* files_ = nullptr; // Must outlive this object.
     gfx::Palette palette_;
     std::string palette_name_, palette_archive_;
+    std::string theater_name_;
+    rules::IniFile settings_;
+    std::vector<TileSetRange> tile_sets_;
     std::vector<std::string> filenames_;
     std::vector<bool> urban_fallback_;
     std::vector<std::pair<std::uint32_t, std::uint32_t>> shifts_;

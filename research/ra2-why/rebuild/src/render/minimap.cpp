@@ -69,6 +69,7 @@ TheaterArt TheaterArt::load(fs::MixFileSystem& files, std::string_view theater) 
     files.mount(std::string(t.iso)+".MIX");
     if (!expansion) files.mount("ISOGEN.MIX", false);
     TheaterArt art; art.files_ = &files;
+    art.theater_name_ = std::string(theater);
     art.palette_name_ = "ISO"+std::string(t.extension)+".PAL";
     const auto palette = files.read_file(art.palette_name_);
     if (!palette) throw RenderError("Missing theater palette " + art.palette_name_);
@@ -87,6 +88,8 @@ TheaterArt TheaterArt::load(fs::MixFileSystem& files, std::string_view theater) 
         if (count == -1) break; // Same stopping rule as 0x00545150.
         if (count < 0 || count > 4096 || art.filenames_.size()+count > 65535)
             throw RenderError("Invalid TilesInSet");
+        art.tile_sets_.push_back({static_cast<std::uint32_t>(art.filenames_.size()),
+                                 static_cast<std::uint32_t>(count)});
         if (set == clear_set) art.clear_ = art.filenames_.size();
         const auto stem = ini.read_string(section, "FileName");
         if (count && stem.empty()) throw RenderError("Missing tileset FileName");
@@ -101,26 +104,32 @@ TheaterArt TheaterArt::load(fs::MixFileSystem& files, std::string_view theater) 
     }
     if (art.filenames_.empty() || art.clear_ >= art.filenames_.size())
         throw RenderError("Theater has no valid tileset catalog");
+    art.settings_ = std::move(ini);
     return art;
+}
+
+std::uint32_t TheaterArt::translate_map_index(std::uint32_t index) const {
+    if (index == 0xffff || index == 0xffffffff) return 0xffff;
+    const auto original = index;
+    for (auto [threshold, shift] : shifts_) {
+        if (original < threshold) break;
+        if (index > std::numeric_limits<std::uint32_t>::max()-shift)
+            throw RenderError("Tile index translation overflow");
+        index += shift;
+    }
+    if (index >= filenames_.size()) throw RenderError("Map tile index outside theater catalog: "+std::to_string(index));
+    return index;
 }
 
 std::pair<std::uint32_t, std::uint8_t> TheaterArt::resolve(std::uint32_t index,
                                                        std::uint8_t subtile) const {
-    if (index == 0xffff || index == 0xffffffff) { index = clear_; subtile = 0; }
-    else {
-        const auto original = index;
-        for (auto [threshold, shift] : shifts_) {
-            if (original < threshold) break;
-            if (index > std::numeric_limits<std::uint32_t>::max()-shift)
-                throw RenderError("Tile index translation overflow");
-            index += shift;
-        }
-    }
-    if (index >= filenames_.size()) throw RenderError("Map tile index outside theater catalog: "+std::to_string(index));
+    index = translate_map_index(index);
+    if (index == 0xffff) { index = clear_; subtile = 0; }
     return {index, subtile};
 }
 
 TmpImage& TheaterArt::container(std::uint32_t index) {
+    if (index >= filenames_.size()) throw RenderError("Resolved tile index outside theater catalog");
     auto found = containers_.find(index);
     if (found == containers_.end()) {
         auto name = filenames_[index];
@@ -150,10 +159,14 @@ const DecodedTile& TheaterArt::tile(std::uint32_t index, std::uint8_t subtile) {
 
 const TmpRecord& TheaterArt::metadata(std::uint32_t index, std::uint8_t subtile) {
     const auto key = resolve(index, subtile);
-    const auto& records = container(key.first).records();
-    if (key.second >= records.size() || !records[key.second].present)
+    return resolved_metadata(key.first, key.second);
+}
+
+const TmpRecord& TheaterArt::resolved_metadata(std::uint32_t index, std::uint8_t subtile) {
+    const auto& records = container(index).records();
+    if (subtile >= records.size() || !records[subtile].present)
         throw RenderError("Missing terrain metadata for subtile");
-    return records[key.second];
+    return records[subtile];
 }
 
 std::int32_t TheaterArt::terrain_land_type(std::uint8_t raw) {
@@ -189,7 +202,9 @@ Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry,
         // 0x006D1F10 projection, normalized to the rectangular map diamond.
         const int x = (int(tile->x)-tile->y+geometry.size.width-1)*(tw/2)-local.x*tw;
         const int ground_y = (int(tile->x)+tile->y-geometry.size.width-1)*(th/2);
-        const int y = ground_y-int(tile->height)*(th/2)-local.y*th;
+        // Cell +11B is signed (00480350). Map records store its raw byte.
+        const int level = tile->height < 128 ? int(tile->height) : int(tile->height) - 256;
+        const int y = ground_y-level*(th/2)-local.y*th;
         const auto& decoded = art.tile(tile->index, tile->subtile);
         auto draw = [&](const TileLayer& layer) {
             const auto& b = layer.bitmap;

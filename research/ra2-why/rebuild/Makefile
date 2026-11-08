@@ -10,10 +10,11 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/render/tmp_decode.cpp src/render/minimap.cpp src/loop/game_loop.cpp \
     src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp src/fs/filename_hash.cpp \
     src/gfx/palette.cpp src/gfx/shp_decode.cpp src/actors/actors.cpp \
-    src/ui/ui.cpp src/ui/shell.cpp src/text/csf.cpp \
+    src/ui/ui.cpp src/ui/shell.cpp src/ui/skirmish.cpp src/text/csf.cpp \
     src/pack/map_pack.cpp src/rules/ini_file.cpp src/map/map_file.cpp \
     src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
-    src/sim/combat.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp
+    src/sim/combat.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp \
+    src/sim/world.cpp src/sim/drive.cpp src/sim/movement.cpp
 NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
 
 build/native/%.o: %.cpp
@@ -27,14 +28,14 @@ build/native/%.o: %.cpp
 
 all: test
 
-.PHONY: native native-check platform run-platform catalog terrain-inputs scene actors ui audio voxel sim
+.PHONY: native native-check platform run-platform catalog terrain-inputs scene actors ui audio voxel sim sim-move
 
 FS_OBJECTS = build/native/src/fs/mix_archive.o build/native/src/fs/mix_bootstrap.o build/native/src/fs/filename_hash.o
 GFX_OBJECTS = build/native/src/gfx/palette.o build/native/src/gfx/shp_decode.o
 SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS))
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 
-native-check: native platform terrain-inputs scene actors ui audio voxel sim
+native-check: native platform terrain-inputs scene actors ui audio voxel sim sim-move
 	build/ra2-native --game-dir ../game --frames 3 --headless
 	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
@@ -49,7 +50,7 @@ build/actors_test: build/native/src/actors/test_main.o build/native/src/actors/a
 ui: build/ui_test
 	build/ui_test ../game
 
-build/ui_test: build/native/src/ui/ui.o build/native/src/ui/shell.o build/native/src/ui/test_main.o build/native/src/text/csf.o $(FS_OBJECTS) $(GFX_OBJECTS)
+build/ui_test: build/native/src/ui/ui.o build/native/src/ui/shell.o build/native/src/ui/skirmish.o build/native/src/ui/test_main.o build/native/src/text/csf.o build/native/src/rules/ini_file.o $(FS_OBJECTS) $(GFX_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 audio: build/audio_test build/audio_integration_test
@@ -78,6 +79,16 @@ sim: build/sim_test
 
 build/sim_test: build/native/src/sim/test_main.o $(SIM_OBJECTS) $(MAP_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
+
+sim-move: build/sim_move_test
+	build/sim_move_test ../game ../analysis/extracted
+
+build/sim_move_test: build/native/src/sim/test_move.o build/native/src/sim/test_inputs.o $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
+
+build/native/src/sim/test_inputs.o: src/sim/test_inputs.cpp
+	mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -I src/render -MMD -MP -c $< -o $@
 
 scene: build/scene_test
 	build/scene_test ../game ../analysis/extracted/maps/2PEAKS.MAP

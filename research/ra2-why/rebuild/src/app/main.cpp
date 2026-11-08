@@ -205,6 +205,8 @@ int main(int argc, char** argv) {
         if (!actor_bytes) throw std::runtime_error(std::string("Missing original ") + art_name);
         ra2::rules::IniFile actor_art;
         actor_art.parse(std::string_view(reinterpret_cast<const char*>(actor_bytes->data()), actor_bytes->size()));
+        simulation.load_ground_assets((args.game / (args.variant == ra2::fs::GameVariant::RedAlert2 ?
+            "game.exe" : "gamemd.exe")).string(), actor_art);
         ra2map::MapFile map_objects;
         map_objects.parse(ini);
         ra2::app::Scene scene(files, std::move(actor_art), ra2::app::overlay_rules(rules, ini),

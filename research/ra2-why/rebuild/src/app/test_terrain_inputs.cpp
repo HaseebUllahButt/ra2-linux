@@ -20,7 +20,9 @@ int main(int argc, char** argv) {
             const auto& raw = terrain.tiles[i];
             if (input.cell.x != raw.x || input.cell.y != raw.y ||
                 input.tile_index != raw.index || input.subtile != raw.subtile ||
-                !input.tmp_terrain || !input.height_level || !input.ramp_index ||
+                !input.resolved_tile_index ||
+                (*input.resolved_tile_index != 0xffff && !input.tmp_terrain) ||
+                !input.height_level || !input.ramp_index ||
                 !input.floor_world_height || !input.overlay_type_index)
                 throw std::runtime_error("Raw cell metadata did not reach simulation input");
             if (input.land_type || input.bridge)
@@ -39,6 +41,16 @@ int main(int argc, char** argv) {
         fixture.overlay.clear();
         if (ra2::app::terrain_inputs(fixture, art)[0].overlay_type_index != -1)
             throw std::runtime_error("Missing overlay did not use the original empty value");
+        const auto catalog = ra2::app::theater_inputs(art);
+        if (catalog.theater_name != "TEMPERATE" || catalog.tile_sets.empty() ||
+            !catalog.resolved_metadata || catalog.resolved_metadata(0xffff, 0))
+            throw std::runtime_error("Original theater callback did not preserve the clear sentinel");
+        fixture.tiles[0].index = 0xffff;
+        fixture.tiles[0].subtile = 99; // No TMP lookup is valid for the sentinel.
+        const auto clear = ra2::app::terrain_inputs(fixture, art).front();
+        if (clear.tile_index != 0xffff || clear.resolved_tile_index != 0xffff ||
+            clear.ramp_index != 0 || clear.tmp_terrain)
+            throw std::runtime_error("Clear land was replaced by renderer fallback metadata");
         std::cout << "Native terrain inputs passed: " << inputs.size()
                   << " cells, signed levels, floor heights, and original overlay indexing.\n";
     } catch (const std::exception& error) {
