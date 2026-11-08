@@ -1,5 +1,7 @@
 #pragma once
 #include "../map/map_file.h"
+#include "world.h"
+#include "ground.h"
 #include <array>
 #include <map>
 #include <optional>
@@ -50,6 +52,7 @@ struct Entity {
     std::int32_t facing=0, subcell=0, map_health=0;
     // Unit health scaling recovered from original instructions at 007435DA.
     std::optional<std::int32_t> hp;
+    std::optional<Coord> position; // World coordinates are known only with a resolved floor height.
     bool dead=false;
 };
 enum class Op { TakeCash, ResolvedDamage, RandomRange, Move, Attack, Produce, Stop };
@@ -84,17 +87,20 @@ struct Capability { std::string name; bool supported; std::string detail; };
 class Simulation {
 public:
     // Map INI overlays the base rules. All input objects are copied.
-    Simulation(const Ini& rules, const Ini& map, std::uint32_t seed);
+    Simulation(const Ini& rules, const Ini& map, std::uint32_t seed,const TerrainCells& terrain={});
     Result issue(const Command&); // Only accepted commands receive a ticket.
     void tick(); // Execute due native commands in issue order, then increment frame.
     Snapshot snapshot() const;
     const std::map<std::string,Type>& types() const { return types_; }
     const std::map<std::string,Weapon>& weapons() const { return weapons_; }
     static std::vector<Capability> capabilities();
+    const TerrainCells& terrain() const { return terrain_; }
 private:
     Result execute(const Command&);
     Snapshot state_;
     Random random_;
+    TerrainCells terrain_;
+    std::map<std::uint32_t,std::size_t> terrain_index_;
     std::uint64_t next_ticket_=1;
     struct Pending { Command command; std::uint64_t ticket; };
     std::vector<Pending> queue_;

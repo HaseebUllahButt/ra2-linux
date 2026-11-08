@@ -3,6 +3,7 @@
 #include "combat.h"
 #include "target.h"
 #include "distance.h"
+#include "floor.h"
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -149,10 +150,24 @@ int main(int argc,char** argv) try {
         if (actual_damage!=original_damage[i][j]) std::cerr<<"damage="<<damage.damage<<" distance="<<damage.distance<<" actual="<<actual_damage<<" expected="<<original_damage[i][j]<<" maximum="<<damage.maximum<<"\n";
         check(actual_damage==original_damage[i][j],"original x86 total damage vector");
     }
-    damage.damage=90; damage.distance=0; damage.cell_spread=.3f;
-    bool unsupported_radius=false;
-    try { total_damage(damage); } catch(const std::range_error&) { unsupported_radius=true; }
-    check(unsupported_radius,"unverified x87 radius fails explicitly");
+    std::uint32_t damage_grid_hash=2166136261u;
+    unsigned damage_grid_count=0;
+    for (int raw:{90,120,10000}) {
+        for (float spread:{0.f,.1f,.3f,.5f,.75f,1.5f}) {
+            for (float percent:{0.f,.1f,.5f,.9f,1.f,2.f}) {
+                for (double verse:{0.,.1,.25,.9,1.,2.}) {
+                    for (int distance:{0,1,7,8,16,64,128,256,1024}) {
+                        DamageInputs grid; grid.damage=raw; grid.cell_spread=spread;
+                        grid.percent_at_max=percent; grid.armor_verse=verse; grid.distance=distance; grid.maximum=10000;
+                        const auto value=total_damage(grid);
+                        damage_grid_hash=(damage_grid_hash^static_cast<std::uint32_t>(value))*16777619u;
+                        ++damage_grid_count;
+                    }
+                }
+            }
+        }
+    }
+    check(damage_grid_count==5832 && damage_grid_hash==0xaff8a2e1u,"5832 original x86 armor/range cases");
     damage.cell_spread=.5f;
     damage.damage=-50; damage.distance=7; check(total_damage(damage)==-50,"original healing distance seven");
     damage.distance=8; check(total_damage(damage)==0,"original healing distance eight");
@@ -161,6 +176,19 @@ int main(int argc,char** argv) try {
     check(select_resolved_table_target({{1,false,100},{2,true,1},{3,true,2}})==3,"original eligible maximum");
     check(!select_resolved_table_target({{1,true,-1}}),"original score minus one excluded");
     check(threat_categories(0x100)==0x8042 && threat_categories(4)==4 && threat_categories(0)==0,"original threat category conversion");
+    std::uint32_t floor_hash=2166136261u; unsigned floor_count=0;
+    const int local_points[][2]={{0,0},{0,255},{255,0},{255,255},{128,128},{64,192},{192,64},{-1,-1}};
+    for (int level:{-1,0,1,7}) for (int ramp=0;ramp<=20;++ramp) for (const auto& point:local_points) {
+        const auto value=original_floor_height(static_cast<std::int8_t>(level),static_cast<std::uint8_t>(ramp),point[0],point[1]);
+        floor_hash=(floor_hash^static_cast<std::uint32_t>(value))*16777619u; ++floor_count;
+    }
+    check(floor_count==672 && floor_hash==0xdbba8a41u,"672 original floor and ramp cases");
+    TerrainCell known_floor; known_floor.cell=first.cell;
+    known_floor.floor_world_height=original_floor_height(0,0,first.cell.x*256+128,first.cell.y*256+128);
+    Simulation located(rules,map,1,TerrainCells{known_floor});
+    const auto location=located.snapshot().entities[vehicle-1].position;
+    check(location && location->x==first.cell.x*256+128 && location->y==first.cell.y*256+128 && location->z==0,"world input resolves original unit center");
+    check(!a.snapshot().entities[vehicle-1].position,"unknown floor leaves world position explicit");
     const auto distance_table=OriginalDistance::from_executable(root+"/../../game/game.exe");
     check(distance_table.square_root(0)==0,"original zero distance");
     check(distance_table.between({0,0,0},{3,4,0})==5,"original table distance");

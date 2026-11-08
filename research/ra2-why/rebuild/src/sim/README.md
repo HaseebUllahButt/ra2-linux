@@ -171,8 +171,8 @@ Original instructions recover the floating-point operands omitted from its decom
 
 The caller supplies resolved warhead inputs and the armor coefficient.
 This function does not parse missing warhead defaults or choose armor automatically.
-Interpolation currently supports exact binary radii within a documented numeric domain.
-Other radii and uncertain x87 integer boundaries throw errors.
+Interpolation supports nonnegative radii with the recovered 53-bit truncation mode.
+Exceptional numeric inputs throw errors.
 This restriction prevents a Linux floating-point approximation from silently changing gameplay.
 `original_damage_check.py` verifies 28 vectors against original x86 instructions.
 The vectors use TankOGas's real CellSpread, PercentAtMax, and one armor verse.
@@ -297,3 +297,25 @@ The expansion stores that cash at house +30C.
 Both editions produce replay hash 72681CC7 across all 108 test frames.
 Both stall without money and resume with money.
 The native test checks the same per-frame progress, remaining cost, cash, and spent hash.
+
+## Terrain injection and floor height
+
+The optional fourth `Simulation` constructor argument accepts `TerrainCells` from `world.h`.
+Inputs are copied, and duplicate cell coordinates fail explicitly.
+The raw TMP terrain byte and the final cell LandType are separate fields.
+The decoder may leave final LandType empty until overlay and object changes are known.
+A known floor height makes `Entity.position` available in original world units.
+Unknown floor height leaves that optional position empty.
+
+`floor.h` exposes the original floor formula for signed height levels and all 20 ramp indices.
+`original_floor_height(level,ramp,world_x,world_y)` excludes the optional bridge deck.
+Original initializers produce LevelHeight 104 and bridge height 416.
+The initializers execute unchanged in `original_floor_check.py`.
+The oracle uses a PE section loader that leaves uninitialized data zeroed.
+All 672 tested level, ramp, and local-coordinate cases match the native formula.
+The tests include signed negative levels and the original low-byte coordinate wrapping.
+
+The shared floating-point helpers now support general nonnegative damage radii.
+They replace the earlier binary-radius-only implementation.
+Both original executables and the native port produce hash AFF8A2E1 for 5,832 armor/range cases.
+Nonfinite, overflowing, negative-radius, and negative-distance paths still return explicit errors where applicable.

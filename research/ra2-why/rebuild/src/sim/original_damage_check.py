@@ -46,3 +46,24 @@ for damage, expected in cases:
             actual -= 0x100000000
         assert actual == golden, (damage, distance, actual, golden)
 print('28 original x86 damage results match native test vectors')
+
+replay_hash = 2166136261
+count = 0
+for damage in (90, 120, 10000):
+    for spread in (0., .1, .3, .5, .75, 1.5):
+        cpu.mem_write(0x1000000 + 0x124, struct.pack('<f', spread))
+        for percent in (0., .1, .5, .9, 1., 2.):
+            cpu.mem_write(0x1000000 + 0x12c, struct.pack('<f', percent))
+            for verse in (0., .1, .25, .9, 1., 2.):
+                cpu.mem_write(0x1000000 + 0xa0, struct.pack('<d', verse))
+                for distance in (0, 1, 7, 8, 16, 64, 128, 256, 1024):
+                    cpu.reg_write(UC_X86_REG_ECX, damage)
+                    cpu.reg_write(UC_X86_REG_EDX, 0x1000000)
+                    cpu.reg_write(UC_X86_REG_ESP, 0x101f000)
+                    cpu.mem_write(0x101f000, struct.pack('<III', 0x101e000, 0, distance))
+                    cpu.emu_start(routine, 0x101e000, count=10000)
+                    actual = cpu.reg_read(UC_X86_REG_EAX)
+                    replay_hash = ((replay_hash ^ actual) * 16777619) & 0xffffffff
+                    count += 1
+assert count == 5832 and replay_hash == 0xaff8a2e1
+print(f'{count} original damage grid cases produce hash {replay_hash:08x}')

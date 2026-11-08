@@ -34,7 +34,12 @@ bool equal_ascii_case(const std::string& a,const std::string& b) {
     return true;
 }
 }
-Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed):random_(seed) {
+Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed,const TerrainCells& terrain):random_(seed),terrain_(terrain) {
+    for (std::size_t i=0;i<terrain_.size();++i) {
+        const auto cell=terrain_[i].cell;
+        const auto key=static_cast<std::uint32_t>(cell.x)|(static_cast<std::uint32_t>(cell.y)<<16);
+        if (!terrain_index_.emplace(key,i).second) throw std::invalid_argument("duplicate terrain input cell");
+    }
     // Registry names remain authored inputs. No guessed constructor defaults.
     for (const auto* category:{"BuildingTypes","VehicleTypes","InfantryTypes","AircraftTypes"}) {
         const auto registry=fields(base,map,category);
@@ -91,6 +96,11 @@ Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed):random
             }
             e.type=t->first;
             object_fields(e,obj);
+            const auto key=static_cast<std::uint32_t>(e.cell.x)|(static_cast<std::uint32_t>(e.cell.y)<<16);
+            const auto floor=terrain_index_.find(key);
+            if (floor!=terrain_index_.end() && terrain_[floor->second].floor_world_height) {
+                e.position=Coord{e.cell.x*256+128,e.cell.y*256+128,*terrain_[floor->second].floor_world_height};
+            }
             if (std::none_of(state_.houses.begin(),state_.houses.end(),[&](const House& h){return h.name==e.house;}))
                 {
                 House house; house.name=e.house;
