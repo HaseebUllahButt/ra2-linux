@@ -675,3 +675,21 @@ The test includes flat regions, alternating categories, varying heights, and sel
 `test_hierarchy.sh` checks all 768 native layer hashes and one unresolved-input error.
 All 769 checks also pass with address and undefined-behavior sanitizers.
 Hierarchy search and the Cell +4C producer still need integration before ordinary far-goal Move works.
+
+## Cell coarse category producer
+
+`original_coarse_category()` ports base 00478F40 and expansion 00483C80, which write Cell +4C.
+Its result is the input category for map regions. It is not LandType or full Unit entry eligibility.
+Inputs preserve the usable-area answer, overlay bytes, final LandType, Track table floats, and ordered ground occupants.
+Building, owner, terrain-type, and Session fields keep explicit offset labels until their meanings are proved.
+The header lists both editions' offsets. Unknown required fields produce errors at the original point of use.
+Early returns do not require fields that the original branch does not read.
+
+The result retains every ordered cache write, including building writes of six that a later zero overwrites.
+It preserves the original overlay zero comparison, the double 0.01 terrain threshold, and unordered float branches.
+Only runtime-type virtual answers and usable-area answers are adapted by the original x86 oracle.
+`original_category_check.py executable [--base]` matches 4,096 cases per edition with hash DA970EA0.
+`test_category.sh` passes 4,115 checks, including five terrain entries from original rulesmd.ini and required-input errors.
+The same checks pass with address and undefined-behavior sanitizers.
+The producer does not recover overlay constructors, occupant placement order, or the fields it requires from those objects.
+The terrain adapter must supply the resolved original inputs, or keep that cell category unknown.
