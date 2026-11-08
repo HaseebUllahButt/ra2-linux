@@ -100,6 +100,44 @@ int main(int argc,char** argv) try {
         for (const auto& cell:first.terrain()) if (cell.cell.x==e.cell.x && (cell.cell.y==e.cell.y || cell.cell.y==move.destination.y))
             std::cout<<"fixture cell "<<cell.cell.x<<","<<cell.cell.y<<" land="<<cell.land_type.value_or(-1)<<"\n";
         if (base) {
+            const auto& routed=initial.entities.at(60);
+            require(routed.id==61 && routed.type=="HTNK" && routed.cell.x==117 && routed.cell.y==67 && routed.facing==128,"real route fixture changed");
+            struct RealRoute { std::vector<unsigned> path; std::vector<DrivePoint> points; };
+            const RealRoute route_vectors[]={
+#include "real_route_golden.inc"
+            };
+            for (const auto& golden:route_vectors) {
+                Simulation route_case(rules,map,9,a.terrain()),route_replay(rules,map,9,a.terrain());
+                route_case.load_ground_assets(executable,art); route_replay.load_ground_assets(executable,art);
+                Command route; route.op=Op::Move; route.entity=routed.id; route.path_directions=golden.path;
+                route.destination=routed.cell;
+                for (auto direction:golden.path) { route.destination.x+=directions[direction][0]; route.destination.y+=directions[direction][1]; }
+                require(route_case.issue(route).error==Error::None && route_replay.issue(route).error==Error::None,"real route did not queue");
+                route_case.tick(); route_replay.tick();
+                require(route_case.snapshot().results.at(0).error==Error::None,"real route rejected");
+                require(trace(route_case.snapshot(),routed.id)==trace(route_replay.snapshot(),routed.id),"real route dispatch replay differs");
+                for (std::size_t step=0;step<golden.points.size();++step) {
+                    route_case.tick(); route_replay.tick();
+                    const auto actual=route_case.snapshot().entities.at(routed.id-1);
+                    const auto expected=golden.points[step];
+                    require(actual.position->x==routed.position->x+expected.x && actual.position->y==routed.position->y+expected.y && actual.position->z==routed.position->z && actual.facing==expected.facing,"real route position or facing differs from original x86");
+                    require(actual.moving==(step+1<golden.points.size()),"real route duration differs from original x86");
+                    require(trace(route_case.snapshot(),routed.id)==trace(route_replay.snapshot(),routed.id),"real route replay differs");
+                }
+                const auto final_route=route_case.snapshot().entities.at(routed.id-1);
+                require(final_route.cell.x==route.destination.x && final_route.cell.y==route.destination.y && final_route.mission==expected_mission && final_route.hp==routed.hp,"real route completion state differs");
+                std::cout<<"real base route passed: entity 61 path="<<golden.path[0]<<","<<golden.path[1]<<" ticks="<<golden.points.size()<<"\n";
+            }
+            for (const auto& path:{std::vector<unsigned>{4,5},std::vector<unsigned>{4,8},std::vector<unsigned>{4,3,2}}) {
+                Simulation rejected_case(rules,map,9,a.terrain()); rejected_case.load_ground_assets(executable,art);
+                Command rejected_route; rejected_route.op=Op::Move; rejected_route.entity=routed.id; rejected_route.path_directions=path;
+                rejected_route.destination=path==std::vector<unsigned>{4,5}?ra2map::Cell{116,69}:ra2map::Cell{118,69};
+                require(rejected_case.issue(rejected_route).error==Error::None,"rejected route did not queue"); rejected_case.tick();
+                require(rejected_case.snapshot().results.at(0).error==Error::Unsupported,"invalid or unrecovered route was accepted");
+                if (path==std::vector<unsigned>{4,5}) require(rejected_case.snapshot().results.at(0).detail.find("resolved clear or road")!=std::string::npos,"real curve terrain guard was not reached");
+                const auto unchanged=rejected_case.snapshot().entities.at(routed.id-1);
+                require(!unchanged.moving && unchanged.position->x==routed.position->x && unchanged.position->y==routed.position->y && unchanged.facing==routed.facing && unchanged.mission==routed.mission,"rejected route changed entity state");
+            }
             bool moved_on_clear=false;
             for (const auto& candidate:initial.entities) {
                 if (candidate.kind!=Kind::Unit || candidate.type!="HTNK" || candidate.house!=e.house || !candidate.position || candidate.facing<0 || candidate.facing>=256 || candidate.facing%64) continue;

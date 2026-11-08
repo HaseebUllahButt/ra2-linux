@@ -61,35 +61,6 @@ Result Simulation::start_move(const Command& c) {
     const auto speed_type=field(type.fields,"SpeedType");
     if ((!zone.empty() && zone!="Normal" && zone!="Destroyer") || (!speed_type.empty() && speed_type!="Foot" && speed_type!="Track" && speed_type!="Wheel"))
         return unsupported("this movement zone or speed type is not recovered");
-    const auto source=terrain_index_.find(key(e.cell)), destination=terrain_index_.find(key(c.destination));
-    if (source==terrain_index_.end() || destination==terrain_index_.end()) return unsupported("Move cell terrain is missing");
-    const auto& from=terrain_[source->second]; const auto& to=terrain_[destination->second];
-    for (const auto* cell:{&from,&to}) {
-        if (!cell->land_type || (*cell->land_type!=0 && *cell->land_type!=1) || !cell->ramp_index || *cell->ramp_index || !cell->bridge || *cell->bridge || !cell->overlay_type_index || *cell->overlay_type_index!=-1 || !cell->floor_world_height)
-            return unsupported("Move currently supports resolved clear or road flat cells without overlays or bridges");
-        if (*cell->land_type==0 && !cell->tile_replacement_resolved)
-            return unsupported("clear-cell Move needs original ordered tile setup through TheaterInputs");
-        const auto& land_rules=*cell->land_type==0?clear_fields_:road_fields_;
-        for (const auto* category:{"Foot","Track","Wheel"}) {
-            const auto multiplier=Ini::double_value(field(land_rules,category));
-            if (!multiplier || *multiplier!=1) return unsupported("Move currently needs original terrain multipliers of one");
-        }
-        if (terrain_blockers_.count(key(cell->cell))) return unsupported("terrain-object occupancy is present");
-    }
-    if (*from.floor_world_height!=*to.floor_world_height) return unsupported("Move floor levels differ");
-    // Conservative bounds exclude uncertain apron/bib cells instead of treating them as clear.
-    for (const auto& blocker:state_.entities) {
-        if (blocker.dead || blocker.id==e.id) continue;
-        if (blocker.kind==Kind::Structure) {
-            const auto found=foundations_.find(blocker.type);
-            if (found==foundations_.end()) return unsupported("building foundation metadata is unresolved");
-            const auto b=found->second;
-            if (b.width && b.height && c.destination.x>=blocker.cell.x && c.destination.x<blocker.cell.x+b.width && c.destination.y>=blocker.cell.y && c.destination.y<blocker.cell.y+b.height+1)
-                return unsupported("destination intersects a conservative original building foundation bound");
-        } else if (key(blocker.cell)==key(c.destination) || (blocker.move_goal && key(*blocker.move_goal)==key(c.destination))) {
-            return unsupported("vehicle or infantry collision handling is not recovered");
-        }
-    }
     const auto house=std::find_if(state_.houses.begin(),state_.houses.end(),[&](const House& h){return h.name==e.house;});
     if (house==state_.houses.end() || house->country.empty()) return unsupported("vehicle country speed modifier is unresolved");
     const auto country=country_fields_.find(house->country);
@@ -108,11 +79,45 @@ Result Simulation::start_move(const Command& c) {
     DriveIdleInputs idle; idle.edition=drive_tables_->edition(); idle.house_iq=*house->iq; idle.guard_area_iq=guard_area_iq_;
     idle.default_to_guard_area=Ini::bool_value(field(type.fields,"DefaultToGuardArea")).value_or(false);
     const auto idle_mission=type.primary.empty()?DriveIdleMission::Guard:original_armed_drive_idle(idle);
-    Coord goal{c.destination.x*256+128,c.destination.y*256+128,*to.floor_world_height};
+    const auto destination=terrain_index_.find(key(c.destination));
+    if (destination==terrain_index_.end() || !terrain_[destination->second].floor_world_height) return unsupported("Move destination floor is missing");
+    Coord goal{c.destination.x*256+128,c.destination.y*256+128,*terrain_[destination->second].floor_world_height};
+    std::optional<DriveSegment> planned;
     try {
-        auto motion=DriveSegment::begin(*e.position,goal,static_cast<unsigned>(e.facing),speed,*drive_tables_);
-        movements_.emplace(e.id,std::move(motion));
+        if (c.path_directions.empty()) planned=DriveSegment::begin(*e.position,goal,static_cast<unsigned>(e.facing),speed,*drive_tables_);
+        else planned=DriveSegment::begin_route(*e.position,goal,static_cast<unsigned>(e.facing),speed,c.path_directions,*drive_tables_);
     } catch (const std::exception& error) { return unsupported(error.what()); }
+    for (const auto& pair:planned->swept_cells(*drive_tables_)) {
+        if (pair[0]<0 || pair[0]>65535 || pair[1]<0 || pair[1]>65535) return unsupported("Move curve leaves the map coordinate range");
+        const ra2map::Cell crossed{static_cast<std::uint16_t>(pair[0]),static_cast<std::uint16_t>(pair[1])};
+        const auto found=terrain_index_.find(key(crossed));
+        if (found==terrain_index_.end()) return unsupported("Move swept-cell terrain is missing");
+        const auto& cell=terrain_[found->second];
+        if (!cell.land_type || (*cell.land_type!=0 && *cell.land_type!=1) || !cell.ramp_index || *cell.ramp_index || !cell.bridge || *cell.bridge || !cell.overlay_type_index || *cell.overlay_type_index!=-1 || !cell.floor_world_height)
+            return unsupported("Move currently supports resolved clear or road flat cells without overlays or bridges");
+        if (*cell.land_type==0 && !cell.tile_replacement_resolved)
+            return unsupported("clear-cell Move needs original ordered tile setup through TheaterInputs");
+        if (*cell.floor_world_height!=e.position->z) return unsupported("Move swept-cell floor levels differ");
+        const auto& land_rules=*cell.land_type==0?clear_fields_:road_fields_;
+        for (const auto* category:{"Foot","Track","Wheel"}) {
+            const auto multiplier=Ini::double_value(field(land_rules,category));
+            if (!multiplier || *multiplier!=1) return unsupported("Move currently needs original terrain multipliers of one");
+        }
+        if (terrain_blockers_.count(key(crossed))) return unsupported("terrain-object occupancy is present");
+        // Conservative bounds also cover the cells cut by a turn, not only the supplied path cells.
+        for (const auto& blocker:state_.entities) {
+            if (blocker.dead || blocker.id==e.id) continue;
+            if (blocker.kind==Kind::Structure) {
+                const auto foundation=foundations_.find(blocker.type);
+                if (foundation==foundations_.end()) return unsupported("building foundation metadata is unresolved");
+                const auto bounds=foundation->second;
+                if (bounds.width && bounds.height && crossed.x>=blocker.cell.x && crossed.x<blocker.cell.x+bounds.width && crossed.y>=blocker.cell.y && crossed.y<blocker.cell.y+bounds.height+1)
+                    return unsupported("Move swept cell intersects a conservative original building foundation bound");
+            } else if (key(blocker.cell)==key(crossed) || (blocker.move_goal && key(*blocker.move_goal)==key(crossed)))
+                return unsupported("vehicle or infantry collision handling is not recovered");
+        }
+    }
+    movements_.emplace(e.id,std::move(*planned));
     completion_missions_[e.id]=idle_mission==DriveIdleMission::Guard?"Guard":"Area Guard";
     e.moving=true; e.move_goal=c.destination; e.mission="Move";
     return {};
@@ -122,7 +127,7 @@ void Simulation::update_movement() {
     for (auto it=movements_.begin();it!=movements_.end();) {
         auto& e=state_.entities.at(it->first-1);
         if (e.dead) { e.moving=false; e.move_goal.reset(); completion_missions_.erase(e.id); it=movements_.erase(it); continue; }
-        it->second.tick(*drive_tables_); e.position=it->second.current;
+        it->second.tick(*drive_tables_); e.position=it->second.current; e.facing=static_cast<int>(it->second.facing);
         e.cell={static_cast<std::uint16_t>(e.position->x/256),static_cast<std::uint16_t>(e.position->y/256)};
         if (!it->second.active) {
             e.moving=false; e.move_goal.reset(); e.mission=completion_missions_.at(e.id); completion_missions_.erase(e.id);

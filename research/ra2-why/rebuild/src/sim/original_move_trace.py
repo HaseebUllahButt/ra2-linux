@@ -99,25 +99,26 @@ bind(0x55a280 if base else 0x578080,4,ret(0))
 bind(0x476920 if base else 0x481a00,0,ret(0))
 bind(0x4b8b10 if base else 0x4c9300,4,ret(0))
 bind(0x6d7910 if base else 0x70d0d0,4,ret(0))
-for facing in range(0,256,32):
-    for speed in (1,7,15,30,255):
-        destination=setup(facing,speed)
-        h=2166136261
-        for frame in range(1,1025):
-            cpu.reg_write(UC_X86_REG_ECX,LOCO)
-            cpu.reg_write(UC_X86_REG_ESP,0x103f000)
-            cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,0))
-            try: cpu.emu_start(0x4a1000 if base else 0x4b0f20,0x103e000,count=100000)
-            except UcError:
-                print('unresolved original dependency at',hex(cpu.reg_read(UC_X86_REG_EIP)),[hex(a) for a in recent],hex(read(cpu.reg_read(UC_X86_REG_ESP))))
-                raise
-            current=tuple(signed(FOOT+position+4*i) for i in range(3))
-            state=(*current,signed(LOCO+0x58),read(LOCO+0x5c),read(LOCO+0x4c))
-            if '--trace' in sys.argv and facing==int(sys.argv[-2]) and speed==int(sys.argv[-1]): print(frame,*state)
-            for value in state: h=((h ^ (value & 0xffffffff))*16777619)&0xffffffff
-            if signed(LOCO+0x58)==-1:
-                assert current==destination, (facing,speed,current,destination)
-                break
-        else: raise AssertionError('original move did not finish')
-        if '--vectors' in sys.argv: print('{%d,%d,%d,0x%08xu},'%(facing,speed,frame,h))
-        else: print('original Move facing %d speed %d frames %d hash %08x'%(facing,speed,frame,h))
+if __name__ == '__main__':
+    for facing in range(0,256,32):
+        for speed in (1,7,15,30,255):
+            destination=setup(facing,speed)
+            h=2166136261
+            for frame in range(1,1025):
+                cpu.reg_write(UC_X86_REG_ECX,LOCO)
+                cpu.reg_write(UC_X86_REG_ESP,0x103f000)
+                cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,0))
+                try: cpu.emu_start(0x4a1000 if base else 0x4b0f20,0x103e000,count=100000)
+                except UcError:
+                    print('unresolved original dependency at',hex(cpu.reg_read(UC_X86_REG_EIP)),[hex(a) for a in recent],hex(read(cpu.reg_read(UC_X86_REG_ESP))))
+                    raise
+                current=tuple(signed(FOOT+position+4*i) for i in range(3))
+                state=(*current,signed(LOCO+0x58),read(LOCO+0x5c),read(LOCO+0x4c))
+                if '--trace' in sys.argv and facing==int(sys.argv[-2]) and speed==int(sys.argv[-1]): print(frame,*state)
+                for value in state: h=((h ^ (value & 0xffffffff))*16777619)&0xffffffff
+                if signed(LOCO+0x58)==-1:
+                    assert current==destination, (facing,speed,current,destination)
+                    break
+            else: raise AssertionError('original move did not finish')
+            if '--vectors' in sys.argv: print('{%d,%d,%d,0x%08xu},'%(facing,speed,frame,h))
+            else: print('original Move facing %d speed %d frames %d hash %08x'%(facing,speed,frame,h))

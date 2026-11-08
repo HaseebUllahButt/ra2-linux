@@ -493,3 +493,41 @@ Five native checks also connect these times to the cash-only factory timer.
 make -C rebuild sim-build-time
 PYTHONPATH=/tmp/ra2-sim-capstone /usr/bin/python3 rebuild/src/sim/original_build_time_check.py game rebuild/build/sim_build_time_test
 ```
+
+## Connected original drive paths
+
+`Command.path_directions` can supply an already resolved original path of 1..23 directions.
+Direction zero is north. The other seven directions follow clockwise.
+An empty vector keeps the adjacent-goal API.
+This input does not claim to recover the original path search.
+
+`DriveSegment` ports the clear-cell preparation branch from base 004A2670 and expansion 004B2630.
+The shared 64-row control table chooses original curves 1..6.
+A turn can consume two path entries and use their final cell as its curve anchor.
+The native state keeps the original signed remainder, curve sample, direction queue, and facing writes.
+Base 004A05F0 and expansion 004B0500 control same-frame continuation.
+A newly prepared track has different continuation rules from an already active track.
+The last turn can be 45 or 90 degrees in either direction.
+Straight steps can precede that final turn.
+Mid-curve track connections and initial turn-in-place remain explicit errors.
+
+Move validates every conservative swept cell from original samples and interpolation bounds.
+A turn can cross cells outside the direction queue.
+Each crossed cell must have supported flat terrain and no intersecting object bounds.
+The command validates its complete route before it changes the entity.
+Path search, changed routes, simultaneous movers, ramps, bridges, and dynamic collision responses remain gaps.
+Original search functions include 00429A90, 0042C900, 0042D170, and the Foot wrapper 004D3920.
+
+`original_route_check.py executable [--base] --vectors` executes the original wrapper and its preparation and follow bodies.
+Its adapters supply resolved empty cells, full health, fixed speed, and a direction queue.
+Original facing and static direction initializers execute as x86.
+The native game reads only the original static curve data.
+
+`test_route.sh` compares 440 complete original traces in each edition and ten explicit limit checks.
+The traces include eight headings, five speeds, 2/3/23-cell straight paths, and both final turn sizes and signs.
+They compare every frame's position, facing, track, sample, signed remainder, and all 24 path entries.
+Both x86 editions produce identical vectors.
+The real base map test also moves unchanged ALL02S HTNK 61 through paths {4,4}, {4,3}, and {4,2}.
+These take 23, 26, and 19 movement ticks.
+Every real-map position and facing matches separately captured base x86 vectors.
+The real-map tests replay each route and reject invalid paths without changing the entity.

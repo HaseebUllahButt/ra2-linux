@@ -70,6 +70,8 @@ struct Command {
     std::string house, type;
     std::int32_t amount=0, high=0;
     ra2map::Cell destination;
+    // Optional resolved original path, 0=N clockwise through 7=NW; this does not run path search.
+    std::vector<unsigned> path_directions;
 };
 enum class Error { None, Unsupported, PastFrame, InvalidEntity, InvalidHouse, InvalidAmount, UnknownHealth, UnknownMoney };
 struct Result {

@@ -241,7 +241,7 @@ std::vector<Capability> Simulation::capabilities() {
         {"ground_primitives",true,"ground.h: guarded destination setter and original curve transforms; no map movement tick"},
         {"damage_primitives",true,"combat.h: 00489180 armor/range arithmetic in explicit precision domain"},
         {"target_primitives",true,"combat.h: resolved candidate maximum and original threat category flags"},
-        {"movement",true,"One aligned adjacent flat drive segment; road or initialized clear terrain; original assets and resolved inputs required"},
+        {"movement",true,"Aligned adjacent Move, or supplied original path with straight steps and one final curve; flat clear/road cells; no path search"},
         {"target_selection",false,"Threat arithmetic recovered; full 006F7CA0 eligibility and bounded scans remain incomplete"},
         {"combat",false,"Armor/range arithmetic recovered; projectile and derived damage handlers remain incomplete"},
         {"production",false,"Cash-only Factory primitive available; 006F47A0 complete formula and placement unresolved"}
