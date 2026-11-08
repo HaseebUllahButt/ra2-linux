@@ -7,7 +7,7 @@ Data: decomp index + call edges + symbols.
 | functions | 8584 |
 | decompiled ok | 8583
 | code bytes | 2590052
-| community-named | 5850
+| community-named | 6533
 
 ## Largest functions
 
