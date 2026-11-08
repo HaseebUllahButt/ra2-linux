@@ -17,19 +17,47 @@ sim::CandidateDecision assess_target_for_scan(const sim::CandidatePrefix &);
 // Uses the original executable's square-root table.
 int base_ballistic_launch_speed(int distance, double gravity,
                                 const sim::OriginalDistance &);
+// Base 0x6CB0E7..0x6CB15E clamps initial velocity magnitude to half the
+// resolved 3-D distance. The displacement is target minus muzzle.
+int base_limit_initial_speed(int speed, const std::array<std::int32_t, 3> &,
+                             const sim::OriginalDistance &);
 
 // Base 0x47F8B0 / 0x47F9B0, including the executable's angle table.
 // A missing result means the original reports no usable solution, or the
 // second-solution value needed by its caller cannot be established.
+struct BaseTankLaunch {
+  int limited_speed;
+  std::uint16_t heading, pitch;
+  std::array<double, 3> velocity;
+};
 class BaseBallisticAngles {
 public:
   static BaseBallisticAngles from_executable(const std::string &path);
   std::optional<std::uint16_t> angle(int speed, int horizontal_distance,
                                       int height_delta, double gravity,
                                       bool alternate) const;
+  // Base 0x6CB605..0x6CB747. Reorient the caller's initial velocity using
+  // an already resolved pitch. Does not select yaw or firing eligibility.
+  std::array<double, 3> pitch_velocity(std::array<double, 3> velocity,
+                                       std::uint16_t pitch) const;
+  // Base 0x6CB1AC..0x6CB3F1, normal tank path without burst spread.
+  // speed and heading must already be resolved by the caller.
+  std::array<double, 3> horizontal_velocity(int speed,
+                                             std::uint16_t heading) const;
+  // Base 0x6CB062..0x6CB0A2 for ROT=0 and Dropping=false.
+  std::uint16_t heading(std::int32_t dx, std::int32_t dy) const;
+  // Normal non-burst Cannon path. Supply target minus muzzle and the
+  // resolved 0x6D7D20 branch. A missing result means no supported solution.
+  std::optional<BaseTankLaunch> tank_launch(int speed,
+      const std::array<std::int32_t, 3> &displacement, double gravity,
+      bool alternate) const;
 private:
+  float trig(double angle, bool cosine) const;
+  double atan_vector(double y, double x) const;
   sim::OriginalDistance distance_;
   std::array<float, 4097> angles_{};
+  std::array<float, 4097> atan_{};
+  std::array<float, 10240> sine_{};
 };
 
 // Use only after the original firing checks and weapon selection have been

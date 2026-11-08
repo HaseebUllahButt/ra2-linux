@@ -6,6 +6,56 @@
 using namespace ra2::weapons;
 int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--tank-launch") {
+      auto tables = BaseBallisticAngles::from_executable("/path/to/user/ra2/game/game.exe");
+      int speed, alternate; double gravity;
+      std::array<std::int32_t, 3> displacement{};
+      std::cout << std::setprecision(17);
+      while (std::cin >> speed >> displacement[0] >> displacement[1] >> displacement[2] >> gravity >> alternate) {
+        auto result = tables.tank_launch(speed, displacement, gravity, alternate != 0);
+        if (!result) { std::cout << "none\n"; continue; }
+        std::cout << result->limited_speed << ' ' << result->heading << ' ' << result->pitch << ' ';
+        for (auto value : result->velocity) std::cout << value << ' ';
+        std::cout << '\n';
+      }
+      return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--heading-angle") {
+      auto tables = BaseBallisticAngles::from_executable("/path/to/user/ra2/game/game.exe");
+      std::int32_t x, y;
+      while (std::cin >> x >> y) std::cout << tables.heading(x, y) << '\n';
+      return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--limit-speed") {
+      auto table = ra2::sim::OriginalDistance::from_executable("/path/to/user/ra2/game/game.exe");
+      int speed; std::array<std::int32_t, 3> displacement{};
+      while (std::cin >> speed >> displacement[0] >> displacement[1] >> displacement[2])
+        std::cout << base_limit_initial_speed(speed, displacement, table) << '\n';
+      return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--heading") {
+      auto tables = BaseBallisticAngles::from_executable("/path/to/user/ra2/game/game.exe");
+      int speed, heading;
+      std::cout << std::setprecision(17);
+      while (std::cin >> speed >> heading) {
+        auto result = tables.horizontal_velocity(speed, static_cast<std::uint16_t>(heading));
+        for (auto value : result) std::cout << value << ' ';
+        std::cout << '\n';
+      }
+      return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--pitch") {
+      auto tables = BaseBallisticAngles::from_executable("/path/to/user/ra2/game/game.exe");
+      std::array<double, 3> velocity{};
+      int pitch;
+      std::cout << std::setprecision(17);
+      while (std::cin >> velocity[0] >> velocity[1] >> velocity[2] >> pitch) {
+        auto result = tables.pitch_velocity(velocity, static_cast<std::uint16_t>(pitch));
+        for (auto value : result) std::cout << value << ' ';
+        std::cout << '\n';
+      }
+      return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--angle") {
       auto tables = BaseBallisticAngles::from_executable("/path/to/user/ra2/game/game.exe");
       int speed, distance, height, alternate;

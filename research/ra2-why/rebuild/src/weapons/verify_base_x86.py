@@ -111,6 +111,176 @@ for case, expected in zip(angle_cases, angle_native):
     assert result == int(expected), (case, result, expected)
 assert len(angle_native) == len(angle_cases)
 
+# Original target-to-heading conversion, including the four axes.
+heading_rng = random.Random(0x6CB062)
+heading_cases = [
+    (heading_rng.randrange(-10000, 10001), heading_rng.randrange(-10000, 10001))
+    for _ in range(512)
+]
+heading_cases += [(0, 0), (0, 1), (0, -1), (-1, 0), (1, 0)]
+heading_input = "".join(" ".join(map(str, c)) + "\n" for c in heading_cases)
+heading_native = subprocess.check_output(
+    [sys.argv[1], "--heading-angle"], input=heading_input, text=True
+).splitlines()
+for case, line in zip(heading_cases, heading_native):
+    x, y = case
+    w(stack + 0x7C, x)
+    u.reg_write(UC_X86_REG_EAX, y & 0xFFFFFFFF)
+    u.reg_write(UC_X86_REG_ESP, stack)
+    u.reg_write(UC_X86_REG_FPCW, 0xE7F)
+    u.emu_start(0x6CB062, 0x6CB0A2, count=100000)
+    actual = struct.unpack("<H", u.mem_read(stack + 0x20, 2))[0]
+    assert actual == int(line), (case, actual, line)
+assert len(heading_native) == len(heading_cases)
+
+# Normal non-burst horizontal velocity from the resolved heading and speed.
+velocity_cases = [
+    (heading_rng.randrange(2, 1000), heading_rng.randrange(65536)) for _ in range(512)
+]
+velocity_cases += [(0, 0), (0, 0x3FFF)]
+velocity_input = "".join(" ".join(map(str, c)) + "\n" for c in velocity_cases)
+velocity_native = subprocess.check_output(
+    [sys.argv[1], "--heading"], input=velocity_input, text=True
+).splitlines()
+for case, line in zip(velocity_cases, velocity_native):
+    speed, heading = case
+    w(stack + 0x28, speed)
+    w(stack + 0x1C, 0)
+    u.mem_write(stack + 0x20, struct.pack("<H", heading))
+    u.reg_write(UC_X86_REG_ESP, stack)
+    u.reg_write(UC_X86_REG_FPCW, 0xE7F)
+    u.emu_start(0x6CB1AC, 0x6CB3F1, count=100000)
+    actual = struct.unpack("<3d", u.mem_read(stack + 0x3C, 24))
+    expected = tuple(map(float, line.split()))
+    assert actual == expected, (case, actual, expected)
+assert len(velocity_native) == len(velocity_cases)
+
+# The original caller limits initial speed to half the 3-D displacement.
+limit_cases = [
+    (
+        heading_rng.randrange(0, 1000),
+        heading_rng.randrange(-3000, 3001),
+        heading_rng.randrange(-3000, 3001),
+        heading_rng.randrange(-3000, 3001),
+    )
+    for _ in range(512)
+]
+limit_input = "".join(" ".join(map(str, c)) + "\n" for c in limit_cases)
+limit_native = subprocess.check_output(
+    [sys.argv[1], "--limit-speed"], input=limit_input, text=True
+).splitlines()
+for case, line in zip(limit_cases, limit_native):
+    speed, x, y, z = case
+    w(stack + 0x28, speed)
+    w(stack + 0x7C, x)
+    w(stack + 0x80, y)
+    w(stack + 0x84, z)
+    u.reg_write(UC_X86_REG_ESP, stack)
+    u.reg_write(UC_X86_REG_FPCW, 0xE7F)
+    u.emu_start(0x6CB0E7, 0x6CB15E, count=100000)
+    actual = struct.unpack("<i", u.mem_read(stack + 0x28, 4))[0]
+    assert actual == int(line), (case, actual, line)
+assert len(limit_native) == len(limit_cases)
+
+# Reorient a resolved three-dimensional launch vector with the original
+# trigonometric tables. Positions and firing eligibility remain caller inputs.
+pitch_rng = random.Random(0x6CB605)
+pitch_cases = [
+    (
+        pitch_rng.randrange(-1000, 1001) / 10,
+        pitch_rng.randrange(-1000, 1001) / 10,
+        pitch_rng.randrange(-300, 301) / 10,
+        pitch_rng.randrange(65536),
+    )
+    for _ in range(512)
+]
+pitch_input = "".join(" ".join(map(str, c)) + "\n" for c in pitch_cases)
+pitch_native = subprocess.check_output(
+    [sys.argv[1], "--pitch"], input=pitch_input, text=True
+).splitlines()
+for case, line in zip(pitch_cases, pitch_native):
+    x, y, z, pitch = case
+    u.mem_write(stack + 0x3C, struct.pack("<3d", x, y, z))
+    u.mem_write(stack + 0x60, struct.pack("<H", pitch))
+    u.reg_write(UC_X86_REG_ESP, stack)
+    u.reg_write(UC_X86_REG_FPCW, 0xE7F)
+    u.emu_start(0x6CB605, 0x6CB747, count=100000)
+    actual = struct.unpack("<3d", u.mem_read(stack + 0x3C, 24))
+    expected = tuple(map(float, line.split()))
+    assert actual == expected, (case, actual, expected)
+assert len(pitch_native) == len(pitch_cases)
+
+# Execute the connected normal Cannon launch path. The 0x6D7D20 branch
+# is supplied as a resolved original virtual result.
+launch_type, launch_bullet, launch_rules, launch_frame = (
+    base + 0x70000,
+    base + 0x74000,
+    base + 0x78000,
+    base + 0x7C000,
+)
+w(launch_bullet + 0x98, launch_type)
+w(launch_type + 0x2AC, 0)
+u.mem_write(launch_type + 0x26B, b"\1")
+u.mem_write(launch_type + 0x26C, b"\0")
+u.mem_write(launch_type + 0x265, b"\0")
+w(0x839848, launch_rules)
+launch_alternate = 0
+
+
+def launch_hook(cpu, address, size, unused):
+    sp = cpu.reg_read(UC_X86_REG_ESP)
+    return_address = struct.unpack("<I", cpu.mem_read(sp, 4))[0]
+    cpu.reg_write(UC_X86_REG_EAX, launch_alternate)
+    cpu.reg_write(UC_X86_REG_ESP, sp + 8)
+    cpu.reg_write(UC_X86_REG_EIP, return_address)
+
+
+u.hook_add(UC_HOOK_CODE, launch_hook, begin=0x6D7D20, end=0x6D7D20)
+launch_cases = []
+for _ in range(256):
+    dx = heading_rng.choice((-1, 1)) * heading_rng.randrange(100, 501)
+    dy = heading_rng.randrange(-500, 501)
+    dz = heading_rng.choice((-32, 0, 32))
+    launch_cases.append((120, dx, dy, dz, 6, heading_rng.randrange(2)))
+launch_input = "".join(" ".join(map(str, c)) + "\n" for c in launch_cases)
+launch_native = subprocess.check_output(
+    [sys.argv[1], "--tank-launch"], input=launch_input, text=True
+).splitlines()
+for case, line in zip(launch_cases, launch_native):
+    speed, dx, dy, dz, gravity, launch_alternate = case
+    w(stack + 0x7C, dx)
+    w(stack + 0x80, dy)
+    w(stack + 0x84, dz)
+    w(stack + 0x28, speed)
+    w(stack + 0x1C, launch_type)
+    u.reg_write(UC_X86_REG_EAX, dy & 0xFFFFFFFF)
+    u.reg_write(UC_X86_REG_ESP, stack)
+    u.reg_write(UC_X86_REG_FPCW, 0xE7F)
+    u.emu_start(0x6CB062, 0x6CB15E, count=100000)
+    original_speed = struct.unpack("<i", u.mem_read(stack + 0x28, 4))[0]
+    original_heading = struct.unpack("<H", u.mem_read(stack + 0x20, 2))[0]
+    w(stack + 0x1C, 0)
+    w(stack + 0x2C, launch_bullet)
+    w(launch_rules + 0x1320, gravity)
+    w(launch_frame + 12, 0)
+    u.reg_write(UC_X86_REG_EDI, dz & 0xFFFFFFFF)
+    u.reg_write(UC_X86_REG_EBP, launch_frame)
+    u.emu_start(0x6CB1AC, 0x6CB747, count=100000)
+    original_pitch = struct.unpack("<H", u.mem_read(stack + 0x60, 2))[0]
+    original_vector = struct.unpack("<3d", u.mem_read(stack + 0x3C, 24))
+    vals = line.split()
+    assert vals[0] != "none", (
+        case,
+        original_speed,
+        original_heading,
+        original_pitch,
+        original_vector,
+    )
+    actual = (original_speed, original_heading, original_pitch, *original_vector)
+    expected = (*map(int, vals[:3]), *map(float, vals[3:]))
+    assert actual == expected, (case, actual, expected)
+assert len(launch_native) == len(launch_cases)
+
 # Load gravity onto x87, then execute the actual arc update instructions.
 # At 460397 the original x87 stack already holds gravity.
 stub = base + 0x5000
@@ -296,5 +466,5 @@ for case, line in zip(impact_cases, impact_native):
     assert actual == int(line), (case, actual, line)
 assert len(impact_native) == len(impact_cases)
 print(
-    f"Base game.exe: {len(speeds)} ballistic speeds, {len(angle_cases)} launch angles, {len(cases)} arc proposals, {len(fire_cases)} fire events, and {len(impact_cases)} impact checks match"
+    f"Base game.exe: {len(speeds)} ballistic speeds, {len(angle_cases)} launch angles, {len(heading_cases)} headings, {len(velocity_cases)} horizontal vectors, {len(limit_cases)} speed limits, {len(pitch_cases)} pitch vectors, {len(launch_cases)} connected launches, {len(cases)} arc proposals, {len(fire_cases)} fire events, and {len(impact_cases)} impact checks match"
 )

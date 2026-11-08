@@ -1,5 +1,6 @@
 #include "weapons.h"
 #include <sim/fp.h>
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -45,6 +46,19 @@ int base_ballistic_launch_speed(int distance, double gravity,
   return truncate_int(lookup.square_root(scaled));
 }
 
+int base_limit_initial_speed(int speed, const std::array<std::int32_t, 3> &d,
+                             const sim::OriginalDistance &lookup) {
+  if (speed < 0) throw std::invalid_argument("negative initial speed");
+  for (auto value : d)
+    if (value < -100000 || value > 100000)
+      throw std::range_error("initial displacement outside verified range");
+  const auto xx = sim::fp::multiply(d[0], d[0]);
+  const auto yy = sim::fp::multiply(d[1], d[1]);
+  const auto zz = sim::fp::multiply(d[2], d[2]);
+  const int distance = truncate_int(lookup.square_root(sim::fp::add(sim::fp::add(yy, zz), xx)));
+  return std::min(speed, distance / 2);
+}
+
 BaseBallisticAngles BaseBallisticAngles::from_executable(const std::string &path) {
   BaseBallisticAngles out;
   out.distance_ = sim::OriginalDistance::from_executable(path);
@@ -57,16 +71,21 @@ BaseBallisticAngles BaseBallisticAngles::from_executable(const std::string &path
   file.read(reinterpret_cast<char *>(actual), sizeof actual);
   if (!file || std::memcmp(actual, signature, sizeof signature))
     throw std::runtime_error("unsupported base angle table");
-  file.seekg(0x80bdd4 - 0x400000);
-  for (auto &value : out.angles_) {
-    unsigned char b[4];
-    file.read(reinterpret_cast<char *>(b), sizeof b);
-    if (!file) throw std::runtime_error("truncated base angle table");
-    const std::uint32_t bits = std::uint32_t(b[0]) | std::uint32_t(b[1]) << 8 |
-                               std::uint32_t(b[2]) << 16 | std::uint32_t(b[3]) << 24;
-    std::memcpy(&value, &bits, sizeof value);
-    if (!std::isfinite(value)) throw std::runtime_error("invalid base angle table");
-  }
+  auto read_table = [&](auto &table, std::uint32_t address) {
+    file.seekg(address - 0x400000);
+    for (auto &value : table) {
+      unsigned char b[4];
+      file.read(reinterpret_cast<char *>(b), sizeof b);
+      if (!file) throw std::runtime_error("truncated base angle table");
+      const std::uint32_t bits = std::uint32_t(b[0]) | std::uint32_t(b[1]) << 8 |
+                                 std::uint32_t(b[2]) << 16 | std::uint32_t(b[3]) << 24;
+      std::memcpy(&value, &bits, sizeof value);
+      if (!std::isfinite(value)) throw std::runtime_error("invalid base angle table");
+    }
+  };
+  read_table(out.angles_, 0x80bdd4);
+  read_table(out.atan_, 0x813df4);
+  read_table(out.sine_, 0x801dc4);
   return out;
 }
 
@@ -110,6 +129,112 @@ BaseBallisticAngles::angle(int speed, int distance, int height, double gravity,
   const double direction = sim::fp::multiply(sim::fp::add(*first, -half_pi),
                                               direction_scale);
   return static_cast<std::uint16_t>(truncate_int(direction));
+}
+
+float BaseBallisticAngles::trig(double angle, bool cosine) const {
+  constexpr double table_scale = 2607.594482421875;
+  const int units = truncate_int(sim::fp::multiply(angle, table_scale));
+  int index = (units / 2) % 8192;
+  if (index < 0) index += 8192;
+  if (cosine) index += 2048;
+  if ((units & 1) && index < (cosine ? 10239 : 8191)) ++index;
+  return sine_[std::size_t(index)];
+}
+
+double BaseBallisticAngles::atan_vector(double y, double x) const {
+  constexpr double atan_step = 0.024413354694843292;
+  constexpr float half_pi_float = 1.5707963705062866f;
+  constexpr double pi = 3.141592653589793;
+  auto single_toward_zero = [](double value) {
+    float result = static_cast<float>(value);
+    if (std::abs(double(result)) > std::abs(value))
+      result = std::nextafter(result, 0.0f);
+    return result;
+  };
+  const float fy = single_toward_zero(y), fx = single_toward_zero(x);
+  if (fx == 0) {
+    if (fy == 0) return 0;
+    return fy > 0 ? half_pi_float : -half_pi_float;
+  }
+  const auto ratio = sim::fp::divide(sim::fp::divide(fy, fx), atan_step);
+  if (std::abs(ratio) > std::numeric_limits<int>::max())
+    throw std::range_error("angle ratio outside verified range");
+  const int index = std::abs(truncate_int(ratio));
+  double angle = index < 4097 ? atan_[std::size_t(index)] : half_pi_float;
+  if (fx < 0) angle = sim::fp::add(pi, -angle);
+  if (fy < 0) angle = -angle;
+  return angle;
+}
+
+std::uint16_t BaseBallisticAngles::heading(std::int32_t dx, std::int32_t dy) const {
+  if (dy == std::numeric_limits<std::int32_t>::min())
+    throw std::range_error("heading displacement outside verified range");
+  constexpr double half_pi = 1.5707963267948966;
+  constexpr double direction_scale = -10430.060040584269;
+  return static_cast<std::uint16_t>(truncate_int(sim::fp::multiply(
+      sim::fp::add(atan_vector(-double(dy), dx), -half_pi), direction_scale)));
+}
+
+std::array<double, 3>
+BaseBallisticAngles::horizontal_velocity(int speed, std::uint16_t heading) const {
+  if (speed < 0) throw std::invalid_argument("negative initial speed");
+  constexpr double direction_unit = -9.587672516830327e-05;
+  const double initial = sim::fp::multiply(
+      sim::fp::divide(speed, distance_.square_root(10000)), 100);
+  const double x = initial == 0 ? 100 : initial;
+  const double magnitude = distance_.square_root(sim::fp::multiply(x, x));
+  const int signed_heading = heading < 32768 ? heading : int(heading) - 65536;
+  const double angle = sim::fp::multiply(signed_heading - 0x3fff, direction_unit);
+  return {sim::fp::multiply(trig(angle, true), magnitude),
+          -sim::fp::multiply(trig(angle, false), magnitude), 0};
+}
+
+std::optional<BaseTankLaunch>
+BaseBallisticAngles::tank_launch(int speed, const std::array<std::int32_t, 3> &d,
+                                 double gravity, bool alternate) const {
+  if (!std::isfinite(gravity) || gravity < 0)
+    throw std::invalid_argument("invalid projectile gravity");
+  const int limited = base_limit_initial_speed(speed, d, distance_);
+  if (!limited) return std::nullopt;
+  const int horizontal = truncate_int(distance_.square_root(sim::fp::add(
+      sim::fp::multiply(d[0], d[0]), sim::fp::multiply(d[1], d[1]))));
+  if (!horizontal) return std::nullopt;
+  const auto direction = heading(d[0], d[1]);
+  auto elevation = angle(limited, horizontal, d[2], gravity, alternate);
+  if (!elevation) return std::nullopt;
+  auto v = pitch_velocity(horizontal_velocity(limited, direction), *elevation);
+  return BaseTankLaunch{limited, direction, *elevation, v};
+}
+
+std::array<double, 3>
+BaseBallisticAngles::pitch_velocity(std::array<double, 3> v,
+                                    std::uint16_t pitch) const {
+  using namespace sim::fp;
+  constexpr double half_pi = 1.5707963267948966;
+  constexpr double direction_scale = -10430.060040584269;
+  constexpr double direction_unit = -9.587672516830327e-05;
+  const double xy = add(multiply(v[1], v[1]), multiply(v[0], v[0]));
+  const float horizontal = distance_.square_root(xy);
+  const double elevation = atan_vector(v[2], horizontal);
+  const auto encoded = static_cast<std::uint16_t>(truncate_int(
+      multiply(add(elevation, -half_pi), direction_scale)));
+  const int signed_encoded = encoded < 32768 ? encoded : int(encoded) - 65536;
+  const double old_pitch = multiply(signed_encoded - 0x3fff, direction_unit);
+  const double magnitude = distance_.square_root(
+      add(add(multiply(v[0], v[0]), multiply(v[1], v[1])), multiply(v[2], v[2])));
+  if (old_pitch != 0) {
+    const double cosine = trig(old_pitch, true);
+    if (cosine == 0) throw std::range_error("vertical velocity outside verified domain");
+    v[0] = divide(v[0], cosine);
+    v[1] = divide(v[1], cosine);
+  }
+  const int signed_pitch = pitch < 32768 ? pitch : int(pitch) - 65536;
+  const double new_pitch = multiply(signed_pitch - 0x3fff, direction_unit);
+  const double cosine = trig(new_pitch, true);
+  v[0] = multiply(v[0], cosine);
+  v[1] = multiply(v[1], cosine);
+  v[2] = multiply(trig(new_pitch, false), magnitude);
+  return v;
 }
 
 ArcProposal base_arc_proposal(const ArcInput &input) {
