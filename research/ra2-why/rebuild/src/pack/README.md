@@ -42,3 +42,9 @@ arrays for each map, and 6395622 bytes of preview pixels.
 
 This module reads map data. It does not draw the battlefield or implement
 unit behavior.
+
+## Wire-in
+
+- rebuild/src/map/map_file.cpp now stores raw pack bytes and exposes
+  them; terrain reads go through packed_terrain() where needed.
+- Makefile: `make pack` runs the pack tests against the real maps.

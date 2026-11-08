@@ -84,3 +84,10 @@ run-map:
 		src/rules/ini_file.cpp src/pack/map_pack.cpp src/map/test_main.cpp \
 		-ldl -o src/map/map_test
 	src/map/map_test ../analysis/extracted/maps/2PEAKS.MAP
+
+pack: run-pack
+
+run-pack:
+	$(CXX) $(CXXFLAGS) -I src/pack -I src/rules src/pack/test_main.cpp \
+		src/pack/map_pack.cpp src/rules/ini_file.cpp -o src/pack/pack_test
+	cd .. && rebuild/src/pack/pack_test analysis/extracted/maps
