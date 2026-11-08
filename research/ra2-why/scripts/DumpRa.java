@@ -21,11 +21,13 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Instruction;
+import ghidra.program.model.listing.InstructionIterator;
+import ghidra.program.model.listing.Program;
 import ghidra.program.model.symbol.Reference;
 
 public class DumpRa extends GhidraScript {
 
-    private static final String OUT_DIR = "/path/to/user/ra2/analysis/ghidra-dump";
+    private String outDir = "/path/to/user/ra2/analysis/ghidra-dump";
 
     private static final String[] KEYWORDS = {
         "chronosphere", "weather", "lightning", "iron curtain", "psychic",
@@ -38,7 +40,7 @@ public class DumpRa extends GhidraScript {
     };
 
     private PrintWriter writer(String name) throws IOException {
-        File dir = new File(OUT_DIR);
+        File dir = new File(outDir);
         dir.mkdirs();
         return new PrintWriter(new BufferedWriter(
             new FileWriter(new File(dir, name), false)));
@@ -53,6 +55,8 @@ public class DumpRa extends GhidraScript {
 
     @Override
     public void run() throws Exception {
+        String[] args = getScriptArgs();
+        if (args.length > 0) outDir = args[0];
         Program program = currentProgram;
 
         // 1. function index
@@ -69,7 +73,7 @@ public class DumpRa extends GhidraScript {
 
         // 2. defined strings
         ArrayList<Data> stringData = new ArrayList<Data>();
-        PrintWriter stringsOut = writer("strings.csv);
+        PrintWriter stringsOut = writer("strings.csv");
         stringsOut.println("address,value");
         for (Data data : program.getListing().getDefinedData(true)) {
             if (data.hasStringValue()) {
@@ -159,6 +163,6 @@ public class DumpRa extends GhidraScript {
         di.dispose();
         println("DumpRa done: " + sizes.size() + " functions, "
             + stringData.size() + " strings, " + landmark.size()
-            " landmark functions, " + done + " decompiled");
+            + " landmark functions, " + done + " decompiled");
     }
 }

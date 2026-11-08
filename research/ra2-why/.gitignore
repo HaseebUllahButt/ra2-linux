@@ -13,3 +13,5 @@ __pycache__/
 
 rebuild/hook/winmm.dll
 /rebuild/build/
+/analysis/base-ra2/*.gpr
+/analysis/base-ra2/*.rep/

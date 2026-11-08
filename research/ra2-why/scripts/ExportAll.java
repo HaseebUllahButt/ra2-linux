@@ -11,7 +11,8 @@ import ghidra.program.model.listing.Function;
 
 public class ExportAll extends GhidraScript {
     public void run() throws Exception {
-        File outDir = new File("/path/to/user/ra2/rebuild/decomp");
+        String[] args = getScriptArgs();
+        File outDir = new File(args.length > 0 ? args[0] : "/path/to/user/ra2/rebuild/decomp");
         outDir.mkdirs();
         DecompInterface di = new DecompInterface();
         di.openProgram(currentProgram);

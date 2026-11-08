@@ -4,10 +4,28 @@
 
 CXX ?= g++
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O2
+SDL_FLAGS = $(shell pkg-config --cflags --libs sdl2)
 
 .PHONY: all test clean fs rules text map pack loop gfx hook run-fs run-rules run-text run-map run-pack run-loop run-gfx run-hook
 
 all: test
+
+.PHONY: native platform run-platform
+
+platform: run-platform
+
+run-platform:
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) src/app/platform.cpp src/app/test_platform.cpp $(SDL_FLAGS) -o build/platform_test
+	SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy build/platform_test
+
+native:
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) src/app/platform.cpp src/app/main.cpp \
+		src/render/tmp_decode.cpp src/render/minimap.cpp src/loop/game_loop.cpp \
+		src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp src/fs/filename_hash.cpp \
+		src/gfx/palette.cpp src/pack/map_pack.cpp src/rules/ini_file.cpp \
+		$(SDL_FLAGS) -ldl -o build/ra2-native
 
 test: fs rules text map pack loop gfx hook
 	@echo "== all layer tests passed =="
@@ -85,9 +103,3 @@ run-map:
 		-ldl -o src/map/map_test
 	src/map/map_test ../analysis/extracted/maps/2PEAKS.MAP
 
-pack: run-pack
-
-run-pack:
-	$(CXX) $(CXXFLAGS) -I src/pack -I src/rules src/pack/test_main.cpp \
-		src/pack/map_pack.cpp src/rules/ini_file.cpp -o src/pack/pack_test
-	cd .. && rebuild/src/pack/pack_test analysis/extracted/maps
