@@ -39,6 +39,16 @@ struct SkirmishSetup {
     std::optional<int> color;
     std::array<OpponentSlot,7> opponents;
 };
+struct SkirmishMap {
+    std::string id, filename, name;
+    int min_players = 2, max_players = 4;
+    std::vector<std::string> modes;
+    bool available = false;
+};
+// Original MISSIONS.PKT or MISSIONSMD.PKT catalog order. Mount map archives
+// before calling to check availability. Extra PKT files are not yet included.
+std::vector<SkirmishMap> load_skirmish_maps(const fs::MixFileSystem& files,
+                                             const ra2text::CsfFile& strings);
 // Original dialog 258. 0x006AE6E0 and 0x004E37D0 map player slots.
 struct SkirmishControls {
     static constexpr std::uint32_t choose_map=1450, start=1559, credits=1297;
@@ -99,6 +109,7 @@ public:
     Page page() const noexcept { return navigation_.page(); }
     bool confirming_exit() const noexcept { return confirming_exit_; }
     const SkirmishSetup& skirmish_setup() const noexcept { return setup_; }
+    const SkirmishSetup& setup() const noexcept { return setup_; }
     gfx::RgbaImage render() const;
     void pointer_move(int x, int y);
     void pointer_down(int x, int y);

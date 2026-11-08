@@ -45,6 +45,11 @@ original edition-specific INI file. `read_skirmish_setup` accepts an `IniFile`.
 Missing values that depend on the game rules remain unset. These values are
 not editable in the UI yet, and Start stays disabled. `0x00697F10` reads the
 original saved skirmish settings; `0x006980C0` reads player preferences.
+`load_skirmish_maps` reads the original `MultiMaps` packet in catalog order.
+It resolves CSF names and checks files through the prepared filesystem. It
+does not yet add loose PKT, YRO, or YRM entries, or select a fallback map for
+the active game mode. Therefore a saved scenario index is not yet guaranteed
+to resolve to a usable map.
 
 `draw_shell_background` draws the static 800x600 shell into RGBA, using a
 prepared filesystem. Mount `NEUTRAL.MIX` for the base game and mount

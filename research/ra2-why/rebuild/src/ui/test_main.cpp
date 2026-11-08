@@ -83,6 +83,7 @@ int main(int argc,char** argv) {
     fs::MixFileSystem base(argv[1]);
     base.bootstrap(fs::GameVariant::RedAlert2); base.mount_language(fs::GameVariant::RedAlert2);
     base.mount("neutral.mix");
+    base.mount("multi.mix"); files.mount("multimd.mix");
     auto basecsf=base.read_file("ra2.csf"); assert(basecsf);
     auto base_art=base.read_file("art.ini"); assert(base_art && !base_art->empty());
     rules::IniFile art; art.parse(std::string_view(reinterpret_cast<const char*>(base_art->data()),base_art->size()));
@@ -101,6 +102,13 @@ int main(int argc,char** argv) {
         assert(std::any_of(base_skirmish.controls.begin(),base_skirmish.controls.end(),[id](const auto& c){return c.id==id;}));
     auto base_shell=ui::draw_shell_background(base,800,600);
     assert(base_shell.width==800 && base_shell.height==600);
+    auto base_maps=ui::load_skirmish_maps(base,base_strings);
+    auto expansion_maps=ui::load_skirmish_maps(files,strings);
+    assert(base_maps.size()==137 && expansion_maps.size()==161);
+    assert(base_maps[0].id=="MP02T2" && base_maps[0].filename=="MP02T2.MAP" && !base_maps[0].name.empty());
+    assert(expansion_maps[0].id=="XMP29U2" && !expansion_maps[0].name.empty());
+    assert(std::any_of(base_maps.begin(),base_maps.end(),[](const auto& map){return map.available;}));
+    assert(std::any_of(expansion_maps.begin(),expansion_maps.end(),[](const auto& map){return map.available;}));
     auto menu=ui::Menu::load(base,base_exe,base_strings);
     rules::IniFile defaults;
     auto empty_setup=ui::read_skirmish_setup(defaults);
