@@ -633,3 +633,25 @@ The Move guard now uses this proven maximum instead of adding a row to every bui
 `original_foundation_check.py executable [--base]` verifies all 22 foundation sizes, both Bib states, and both include-Bib arguments.
 Both editions pass 88 cases with hash 7737195D.
 Move also rejects IsTrain=yes and authored Tubes sections until their extra state is recovered.
+
+## Initial coarse map regions
+
+`build_original_coarse_regions()` ports base 0054F250 and expansion 0056CB90.
+It preserves the row scan in 0056C510 before tube edges and movement-zone reachability tables.
+Inputs are the original Cell +4C cached category and raw unsigned height byte.
+The cached category is not LandType. The caller must recover that cache before using real terrain.
+Unknown input, a missing blocked border, and native storage limits produce explicit errors.
+
+The scan retains the original asymmetric height checks: left steps allow one; right steps allow three.
+The upper and lower fringe scans include both diagonal endpoints.
+Category six relaxes height checks for region links, but does not relax component filling.
+The result includes cell labels, original reported sizes, largest-region identity, and ordered region pairs.
+Edge order follows the original 256 buckets and insertion order within each bucket.
+This is a graph-building primitive. It does not yet enable ordinary far-goal Move.
+
+`original_region_check.py executable [--base] --vectors` executes the original recursive fill without replacing its decisions.
+Only the driver and preallocated vector storage are supplied by the test.
+Both editions match all 256 cases, including flat regions, alternating categories, height changes, and category-six links.
+`test_regions.sh` compares complete result hashes and verifies seven explicit input cases: 263 checks.
+The same native checks pass with address and undefined-behavior sanitizers.
+Tube edges, final Cell category recovery, three hierarchy layers, and hierarchy search remain separate work.
