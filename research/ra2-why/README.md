@@ -97,8 +97,8 @@ Continued reverse engineering for preservation. Full report:
   archive crypto key material ships with the game.
 - Recovered all game text: 5,211 + 4,479 strings decoded from the
   CSF tables (XOR-0xFF UTF-16 variant documented from evidence).
-- Extracted 195 maps as plain INI text (173 named from the official
-  spawn list), plus rules/sound/spawn configs under `analysis/extracted/`.
+- Extracted 175 map files as plain INI text (multiplayer map names
+  from the official spawn list) plus rules, sound and spawn configs.
 - Ghidra headless dump of gamemd.exe: 8,584 functions indexed, 139
   landmark functions decompiled (`analysis/ghidra-dump/`), engine
   landmarks table in the report. Rules class pointer DAT_00A8B230
