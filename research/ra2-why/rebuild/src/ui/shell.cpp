@@ -52,6 +52,20 @@ void blit(gfx::RgbaImage& dst, const gfx::RgbaImage& src, int x, int y,
         }
     }
 }
+bool contains(Rect r, int x, int y) {
+    return x>=r.x && y>=r.y && std::int64_t(x)<std::int64_t(r.x)+r.width &&
+           std::int64_t(y)<std::int64_t(r.y)+r.height;
+}
+void fill(gfx::RgbaImage& image, Rect r, gfx::Rgba color) {
+    const int left=std::max(0,r.x), top=std::max(0,r.y);
+    const int right=static_cast<int>(std::min<std::int64_t>(image.width,std::int64_t(r.x)+r.width));
+    const int bottom=static_cast<int>(std::min<std::int64_t>(image.height,std::int64_t(r.y)+r.height));
+    for (int y=top;y<bottom;++y) for(int x=left;x<right;++x) {
+        const auto pos=(static_cast<std::size_t>(y)*image.width+x)*4;
+        image.pixels[pos]=color.r; image.pixels[pos+1]=color.g;
+        image.pixels[pos+2]=color.b; image.pixels[pos+3]=color.a;
+    }
+}
 void blit_strip(gfx::RgbaImage& dst, const gfx::RgbaImage& src, int x, int y, int width) {
     if (!src.width || width<=0) return;
     const int start=src.width>width ? (src.width-width)/2 : 0;
@@ -125,6 +139,8 @@ Menu Menu::load(const fs::MixFileSystem& files, const std::vector<std::uint8_t>&
     result.single_ = load_dialog(exe, Page::SinglePlayer, strings);
     result.skirmish_ = load_dialog(exe, Page::Skirmish, strings);
     result.font_ = GameFont::parse(required(files, "GAME.FNT"));
+    result.arrow_normal_ = decode_pcx(required(files, "dnarrowr.pcx"));
+    result.arrow_pressed_ = decode_pcx(required(files, "dnarrowp.pcx"));
     result.check_on_ = decode_pcx(required(files, "cce_i.pcx"));
     result.check_off_ = decode_pcx(required(files, "cue_i.pcx"));
     result.slider_grip_ = decode_pcx(required(files, "trakgrip.pcx"));
@@ -143,6 +159,8 @@ Menu Menu::load(const fs::MixFileSystem& files, const std::vector<std::uint8_t>&
     result.setup_ = read_skirmish_setup(preferences, base_data ? &base_rules : nullptr,
                                        expansion_data ? &expansion_rules : nullptr);
     result.countries_ = load_skirmish_countries(files, strings);
+    result.colors_ = load_skirmish_colors(strings);
+    result.opponent_choices_ = load_skirmish_opponents(strings);
     const auto colors = gfx::Palette::from_bytes(required(files, "SDBTNANM.PAL"));
     const auto button = shape(files, "SDBTNANM.SHP");
     result.normal_ = button.decode_frame(2, colors);
@@ -226,6 +244,64 @@ std::vector<Menu::Button> Menu::checks() const {
     return result;
 }
 
+std::vector<Menu::Dropdown> Menu::dropdowns() const {
+    std::vector<Dropdown> result;
+    if (confirming_exit_ || page()!=Page::Skirmish) return result;
+    for (const auto& c : skirmish_.controls) {
+        int kind=-1;
+        std::size_t slot=0;
+        if (c.id==SkirmishControls::player_country) kind=1;
+        if (c.id==SkirmishControls::player_color) kind=2;
+        for (std::size_t i=0;i<setup_.opponents.size();++i) {
+            if (c.id==SkirmishControls::opponents[i]) {kind=0;slot=i+1;}
+            if (c.id==SkirmishControls::countries[i]) {kind=1;slot=i+1;}
+            if (c.id==SkirmishControls::colors[i]) {kind=2;slot=i+1;}
+        }
+        if (kind<0 || !(c.style&0x10000000u)) continue;
+        const bool active=slot==0 || (setup_.opponents[slot-1].opponent &&
+                                      *setup_.opponents[slot-1].opponent!=Opponent::Closed);
+        const bool enabled=!(c.style&0x08000000u) && (kind==0 || active);
+        // The item is 19 pixels. Linux adds a two-pixel border on each side.
+        const int height=static_cast<int>(combo_item_metrics(font_).selection_height)+4;
+        Dropdown d{c.id,slot,kind,{(c.bounds.x*3+1)/2,(c.bounds.y*163+50)/100,
+                                  (c.bounds.width*3+1)/2+1,height},enabled,{},-999};
+        if (kind==0) {
+            if (setup_.opponents[slot-1].opponent)
+                d.current=static_cast<int>(*setup_.opponents[slot-1].opponent);
+            for (const auto& choice : opponent_choices_)
+                d.choices.push_back({static_cast<int>(choice.value),choice.name,std::nullopt});
+        } else if (kind==1) {
+            if (slot) d.current=setup_.opponents[slot-1].country;
+            for (const auto& choice : countries_) {
+                if (!slot && setup_.country==choice.id) d.current=choice.index;
+                d.choices.push_back({choice.index,choice.name,std::nullopt});
+            }
+        } else {
+            d.current=slot ? setup_.opponents[slot-1].color : setup_.color.value_or(-999);
+            for (const auto& choice : colors_) {
+                bool used=false;
+                if (choice.index!=-2) {
+                    if (slot && setup_.color==choice.index) used=true;
+                    for (std::size_t i=0;i<setup_.opponents.size();++i) {
+                        const auto& other=setup_.opponents[i];
+                        if (slot==i+1 || !other.opponent || *other.opponent==Opponent::Closed) continue;
+                        if (other.color==choice.index) used=true;
+                    }
+                }
+                if (!used) d.choices.push_back({choice.index,choice.name,choice.swatch});
+            }
+        }
+        result.push_back(std::move(d));
+    }
+    return result;
+}
+Rect Menu::dropdown_list_bounds(const Dropdown& d) const {
+    const auto row=static_cast<int>(combo_item_metrics(font_).list_height);
+    const int height=static_cast<int>(d.choices.size())*row+4;
+    // Linux keeps the popup inside the 800x600 client area.
+    const int y=std::min(d.bounds.y+d.bounds.height,600-height);
+    return {d.bounds.x,std::max(0,y),d.bounds.width,height};
+}
 std::optional<Rect> Menu::credit_bounds() const {
     if (confirming_exit_ || page()!=Page::Skirmish || !setup_.credits ||
         setup_.min_credits<0 || setup_.max_credits>65535 ||
@@ -268,6 +344,25 @@ void Menu::pointer_move(int x, int y) {
     }
 }
 void Menu::pointer_down(int x, int y) {
+    const auto drops=dropdowns();
+    if (open_dropdown_) {
+        held_dropdown_item_=-1;
+        for (const auto& d : drops) if (d.id==*open_dropdown_) {
+            const auto list=dropdown_list_bounds(d);
+            if (contains(list,x,y)) {
+                const auto row=static_cast<int>(combo_item_metrics(font_).list_height);
+                const int item=(y-list.y-2)/row;
+                if (y>=list.y+2 && item>=0 && static_cast<std::size_t>(item)<d.choices.size())
+                    held_dropdown_item_=item;
+            }
+            break;
+        }
+        return;
+    }
+    for (const auto& d : drops) if (d.enabled && contains(d.bounds,x,y)) {
+        held_dropdown_=d.id;
+        return;
+    }
     pointer_move(x, y);
     held_ = hovered_;
     const auto slider=credit_bounds();
@@ -279,6 +374,33 @@ void Menu::pointer_down(int x, int y) {
     }
 }
 Action Menu::pointer_up(int x, int y) {
+    if (held_dropdown_item_) {
+        const int held=*held_dropdown_item_;
+        held_dropdown_item_.reset();
+        for (const auto& d : dropdowns()) if (open_dropdown_ && d.id==*open_dropdown_) {
+            const auto list=dropdown_list_bounds(d);
+            open_dropdown_.reset();
+            if (held<0 || !contains(list,x,y) || y<list.y+2) return Action::None;
+            const int row=static_cast<int>(combo_item_metrics(font_).list_height);
+            const int item=(y-list.y-2)/row;
+            if (item!=held || static_cast<std::size_t>(item)>=d.choices.size()) return Action::None;
+            const int value=d.choices[item].value;
+            if (d.kind==0) return select_opponent(d.slot,static_cast<Opponent>(value));
+            if (d.kind==1) return select_country(d.slot,value);
+            return select_color(d.slot,value);
+        }
+        open_dropdown_.reset();
+        return Action::None;
+    }
+    if (held_dropdown_) {
+        const auto held=*held_dropdown_;
+        held_dropdown_.reset();
+        for (const auto& d : dropdowns()) if (d.id==held && d.enabled && contains(d.bounds,x,y)) {
+            open_dropdown_=held;
+            return Action::None;
+        }
+        return Action::None;
+    }
     pointer_move(x, y);
     if (held_==SkirmishControls::credits) {
         held_.reset();
@@ -314,6 +436,10 @@ Action Menu::pointer_up(int x, int y) {
 Action Menu::key_down(Key key) noexcept {
     // 0x005D4D50 routes dialog keys through IsDialogMessageA; Escape sends
     // IDCANCEL (2), which 0x005D3711 maps to the cancel result.
+    if (open_dropdown_ && key == Key::Escape) {
+        open_dropdown_.reset(); held_dropdown_.reset(); held_dropdown_item_.reset();
+        return Action::None;
+    }
     if (confirming_exit_ && key == Key::Escape) {
         confirming_exit_ = false;
         hovered_.reset(); held_.reset();
@@ -491,6 +617,46 @@ gfx::RgbaImage Menu::render() const {
             const int text_x=value_x+(50-static_cast<int>(font_.text_width(text)))/2;
             const int text_y=slider->y+(slider->height-static_cast<int>(font_.line_height()))/2;
             font_.draw_text(image,text,text_x,text_y,{255,255,0,255});
+        }
+    }
+    if (!confirming_exit_ && page()==Page::Skirmish) {
+        const auto drops=dropdowns();
+        auto draw_choice=[&](Rect bounds,const DropChoice& choice,bool enabled) {
+            if (choice.swatch) {
+                fill(image,{bounds.x+2,bounds.y+3,std::max(0,bounds.width-4),bounds.height-6},*choice.swatch);
+            } else if (bounds.width>4 && bounds.height>0) {
+                // Clip long names to the control, as the original text painter does.
+                gfx::RgbaImage text{static_cast<std::uint16_t>(bounds.width-4),
+                                    static_cast<std::uint16_t>(bounds.height),
+                                    std::vector<std::uint8_t>(static_cast<std::size_t>(bounds.width-4)*bounds.height*4)};
+                font_.draw_text(text,choice.label,0,std::max(0,(bounds.height-static_cast<int>(font_.line_height()))/2),
+                                enabled ? gfx::Rgba{255,255,0,255} : gfx::Rgba{159,0,0,255});
+                blit(image,text,bounds.x+2,bounds.y);
+            }
+        };
+        for (const auto& d : drops) {
+            // Native two-pixel frame. 0x00617886 draws the original frame;
+            // its Windows outer bounds are not recovered.
+            fill(image,d.bounds,{104,122,128,255});
+            fill(image,{d.bounds.x+2,d.bounds.y+2,d.bounds.width-4,d.bounds.height-4},{0,0,0,255});
+            const auto current=std::find_if(d.choices.begin(),d.choices.end(),[&](const auto& c){return c.value==d.current;});
+            if (current!=d.choices.end())
+                draw_choice({d.bounds.x+2,d.bounds.y+2,d.bounds.width-24,d.bounds.height-4},*current,d.enabled);
+            // 0x0061791D places the original down-arrow image at the right edge.
+            blit(image,held_dropdown_==d.id ? arrow_pressed_ : arrow_normal_,
+                 d.bounds.x+d.bounds.width-19,d.bounds.y+1);
+        }
+        if (open_dropdown_) for (const auto& d : drops) if (d.id==*open_dropdown_) {
+            const auto list=dropdown_list_bounds(d);
+            const int row=static_cast<int>(combo_item_metrics(font_).list_height);
+            fill(image,list,{104,122,128,255});
+            fill(image,{list.x+2,list.y+2,list.width-4,list.height-4},{0,0,0,255});
+            for (std::size_t i=0;i<d.choices.size();++i) {
+                Rect r{list.x+2,list.y+2+static_cast<int>(i)*row,list.width-4,row};
+                if (d.choices[i].value==d.current) fill(image,r,{80,80,80,255});
+                draw_choice(r,d.choices[i],d.enabled);
+            }
+            break;
         }
     }
     return image;

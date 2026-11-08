@@ -59,15 +59,17 @@ scenario index is therefore not guaranteed to resolve to the same map.
 `load_skirmish_modes` reads the original mode declarations. `resolve_saved_skirmish_map` returns no map until the original saved-index
 ordering and fallback are recovered.
 `load_skirmish_countries` returns the original random entry and selectable
-country IDs and names in rules order. Country controls are not editable yet.
+country IDs and names in rules order.
 `load_skirmish_colors` returns the original random entry, eight color IDs,
-swatches, and labels. Color controls are not editable yet.
+swatches, and labels.
 `load_skirmish_opponents` returns the four original difficulty choices and
-their saved values. Opponent controls are not editable yet.
+their saved values.
 `select_opponent`, `select_country`, and `select_color` apply validated
 selections to the setup. Closing an opponent clears its country and color.
-These methods reject duplicate active colors. The on-screen dropdowns are not
-implemented yet.
+These methods reject duplicate active colors. The visible dropdowns use the
+original labels, values, item heights, and arrow assets. Linux uses a two-pixel
+frame and keeps each popup within the client area. The original Windows outer
+border, background shading, and popup placement are not yet verified.
 
 `draw_shell_background` draws the static 800x600 shell into RGBA, using a
 prepared filesystem. Mount `NEUTRAL.MIX` for the base game and mount
@@ -96,9 +98,7 @@ prepared filesystem. `select_mode` and `select_map` validate programmatic
 selection. Explicit map selection stores its file and source archive in
 `setup()`. The saved scenario index is preserved as a saved value. Selection
 does not update it because the original filtered and sorted index is unknown.
-Changing mode clears the selected file until the original fallback is recovered. The on-screen map picker and dropdowns remain
-unimplemented. Match Start remains disabled.
+Changing mode clears the selected file until the original fallback is recovered. The on-screen map picker remains unimplemented. Match Start remains disabled.
 
 `combo_item_metrics` returns the original selection and list item heights.
-The window border and popup bounds remain unresolved. The original down-arrow
-PCX assets are available in the mounted game archives.
+The original Windows window border and popup bounds remain unresolved.

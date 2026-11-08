@@ -167,6 +167,11 @@ public:
     Action select_country(std::size_t slot, int country_index);
     Action select_color(std::size_t slot, int color_index) noexcept;
 private:
+    struct DropChoice { int value; std::string label; std::optional<gfx::Rgba> swatch; };
+    struct Dropdown { std::uint32_t id; std::size_t slot; int kind; Rect bounds; bool enabled;
+                      std::vector<DropChoice> choices; int current; };
+    std::vector<Dropdown> dropdowns() const;
+    Rect dropdown_list_bounds(const Dropdown& dropdown) const;
     struct Button { std::uint32_t id; Rect bounds; std::string label; bool enabled; };
     std::vector<Button> buttons() const;
     std::vector<Button> checks() const;
@@ -174,18 +179,21 @@ private:
     void move_credit(int x);
     gfx::RgbaImage background_, normal_, hover_, pressed_;
     gfx::RgbaImage popup_, popup_normal_, popup_hover_, popup_pressed_;
-    gfx::RgbaImage check_on_, check_off_;
+    gfx::RgbaImage check_on_, check_off_, arrow_normal_, arrow_pressed_;
     gfx::RgbaImage slider_grip_, slider_left_, slider_middle_, slider_right_;
     std::string exit_prompt_, exit_ok_, exit_cancel_;
     bool confirming_exit_ = false;
     bool credit_changed_ = false;
     SkirmishSetup setup_;
     std::vector<SkirmishCountry> countries_;
+    std::vector<SkirmishColor> colors_;
+    std::vector<SkirmishOpponentChoice> opponent_choices_;
     std::vector<SkirmishMap> maps_;
     std::vector<SkirmishMode> modes_;
     GameFont font_;
     Dialog main_, single_, skirmish_;
     MenuNavigation navigation_;
-    std::optional<std::uint32_t> hovered_, held_;
+    std::optional<std::uint32_t> hovered_, held_, open_dropdown_, held_dropdown_;
+    std::optional<int> held_dropdown_item_;
 };
 }

@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <stdexcept>
 using namespace ra2;
 static std::vector<std::uint8_t> read(const std::string& path) {
@@ -274,6 +275,57 @@ int main(int argc,char** argv) {
     assert(menu.setup().short_game && *menu.setup().short_game!=*previous_short_game);
     menu.pointer_down(short_x,short_y); assert(menu.pointer_up(short_x,short_y)==ui::Action::SetupChanged);
     assert(menu.setup().short_game==previous_short_game);
+    auto combo_rect=[&](std::uint32_t id) {
+        const auto c=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
+                                  [id](const auto& control){return control.id==id;});
+        assert(c!=base_skirmish.controls.end());
+        return ui::Rect{(c->bounds.x*3+1)/2,(c->bounds.y*163+50)/100,
+                        (c->bounds.width*3+1)/2+1,23};
+    };
+    auto click=[&](int x,int y) {menu.pointer_down(x,y);return menu.pointer_up(x,y);};
+    const auto opponent_combo=combo_rect(ui::SkirmishControls::opponents[0]);
+    const auto country_combo=combo_rect(ui::SkirmishControls::player_country);
+    const auto ai_country_combo=combo_rect(ui::SkirmishControls::countries[0]);
+    const auto color_combo=combo_rect(ui::SkirmishControls::player_color);
+    const auto closed_menu=menu.render();
+    const auto normal_arrow=ui::decode_pcx(*base.read_file("dnarrowr.pcx"));
+    check_blit(closed_menu,normal_arrow,opponent_combo.x+opponent_combo.width-19,opponent_combo.y+1);
+    click(opponent_combo.x+4,opponent_combo.y+4);
+    const auto expanded=menu.render();
+    assert(expanded.pixels!=closed_menu.pixels);
+    menu.pointer_down(opponent_combo.x+4,opponent_combo.y+opponent_combo.height+3);
+    assert(menu.pointer_up(std::numeric_limits<int>::min(),std::numeric_limits<int>::min())==ui::Action::None);
+    click(opponent_combo.x+4,opponent_combo.y+4);
+    assert(click(opponent_combo.x+4,opponent_combo.y+opponent_combo.height+3)==ui::Action::SetupChanged);
+    assert(menu.setup().opponents[0].opponent==ui::Opponent::Closed);
+    // A closed slot has no active country picker.
+    assert(click(ai_country_combo.x+4,ai_country_combo.y+4)==ui::Action::None);
+    const auto disabled_country=menu.render();
+    assert(click(ai_country_combo.x+4,ai_country_combo.y+4)==ui::Action::None);
+    assert(menu.render().pixels==disabled_country.pixels);
+    click(opponent_combo.x+4,opponent_combo.y+4);
+    assert(click(opponent_combo.x+4,opponent_combo.y+opponent_combo.height+2+23+1)==ui::Action::SetupChanged);
+    assert(menu.setup().opponents[0].opponent==ui::Opponent::Easy);
+    click(country_combo.x+4,country_combo.y+4);
+    const auto old_country=menu.setup().country;
+    const auto chosen_country=old_country==base_countries[0].id ? 1u : 0u;
+    assert(click(country_combo.x+4,country_combo.y+country_combo.height+3+23*chosen_country)==ui::Action::SetupChanged);
+    assert(menu.setup().country==base_countries[chosen_country].id);
+    click(color_combo.x+4,color_combo.y+4);
+    assert(menu.key_down(ui::Key::Escape)==ui::Action::None);
+    std::vector<int> available_colors{-2};
+    for (int color=0;color<8;++color) {
+        bool used=false;
+        for (const auto& other : menu.setup().opponents)
+            if (other.opponent && *other.opponent!=ui::Opponent::Closed && other.color==color) used=true;
+        if (!used) available_colors.push_back(color);
+    }
+    const std::size_t color_choice=menu.setup().color==-2 ? 1 : 0;
+    assert(color_choice<available_colors.size());
+    click(color_combo.x+4,color_combo.y+4);
+    assert(click(color_combo.x+4,color_combo.y+color_combo.height+3+23*color_choice)==ui::Action::SetupChanged);
+    assert(menu.setup().color==available_colors[color_choice]);
+    assert(menu.page()==ui::Page::Skirmish);
     const auto saved_scenario=menu.setup().scenario_index;
     menu.configure_maps(base_maps,base_modes);
     assert(menu.select_mode(99999)==ui::Action::None);
@@ -324,6 +376,17 @@ int main(int argc,char** argv) {
     assert(menu.page()==ui::Page::SinglePlayer);
     auto expansion_menu=ui::Menu::load(files,exe,strings);
     assert(expansion_menu.render().width==800);
+    auto exp_click=[&](int x,int y) {expansion_menu.pointer_down(x,y);return expansion_menu.pointer_up(x,y);};
+    assert(exp_click(645,200)==ui::Action::PageChanged);
+    assert(exp_click(645,284)==ui::Action::PageChanged);
+    auto exp_ai=std::find_if(skirmish.controls.begin(),skirmish.controls.end(),[](const auto& c){return c.id==ui::SkirmishControls::opponents[0];});
+    assert(exp_ai!=skirmish.controls.end());
+    const int exp_x=(exp_ai->bounds.x*3+1)/2, exp_y=(exp_ai->bounds.y*163+50)/100;
+    const auto exp_closed=expansion_menu.render();
+    assert(exp_click(exp_x+4,exp_y+4)==ui::Action::None);
+    assert(expansion_menu.render().pixels!=exp_closed.pixels);
+    assert(expansion_menu.key_down(ui::Key::Escape)==ui::Action::None);
+    assert(expansion_menu.render().pixels==exp_closed.pixels);
     fails([&]{ui::draw_shell_background(files,640,480);});
     auto damaged=*title;damaged.resize(140); fails([&]{ui::decode_pcx(damaged);});
     damaged=*title;damaged[0]=0;fails([&]{ui::decode_pcx(damaged);});
