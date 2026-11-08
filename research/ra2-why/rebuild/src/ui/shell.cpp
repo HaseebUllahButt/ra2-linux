@@ -322,6 +322,18 @@ gfx::RgbaImage Menu::render() const {
         const int y=c.bounds.y+(c.bounds.height-static_cast<int>(font_.line_height()))/2;
         font_.draw_text(image,c.label,c.bounds.x+26,y,color);
     }
+    if (!confirming_exit_ && page()==Page::Skirmish) {
+        for (const auto& control : skirmish_.controls) {
+            const auto id=control.id;
+            if (id!=1689 && id!=1691 && id!=1692 &&
+                id!=1937 && id!=1938 && id!=1939 && id!=1940 && id!=1942) continue;
+            if (!(control.style&0x10000000u) || control.label.empty()) continue;
+            // 0x00615A91 applies the static control's alignment bits.
+            const int x=(control.bounds.x*3+1)/2;
+            const int y=(control.bounds.y*163+50)/100;
+            font_.draw_text(image,control.label,x,y,{255,255,0,255});
+        }
+    }
     return image;
 }
 } // namespace ra2::ui

@@ -34,6 +34,7 @@ struct OpponentSlot {
 };
 struct SkirmishSetup {
     std::optional<int> game_mode, scenario_index, game_speed, credits, unit_count;
+    int min_credits=2500, max_credits=10000, credit_increment=100;
     std::optional<bool> short_game, super_weapons, build_off_ally, mcv_repacks, crates;
     std::optional<std::string> country;
     std::optional<int> color;

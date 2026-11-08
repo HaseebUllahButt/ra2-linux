@@ -122,9 +122,10 @@ int main(int argc,char** argv) {
     assert(empty_setup.short_game==false && empty_setup.super_weapons==true);
     assert(empty_setup.opponents[0].opponent==ui::Opponent::Hard);
     assert(empty_setup.opponents[1].opponent==ui::Opponent::Closed);
-    rules::IniFile defaults_rules; defaults_rules.parse("[MultiplayerDialogSettings]\nMoney=7000\nShortGame=yes\n");
+    rules::IniFile defaults_rules; defaults_rules.parse("[MultiplayerDialogSettings]\nMoney=7000\nMinMoney=1000\nMoneyIncrement=250\nShortGame=yes\n");
     auto rules_setup=ui::read_skirmish_setup(defaults,&defaults_rules);
     assert(rules_setup.credits==7000 && rules_setup.short_game==true);
+    assert(rules_setup.min_credits==1000 && rules_setup.max_credits==10000 && rules_setup.credit_increment==250);
     rules::IniFile saved; saved.parse("[MultiPlayer]\nSide=Russians\nColor=2\n[Skirmish]\nCredits=10000\nSlot01=4,-2,-2\n");
     auto setup=ui::read_skirmish_setup(saved);
     assert(setup.country=="Russians" && setup.color==2 && setup.credits==10000);
@@ -167,7 +168,18 @@ int main(int argc,char** argv) {
     menu.pointer_down(645,200); assert(menu.pointer_up(645,200)==ui::Action::PageChanged);
     assert(menu.page()==ui::Page::SinglePlayer); menu.render();
     menu.pointer_down(645,284); assert(menu.pointer_up(645,284)==ui::Action::PageChanged);
-    assert(menu.page()==ui::Page::Skirmish); menu.render();
+    assert(menu.page()==ui::Page::Skirmish); auto skirmish_image=menu.render();
+    auto speed_label=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
+                                  [](const auto& c){return c.id==1689;});
+    assert(speed_label!=base_skirmish.controls.end());
+    const int sx=(speed_label->bounds.x*3+1)/2, sy=(speed_label->bounds.y*163+50)/100;
+    bool label_pixel=false;
+    for(int y=sy;y<sy+16;++y) for(int x=sx;x<sx+80;++x) {
+        auto p=(static_cast<std::size_t>(y)*800+x)*4;
+        if(skirmish_image.pixels[p]==255 && skirmish_image.pixels[p+1]==255 && skirmish_image.pixels[p+2]==0)
+            label_pixel=true;
+    }
+    assert(label_pixel);
     const auto previous_short_game=menu.setup().short_game; assert(previous_short_game);
     auto short_control=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
                                     [](const auto& c){return c.id==1358;});

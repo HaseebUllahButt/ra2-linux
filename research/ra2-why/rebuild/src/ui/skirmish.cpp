@@ -114,6 +114,9 @@ SkirmishSetup read_skirmish_setup(const rules::IniFile& preferences,
     };
     setup.game_mode = integer(preferences, "Skirmish", "GameMode");
     setup.scenario_index = integer(preferences, "Skirmish", "ScenIndex").value_or(0);
+    setup.min_credits = rule_integer("MinMoney",2500);
+    setup.max_credits = rule_integer("MaxMoney",10000);
+    setup.credit_increment = rule_integer("MoneyIncrement",100);
     setup.game_speed = integer(preferences, "Skirmish", "GameSpeed").value_or(rule_integer("GameSpeed",6));
     setup.credits = integer(preferences, "Skirmish", "Credits").value_or(rule_integer("Money",10000));
     setup.unit_count = integer(preferences, "Skirmish", "UnitCount").value_or(rule_integer("UnitCount",10));
