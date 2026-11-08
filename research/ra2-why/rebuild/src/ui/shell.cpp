@@ -15,6 +15,26 @@ std::vector<std::uint8_t> required(const fs::MixFileSystem& files, const char* n
 gfx::ShpImage shape(const fs::MixFileSystem& files, const char* name) {
     return gfx::ShpImage::parse(required(files, name));
 }
+std::optional<bool>* option(SkirmishSetup& setup, std::uint32_t id) {
+    switch (id) {
+    case 1358: return &setup.short_game;
+    case 1683: return &setup.mcv_repacks;
+    case 1686: return &setup.crates;
+    case 1690: return &setup.super_weapons;
+    case 1693: return &setup.build_off_ally;
+    default: return nullptr;
+    }
+}
+const std::optional<bool>* option(const SkirmishSetup& setup, std::uint32_t id) {
+    switch (id) {
+    case 1358: return &setup.short_game;
+    case 1683: return &setup.mcv_repacks;
+    case 1686: return &setup.crates;
+    case 1690: return &setup.super_weapons;
+    case 1693: return &setup.build_off_ally;
+    default: return nullptr;
+    }
+}
 
 void blit(gfx::RgbaImage& dst, const gfx::RgbaImage& src, int x, int y,
           int clip_width = 65535, int clip_height = 65535) {
@@ -91,10 +111,19 @@ Menu Menu::load(const fs::MixFileSystem& files, const std::vector<std::uint8_t>&
     result.single_ = load_dialog(exe, Page::SinglePlayer, strings);
     result.skirmish_ = load_dialog(exe, Page::Skirmish, strings);
     result.font_ = GameFont::parse(required(files, "GAME.FNT"));
+    result.check_on_ = decode_pcx(required(files, "cce_i.pcx"));
+    result.check_off_ = decode_pcx(required(files, "cue_i.pcx"));
     rules::IniFile preferences;
     auto saved = files.read_file(files.variant() == fs::GameVariant::RedAlert2 ? "RA2.INI" : "RA2MD.INI");
     if (saved) preferences.parse(std::string_view(reinterpret_cast<const char*>(saved->data()), saved->size()));
-    result.setup_ = read_skirmish_setup(preferences);
+    rules::IniFile base_rules, expansion_rules;
+    const auto base_data=files.read_file("RULES.INI");
+    if (base_data) base_rules.parse(std::string_view(reinterpret_cast<const char*>(base_data->data()),base_data->size()));
+    const auto expansion_data=files.variant() == fs::GameVariant::YurisRevenge ?
+                              files.read_file("RULESMD.INI") : std::nullopt;
+    if (expansion_data) expansion_rules.parse(std::string_view(reinterpret_cast<const char*>(expansion_data->data()),expansion_data->size()));
+    result.setup_ = read_skirmish_setup(preferences, base_data ? &base_rules : nullptr,
+                                       expansion_data ? &expansion_rules : nullptr);
     const auto colors = gfx::Palette::from_bytes(required(files, "SDBTNANM.PAL"));
     const auto button = shape(files, "SDBTNANM.SHP");
     result.normal_ = button.decode_frame(2, colors);
@@ -137,7 +166,8 @@ std::vector<Menu::Button> Menu::buttons() const {
             (id == 1667 || id == 1668 || id == 1400 || id == 1670 || id == 1372 || id == 1006);
         const bool single_button = page() == Page::SinglePlayer &&
             (id == 1672 || id == 1673 || id == 1401 || id == 1670);
-        const bool skirmish_button = page() == Page::Skirmish && (id == 1559 || id == 1472);
+        const bool skirmish_button = page() == Page::Skirmish &&
+                                      (id == 1559 || id == 1450 || id == 1472);
         if (!main_button && !single_button && !skirmish_button) continue;
         const bool back = (page() == Page::Main && id == 1006) ||
                           (page() == Page::SinglePlayer && id == 1670) ||
@@ -158,12 +188,38 @@ std::vector<Menu::Button> Menu::buttons() const {
     return result;
 }
 
+std::vector<Menu::Button> Menu::checks() const {
+    std::vector<Button> result;
+    if (confirming_exit_ || page()!=Page::Skirmish) return result;
+    for (const auto& control : skirmish_.controls) {
+        const auto id=control.id;
+        if (id!=1358 && id!=1683 && id!=1686 && id!=1690 && id!=1693) continue;
+        const auto* value = option(setup_, id);
+        const bool adjusted = id!=1693; // 0x0060B950 moves these four left one pixel.
+        const int x=(control.bounds.x*3+1)/2-(adjusted ? 1 : 0);
+        const int y=(control.bounds.y*163+50)/100;
+        const int w=(control.bounds.width*3+1)/2+1;
+        const int h=(control.bounds.height*163+50)/100+1;
+        const bool enabled=value && value->has_value() &&
+                           (control.style & 0x10000000u) && !(control.style & 0x08000000u);
+        result.push_back({id,{x,y,w,h},control.label,enabled});
+    }
+    return result;
+}
+
 void Menu::pointer_move(int x, int y) {
     hovered_.reset();
     for (const auto& b : buttons()) {
         if (b.enabled && x >= b.bounds.x && y >= b.bounds.y &&
             x < b.bounds.x + b.bounds.width && y < b.bounds.y + b.bounds.height) {
             hovered_ = b.id;
+            break;
+        }
+    }
+    if (!hovered_) for (const auto& b : checks()) {
+        if (b.enabled && x>=b.bounds.x && y>=b.bounds.y &&
+            x<b.bounds.x+b.bounds.width && y<b.bounds.y+b.bounds.height) {
+            hovered_=b.id;
             break;
         }
     }
@@ -177,6 +233,13 @@ Action Menu::pointer_up(int x, int y) {
     const auto activated = held_ && hovered_ && *held_ == *hovered_ ? held_ : std::nullopt;
     held_.reset();
     if (!activated) return Action::None;
+    if (!confirming_exit_ && page()==Page::Skirmish) {
+        auto* value=option(setup_,*activated);
+        if (value && value->has_value()) {
+            *value = !**value;
+            return Action::SetupChanged;
+        }
+    }
     if (confirming_exit_) {
         confirming_exit_ = false;
         hovered_.reset();
@@ -243,6 +306,21 @@ gfx::RgbaImage Menu::render() const {
         const int x = b.bounds.x + (b.bounds.width - width) / 2 + (down ? 2 : 0);
         const int y = b.bounds.y + 1 + (b.bounds.height - 1 - static_cast<int>(font_.line_height())) / 2 + (down ? 4 : 0);
         font_.draw_text(image, b.label, x, y, color);
+    }
+    for (const auto& c : checks()) {
+        const auto* value=option(setup_,c.id);
+        auto icon=value && value->value_or(false) ? check_on_ : check_off_;
+        if (!c.enabled) {
+            // 0x00616623 blends disabled checkbox art toward black with 0x60.
+            for (std::size_t p=0;p<icon.pixels.size();p+=4)
+                for (int channel=0;channel<3;++channel)
+                    icon.pixels[p+channel]=static_cast<std::uint8_t>(icon.pixels[p+channel]*159/256);
+        }
+        blit(image,icon,c.bounds.x,c.bounds.y);
+        // 0x00616641 places the label 26 pixels after the checkbox.
+        const auto color=c.enabled ? gfx::Rgba{255,255,0,255} : gfx::Rgba{159,0,0,255};
+        const int y=c.bounds.y+(c.bounds.height-static_cast<int>(font_.line_height()))/2;
+        font_.draw_text(image,c.label,c.bounds.x+26,y,color);
     }
     return image;
 }

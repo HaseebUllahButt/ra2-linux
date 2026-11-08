@@ -24,7 +24,7 @@ struct Control {
 };
 enum class Page { Main, SinglePlayer, Skirmish };
 // Quit is returned after confirmation.
-enum class Action { None, PageChanged, Quit };
+enum class Action { None, PageChanged, SetupChanged, Quit };
 enum class Key { Escape };
 enum class Opponent { Closed = 1, Easy = 4, Medium = 5, Hard = 6 };
 struct OpponentSlot {
@@ -57,8 +57,10 @@ struct SkirmishControls {
     static constexpr std::array<std::uint32_t,7> countries{1296,1299,1310,1300,1311,1312,1313};
     static constexpr std::array<std::uint32_t,7> colors{1314,1315,1316,1317,1318,1319,1320};
 };
-// Read the original saved preferences. Missing rule-derived defaults are unset.
-SkirmishSetup read_skirmish_setup(const rules::IniFile& preferences);
+// Apply built-in defaults, optional base and expansion rules, then preferences.
+SkirmishSetup read_skirmish_setup(const rules::IniFile& preferences,
+                                  const rules::IniFile* base_rules = nullptr,
+                                  const rules::IniFile* expansion_rules = nullptr);
 // Activates only the supported page changes. IDs are from the original dialog.
 class MenuNavigation {
 public:
@@ -118,8 +120,10 @@ public:
 private:
     struct Button { std::uint32_t id; Rect bounds; std::string label; bool enabled; };
     std::vector<Button> buttons() const;
+    std::vector<Button> checks() const;
     gfx::RgbaImage background_, normal_, hover_, pressed_;
     gfx::RgbaImage popup_, popup_normal_, popup_hover_, popup_pressed_;
+    gfx::RgbaImage check_on_, check_off_;
     std::string exit_prompt_, exit_ok_, exit_cancel_;
     bool confirming_exit_ = false;
     SkirmishSetup setup_;

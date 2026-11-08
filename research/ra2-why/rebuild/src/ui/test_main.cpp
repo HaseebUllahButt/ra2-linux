@@ -112,9 +112,13 @@ int main(int argc,char** argv) {
     auto menu=ui::Menu::load(base,base_exe,base_strings);
     rules::IniFile defaults;
     auto empty_setup=ui::read_skirmish_setup(defaults);
-    assert(empty_setup.scenario_index==0 && !empty_setup.credits);
+    assert(empty_setup.scenario_index==0 && empty_setup.credits==10000 && empty_setup.game_speed==6);
+    assert(empty_setup.short_game==false && empty_setup.super_weapons==true);
     assert(empty_setup.opponents[0].opponent==ui::Opponent::Hard);
     assert(empty_setup.opponents[1].opponent==ui::Opponent::Closed);
+    rules::IniFile defaults_rules; defaults_rules.parse("[MultiplayerDialogSettings]\nMoney=7000\nShortGame=yes\n");
+    auto rules_setup=ui::read_skirmish_setup(defaults,&defaults_rules);
+    assert(rules_setup.credits==7000 && rules_setup.short_game==true);
     rules::IniFile saved; saved.parse("[MultiPlayer]\nSide=Russians\nColor=2\n[Skirmish]\nCredits=10000\nSlot01=4,-2,-2\n");
     auto setup=ui::read_skirmish_setup(saved);
     assert(setup.country=="Russians" && setup.color==2 && setup.credits==10000);
@@ -158,7 +162,24 @@ int main(int argc,char** argv) {
     assert(menu.page()==ui::Page::SinglePlayer); menu.render();
     menu.pointer_down(645,284); assert(menu.pointer_up(645,284)==ui::Action::PageChanged);
     assert(menu.page()==ui::Page::Skirmish); menu.render();
+    const auto previous_short_game=menu.setup().short_game; assert(previous_short_game);
+    auto short_control=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
+                                    [](const auto& c){return c.id==1358;});
+    assert(short_control!=base_skirmish.controls.end());
+    const int short_x=(short_control->bounds.x*3+1)/2;
+    const int short_y=(short_control->bounds.y*163+50)/100;
+    menu.pointer_down(short_x,short_y); assert(menu.pointer_up(short_x,short_y)==ui::Action::SetupChanged);
+    assert(menu.setup().short_game && *menu.setup().short_game!=*previous_short_game);
+    menu.pointer_down(short_x,short_y); assert(menu.pointer_up(short_x,short_y)==ui::Action::SetupChanged);
+    assert(menu.setup().short_game==previous_short_game);
+    auto ally=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
+                           [](const auto& c){return c.id==1693;});
+    if (ally!=base_skirmish.controls.end() && (ally->style&0x08000000u)) {
+        const int x=(ally->bounds.x*3+1)/2, y=(ally->bounds.y*163+50)/100;
+        menu.pointer_down(x,y); assert(menu.pointer_up(x,y)==ui::Action::None);
+    }
     menu.pointer_down(645,242); assert(menu.pointer_up(645,242)==ui::Action::None);
+    menu.pointer_down(645,284); assert(menu.pointer_up(645,284)==ui::Action::None);
     menu.pointer_down(645,536); assert(menu.pointer_up(645,536)==ui::Action::PageChanged);
     assert(menu.page()==ui::Page::SinglePlayer);
     auto expansion_menu=ui::Menu::load(files,exe,strings);

@@ -41,9 +41,11 @@ the result stays the same for reference font heights from 8 to 24 pixels.
 The original Windows font base units remain unverified.
 
 `Menu::skirmish_setup()` exposes saved player and opponent choices from the
-original edition-specific INI file. `read_skirmish_setup` accepts an `IniFile`.
-Missing values that depend on the game rules remain unset. These values are
-not editable in the UI yet, and Start stays disabled. `0x00697F10` reads the
+original edition-specific INI file. `read_skirmish_setup` also applies original
+built-in and rules defaults. The five original checkboxes update the setup
+when their original dialog control is enabled. A change returns
+`Action::SetupChanged`.
+Start and Choose Map stay disabled. `0x00697F10` reads the
 original saved skirmish settings; `0x006980C0` reads player preferences.
 `load_skirmish_maps` reads the original `MultiMaps` packet in catalog order.
 It resolves CSF names and checks files through the prepared filesystem. It
@@ -66,7 +68,7 @@ Run the tests:
 The test checks all three original dialog resources, main-menu text and hit
 bounds, the title PCX, the original bitmap font, shell source pixels, page
 changes, pointer press and release, both game executables and language archives,
-and damaged input.
+checkbox toggles, and damaged input.
 
 To run bounded-input tests under sanitizers, pass the original executable, CSF,
 TITLE.PCX, and GAME.FNT as four file arguments to `test_safety.cpp`. The test

@@ -60,20 +60,32 @@ std::vector<SkirmishMap> load_skirmish_maps(const fs::MixFileSystem& files,
     return result;
 }
 
-SkirmishSetup read_skirmish_setup(const rules::IniFile& preferences) {
+SkirmishSetup read_skirmish_setup(const rules::IniFile& preferences,
+                                  const rules::IniFile* base_rules,
+                                  const rules::IniFile* expansion_rules) {
     SkirmishSetup setup;
-    // 0x00697F10 reads the Skirmish section. Missing values other than
-    // ScenIndex depend on live game rules and are left unset here.
+    // 0x00665650 initializes RulesClass. 0x00671EA0 overlays the original
+    // MultiplayerDialogSettings before 0x00697F10 reads saved preferences.
+    auto rule_integer = [&](const char* key, int value) {
+        if (base_rules) value = base_rules->read_integer("MultiplayerDialogSettings",key,value);
+        if (expansion_rules) value = expansion_rules->read_integer("MultiplayerDialogSettings",key,value);
+        return value;
+    };
+    auto rule_bool = [&](const char* key, bool value) {
+        if (base_rules) value = base_rules->read_bool("MultiplayerDialogSettings",key,value);
+        if (expansion_rules) value = expansion_rules->read_bool("MultiplayerDialogSettings",key,value);
+        return value;
+    };
     setup.game_mode = integer(preferences, "Skirmish", "GameMode");
     setup.scenario_index = integer(preferences, "Skirmish", "ScenIndex").value_or(0);
-    setup.game_speed = integer(preferences, "Skirmish", "GameSpeed");
-    setup.credits = integer(preferences, "Skirmish", "Credits");
-    setup.unit_count = integer(preferences, "Skirmish", "UnitCount");
-    setup.short_game = boolean(preferences, "ShortGame");
-    setup.super_weapons = boolean(preferences, "SuperWeaponsAllowed");
-    setup.build_off_ally = boolean(preferences, "BuildOffAlly");
-    setup.mcv_repacks = boolean(preferences, "MCVRepacks");
-    setup.crates = boolean(preferences, "CratesAppear");
+    setup.game_speed = integer(preferences, "Skirmish", "GameSpeed").value_or(rule_integer("GameSpeed",6));
+    setup.credits = integer(preferences, "Skirmish", "Credits").value_or(rule_integer("Money",10000));
+    setup.unit_count = integer(preferences, "Skirmish", "UnitCount").value_or(rule_integer("UnitCount",10));
+    setup.short_game = boolean(preferences, "ShortGame").value_or(rule_bool("ShortGame",false));
+    setup.super_weapons = boolean(preferences, "SuperWeaponsAllowed").value_or(rule_bool("SuperWeaponsAllowed",true));
+    setup.build_off_ally = boolean(preferences, "BuildOffAlly").value_or(rule_bool("BuildOffAlly",true));
+    setup.mcv_repacks = boolean(preferences, "MCVRepacks").value_or(rule_bool("MCVRedeploys",true));
+    setup.crates = boolean(preferences, "CratesAppear").value_or(rule_bool("Crates",true));
     // 0x006980C0 reads the player's saved country and color separately.
     if (const auto* country = preferences.find("MultiPlayer", "Side")) setup.country = country->value;
     setup.color = integer(preferences, "MultiPlayer", "Color");
