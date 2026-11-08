@@ -3,11 +3,13 @@
 Rebuild the original Red Alert 2 engine for native Linux. Base Red Alert 2 is
 the main target. Keep Yuri's Revenge behavior separate where the games differ.
 
-The game is incomplete. The Linux client shows original menu buttons and page
-changes. The scene check shows original terrain, trees, full-health building
+The game is incomplete. The Linux client shows original menu pages,
+country, color, and opponent choices, plus the credits slider.
+The scene check shows original terrain, trees, full-health building
 main images, standing infantry, and flat base HTNK, MTNK, and 4TNK models.
-It advances the recovered native state. Full
-movement, combat, production, AI, campaigns, saves, multiplayer, and menus still
+It advances the recovered native state. Tests execute one aligned vehicle step
+on verified flat road and clear cells. Full movement, combat, production, AI,
+campaigns, saves, multiplayer, and menus still
 need work. The scene also needs pixel depth, shadows, lighting,
 house colors, other vehicle models, and other actor states.
 
@@ -20,6 +22,7 @@ Run from this directory:
 ```sh
 make native
 make native-check
+make world-maps
 build/ra2-native --game-dir ../game
 build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP
 build/ra2-native --game-dir ../game --map ALL01T.MAP
@@ -28,6 +31,11 @@ build/ra2-native --game-dir ../game --map ALL01T.MAP
 Omit `--map` to open the original menu. The supported buttons change pages.
 Maps can be local files or original map names inside mounted game archives.
 Match start stays disabled. Use `--yuri` to select expansion assets and rules.
+The simulation preserves sparse map records and runs both original terrain setup passes.
+The map audit checks 87 available base maps and all 161 installed expansion maps.
+The base packet also lists 50 cooperative variants absent from the installed base archives.
+Production timing matches both original executables with resolved house inputs.
+Production commands and unit placement remain unsupported.
 Use arrow keys to move the temporary scene viewer. Press Escape to exit. These viewer controls do not
 establish the original game input behavior. This is not yet a playable match.
 
