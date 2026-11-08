@@ -138,6 +138,19 @@ ActorArt ActorArt::load(const fs::MixFileSystem& files, const rules::IniFile& ar
     if (!bytes) throw std::runtime_error("actor SHP not found: " + filename);
     ActorArt result(gfx::ShpImage::parse(std::move(*bytes)), filename, kind,
                     art.read_bool(image, "Remapable", false));
+    if (kind == Kind::Effect && art.read_integer(image, "LoopCount", 0) == -1 &&
+        !art.read_bool(image, "Reverse", false) && !art.read_bool(image, "PingPong", false) &&
+        !art.contains(image, "RandomRate")) {
+        // 0x00427F66 converts Rate to a tick delay; 0x00423AC0 wraps
+        // continuing animations from LoopEnd back to LoopStart.
+        const int start = art.read_integer(image, "Start", 0);
+        const int loop_start = art.read_integer(image, "LoopStart", 0);
+        const int loop_end = art.read_integer(image, "LoopEnd", 0);
+        const int rate = art.read_integer(image, "Rate", -1);
+        if (start >= 0 && loop_start >= start && loop_end > loop_start &&
+            loop_end <= result.image_.header().frame_count && rate > 0 && rate <= 900)
+            result.effect_timing_ = EffectTiming{start, loop_start, loop_end, 900 / rate};
+    }
     if (kind == Kind::Infantry) {
         const auto name = art.read_string(image, "Sequence");
         const auto* section = art.find_section(name);
@@ -199,6 +212,18 @@ std::size_t ActorArt::frame_for_map(std::string_view name, std::uint8_t map_faci
 }
 std::size_t ActorArt::frame_at_tick(std::string_view name, unsigned direction,
                                     std::uint64_t ticks, bool& finished, unsigned adjusted_delay) const {
+    if (kind_ == Kind::Effect) {
+        if (!name.empty() || !effect_timing_)
+            throw std::runtime_error("unsupported timed effect");
+        const auto& timing = *effect_timing_;
+        const auto elapsed = ticks / static_cast<unsigned>(timing.delay);
+        const auto first_length = static_cast<unsigned>(timing.loop_end - timing.start);
+        const auto loop_length = static_cast<unsigned>(timing.loop_end - timing.loop_start);
+        const auto index = elapsed < first_length ? timing.start + elapsed :
+            timing.loop_start + (elapsed - first_length) % loop_length;
+        finished = false;
+        return static_cast<std::size_t>(index);
+    }
     const auto it = sequences_.find(name);
     if (it == sequences_.end() || it->second.count <= 0 || it->second.delay < 0)
         throw std::runtime_error("unsupported timed sequence");

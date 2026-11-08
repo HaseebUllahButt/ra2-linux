@@ -5,6 +5,7 @@
 #include "../map/map_file.h"
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -74,6 +75,8 @@ private:
     gfx::ShpImage image_;
     std::string filename_;
     Kind kind_;
+    struct EffectTiming { int start, loop_start, loop_end, delay; };
+    std::optional<EffectTiming> effect_timing_;
     bool remappable_;
     std::map<std::string, Sequence, std::less<>> sequences_;
 };

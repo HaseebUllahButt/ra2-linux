@@ -65,6 +65,10 @@ int main(int argc, char** argv) {
     assert(!effect.draw("",0,0,pal).pixels.empty());
     auto attached=actors::ActorArt::load_attached(files,art,rules,"GAPILE","ActiveAnim");
     assert(!attached.draw("",0,0,pal).pixels.empty());
+    bool effect_finished=false;
+    assert(attached.frame_at_tick("",0,0,effect_finished)==0 && !effect_finished);
+    assert(attached.frame_at_tick("",0,42,effect_finished)==14 && !effect_finished);
+    assert(attached.frame_at_tick("",0,45,effect_finished)==0 && !effect_finished);
     for (auto type : {"GAPILE", "NAHAND"}) {
         auto actor=actors::ActorArt::load(files,art,rules,type,actors::Kind::Building);
         auto frame=actor.draw("",0,0,pal); assert(!frame.pixels.empty());

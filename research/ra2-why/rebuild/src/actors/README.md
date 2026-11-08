@@ -25,7 +25,11 @@ Evidence:
   palette rather than choosing it or producing house color conversion tables.
 
 The `load_attached` function resolves named building animation keys, such as
-`ActiveAnim`. The caller still chooses its frame and whether it is active.
+`ActiveAnim`. `frame_at_tick` supports forward infinite loops with a fixed Rate.
+`0x00427F66` converts Rate to a delay using integer 900 / Rate, and
+`0x00423AC0` loops from LoopEnd back to LoopStart. The caller chooses whether
+an attached animation is active. Reverse, ping-pong, random-rate, finite-loop,
+and other animation states remain unsupported.
 Terrain objects use the theater-specific extension from the original table.
 
 `building_center` returns the original building center in world units from
@@ -41,7 +45,7 @@ applies the Gate and TurretAnimIsVoxel adjustments from building rules.
 Per-pixel depth remains unresolved.
 
 The code does not yet recover automatic animation state
-transitions, fixed-facing changes, building animation overlays, effect timing,
+transitions, fixed-facing changes, automatic building animation overlays,
 health-dependent frames, team-color tables, lighting, or shadow compositing.
 Effects accept an explicit SHP frame.
 Do not treat this as a complete in-game actor renderer. `0x0044F820` skips an
