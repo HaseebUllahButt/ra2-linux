@@ -1,4 +1,5 @@
 #include "minimap.h"
+#include "../map/map_file.h"
 
 #include <algorithm>
 #include <fstream>
@@ -8,6 +9,14 @@
 
 namespace ra2::render {
 namespace {
+
+// Object placement markers over the composed terrain.
+void draw_object_markers(const ra2map::MapFile& map,
+                         const MapGeometry& geometry,
+                         const Rectangle& local,
+                         TheaterArt& art,
+                         Bitmap& image);
+
 std::string number(int n, int width) {
     std::ostringstream out; out << std::setfill('0') << std::setw(width) << n;
     return out.str();
@@ -178,7 +187,8 @@ std::int32_t TheaterArt::terrain_land_type(std::uint8_t raw) {
     return table[raw];
 }
 
-Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry, TheaterArt& art) {
+Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry,
+                      TheaterArt& art, const ra2map::MapFile* objects) {
     const auto& local = geometry.local;
     if (local.width <= 0 || local.height <= 0 || local.width > 512 || local.height > 512 ||
         local.x < 0 || local.y < 0 || local.x > 512 || local.y > 512 ||
@@ -226,8 +236,78 @@ Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry,
         draw(decoded.diamond);
         if (decoded.extra) draw(*decoded.extra);
     }
+    if (objects) draw_object_markers(*objects, geometry, local, art, image);
     return image;
 }
+
+namespace {
+
+// Standard RA2 multiplayer house colors (RGB, 0-255).
+struct HouseColor { const char* name; unsigned char rgb[3]; };
+const HouseColor kHouseColors[] = {
+    {"Americans", {0, 0, 255}},   {"Alliance", {0, 128, 255}},
+    {"French", {128, 128, 255}},  {"Germans", {160, 160, 160}},
+    {"British", {255, 255, 0}},   {"Africans", {0, 128, 0}},
+    {"Arabs", {128, 128, 128}},   {"Confederation", {255, 0, 0}},
+    {"Russians", {128, 0, 0}},    {"YuriCountry", {255, 0, 255}},
+    {"Neutral", {255, 255, 255}}, {"GDI", {255, 200, 0}},
+    {"Nod", {255, 0, 0}},
+};
+
+void draw_object_markers(const ra2map::MapFile& map,
+                         const MapGeometry& geometry,
+                         const Rectangle& local,
+                         TheaterArt& art,
+                         Bitmap& image) {
+    const int tw = art.tile_width(), th = art.tile_height();
+    auto project_cell = [&](const ra2map::Cell& c) {
+        const int x = (int(c.x) - c.y + geometry.size.width - 1) * (tw / 2) - local.x * tw;
+        const int ground_y = (int(c.x) + c.y - geometry.size.width - 1) * (th / 2);
+        return std::pair{x, ground_y};
+    };
+    auto color_for = [&](const std::string& house) {
+        for (const auto& hc : kHouseColors)
+            if (house == hc.name)
+                return std::array{hc.rgb[0], hc.rgb[1], hc.rgb[2]};
+        return std::array<unsigned char, 3>{255, 255, 255};
+    };
+    auto plot = [&](int x, int y, const std::array<unsigned char, 3>& c) {
+        if (x < 0 || y < 0 || x >= image.width || y >= image.height) return;
+        const auto t = std::size_t(y) * image.width + x;
+        image.rgba[t * 4] = c[0];
+        image.rgba[t * 4 + 1] = c[1];
+        image.rgba[t * 4 + 2] = c[2];
+        image.rgba[t * 4 + 3] = 255;
+    };
+    auto marker = [&](int cx, int cy, const std::array<unsigned char, 3>& c) {
+        for (int dy = -3; dy <= 3; ++dy)
+            for (int dx = -3; dx <= 3; ++dx)
+                if (dx * dx + dy * dy <= 9) plot(cx + dx, cy + dy, c);
+    };
+    for (const auto& st : map.structures()) {
+        const auto [px, py] = project_cell(st.cell);
+        marker(px + tw / 2, py + th / 2, color_for(st.house));
+    }
+    for (const auto& u : map.units()) {
+        const auto [px, py] = project_cell(u.cell);
+        marker(px + tw / 2, py + th / 2, color_for(u.house));
+    }
+    for (const auto& inf : map.infantry()) {
+        const auto [px, py] = project_cell(inf.cell);
+        // Small 2px dot for infantry, offset by subcell position.
+        const int dx = (inf.subcell % 3 - 1) * 2, dy = (inf.subcell / 3 - 1) * 2;
+        for (int oy = -1; oy <= 1; ++oy)
+            for (int ox = -1; ox <= 1; ++ox)
+                plot(px + tw / 2 + dx + ox, py + th / 2 + dy + oy,
+                     color_for(inf.house));
+    }
+    for (const auto& a : map.aircraft()) {
+        const auto [px, py] = project_cell(a.cell);  // aircraft hover higher
+        marker(px + tw / 2, py + th / 2, color_for(a.house));
+    }
+}
+
+} // namespace
 
 void write_ppm(const Bitmap& image, const std::filesystem::path& path) {
     if (image.width <= 0 || image.height <= 0 ||
