@@ -25,6 +25,7 @@ int main(int argc,char** argv) {
         std::cout<<seed<<' '<<count<<' '<<mask<<' '<<*picked<<' '<<random.first()<<' '
                  <<random.second()<<' '<<hash;
         for (const auto p:points) std::cout<<' '<<p.x<<' '<<p.y;
+        for (auto word:random.table()) std::cout<<' '<<word;
         std::cout<<'\n';
     }
 }

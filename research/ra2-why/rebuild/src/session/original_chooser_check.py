@@ -41,8 +41,10 @@ lines=subprocess.check_output([native,exe],text=True).splitlines()
 for line in lines:
     fields=list(map(int,line.split()))
     seed,count,mask,native_index,native_first,native_second,native_hash=fields[:7]
-    coords=list(zip(fields[example.invalid],fields[example.invalid]))
-    assert len(coords)==count
+    point_words=fields[7:7+2*count]
+    coords=list(zip(point_words[example.invalid],point_words[example.invalid]))
+    native_table=fields[7+2*count:]
+    assert len(coords)==count and len(native_table)==250
     put(stack,end,seed)
     cpu.reg_write(UC_X86_REG_ECX,scenario+0x218)
     cpu.reg_write(UC_X86_REG_ESP,stack)
@@ -68,4 +70,5 @@ for line in lines:
     state_hash=2166136261
     for word in table: state_hash=((state_hash^word)*16777619)&0xffffffff
     assert (first,second,state_hash)==(native_first,native_second,native_hash), (seed,mask)
+    assert table==tuple(native_table), (seed,mask,"random table")
 print(f'{len(lines)} Battle chooser cases match original x86: {pathlib.Path(exe).name}')
