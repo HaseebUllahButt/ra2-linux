@@ -9,7 +9,7 @@ APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 
 test -f "$MOD/engine/bin/OpenRA.dll"
 test -x "$ROOT/runtime/dotnet"
-for name in ra2.mix language.mix ra2md.mix langmd.mix thememd.mix; do
+for name in ra2.mix language.mix; do
     test -s "$ROOT/game/$name"
 done
 if [ -s "$ROOT/game/THEME.MIX" ]; then
@@ -21,7 +21,9 @@ fi
 
 mkdir -p "$CONTENT" "$APPS" "$HOME/.local/bin"
 for name in ra2.mix language.mix ra2md.mix langmd.mix thememd.mix; do
-    ln -sfn "$ROOT/game/$name" "$CONTENT/$name"
+    if [ -s "$ROOT/game/$name" ]; then
+        ln -sfn "$ROOT/game/$name" "$CONTENT/$name"
+    fi
 done
 ln -sfn "$THEME" "$CONTENT/theme.mix"
 
