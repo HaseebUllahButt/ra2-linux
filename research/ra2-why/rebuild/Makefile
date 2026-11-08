@@ -10,7 +10,7 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/render/tmp_decode.cpp src/render/minimap.cpp src/loop/game_loop.cpp \
     src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp src/fs/filename_hash.cpp \
     src/gfx/palette.cpp src/gfx/shp_decode.cpp src/actors/actors.cpp \
-    src/session/session.cpp src/weapons/weapons.cpp \
+    src/session/session.cpp src/session/map_geometry.cpp src/session/placement_terrain.cpp src/weapons/weapons.cpp src/weapons/occupant_order.cpp \
     src/ui/ui.cpp src/ui/shell.cpp src/ui/skirmish.cpp src/text/csf.cpp \
     src/pack/map_pack.cpp src/rules/ini_file.cpp src/map/map_file.cpp \
     src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
@@ -35,8 +35,9 @@ FS_OBJECTS = build/native/src/fs/mix_archive.o build/native/src/fs/mix_bootstrap
 GFX_OBJECTS = build/native/src/gfx/palette.o build/native/src/gfx/shp_decode.o
 SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS))
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
+SESSION_OBJECTS = build/native/src/session/session.o build/native/src/session/map_geometry.o build/native/src/session/placement_terrain.o
 
-native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-entry-height sim-replacement sim-world sim-build-time sim-production session weapons
+native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-entry-height sim-replacement sim-world sim-build-time sim-production session session-terrain weapons
 	build/ra2-native --game-dir ../game --frames 3 --headless
 	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
@@ -148,7 +149,27 @@ build/sim_production_test: build/native/src/sim/test_production.o build/native/s
 session: build/session_test
 	build/session_test ../game
 
-build/session_test: build/native/src/session/session.o build/native/src/session/test_main.o build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/rules/ini_file.o $(FS_OBJECTS)
+build/session_test: $(SESSION_OBJECTS) build/native/src/session/test_main.o build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/rules/ini_file.o $(FS_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+.PHONY: session-terrain
+session-terrain: build/session_terrain_test
+	build/session_terrain_test ../game
+	build/session_terrain_test ../game --yuri C1A02MD.MAP
+
+build/session_terrain_test: $(SESSION_OBJECTS) build/native/src/session/real_terrain_test.o build/native/src/sim/test_inputs.o $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
+
+build/session_geometry_cases: $(SESSION_OBJECTS) build/native/src/session/geometry_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/session_color_cases: $(SESSION_OBJECTS) build/native/src/session/color_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/session_unlimbo_cases: $(SESSION_OBJECTS) build/native/src/session/unlimbo_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/session_auxiliary_cases: $(SESSION_OBJECTS) build/native/src/session/auxiliary_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/session_chooser_cases: build/native/src/session/session.o build/native/src/session/chooser_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
@@ -197,6 +218,9 @@ build/weapons_near_ground_test: build/native/src/weapons/near_ground_test.o buil
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 build/weapons_area_impact_test: build/native/src/weapons/area_impact_test.o build/native/src/weapons/weapons.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/weapons_occupant_test: build/native/src/weapons/occupant_order_test.o build/native/src/weapons/occupant_order.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 scene: build/scene_test

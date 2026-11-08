@@ -14,6 +14,8 @@ make -C rebuild build/weapons_near_ground_test
 RA2_GAME_DIR="$PWD/game" python3 rebuild/src/weapons/verify_near_ground_x86.py rebuild/build/weapons_near_ground_test
 make -C rebuild build/weapons_area_impact_test
 RA2_GAME_DIR="$PWD/game" python3 rebuild/src/weapons/verify_area_impact_x86.py rebuild/build/weapons_area_impact_test
+make -C rebuild build/weapons_occupant_test
+RA2_GAME_DIR="$PWD/game" python3 rebuild/src/weapons/verify_occupant_x86.py rebuild/build/weapons_occupant_test
 
 ```
 
@@ -69,6 +71,13 @@ coordinate wrap.
 object list order. The cell list, object positions, eligibility flags and
 alliances must be resolved by the caller. A source or allied object can mask
 another object because selection occurs before those checks.
+
+`ContentLinks` models original cell heads and shared object links separately
+from the simulation. One object link can affect several footprint cells and
+both layers. It preserves earlier writes when a later traversal finds a cycle.
+The original comparison covers 2,298 footprint operations and the map loader
+order. Footprints and placement callbacks remain supplied test inputs. This
+model does not establish live cell occupancy or enable combat.
 
 `base_flat_cannon_tick()` connects movement, target proximity, object
 collision, map bounds and the terrain impact decision for a guarded slice. It

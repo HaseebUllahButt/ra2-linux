@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -eu
 cd "$(dirname "$0")"
-shared=${RA2_SHARED_SOURCE:-/path/to/user/ra2/rebuild/src}
-game=${1:-/path/to/user/ra2/game}
+shared=${RA2_SHARED_SOURCE:-$(cd .. && pwd)}
+game=${1:-$(cd ../../.. && pwd)/game}
 build=$(mktemp -d /tmp/ra2-session-terrain.XXXXXX)
 trap 'rm -rf "$build"' EXIT
 ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared/app" -I "$shared/render" \

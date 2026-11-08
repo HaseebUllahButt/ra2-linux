@@ -65,7 +65,7 @@ commands. The complete session setup must supply that state.
 
 Run the native checks from the project root:
 
-    make -C rebuild session
+    make -C rebuild session session-terrain
 
 
 The test reads the real MP02T2 map from MULTI.MIX and both original executable
@@ -84,6 +84,13 @@ pass before checking every cell. The boundary comparison tests the adapter;
 `--cases` emits the resolved cells for `original_geometry_check.py`. Both
 original executables match all 15,525 real first-pass cell checks.
 Run `test_real_terrain.sh GAME_DIRECTORY --original` for both comparisons.
+The shared Makefile also builds the fixture once for direct comparisons:
+
+    make -C rebuild build/session_terrain_test
+    python3 rebuild/src/session/original_geometry_check.py game/game.exe rebuild/build/session_terrain_test game --cases
+    python3 rebuild/src/session/original_geometry_check.py game/gamemd.exe rebuild/build/session_terrain_test game --cases
+    python3 rebuild/src/session/original_geometry_check.py game/gamemd.exe rebuild/build/session_terrain_test game --cases --yuri C1A02MD.MAP
+
 The optional original checks require Python Unicorn.
 Set `RA2_SESSION_YURI_MAP=C1A02MD.MAP` to also load the original expansion map
 from MIX files. Its 22,990 first-pass cells match the expansion executable.

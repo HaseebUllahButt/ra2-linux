@@ -11,8 +11,8 @@ import sys
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_ESP
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parent.parent/'sim'))
 from original_image import load_original
-if len(sys.argv)!=3: raise SystemExit('usage: original_geometry_check.py game.exe geometry_cases')
-exe,native=sys.argv[1:]
+if len(sys.argv)<3: raise SystemExit('usage: original_geometry_check.py game.exe native [args...]')
+exe=sys.argv[1]
 base=pathlib.Path(exe).name.lower()=='game.exe'
 cpu=load_original(exe);cpu.mem_map(0x1000000,0x300000)
 mapobj,local,point,cell,grid,stack,end=0x1000000,0x1002000,0x1003000,0x1004000,0x1100000,0x12fd000,0x12ff000
@@ -20,7 +20,7 @@ def put(addr,*values):cpu.mem_write(addr,struct.pack('<'+'I'*len(values),*(v&0xf
 def words(addr,n):return struct.unpack('<'+'i'*n,cpu.mem_read(addr,4*n))
 if not base:put(0x87f924,grid)
 previous=None
-lines=subprocess.check_output([native],text=True).splitlines()
+lines=subprocess.check_output(sys.argv[2:],text=True).splitlines()
 for line in lines:
     w,h,lx,ly,lw,lh,nx,ny,nw,nh,x,y,height,ramp,expected_base,expected_yuri=map(int,line.split())
     if base:
