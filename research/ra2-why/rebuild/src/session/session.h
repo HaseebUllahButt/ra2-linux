@@ -110,6 +110,8 @@ struct BattleHousePlan {
     StartingMission extra_unit_mission;
     std::optional<StartingUnit> base_unit;
     std::vector<StartingUnit> extra_units;
+    // Render color after the original selected-color field copy.
+    std::int32_t palette_color=0;
 };
 struct BattlePlan { std::vector<BattleHousePlan> houses; std::int32_t unit_budget; };
 // World preparation includes map and terrain steps and the second original

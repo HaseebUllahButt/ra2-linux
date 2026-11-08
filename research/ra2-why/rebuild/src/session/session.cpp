@@ -248,7 +248,7 @@ std::optional<BattlePlan> plan_battle(const BattlePlanInput& input, sim::Random&
         const auto& house=input.houses[i];
         plan.houses.push_back({house,initialize_house_values(input.credits,house.raw_color),
                                input.assigned_starts[i],0,0,0,starting_unit_mission(house.slot==0),
-                               std::nullopt,{}});
+                               std::nullopt,{},multiplayer_house_color(house.raw_color)});
     }
     const auto prepared=prepare_world(plan.houses,working);
     if (!prepared || !prepared->resolved_types_unchanged || prepared->active_slots.size()!=plan.houses.size() ||

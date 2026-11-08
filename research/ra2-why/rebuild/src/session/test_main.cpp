@@ -313,6 +313,7 @@ int main(int argc, char** argv) {
     };
     sim::Random staged_rng(951), staged_expected(951);
     const auto planned=session::plan_battle(input,staged_rng,prepare,place,finish_house,finish_world);
+    assert(planned && planned->houses[0].palette_color==session::multiplayer_house_color(input.houses[0].raw_color));
     assert(planned && planned->unit_budget==150 && planned->houses.size()==2);
     assert(planned->houses[0].base_unit && planned->houses[0].base_unit->type_index==0 &&
            planned->houses[1].base_unit && planned->houses[1].base_unit->type_index==1);
