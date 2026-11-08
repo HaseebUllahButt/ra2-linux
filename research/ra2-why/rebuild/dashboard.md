@@ -7,7 +7,7 @@ Data: decomp index + call edges + symbols.
 | functions | 8584 |
 | decompiled ok | 8583
 | code bytes | 2590052
-| community-named | 2160
+| community-named | 3095
 
 ## Largest functions
 
@@ -46,7 +46,7 @@ Data: decomp index + call edges + symbols.
 | 005E3D10 | 363 | Lobby_DecodeGameOptions |
 | 0064DEA0 | 360 | Network_WriteSyncDump |
 | 006691E0 | 305 | RulesClass::Read_AudioVisual |
-| 006C6F50 | 270 | FUN_006c6f50 |
+| 006C6F50 | 270 | Game::SendStatisticsPacket |
 | 005A9C40 | 241 | StaticCellPairTables_Initialize |
 | 005DC350 | 238 | FUN_005dc350 |
 | 006DD8B0 | 224 | TActionClass::Execute |
