@@ -131,6 +131,17 @@ int main(int argc,char** argv) {
     assert(expansion_maps[0].id=="XMP29U2" && !expansion_maps[0].name.empty());
     assert(std::any_of(base_maps.begin(),base_maps.end(),[](const auto& map){return map.available;}));
     assert(std::any_of(expansion_maps.begin(),expansion_maps.end(),[](const auto& map){return map.available;}));
+    // Base and expansion use different cooperative packet entries and files.
+    const auto base_packet=base.locate("MISSIONS.PKT");
+    const auto expansion_packet=files.locate("MISSIONSMD.PKT");
+    assert(base_packet && base_packet->archive->name()=="LOCAL.MIX");
+    assert(expansion_packet && expansion_packet->archive->name().find("langmd.mix")!=std::string::npos);
+    const auto base_coop=std::find_if(base_maps.begin(),base_maps.end(),[](const auto& map){return map.id=="C1M1A";});
+    assert(base_coop!=base_maps.end() && base_coop->built_in && base_coop->filename=="C1M1A.MAP");
+    assert(!ui::skirmish_map_matches_mode(*base_coop,base_modes[0]));
+    assert(base_coop->available==bool(base.read_file("C1M1A.MAP")));
+    const auto expansion_coop=std::find_if(expansion_maps.begin(),expansion_maps.end(),[](const auto& map){return map.id=="C1A01MD";});
+    assert(expansion_coop!=expansion_maps.end() && expansion_coop->filename=="C1A01MD.MAP" && expansion_coop->available);
     ui::SkirmishSetup known_map; known_map.game_mode=1; known_map.scenario_index=0;
     const auto resolved=ui::resolve_saved_skirmish_map(known_map,base_maps,base_modes);
     assert(!resolved);
