@@ -98,3 +98,7 @@ selection. Explicit map selection stores its file and source archive in
 does not update it because the original filtered and sorted index is unknown.
 Changing mode clears the selected file until the original fallback is recovered. The on-screen map picker and dropdowns remain
 unimplemented. Match Start remains disabled.
+
+`combo_item_metrics` returns the original selection and list item heights.
+The window border and popup bounds remain unresolved. The original down-arrow
+PCX assets are available in the mounted game archives.

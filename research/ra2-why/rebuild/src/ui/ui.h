@@ -136,6 +136,10 @@ private:
     std::uint32_t max_width_=0, row_bytes_=0, height_=0, line_height_=0;
     std::uint32_t count_=0, glyph_bytes_=0;
 };
+// Item heights used by the original combo box. The outer window border is
+// separate and is not recovered yet.
+struct ComboItemMetrics { std::uint32_t selection_height, list_height; };
+ComboItemMetrics combo_item_metrics(const GameFont& font);
 // Decodes the original 8-bit, single-plane PCX variant to opaque RGBA.
 gfx::RgbaImage decode_pcx(const std::vector<std::uint8_t>& bytes);
 // Static shell background at the original 800x600 resolution. Mount NTRLMD.MIX

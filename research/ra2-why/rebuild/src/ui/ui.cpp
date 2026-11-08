@@ -248,6 +248,13 @@ std::uint32_t GameFont::text_width(std::string_view text) const {
     }
     return static_cast<std::uint32_t>(width);
 }
+ComboItemMetrics combo_item_metrics(const GameFont& font) {
+    const auto height=font.line_height();
+    require(height<=std::numeric_limits<std::uint32_t>::max()-6, "combo item height overflow");
+    // 0x00618B17 and 0x00618B2B set selection and list item heights.
+    // 0x00433880 obtains the font height from the GAME.FNT header.
+    return {height+2,height+6};
+}
 gfx::RgbaImage decode_pcx(const Bytes& b) {
     require(b.size()>=897 && b[0]==10 && b[2]==1 && b[3]==8 && b[65]==1, "unsupported PCX format");
     auto x0=u16(b,4), y0=u16(b,6), x1=u16(b,8), y1=u16(b,10), stride=u16(b,66);

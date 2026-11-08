@@ -52,6 +52,13 @@ int main(int argc,char** argv) {
     assert(start!=skirmish.controls.end() && start->label=="Start Game" && start->bounds.x==425 && start->bounds.y==149);
     assert(!skirmish.hit_test(425,149,{}) && skirmish.hit_test(425,149,{1559})==1559);
     auto font=ui::GameFont::parse(*fontdata);
+    const auto combo_metrics=ui::combo_item_metrics(font);
+    assert(combo_metrics.selection_height==19 && combo_metrics.list_height==23);
+    for (const auto* name : {"gdnarrowr.pcx","gdnarrowp.pcx","dnarrowr.pcx","dnarrowp.pcx"}) {
+        const auto bytes=files.read_file(name); assert(bytes);
+        const auto arrow=ui::decode_pcx(*bytes);
+        assert(arrow.width==18 && arrow.height==22);
+    }
     auto letter=font.glyph(u'A',{255,0,0,255}); assert(letter && letter->width==7 && letter->height==16 && font.line_height()==17);
     assert(std::any_of(letter->pixels.begin(),letter->pixels.end(),[](auto v){return v!=0;}));
     gfx::RgbaImage canvas{100,20,std::vector<std::uint8_t>(100*20*4)};
@@ -84,6 +91,14 @@ int main(int argc,char** argv) {
     base.bootstrap(fs::GameVariant::RedAlert2); base.mount_language(fs::GameVariant::RedAlert2);
     base.mount("neutral.mix");
     base.mount("multi.mix"); files.mount("multimd.mix");
+    const auto base_font_bytes=base.read_file("GAME.FNT"); assert(base_font_bytes);
+    const auto base_metrics=ui::combo_item_metrics(ui::GameFont::parse(*base_font_bytes));
+    assert(base_metrics.selection_height==19 && base_metrics.list_height==23);
+    for (const auto* name : {"gdnarrowr.pcx","gdnarrowp.pcx","dnarrowr.pcx","dnarrowp.pcx"}) {
+        const auto bytes=base.read_file(name); assert(bytes);
+        const auto arrow=ui::decode_pcx(*bytes);
+        assert(arrow.width==18 && arrow.height==22);
+    }
     auto basecsf=base.read_file("ra2.csf"); assert(basecsf);
     auto base_art=base.read_file("art.ini"); assert(base_art && !base_art->empty());
     rules::IniFile art; art.parse(std::string_view(reinterpret_cast<const char*>(base_art->data()),base_art->size()));
