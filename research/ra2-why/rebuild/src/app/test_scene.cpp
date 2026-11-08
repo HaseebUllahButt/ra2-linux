@@ -31,6 +31,12 @@ int main(int argc, char** argv) {
         const auto map = rules::IniFile::from_file(argv[2]);
         const auto packed = pack::load_terrain(map);
         const auto geometry = render::MapGeometry::from_ini(map);
+        ra2map::MapFile map_objects;
+        map_objects.parse(map);
+        const auto tree_center = actors::terrain_position({2,3}, -104);
+        require(tree_center.x == 640 && tree_center.y == 896 && tree_center.z == 0,
+                "Terrain placement did not preserve the original zero-Z floor clamp");
+        require(actors::terrain_position({2,3}, 104).z == 104, "Raised terrain object lost its floor height");
         for (const auto variant : {fs::GameVariant::RedAlert2, fs::GameVariant::YurisRevenge}) {
             const bool expansion = variant == fs::GameVariant::YurisRevenge;
             fs::MixFileSystem files(argv[1]);
@@ -43,11 +49,16 @@ int main(int argc, char** argv) {
             const auto rules = read_ini(files, expansion ? "RULESMD.INI" : "RULES.INI");
             const auto art = read_ini(files, expansion ? "ARTMD.INI" : "ART.INI");
             sim::Simulation simulation(rules, map, 0, cells);
-            app::Scene scene(files, art, app::overlay_rules(rules, map), geometry, cells, "TEMPERATE");
+            app::Scene scene(files, art, app::overlay_rules(rules, map), geometry, cells,
+                "TEMPERATE", map_objects.terrain());
             const auto battlefield = render::render_minimap(packed, geometry, terrain_art);
             const auto frame = scene.render(battlefield, simulation.snapshot(),
                 {0, 0, battlefield.width, battlefield.height});
-            require(frame.drawn > 0 && frame.gaps.empty(), "Original map buildings did not reach the scene");
+            for (const auto& gap : frame.gaps)
+                if (gap != "Terrain TIBTRE01: Tiberium spawner drawing is unresolved")
+                    throw std::runtime_error(gap);
+            require(frame.gaps.size() == 5, "Original animated spawner gaps were lost");
+            require(frame.drawn > simulation.snapshot().entities.size(), "Original map trees did not reach the scene");
             require(frame.image.rgba != battlefield.rgba, "The scene did not compose the original buildings");
 
             // A flat cell gives an independently fixed anchor: (1800,1245).
@@ -95,11 +106,32 @@ int main(int argc, char** argv) {
             state.entities[0].kind = sim::Kind::Unit;
             const auto unsupported = fixture.render(empty, state, view);
             require(unsupported.drawn == 0 && unsupported.gaps.size() == 1, "Unresolved vehicle draw was invented");
+            require(actors::terrain_initial_frame(rules, "TREE01") == 1,
+                    "Original initial terrain health selected the wrong frame");
+            app::Scene tree_scene(files, art, rules, geometry, {flat}, "TEMPERATE", {{flat.cell, "TREE01"}});
+            const auto tree_output = tree_scene.render(empty, {}, view);
+            require(tree_output.drawn == 1 && tree_output.gaps.empty(), "Original tree did not draw");
+            const auto iso = files.read_file("ISOTEM.PAL");
+            require(iso.has_value(), "Original terrain object palette is missing");
+            const auto tree_art = actors::ActorArt::load(files, art, rules, "TREE01", actors::Kind::Terrain);
+            const auto tree_pixels = tree_art.draw_frame(1, gfx::Palette::from_bytes(*iso));
+            const int tree_left = 250 - tree_pixels.width / 2, tree_top = 215 - tree_pixels.height / 2;
+            std::size_t tree_checked = 0;
+            for (int y = 0; y < tree_pixels.height; ++y) for (int x = 0; x < tree_pixels.width; ++x) {
+                if (tree_left+x < 0 || tree_top+y < 0 || tree_left+x >= 500 || tree_top+y >= 400) continue;
+                const auto source = (std::size_t(y)*tree_pixels.width+x)*4;
+                if (!tree_pixels.pixels[source+3]) continue;
+                const auto target = (std::size_t(tree_top+y)*500+tree_left+x)*4;
+                require(std::equal(tree_pixels.pixels.begin()+source, tree_pixels.pixels.begin()+source+4,
+                    tree_output.image.rgba.begin()+target), "Tree frame, palette, or center changed");
+                ++tree_checked;
+            }
+            require(tree_checked > 100, "Original tree pixel check was empty");
             // A view beyond the map must not create an out-of-range iterator.
             require(fixture.render(empty, {}, {1000000, 0, 1, 1}).image.rgba.size() == 4,
                     "Empty outside-map view failed");
             std::cout << (expansion ? "Expansion" : "Base") << " scene passed: " << frame.drawn
-                      << " map buildings, exact actor pixels, camera, subcells, and dead actor removal.\n";
+                      << " buildings and trees, exact actor pixels, camera, subcells, and dead actor removal.\n";
         }
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

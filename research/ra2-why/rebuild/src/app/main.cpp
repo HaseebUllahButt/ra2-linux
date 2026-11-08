@@ -4,6 +4,7 @@
 #include "../loop/game_loop.h"
 #include "../render/minimap.h"
 #include "../sim/sim.h"
+#include "../ui/ui.h"
 #include <SDL.h>
 
 #include <algorithm>
@@ -39,8 +40,8 @@ Options options(int argc, char** argv) {
             }
         } else throw std::runtime_error("Unknown argument: " + arg);
     }
-    if (result.game.empty() || result.map.empty())
-        throw std::runtime_error("Usage: ra2-native --game-dir <owned-game-folder> --map <map-file> [--yuri] [--frames N] [--headless]");
+    if (result.game.empty())
+        throw std::runtime_error("Usage: ra2-native --game-dir <owned-game-folder> [--map <map-file>] [--yuri] [--frames N] [--headless]");
     if (result.headless && !result.frames)
         throw std::runtime_error("Headless checks need a frame budget");
     return result;
@@ -106,6 +107,75 @@ public:
             throw std::runtime_error("Native output differs from the composed scene frame");
     }
 };
+
+class MenuPump final : public ra2::loop::MessagePump {
+    ra2::app::Window& window_;
+    ra2::ui::Menu& menu_;
+    bool headless_;
+public:
+    MenuPump(ra2::app::Window& window, ra2::ui::Menu& menu, bool headless)
+        : window_(window), menu_(menu), headless_(headless) {}
+    void pump(ra2::loop::State& state) override {
+        using ra2::app::InputKind;
+        for (const auto& input : window_.poll()) {
+            if (input.kind == InputKind::Quit) state.running = false;
+            else if (input.kind == InputKind::Focus) {
+                if (!headless_) state.window_active = input.pressed;
+                if (!input.pressed) menu_.pointer_up(-1, -1);
+            } else if (input.kind == InputKind::Motion) menu_.pointer_move(input.x, input.y);
+            else if (input.kind == InputKind::Button && input.key == SDL_BUTTON_LEFT) {
+                if (input.pressed) menu_.pointer_down(input.x, input.y);
+                else if (menu_.pointer_up(input.x, input.y) == ra2::ui::Action::Quit)
+                    state.running = false;
+            } else if (input.kind == InputKind::Key && input.pressed && input.key == SDLK_ESCAPE)
+                menu_.key_down(ra2::ui::Key::Escape);
+        }
+    }
+};
+
+class MenuPresenter final : public ra2::loop::Renderer {
+    ra2::app::Window& window_;
+    const ra2::ui::Menu& menu_;
+    ra2::gfx::RgbaImage frame_;
+public:
+    std::size_t presented = 0;
+    MenuPresenter(ra2::app::Window& window, const ra2::ui::Menu& menu)
+        : window_(window), menu_(menu) {}
+    void present(const ra2::loop::State&) override {
+        frame_ = menu_.render();
+        window_.present(frame_.pixels.data(), frame_.width, frame_.height, frame_.pixels.size());
+        ++presented;
+    }
+    void verify() const {
+        int width = 0, height = 0;
+        const auto actual = window_.capture(width, height);
+        if (width != frame_.width || height != frame_.height || actual != frame_.pixels)
+            throw std::runtime_error("Native output differs from the original menu composition");
+    }
+};
+
+int run_menu(const Options& args, ra2::fs::MixFileSystem& files) {
+    const bool expansion = args.variant == ra2::fs::GameVariant::YurisRevenge;
+    if (expansion) files.mount("NTRLMD.MIX");
+    files.mount("NEUTRAL.MIX");
+    const auto exe = files.read_file(expansion ? "gamemd.exe" : "game.exe");
+    const auto csf = files.read_file(expansion ? "RA2MD.CSF" : "RA2.CSF");
+    if (!exe || !csf) throw std::runtime_error("Original menu resources are missing");
+    ra2text::CsfFile strings;
+    strings.parse(csf->data(), csf->size());
+    auto menu = ra2::ui::Menu::load(files, *exe, strings);
+    ra2::app::Window window("Red Alert 2 native rebuild: menu", 800, 600, !args.headless);
+    MenuPump pump(window, menu, args.headless);
+    MenuPresenter presenter(window, menu);
+    ra2::loop::SteadyClock clock;
+    ra2::loop::GameLoop loop(pump, presenter, clock);
+    if (args.frames) loop.run(args.frames);
+    else while (loop.state().running) loop.step();
+    if (args.headless) presenter.verify();
+    std::cout << "Native " << (expansion ? "Yuri" : "base RA2") << " menu: "
+              << presenter.presented << " frames presented. Match start remains unsupported.\n";
+    return 0;
+}
 }
 
 int main(int argc, char** argv) {
@@ -113,13 +183,14 @@ int main(int argc, char** argv) {
         const auto args = options(argc, argv);
         if (args.headless && SDL_setenv("SDL_VIDEODRIVER", "dummy", 1) != 0)
             throw std::runtime_error("Cannot select headless native video");
-        const auto ini = ra2::rules::IniFile::from_file(args.map.string());
-        const auto terrain = ra2::pack::load_terrain(ini);
-        const auto geometry = ra2::render::MapGeometry::from_ini(ini);
         ra2::fs::MixFileSystem files(args.game);
         files.mount_language(args.variant);
         files.bootstrap(args.variant);
         files.mount_overlays();
+        if (args.map.empty()) return run_menu(args, files);
+        const auto ini = ra2::rules::IniFile::from_file(args.map.string());
+        const auto terrain = ra2::pack::load_terrain(ini);
+        const auto geometry = ra2::render::MapGeometry::from_ini(ini);
         files.mount_resources();
         auto art = ra2::render::TheaterArt::load(files, ini.read_string("Map", "Theater"));
         const auto cells = ra2::app::terrain_inputs(terrain, art);
@@ -134,8 +205,10 @@ int main(int argc, char** argv) {
         if (!actor_bytes) throw std::runtime_error(std::string("Missing original ") + art_name);
         ra2::rules::IniFile actor_art;
         actor_art.parse(std::string_view(reinterpret_cast<const char*>(actor_bytes->data()), actor_bytes->size()));
+        ra2map::MapFile map_objects;
+        map_objects.parse(ini);
         ra2::app::Scene scene(files, std::move(actor_art), ra2::app::overlay_rules(rules, ini),
-            geometry, cells, ini.read_string("Map", "Theater"));
+            geometry, cells, ini.read_string("Map", "Theater"), map_objects.terrain());
         const auto battlefield = ra2::render::render_minimap(terrain, geometry, art);
         ra2::app::Window window("Red Alert 2 native rebuild: scene checks", 1024, 768, !args.headless);
         NativePump pump(window, args.headless);

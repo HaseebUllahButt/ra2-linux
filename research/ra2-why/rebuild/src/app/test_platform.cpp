@@ -43,6 +43,28 @@ int main() {
         SDL_Window* native = SDL_GetWindowFromID(1);
         require(native != nullptr, "Native test window is missing");
         const auto id = SDL_GetWindowID(native);
+        std::vector<std::uint8_t> square(32 * 32 * 4, 255);
+        window.present(square.data(), 32, 32, square.size());
+        const auto letterboxed = window.capture(width, height);
+        require(width == 64 && height == 32, "Native output size changed with logical size");
+        for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
+            const auto p = (std::size_t(y) * width + x) * 4;
+            const auto color = x >= 16 && x < 48 ? 255 : 0;
+            require(letterboxed[p] == color && letterboxed[p+1] == color &&
+                    letterboxed[p+2] == color && letterboxed[p+3] == 255,
+                    ("Native border mismatch at " + std::to_string(x) + "," + std::to_string(y) +
+                     ": " + std::to_string(letterboxed[p]) + "," + std::to_string(letterboxed[p+3])).c_str());
+        }
+        SDL_Event mapped_motion{};
+        mapped_motion.type = SDL_MOUSEMOTION;
+        mapped_motion.motion.windowID = id;
+        mapped_motion.motion.x = 24; mapped_motion.motion.y = 8;
+        require(SDL_PushEvent(&mapped_motion) == 1, "Cannot inject scaled pointer event");
+        const auto mapped = window.poll();
+        require(mapped.size() == 1 && mapped[0].kind == InputKind::Motion &&
+                mapped[0].x == 8 && mapped[0].y == 8,
+                "Native pointer did not follow the displayed logical frame");
+        window.present(frame.data(), 64, 32, frame.size());
         SDL_Event key{};
         key.type = SDL_KEYDOWN;
         key.key.windowID = id;

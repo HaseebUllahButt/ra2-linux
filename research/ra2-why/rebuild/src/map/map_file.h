@@ -78,6 +78,7 @@ class MapFile {
 public:
     // Parses map text; throws std::runtime_error on I/O failure via IniFile.
     void parse(std::string_view text);
+    void parse(const ra2::rules::IniFile& ini);
 
     // [Map]
     const std::string& theater() const noexcept { return theater_; }

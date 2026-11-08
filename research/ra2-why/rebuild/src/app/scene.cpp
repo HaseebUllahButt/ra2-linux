@@ -47,17 +47,24 @@ rules::IniFile overlay_rules(const rules::IniFile& base, const rules::IniFile& m
 
 Scene::Scene(const fs::MixFileSystem& files, rules::IniFile art, rules::IniFile rules,
              const render::MapGeometry& geometry, const sim::TerrainCells& terrain,
-             std::string_view theater)
+             std::string_view theater, std::vector<ra2map::TerrainObject> objects)
     : files_(files), art_(std::move(art)), rules_(std::move(rules)),
       // Original tile caller 006D7F20 projects cell*256 then subtracts 30
       // from X. Align actor projection with render_minimap's diamond origin.
       map_camera_{geometry.local.x * 60 - geometry.size.width * 30,
-                  geometry.local.y * 30 + (geometry.size.width + 1) * 15}, theater_(0) {
+                  geometry.local.y * 30 + (geometry.size.width + 1) * 15}, theater_(0),
+      terrain_objects_(std::move(objects)) {
     for (const auto& entry : theaters) if (theater == entry.name) {
         theater_ = entry.code;
         const auto bytes = files.read_file(entry.palette);
         if (!bytes) throw std::runtime_error(std::string("Missing original unit palette: ") + entry.palette);
         palette_ = gfx::Palette::from_bytes(*bytes);
+        // Terrain draw 0071C1B0 uses the cell conversion from 00544E70.
+        // Its source palette is ISO<extension>.PAL, loaded at 00545150.
+        const auto iso_name = "ISO" + std::string(entry.palette + 4);
+        const auto iso = files.read_file(iso_name);
+        if (!iso) throw std::runtime_error("Missing original terrain object palette: " + iso_name);
+        terrain_palette_ = gfx::Palette::from_bytes(*iso);
     }
     if (!theater_) throw std::runtime_error("Unsupported scene theater");
     for (const auto& cell : terrain)
@@ -107,7 +114,12 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
         std::copy_n(terrain.rgba.begin() + (std::size_t(y + viewport.y) * terrain.width + viewport.x) * 4,
             std::size_t(copy_width) * 4, result.image.rgba.begin() + std::size_t(y) * viewport.width * 4);
 
-    struct Draw { const sim::Entity* entity; actors::WorldPosition position; std::int64_t key; };
+    struct Draw {
+        const sim::Entity* entity;
+        const ra2map::TerrainObject* terrain;
+        actors::WorldPosition position;
+        std::int64_t key;
+    };
     std::vector<Draw> draws;
     for (const auto& entity : state.entities) {
         if (entity.dead) continue;
@@ -115,32 +127,50 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
             const auto world = position(entity);
             const auto key = entity.kind == sim::Kind::Structure ?
                 actors::building_y_sort(world, rules_, entity.type) : actors::object_y_sort(world);
-            draws.push_back({&entity, world, key});
+            draws.push_back({&entity, nullptr, world, key});
         } catch (const std::exception& error) {
             result.gaps.push_back("Entity " + std::to_string(entity.id) + ": " + error.what());
         }
     }
+    for (const auto& object : terrain_objects_) {
+        try {
+            const auto cell = cells_.find(cell_key(object.cell));
+            if (cell == cells_.end() || !cell->second.floor_world_height)
+                throw std::runtime_error("Terrain object floor height is unresolved");
+            // Tiberium spawners use a different palette and a -16 Y adjustment.
+            if (rules_.read_bool(object.type, "SpawnsTiberium", false))
+                throw std::runtime_error("Tiberium spawner drawing is unresolved");
+            const auto world = actors::terrain_position(object.cell, *cell->second.floor_world_height);
+            draws.push_back({nullptr, &object, world, actors::object_y_sort(world)});
+        } catch (const std::exception& error) {
+            result.gaps.push_back("Terrain " + object.type + ": " + error.what());
+        }
+    }
     std::stable_sort(draws.begin(), draws.end(), [](const Draw& a, const Draw& b) { return a.key < b.key; });
     for (const auto& draw : draws) {
-        const auto& entity = *draw.entity;
+        const auto label = draw.entity ? "Entity " + std::to_string(draw.entity->id) : "Terrain " + draw.terrain->type;
         try {
-            const auto key = std::make_pair(entity.kind, entity.type);
+            const auto kind = !draw.entity ? actors::Kind::Terrain :
+                draw.entity->kind == sim::Kind::Structure ? actors::Kind::Building : actors::Kind::Infantry;
+            const auto& type = draw.entity ? draw.entity->type : draw.terrain->type;
+            const auto key = std::make_pair(kind, type);
             auto found = assets_.find(key);
             if (found == assets_.end()) {
-                const auto kind = entity.kind == sim::Kind::Structure ? actors::Kind::Building : actors::Kind::Infantry;
                 found = assets_.emplace(key, Asset{actors::ActorArt::load(files_, art_, rules_,
-                    entity.type, kind, theater_), {}}).first;
+                    type, kind, theater_), {}}).first;
             }
             auto& asset = found->second;
             // Only stationary, full-health main images are established here.
             // Gameplay transitions and damaged building frames remain separate.
-            if (entity.map_health != 256)
+            if (draw.entity && draw.entity->map_health != 256)
                 throw std::runtime_error("Damaged actor frame selection is unresolved");
-            const auto frame = entity.kind == sim::Kind::Infantry ?
-                asset.art.frame_for_map("Ready", static_cast<std::uint8_t>(entity.facing), 0) : 0;
+            const auto frame = kind == actors::Kind::Infantry ?
+                asset.art.frame_for_map("Ready", static_cast<std::uint8_t>(draw.entity->facing), 0) :
+                kind == actors::Kind::Terrain ? actors::terrain_initial_frame(rules_, type) : 0;
             auto image = asset.frames.find(frame);
             if (image == asset.frames.end())
-                image = asset.frames.emplace(frame, asset.art.draw_frame(frame, palette_)).first;
+                image = asset.frames.emplace(frame, asset.art.draw_frame(frame,
+                    kind == actors::Kind::Terrain ? terrain_palette_ : palette_)).first;
             auto anchor = actors::project_world(draw.position, map_camera_);
             anchor.x -= viewport.x;
             anchor.y -= viewport.y;
@@ -160,7 +190,7 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
             }
             result.drawn += drawn;
         } catch (const std::exception& error) {
-            result.gaps.push_back("Entity " + std::to_string(entity.id) + ": " + error.what());
+            result.gaps.push_back(label + ": " + error.what());
         }
     }
     for (std::size_t p = 3; p < result.image.rgba.size(); p += 4) result.image.rgba[p] = 255;

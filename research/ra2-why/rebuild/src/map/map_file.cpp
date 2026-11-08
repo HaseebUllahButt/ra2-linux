@@ -43,6 +43,12 @@ std::int32_t field_int(std::string_view value, std::size_t index,
 } // namespace
 
 void MapFile::parse(std::string_view text) {
+    Ini ini;
+    ini.parse(text);
+    parse(ini);
+}
+
+void MapFile::parse(const Ini& ini) {
     structures_.clear();
     units_.clear();
     infantry_.clear();
@@ -53,8 +59,6 @@ void MapFile::parse(std::string_view text) {
     overlay_pack_.clear();
     packed_terrain_ = {};
 
-    Ini ini;
-    ini.parse(text);
     stats_ = ini.statistics();
 
     // [Map]

@@ -86,6 +86,21 @@ WorldPosition infantry_position(ra2map::Cell cell, unsigned subcell, std::int32_
     return {std::int64_t(cell.x) * 256 + offsets[subcell][0],
             std::int64_t(cell.y) * 256 + offsets[subcell][1], z};
 }
+WorldPosition terrain_position(ra2map::Cell cell, std::int32_t floor) {
+    // 0071BB90 supplies cell*256+128 and Z=0. 0071E0D0 keeps the
+    // greater of that Z and GetFloorHeight. 0041BE00 preserves draw XYZ.
+    return {std::int64_t(cell.x) * 256 + 128, std::int64_t(cell.y) * 256 + 128,
+            std::max(0, floor)};
+}
+std::size_t terrain_initial_frame(const rules::IniFile& rules, std::string_view type) {
+    // 0071DA80 defaults IsAnimated to false. The initial animated state is
+    // outside this helper. 0071C1B0 uses frame 1 for initial health < 2.
+    if (rules.read_bool(type, "IsAnimated", false))
+        throw std::runtime_error("animated terrain frame state is unresolved");
+    // ObjectType constructor 005F7090 initializes Strength to zero.
+    // Terrain constructor 0071BB90 copies that resolved value to Health.
+    return rules.read_integer(type, "Strength", 0) < 2 ? 1 : 0;
+}
 WorldPosition building_draw_position(ra2map::Cell cell, std::int32_t z) {
     // 0x0044F820 stores cell*256+128. The building draw-position virtual
     // at 0x00459EF0 subtracts 128 from both coordinates.

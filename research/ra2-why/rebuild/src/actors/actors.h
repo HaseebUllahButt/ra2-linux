@@ -30,6 +30,11 @@ std::int64_t building_y_sort(WorldPosition draw_position, const rules::IniFile& 
                              std::string_view type);
 // Map placement of a stationary infantry unit; world_z is the resolved terrain height.
 WorldPosition infantry_position(ra2map::Cell cell, unsigned subcell, std::int32_t world_z);
+// Terrain constructor starts at cell center and clamps its initial zero Z
+// against the original floor query (base 006E5850; expansion 0071E0D0).
+WorldPosition terrain_position(ra2map::Cell cell, std::int32_t floor_world_height);
+// Initial, non-animated terrain draw. Burning and animation states are separate.
+std::size_t terrain_initial_frame(const rules::IniFile& rules, std::string_view type);
 // Base world point used by the building draw caller before projection.
 WorldPosition building_draw_position(ra2map::Cell cell, std::int32_t world_z);
 // Original building center in engine world units, before screen projection.

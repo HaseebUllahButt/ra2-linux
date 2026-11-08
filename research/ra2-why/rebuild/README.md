@@ -3,10 +3,11 @@
 Rebuild the original Red Alert 2 engine for native Linux. Base Red Alert 2 is
 the main target. Keep Yuri's Revenge behavior separate where the games differ.
 
-The game is incomplete. The Linux client shows original terrain, full-health
-building main images, and standing infantry. It advances the recovered native
-state. Full movement, combat, production, AI, campaigns, saves, multiplayer,
-and menus still need work. The scene also needs pixel depth, shadows, lighting,
+The game is incomplete. The Linux client shows original menu buttons and page
+changes. The scene check shows original terrain, trees, full-health building
+main images, and standing infantry. It advances the recovered native state. Full
+movement, combat, production, AI, campaigns, saves, multiplayer, and menus still
+need work. The scene also needs pixel depth, shadows, lighting,
 house colors, vehicle assembly, and other actor states.
 
 Build with a C++17 compiler, make, pkg-config, SDL2 development files, and the
@@ -18,11 +19,13 @@ Run from this directory:
 ```sh
 make native
 make native-check
+build/ra2-native --game-dir ../game
 build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP
 ```
 
-Use `--yuri` to select expansion assets and rules. Use arrow keys to move the
-temporary scene viewer. Press Escape to exit. These viewer controls do not
+Omit `--map` to open the original menu. The supported buttons change pages.
+Match start stays disabled. Use `--yuri` to select expansion assets and rules.
+Use arrow keys to move the temporary scene viewer. Press Escape to exit. These viewer controls do not
 establish the original game input behavior. This is not yet a playable match.
 
 ## Why

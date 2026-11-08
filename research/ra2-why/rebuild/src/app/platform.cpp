@@ -43,6 +43,8 @@ Window::Window(const std::string& title, int width, int height, bool visible)
     if (!impl_->renderer)
         impl_->renderer = SDL_CreateRenderer(impl_->window, -1, SDL_RENDERER_SOFTWARE);
     if (!impl_->renderer) error("Create native renderer");
+    if (SDL_SetRenderDrawColor(impl_->renderer, 0, 0, 0, 255) != 0)
+        error("Set native border color");
 }
 Window::~Window() = default;
 
@@ -93,6 +95,10 @@ void Window::present(const std::uint8_t* rgba, int width, int height, std::size_
     if (!rgba || size != image_size(width, height))
         throw std::runtime_error("Native frame dimensions differ from pixel buffer");
     if (!impl_->texture || width != impl_->texture_width || height != impl_->texture_height) {
+        // Keep original pixels at their aspect ratio. SDL also maps pointer
+        // events into these logical coordinates, including after resizing.
+        if (SDL_RenderSetLogicalSize(impl_->renderer, width, height) != 0)
+            error("Set native logical frame size");
         if (impl_->texture) SDL_DestroyTexture(impl_->texture);
         impl_->texture = SDL_CreateTexture(impl_->renderer, SDL_PIXELFORMAT_RGBA32,
                                            SDL_TEXTUREACCESS_STREAMING, width, height);
@@ -118,9 +124,18 @@ std::vector<std::uint8_t> Window::capture(int& width, int& height) const {
     if (SDL_GetRendererOutputSize(impl_->renderer, &width, &height) != 0)
         error("Read native render size");
     std::vector<std::uint8_t> pixels(image_size(width, height));
-    if (SDL_RenderReadPixels(impl_->renderer, nullptr, SDL_PIXELFORMAT_RGBA32,
-                             pixels.data(), width * 4) != 0)
-        error("Read native frame pixels");
+    // SDL 2.30 reads only the current viewport, even with a null rectangle.
+    // Read the whole physical target so checks include the border pixels.
+    SDL_Rect viewport;
+    SDL_RenderGetViewport(impl_->renderer, &viewport);
+    if (SDL_RenderSetViewport(impl_->renderer, nullptr) != 0)
+        error("Set native capture viewport");
+    const int status = SDL_RenderReadPixels(impl_->renderer, nullptr, SDL_PIXELFORMAT_RGBA32,
+                                            pixels.data(), width * 4);
+    const std::string detail = status != 0 ? SDL_GetError() : "";
+    if (SDL_RenderSetViewport(impl_->renderer, &viewport) != 0)
+        error("Restore native capture viewport");
+    if (status != 0) throw std::runtime_error("Read native frame pixels: " + detail);
     return pixels;
 }
 

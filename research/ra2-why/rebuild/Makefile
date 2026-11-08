@@ -10,6 +10,7 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/render/tmp_decode.cpp src/render/minimap.cpp src/loop/game_loop.cpp \
     src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp src/fs/filename_hash.cpp \
     src/gfx/palette.cpp src/gfx/shp_decode.cpp src/actors/actors.cpp \
+    src/ui/ui.cpp src/ui/shell.cpp src/text/csf.cpp \
     src/pack/map_pack.cpp src/rules/ini_file.cpp src/map/map_file.cpp \
     src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
     src/sim/combat.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp
@@ -34,6 +35,8 @@ SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS))
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 
 native-check: native platform terrain-inputs scene actors ui audio voxel sim
+	build/ra2-native --game-dir ../game --frames 3 --headless
+	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless --yuri
 
