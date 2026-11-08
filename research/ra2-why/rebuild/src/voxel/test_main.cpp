@@ -7,6 +7,12 @@
 using namespace ra2::voxel;
 int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--flat-depth-adjust") {
+      int height;
+      while (std::cin >> height)
+        std::cout << base_flat_vehicle_depth_adjustment(height) << '\n';
+      return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--depth-visible") {
       int pixel, row, terrain;
       while (std::cin >> pixel >> row >> terrain)
@@ -15,10 +21,14 @@ int main(int argc, char **argv) {
                   << '\n';
       return 0;
     }
-    if (argc == 2 && std::string(argv[1]) == "--depth-rows") {
+    if (argc == 2 && (std::string(argv[1]) == "--depth-rows" ||
+                      std::string(argv[1]) == "--flat-depth-rows")) {
       int base, origin, destination, clip, height, adjustment;
       while (std::cin >> base >> origin >> destination >> clip >> height >> adjustment) {
-        auto row = base_depth_row(base, origin, destination, clip, height, adjustment);
+        auto row = std::string(argv[1]) == "--flat-depth-rows"
+            ? base_flat_vehicle_depth_row({base, origin, destination, clip,
+                                           height, adjustment})
+            : base_depth_row(base, origin, destination, clip, height, adjustment);
         for (int i = 0; i != 8; ++i) {
           std::cout << row.value << ' ' << row.phase << ' ';
           base_depth_next_row(row);
@@ -93,7 +103,8 @@ int main(int argc, char **argv) {
                       shadow.pixels.size());
       return std::cout ? 0 : 1;
     }
-    if (argc == 5 && std::string(argv[1]) == "--vehicle-case") {
+    if (argc == 5 && (std::string(argv[1]) == "--vehicle-case" ||
+                      std::string(argv[1]) == "--vehicle-parts-case")) {
       std::string name(argv[2]);
       int facing = std::stoi(argv[3]), offset = std::stoi(argv[4]);
       if (facing < 0 || facing > 255)
@@ -110,6 +121,23 @@ int main(int argc, char **argv) {
       input.hull = {&hull, &hull_hva};
       input.turret = {&turret, &turret_hva};
       input.barrel = {&barrel, &barrel_hva};
+      if (std::string(argv[1]) == "--vehicle-parts-case") {
+        auto parts = draw_vehicle_parts(input, lighting);
+        std::uint32_t count = static_cast<std::uint32_t>(parts.size());
+        std::cout.write(reinterpret_cast<const char *>(&count), sizeof count);
+        for (const auto &part : parts) {
+          std::int32_t bounds[] = {part.left, part.top, part.source_x,
+                                   part.source_y, part.source_width,
+                                   part.source_height};
+          std::cout.write(reinterpret_cast<const char *>(bounds), sizeof bounds);
+          for (auto pixel : part.image.pixels) {
+            char rgba[] = {char(pixel.r), char(pixel.g), char(pixel.b),
+                           char(pixel.a)};
+            std::cout.write(rgba, sizeof rgba);
+          }
+        }
+        return std::cout ? 0 : 1;
+      }
       auto output = draw_vehicle(input, lighting);
       std::int32_t origin[] = {output.left, output.top};
       std::cout.write(reinterpret_cast<const char *>(origin), sizeof origin);

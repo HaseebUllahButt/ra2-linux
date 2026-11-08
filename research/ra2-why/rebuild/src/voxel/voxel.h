@@ -80,6 +80,15 @@ struct BaseDepthRow {
 };
 BaseDepthRow base_depth_row(int z_base, int z_origin_y, int destination_y,
                             int clipped_y, int clipped_height, int adjustment);
+// Flat, clear ground only. projected_height is the original 0x6A2970 result
+// for the vehicle's world Z. Slopes, bridges, nearby objects and other
+// locomotors need the complete map checks at 0x4C9930 and 0x6CFEA0.
+int base_flat_vehicle_depth_adjustment(int projected_height);
+struct BaseFlatVehicleDepthInput {
+  int z_base, z_origin_y, destination_y, clipped_y, clipped_height;
+  int projected_height;
+};
+BaseDepthRow base_flat_vehicle_depth_row(const BaseFlatVehicleDepthInput &);
 void base_depth_next_row(BaseDepthRow &);
 // Original raw blitter 0x488870: transparent pixels and equal depths fail.
 bool base_depth_visible(std::uint8_t pixel, int row_depth,
@@ -117,6 +126,8 @@ struct ScenePart {
 struct SceneImage {
   Image image;
   int left, top;
+  // Source rectangle on the original 256x256 part surface (0x7178E0).
+  int source_x = 0, source_y = 0, source_width = 256, source_height = 256;
 };
 // Default game camera from the original initialization at 0x7558CE.
 Matrix game_camera();
@@ -157,6 +168,9 @@ VehicleMatrices vehicle_matrices(const VehiclePose &);
 // Flat, stationary vehicle. Part order and multi-part alignment remain
 // provisional.
 SceneImage draw_vehicle(const VehiclePose &, const Lighting &);
+// Parts remain in original draw order. Each rectangle is relative to its own
+// 256x256 surface. Use the separate rectangle for terrain depth clipping.
+std::vector<SceneImage> draw_vehicle_parts(const VehiclePose &, const Lighting &);
 // Convert the original 256x256 lit indexed raster to RGBA.
 Image raster_rgba(const Section &, const std::array<float, 12> &matrix,
                   const Lighting &,

@@ -99,6 +99,11 @@ hull = struct.unpack("<12f", u.mem_read(base + 0x6100, 48))
 locals_by_name = {model: hull, model + "tur": turret, model + "barl": barrel}
 
 screen = {}
+parts_data = subprocess.check_output(
+    [test, "--vehicle-parts-case", model, str(facing), str(turret_offset)]
+)
+assert struct.unpack_from("<I", parts_data)[0] == 3
+part_offset = 4
 quadrant = (((facing << 8) >> 13) + 1) >> 1 & 3
 part_names = (
     [model, model + "barl", model + "tur"]
@@ -165,6 +170,26 @@ for name in part_names:
     call(0x7178E0, base + 0xA00)
     rx, ry, sx, sy, ww, hh = struct.unpack("<6i", u.mem_read(base + 0xA00, 24))
     buf = bytes(u.mem_read(0xAE3408, 65536))
+    left, top, nx, ny, nw, nh = struct.unpack_from("<6i", parts_data, part_offset)
+    part_offset += 24
+    pixels = parts_data[part_offset : part_offset + 65536 * 4]
+    part_offset += 65536 * 4
+    assert (left + nx, top + ny, nx, ny, nw, nh) == (rx, ry, sx, sy, ww, hh), (
+        name,
+        (left + nx, top + ny, nx, ny, nw, nh),
+        (rx, ry, sx, sy, ww, hh),
+    )
+    for y in range(sy, sy + hh):
+        for x in range(sx, sx + ww):
+            index = buf[y * 256 + x]
+            expected = (
+                (tuple(vpl[16 + index * 3 : 19 + index * 3]) + (255,))
+                if index
+                else (0, 0, 0, 0)
+            )
+            offset = (y * 256 + x) * 4
+            actual = tuple(pixels[offset : offset + 4])
+            assert actual == expected, (name, x, y, actual, expected)
     print(name, (rx, ry, sx, sy, ww, hh), "nonzero", sum(x != 0 for x in buf))
     for y in range(hh):
         for x in range(ww):

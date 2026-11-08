@@ -23,6 +23,14 @@ BaseDepthRow base_depth_row(int z_base, int z_origin_y, int destination_y,
   }
   return result;
 }
+int base_flat_vehicle_depth_adjustment(int projected_height) {
+  return -1 - projected_height;
+}
+BaseDepthRow base_flat_vehicle_depth_row(const BaseFlatVehicleDepthInput &input) {
+  return base_depth_row(input.z_base, input.z_origin_y, input.destination_y,
+                        input.clipped_y, input.clipped_height,
+                        base_flat_vehicle_depth_adjustment(input.projected_height));
+}
 void base_depth_next_row(BaseDepthRow &row) {
   if (++row.phase >= 3) {
     row.phase -= 3;
@@ -862,6 +870,12 @@ SceneImage draw_scene(const std::vector<ScenePart> &parts,
       {256, 256, std::vector<ra2::gfx::Rgba>(65536, {0, 0, 0, 0})},
       int(std::trunc(center[0])) - 128,
       int(std::trunc(center[1])) - 128};
+  const int span_x = int(std::trunc(maximum[0] - minimum[0]));
+  const int span_y = int(std::trunc(maximum[1] - minimum[1]));
+  result.source_x = 124 - span_x / 2;
+  result.source_y = 124 - span_y / 2;
+  result.source_width = span_x + 8;
+  result.source_height = span_y + 8;
   for (std::size_t i = 0; i < indices.size(); ++i)
     if (indices[i])
       result.image.pixels[i] = lighting.palette[indices[i]];
@@ -883,7 +897,8 @@ VehicleMatrices vehicle_matrices(const VehiclePose &vehicle) {
   Matrix barrel = base_barrel_transform(base, rotation, vehicle.barrel_tilt);
   return {hull, turret, barrel};
 }
-SceneImage draw_vehicle(const VehiclePose &vehicle, const Lighting &lighting) {
+std::vector<SceneImage> draw_vehicle_parts(const VehiclePose &vehicle,
+                                           const Lighting &lighting) {
   if (!vehicle.hull.model || !vehicle.hull.animation)
     throw std::runtime_error("vehicle hull is missing");
   std::vector<ScenePart> parts;
@@ -923,10 +938,14 @@ SceneImage draw_vehicle(const VehiclePose &vehicle, const Lighting &lighting) {
   // The original caller renders each vehicle part into its own surface before
   // compositing it at that part's screen offset.
   std::vector<SceneImage> layers;
-  int min_x = 1000000, min_y = 1000000, max_x = -1000000, max_y = -1000000;
-  for (const auto &part : parts) {
+  for (const auto &part : parts)
     layers.push_back(draw_scene({part}, lighting));
-    const auto &layer = layers.back();
+  return layers;
+}
+SceneImage draw_vehicle(const VehiclePose &vehicle, const Lighting &lighting) {
+  auto layers = draw_vehicle_parts(vehicle, lighting);
+  int min_x = 1000000, min_y = 1000000, max_x = -1000000, max_y = -1000000;
+  for (const auto &layer : layers) {
     for (unsigned y = 0; y < layer.image.height; ++y)
       for (unsigned x = 0; x < layer.image.width; ++x)
         if (layer.image.pixels[std::size_t(y) * layer.image.width + x].a) {

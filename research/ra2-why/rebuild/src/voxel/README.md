@@ -52,6 +52,30 @@ depth. The RLE depth reader uses a different drawing path.
 The locomotor interface table at `0x7A31EC` selects gradient 2 through
 `0x53D4B0` and contributes zero to the adjustment through `0x53D4A0`.
 
+`draw_vehicle_parts()` returns separate hull, turret and barrel surfaces in
+the original order. Each `SceneImage` contains the original source rectangle
+on its 256 by 256 surface. Its destination rectangle starts at
+`left + source_x, top + source_y` relative to the vehicle anchor.
+Do not derive terrain depth from the combined `draw_vehicle()` bounds.
+
+On clear, flat ground with the tested locomotor,
+`base_flat_vehicle_depth_adjustment(projected_height)` returns
+`-projected_height - 1`. The input is the original `0x6A2970` result for
+world Z. `base_flat_vehicle_depth_row()` combines this adjustment with the
+original row inputs. It does not calculate clipping or world Z projection.
+The full adjustment at `0x4C9930` also checks terrain flags, nearby tile
+heights, tile shapes, bridges and object state. These checks remain unsupported.
+The flat test supplies a screen-height factor of 15/256; it does not establish
+that factor for every original game configuration.
+
+```
+python3 rebuild/src/voxel/verify_flat_depth_x86.py /tmp/voxel_test
+```
+
+This executes `0x4C9930` and its original map checks for five vehicle heights
+and 32 facings. The synthetic map supplies identical flat cells and a 60 by 30
+tile. Only cell lookup, object position, facing and fixture access use stubs.
+
 The following test compares 256 record 2 cases and five raw blits with the
 original base-game x86 instructions. It checks transparent pixels, ties,
 depth limits, row progression, and that the terrain buffer stays unchanged.

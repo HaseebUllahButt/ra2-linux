@@ -103,6 +103,13 @@ input_text = "".join(" ".join(map(str, case)) + "\n" for case in cases)
 native = subprocess.check_output(
     [sys.argv[1], "--depth-rows"], input=input_text, text=True
 ).splitlines()
+flat_input = "".join(
+    " ".join(map(str, case[:-1] + (-case[-1] - 1,))) + "\n" for case in cases
+)
+flat_native = subprocess.check_output(
+    [sys.argv[1], "--flat-depth-rows"], input=flat_input, text=True
+).splitlines()
+assert flat_native == native
 for case, line in zip(cases, native):
     zbase, origin, destination, clip, height, adjustment = case
     w(base + 0x24, zbase)
