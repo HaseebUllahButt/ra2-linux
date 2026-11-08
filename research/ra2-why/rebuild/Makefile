@@ -56,3 +56,9 @@ run-gfx:
 		src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp \
 		src/fs/filename_hash.cpp -o src/gfx/gfx_test
 	cd .. && rebuild/src/gfx/gfx_test
+
+shp_view:
+	$(CXX) $(CXXFLAGS) -I src/gfx -I src/fs src/gfx/shp_view.cc \
+		src/gfx/palette.cpp src/gfx/shp_decode.cpp \
+		src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp \
+		src/fs/filename_hash.cpp -o src/gfx/shp_view
