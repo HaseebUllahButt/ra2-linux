@@ -98,6 +98,15 @@ void MixFileSystem::bootstrap(GameVariant variant) {
     // 0x005B43E0 and 0x005B43F0 are unconditional-success stubs in this executable.
 }
 
+void MixFileSystem::mount_language(GameVariant variant) {
+    if (variant_ && *variant_ != variant)
+        throw MixError("Use a fresh filesystem when changing game variant");
+    variant_ = variant;
+    // Startup: base 0068E280; expansion 006BB9A0, LANGMD before LANGUAGE.
+    if (variant == GameVariant::YurisRevenge) generic("LANGMD.MIX");
+    generic("LANGUAGE.MIX");
+}
+
 // Original Win32 enumeration order is unspecified. Sort for reproducible Linux
 // precedence; callers can explicitly mount an overlay first when order matters.
 std::vector<std::string> MixFileSystem::discover(std::string_view pattern) const {
@@ -130,6 +139,36 @@ void MixFileSystem::mount_overlays() {
         }
 }
 void MixFileSystem::mount_resources(ResourceOptions options) {
+    if (variant() == GameVariant::RedAlert2) {
+        // Original base 00515E70, kept separate from expansion resource names.
+        generic("CONQUER.MIX");
+        generic("CAMEO.MIX");
+        maps_.clear();
+        movies_.clear();
+        std::shared_ptr<MixArchive> primary_map;
+        if (options.installed) {
+            for (const auto& name : discover("MAPS*.MIX")) {
+                auto archive = generic(name);
+                if (!primary_map) primary_map = archive;
+                else maps_.push_back(archive);
+            }
+        } else primary_map = generic(numbered("MAPS", options.media_index + 1));
+        if (!primary_map) throw MixError("No base game maps MIX archive found");
+        generic("MULTI.MIX");
+        generic("THEME.MIX", false);
+        if (options.installed) {
+            std::string pattern = "MOVIES*.MIX";
+            if (loose_path("MIXFILES/MOVIES01.MIX")) pattern = "MIXFILES/MOVIES*.MIX";
+            bool primary_movie = false;
+            for (const auto& name : discover(pattern)) {
+                auto archive = generic(name);
+                if (primary_movie) movies_.push_back(archive);
+                primary_movie = true;
+            }
+            if (!primary_movie) throw MixError("No base game movies MIX archive found");
+        } else generic(numbered("MOVIES", options.media_index));
+        return;
+    }
     generic("CONQMD.MIX");
     for (const char* name : {"GENERMD.MIX", "GENERIC.MIX", "ISOGENMD.MIX", "ISOGEN.MIX"}) generic(name, false);
     for (const char* name : {"CONQUER.MIX", "CAMEOMD.MIX", "CAMEO.MIX"}) generic(name);

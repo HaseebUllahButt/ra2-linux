@@ -6,10 +6,12 @@ CXX ?= g++
 .DEFAULT_GOAL := all
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O2
 SDL_FLAGS = $(shell pkg-config --cflags --libs sdl2)
-NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp \
+NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cpp \
     src/render/tmp_decode.cpp src/render/minimap.cpp src/loop/game_loop.cpp \
     src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp src/fs/filename_hash.cpp \
-    src/gfx/palette.cpp src/pack/map_pack.cpp src/rules/ini_file.cpp
+    src/gfx/palette.cpp src/pack/map_pack.cpp src/rules/ini_file.cpp src/map/map_file.cpp \
+    src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
+    src/sim/combat.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp
 NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
 
 build/native/%.o: %.cpp
@@ -22,7 +24,14 @@ build/native/%.o: %.cpp
 
 all: test
 
-.PHONY: native platform run-platform catalog
+.PHONY: native platform run-platform catalog terrain-inputs
+
+terrain-inputs: build/terrain_inputs_test
+	build/terrain_inputs_test ../game ../analysis/extracted/maps/2PEAKS.MAP
+
+build/terrain_inputs_test: build/native/src/app/terrain_inputs.o build/native/src/app/test_terrain_inputs.o build/native/src/sim/floor.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 platform: run-platform
 

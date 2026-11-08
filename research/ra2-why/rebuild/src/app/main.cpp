@@ -1,6 +1,8 @@
 #include "platform.h"
+#include "terrain_inputs.h"
 #include "../loop/game_loop.h"
 #include "../render/minimap.h"
+#include "../sim/sim.h"
 #include <SDL.h>
 
 #include <algorithm>
@@ -115,8 +117,18 @@ int main(int argc, char** argv) {
         const auto terrain = ra2::pack::load_terrain(ini);
         const auto geometry = ra2::render::MapGeometry::from_ini(ini);
         ra2::fs::MixFileSystem files(args.game);
+        files.mount_language(args.variant);
         files.bootstrap(args.variant);
+        files.mount_overlays();
+        files.mount_resources();
         auto art = ra2::render::TheaterArt::load(files, ini.read_string("Map", "Theater"));
+        const auto cells = ra2::app::terrain_inputs(terrain, art);
+        const auto rules_name = args.variant == ra2::fs::GameVariant::RedAlert2 ? "RULES.INI" : "RULESMD.INI";
+        const auto rules_bytes = files.read_file(rules_name);
+        if (!rules_bytes) throw std::runtime_error(std::string("Missing original ") + rules_name);
+        ra2::rules::IniFile rules;
+        rules.parse(std::string_view(reinterpret_cast<const char*>(rules_bytes->data()), rules_bytes->size()));
+        ra2::sim::Simulation simulation(rules, ini, 0, cells);
         const auto battlefield = ra2::render::render_minimap(terrain, geometry, art);
         ra2::app::Window window("Red Alert 2 native rebuild: terrain", 1024, 768, !args.headless);
         NativePump pump(window, args.headless);
@@ -124,6 +136,7 @@ int main(int argc, char** argv) {
         ra2::loop::SteadyClock clock;
         ra2::loop::Hooks hooks;
         hooks.update = [&](ra2::loop::State&) {
+            simulation.tick();
             // Viewer controls only. Original game camera timing is not claimed.
             const int dx = 30 * (int(pump.held.count(SDLK_RIGHT)) - int(pump.held.count(SDLK_LEFT)));
             const int dy = 15 * (int(pump.held.count(SDLK_DOWN)) - int(pump.held.count(SDLK_UP)));
@@ -133,8 +146,12 @@ int main(int argc, char** argv) {
         if (args.frames) loop.run(args.frames);
         else while (loop.state().running) loop.step();
         if (args.headless) presenter.verify();
+        const auto snapshot = simulation.snapshot();
+        if (args.headless && snapshot.frame != loop.state().frame_counter)
+            throw std::runtime_error("Native simulation and frame loop diverged");
         std::cout << "Native terrain client: " << terrain.tiles.size() << " original tiles, "
-                  << presenter.presented << " frames presented.\n";
+                  << presenter.presented << " frames presented, " << snapshot.entities.size()
+                  << " map objects, " << snapshot.frame << " simulation ticks.\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

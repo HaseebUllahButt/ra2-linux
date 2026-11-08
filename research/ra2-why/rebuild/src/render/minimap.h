@@ -18,6 +18,9 @@ class TheaterArt {
 public:
     static TheaterArt load(fs::MixFileSystem& files, std::string_view theater);
     const DecodedTile& tile(std::uint32_t index, std::uint8_t subtile);
+    const TmpRecord& metadata(std::uint32_t index, std::uint8_t subtile);
+    // TileType GetLandType: original 00544BE0 and base 00529300.
+    static std::int32_t terrain_land_type(std::uint8_t raw_terrain);
     int tile_width() const noexcept { return 60; }
     int tile_height() const noexcept { return 30; }
     std::size_t loaded_containers() const noexcept { return containers_.size(); }
@@ -25,6 +28,9 @@ public:
     const std::string& palette_name() const noexcept { return palette_name_; }
     const std::string& palette_archive() const noexcept { return palette_archive_; }
 private:
+    std::pair<std::uint32_t, std::uint8_t> resolve(std::uint32_t index,
+                                                std::uint8_t subtile) const;
+    TmpImage& container(std::uint32_t resolved_index);
     fs::MixFileSystem* files_ = nullptr; // Must outlive this object.
     gfx::Palette palette_;
     std::string palette_name_, palette_archive_;

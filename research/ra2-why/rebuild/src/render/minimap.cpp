@@ -51,13 +51,23 @@ TheaterArt TheaterArt::load(fs::MixFileSystem& files, std::string_view theater) 
     const auto& t = *selected;
     // Names come from the six original 0x70-byte records at 0x007E1B78.
     const bool expansion = files.variant() == fs::GameVariant::YurisRevenge;
-    // The MIX API searches first mount first. Expansion art must precede base.
-    if (expansion) files.mount("ISOGENMD.MIX", false);
-    files.mount("ISOGEN.MIX", false);
-    if (expansion) files.mount(std::string(t.root)+"MD.MIX", false);
+    // Expansion generic ISO archives belong to resource startup (00530460).
+    // Supply them here too for callers that load only a terrain catalog.
+    if (expansion) {
+        files.mount("ISOGENMD.MIX", false);
+        files.mount("ISOGEN.MIX", false);
+    } else if (theater != "SNOW") {
+        // Base 00519E70, with a fresh filesystem and no previous theater.
+        files.mount("GENERIC.MIX", false);
+    }
+    // 005349C0 adds the MD root archive only for Snow. Both editions load
+    // the extension archive before the theater's ISO archives.
+    if (expansion && theater == "SNOW") files.mount("SNOWMD.MIX", false);
     files.mount(std::string(t.root)+".MIX");
+    files.mount(std::string(t.extension)+".MIX", false);
     if (expansion) files.mount(std::string(t.iso_md)+".MIX", false);
     files.mount(std::string(t.iso)+".MIX");
+    if (!expansion) files.mount("ISOGEN.MIX", false);
     TheaterArt art; art.files_ = &files;
     art.palette_name_ = "ISO"+std::string(t.extension)+".PAL";
     const auto palette = files.read_file(art.palette_name_);
@@ -94,7 +104,8 @@ TheaterArt TheaterArt::load(fs::MixFileSystem& files, std::string_view theater) 
     return art;
 }
 
-const DecodedTile& TheaterArt::tile(std::uint32_t index, std::uint8_t subtile) {
+std::pair<std::uint32_t, std::uint8_t> TheaterArt::resolve(std::uint32_t index,
+                                                       std::uint8_t subtile) const {
     if (index == 0xffff || index == 0xffffffff) { index = clear_; subtile = 0; }
     else {
         const auto original = index;
@@ -106,10 +117,12 @@ const DecodedTile& TheaterArt::tile(std::uint32_t index, std::uint8_t subtile) {
         }
     }
     if (index >= filenames_.size()) throw RenderError("Map tile index outside theater catalog: "+std::to_string(index));
-    const auto key = std::make_pair(index, subtile);
-    if (const auto found = decoded_.find(key); found != decoded_.end()) return found->second;
-    auto container = containers_.find(index);
-    if (container == containers_.end()) {
+    return {index, subtile};
+}
+
+TmpImage& TheaterArt::container(std::uint32_t index) {
+    auto found = containers_.find(index);
+    if (found == containers_.end()) {
         auto name = filenames_[index];
         auto bytes = files_->read_file(name);
         // 0x00545150, LAB_0054673A: after editor-only marble art attempts,
@@ -119,11 +132,37 @@ const DecodedTile& TheaterArt::tile(std::uint32_t index, std::uint8_t subtile) {
             bytes = files_->read_file(name);
         }
         if (!bytes) throw RenderError("Missing terrain artwork: "+name);
-        try { container = containers_.emplace(index, TmpImage::parse(std::move(*bytes))).first; }
+        try { found = containers_.emplace(index, TmpImage::parse(std::move(*bytes))).first; }
         catch (const RenderError& e) { throw RenderError(name+": "+e.what()); }
     }
-    try { return decoded_.emplace(key, container->second.decode(subtile, palette_)).first->second; }
-    catch (const RenderError& e) { throw RenderError(filenames_[index]+" subtile "+std::to_string(subtile)+": "+e.what()); }
+    return found->second;
+}
+
+const DecodedTile& TheaterArt::tile(std::uint32_t index, std::uint8_t subtile) {
+    const auto key = resolve(index, subtile);
+    if (const auto found = decoded_.find(key); found != decoded_.end()) return found->second;
+    auto& image = container(key.first);
+    try { return decoded_.emplace(key, image.decode(key.second, palette_)).first->second; }
+    catch (const RenderError& e) {
+        throw RenderError(filenames_[key.first]+" subtile "+std::to_string(key.second)+": "+e.what());
+    }
+}
+
+const TmpRecord& TheaterArt::metadata(std::uint32_t index, std::uint8_t subtile) {
+    const auto key = resolve(index, subtile);
+    const auto& records = container(key.first).records();
+    if (key.second >= records.size() || !records[key.second].present)
+        throw RenderError("Missing terrain metadata for subtile");
+    return records[key.second];
+}
+
+std::int32_t TheaterArt::terrain_land_type(std::uint8_t raw) {
+    // Read from the original initialized table at 008288E4.
+    static constexpr std::array<std::int32_t, 16> table{
+        0,8,8,8,8,10,9,3,3,2,6,1,1,0,7,3
+    };
+    if (raw >= table.size()) throw RenderError("Invalid original TMP terrain category");
+    return table[raw];
 }
 
 Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry, TheaterArt& art) {

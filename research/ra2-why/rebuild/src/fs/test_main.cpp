@@ -87,9 +87,16 @@ int main(int argc, char** argv) {
         if (argc > 1 && std::string_view(argv[1]) == "--self-test") return 0;
         if (argc == 3 && std::string_view(argv[1]) == "--base-game") {
             MixFileSystem base(argv[2]);
+            base.mount_language(GameVariant::RedAlert2);
             base.bootstrap(GameVariant::RedAlert2);
+            base.mount_overlays();
+            base.mount_resources();
             require(base.read_file("RULES.INI").has_value(), "Base rules are missing");
             require(!base.read_file("RULESMD.INI"), "Expansion rules leaked into base game");
+            require(base.generics().count("CONQUER.MIX") && base.generics().count("CAMEO.MIX") &&
+                    base.generics().count("MULTI.MIX") && base.generics().count("THEME.MIX"),
+                    "Base startup resources did not load");
+            require(!base.maps().empty() && !base.movies().empty(), "Base map or movie archives missing");
             for (const auto* name : {"RA2MD.MIX", "CACHEMD.MIX", "LOCALMD.MIX"})
                 require(base.generics().count(name) == 0, "Expansion archive loaded by base game");
             bool rejected = false;
@@ -120,11 +127,8 @@ int main(int argc, char** argv) {
                 if (entry.size && entry.size <= 4096) { require(archive->read(entry).size() == entry.size, "Real payload read"); break; }
         }
         MixFileSystem fs(game);
+        fs.mount_language();
         fs.bootstrap(); fs.mount_overlays();
-        // The game's language initialization is outside these reconstructed
-        // stages. Supply its archives explicitly for the real-install test:
-        // their nested CAMEOMD/CAMEO archives are required by resources.
-        fs.mount("LANGMD.MIX"); fs.mount("LANGUAGE.MIX");
         fs.mount_resources();
         std::cout << "Mounted search order:\n";
         for (const auto& archive : fs.mixes()) print_archive(*archive);

@@ -21,6 +21,8 @@ public:
     std::shared_ptr<MixArchive> mount(std::string_view name, bool required = true);
     // Base: game.exe 0x00515C90; expansion: gamemd.exe 0x005301A0.
     void bootstrap(GameVariant variant = GameVariant::YurisRevenge);
+    // Original startup mounts language archives before bootstrap.
+    void mount_language(GameVariant variant = GameVariant::YurisRevenge);
     GameVariant variant() const noexcept { return variant_.value_or(GameVariant::YurisRevenge); }
     void mount_overlays();  // 0x00530000; called separately after bootstrap.
     void mount_resources(ResourceOptions options = {}); // 0x00530460
