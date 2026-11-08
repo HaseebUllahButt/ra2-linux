@@ -25,6 +25,9 @@ ObjectDamagePlan base_object_damage_prefix(const ObjectDamageInput &);
 struct ObjectDamageState {
   int health, maximum_health;
   bool active, has_trigger, redraw, type_present;
+  // Required when lethal damage can enter the original infantry branch.
+  // Infantry (15) without bypass needs unrecovered type +C00/object +5C3 state.
+  std::optional<int> original_kind;
 };
 enum class ObjectDamageActionKind { Trigger, HealingVirtual, DeathVirtual,
                                     DestroyVirtual, RedrawVirtual };

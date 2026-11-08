@@ -73,6 +73,10 @@ ObjectDamagePathResult base_object_damage_path(
     return result(0);
   }
 
+  if (state.health == 0 && !input.bypass_armor &&
+      (!state.original_kind || *state.original_kind == 15))
+    throw std::invalid_argument("original infantry death branch is unresolved");
+
   const int written_health = state.health;
   if (status == 2) {
     if (attacker && state.has_trigger)

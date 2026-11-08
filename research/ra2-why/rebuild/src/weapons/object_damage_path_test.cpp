@@ -14,7 +14,7 @@ int main() {
       input.immune = immune != 0;
       input.resolved_damage = resolved;
       ObjectDamageState state{input.health, input.maximum_health, active != 0,
-                              trigger != 0, redraw != 0, true};
+                              trigger != 0, redraw != 0, true, 1};
       std::vector<ObjectDamageAction> events;
       const auto result = base_object_damage_path(input, state, attacker,
           [&](const ObjectDamageAction &event, ObjectDamageState &current) {
@@ -32,6 +32,18 @@ int main() {
         std::cout << ' ' << static_cast<int>(event.kind) << ' ' << event.argument
                   << ' ' << event.attacker_argument;
       std::cout << '\n';
+    }
+    const ObjectDamageInput lethal{100,100,100,false,false,0.25,100};
+    for (const auto kind : {std::optional<int>{},std::optional<int>{15}}) {
+      ObjectDamageState state{100,100,true,false,false,true,kind};
+      unsigned calls=0;
+      bool rejected=false;
+      try {
+        base_object_damage_path(lethal,state,false,
+            [&](const ObjectDamageAction&,ObjectDamageState&) { ++calls; });
+      } catch (const std::invalid_argument&) { rejected=true; }
+      if (!rejected || calls)
+        throw std::runtime_error("unresolved infantry branch reached damage callbacks");
     }
     return 0;
   } catch (const std::exception &e) {

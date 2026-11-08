@@ -18,6 +18,8 @@ make -C rebuild build/weapons_occupant_test
 RA2_GAME_DIR="$PWD/game" python3 rebuild/src/weapons/verify_occupant_x86.py rebuild/build/weapons_occupant_test
 make -C rebuild build/weapons_object_damage_test
 RA2_GAME_DIR="$PWD/game" python3 rebuild/src/weapons/verify_object_damage_x86.py rebuild/build/weapons_object_damage_test
+make -C rebuild build/weapons_object_damage_path_test
+RA2_GAME_DIR="$PWD/game" python3 rebuild/src/weapons/verify_object_damage_path_x86.py rebuild/build/weapons_object_damage_path_test
 
 ```
 
@@ -123,6 +125,12 @@ stop before callbacks and do not change Simulation health. Original checks
 cover 4,096 shared prefixes, 2,059 Unit entry chains, and 120 death branches.
 The armor result and virtual checks use supplied test values. Derived damage,
 triggers, death effects, and removal remain required before live integration.
+`base_object_damage_path()` also models the shared handler's callback order.
+Its callback must run the real trigger or virtual handler and update the
+snapshot before processing continues. Lethal infantry damage without bypass
+remains unsupported. An unknown required object kind also blocks that path.
+The original comparison covers 4,096 paths with supplied callback changes.
+Unit and Techno derived handlers and real trigger execution remain separate.
 
 The asset test reads base `rules.ini`: HTNK uses 120mm; its damage is 90,
 ROF 65, projectile Cannon, speed 40 and warhead AP. Cannon is arcing and
