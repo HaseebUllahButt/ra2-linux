@@ -190,6 +190,9 @@ build/weapons_asset_test: build/native/src/weapons/asset_test.o $(FS_OBJECTS) bu
 build/weapons_lobber_asset_test: build/native/src/weapons/lobber_asset_test.o $(FS_OBJECTS) build/native/src/rules/ini_file.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
+build/weapons_fractional_tick_test: build/native/src/weapons/fractional_tick_test.o build/native/src/weapons/weapons.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
 scene: build/scene_test
 	build/scene_test ../game ../analysis/extracted/maps/2PEAKS.MAP
 

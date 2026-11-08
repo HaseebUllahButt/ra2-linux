@@ -8,6 +8,8 @@ python3 rebuild/src/weapons/verify_base_x86.py rebuild/build/weapons_test
 python3 rebuild/src/weapons/verify_trace_x86.py rebuild/build/weapons_test
 python3 rebuild/src/weapons/verify_object_x86.py rebuild/build/weapons_test
 python3 rebuild/src/weapons/verify_tick_x86.py rebuild/build/weapons_test
+make -C rebuild build/weapons_fractional_tick_test
+RA2_GAME_DIR="$PWD/game" python3 rebuild/src/weapons/verify_fractional_x86.py rebuild/build/weapons_fractional_tick_test
 
 ```
 
@@ -74,6 +76,10 @@ dispatch and the full lifecycle are outside this slice. The test compares
 1,536 connected base x86 cases. The original floor, map, building, alliance,
 height and terrain trace results use resolved stubs. A separate test compares
 2,048 object selection and collision cases against the original functions.
+`verify_fractional_x86.py` compares 32 original fractional launch vectors and
+eight consecutive updates per vector. All 256 snapshots match the original
+position and velocity. The world, height, and terrain trace remain supplied
+test inputs. This check does not prove near-ground motion or a full lifecycle.
 
 `base_area_impact_enabled()` matches the original area-damage entry gate.
 `base_resolved_impact_recipient()` matches the final recipient checks and returns
