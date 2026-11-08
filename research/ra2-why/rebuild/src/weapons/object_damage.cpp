@@ -48,6 +48,85 @@ ObjectDamagePlan base_object_damage_prefix(const ObjectDamageInput &in) {
   return out;
 }
 
+ObjectDamagePathResult base_object_damage_path(
+    const ObjectDamageInput &input, ObjectDamageState state, bool attacker,
+    const ObjectDamageCallback &callback) {
+  if (!callback || state.health != input.health ||
+      state.maximum_health != input.maximum_health || !state.type_present)
+    throw std::invalid_argument("object damage snapshot is incomplete");
+  const auto plan = base_object_damage_prefix(input);
+  state.health = plan.health;
+  int status = plan.severity;
+  const auto result = [&](int value, bool needs_armor = false) {
+    return ObjectDamagePathResult{state, plan.damage, value, needs_armor};
+  };
+  const auto emit = [&](ObjectDamageActionKind kind, int argument,
+                        bool with_attacker = false) {
+    callback(ObjectDamageAction{kind, argument, with_attacker}, state);
+  };
+  if (plan.stage == ObjectDamageStage::NeedsArmor)
+    return result(0, true);
+  if (plan.stage == ObjectDamageStage::NoChange)
+    return result(0);
+  if (plan.stage == ObjectDamageStage::HealingCallback) {
+    emit(ObjectDamageActionKind::HealingVirtual, 7);
+    return result(0);
+  }
+
+  const int written_health = state.health;
+  if (status == 2) {
+    if (attacker && state.has_trigger)
+      emit(ObjectDamageActionKind::Trigger, 0x27);
+    if (!state.active)
+      return result(5);
+    if (state.has_trigger)
+      emit(ObjectDamageActionKind::Trigger, 0x2a);
+  }
+  if (!state.active)
+    return result(5);
+  if (status == 3) {
+    if (attacker && state.has_trigger)
+      emit(ObjectDamageActionKind::Trigger, 0x28);
+    if (!state.active)
+      return result(5);
+    if (state.has_trigger)
+      emit(ObjectDamageActionKind::Trigger, 0x2b);
+  }
+  if (!state.active)
+    return result(5);
+  if (state.health != input.health && state.type_present &&
+      state.maximum_health == input.health) {
+    if (attacker && state.has_trigger)
+      emit(ObjectDamageActionKind::Trigger, 0x26);
+    if (state.has_trigger && state.active)
+      emit(ObjectDamageActionKind::Trigger, 0x29);
+    if (state.has_trigger) {
+      if (!state.active)
+        return result(5);
+      if (attacker)
+        emit(ObjectDamageActionKind::Trigger, 0x29, true);
+    }
+  }
+  if (!state.active || (written_health > 0 && state.health <= 0))
+    return result(5);
+  if (state.health == 0) {
+    emit(ObjectDamageActionKind::DeathVirtual, 0, attacker);
+    status = 4;
+    emit(ObjectDamageActionKind::DestroyVirtual, 1);
+  }
+  if (!state.active)
+    return result(status);
+  if (attacker && state.has_trigger && status != 4)
+    emit(ObjectDamageActionKind::Trigger, 6, true);
+  if (!state.active)
+    return result(status);
+  if (attacker && state.has_trigger && status != 4)
+    emit(ObjectDamageActionKind::Trigger, 0x2c, true);
+  if (state.active && status != 0 && state.redraw)
+    emit(ObjectDamageActionKind::RedrawVirtual, 2);
+  return result(status);
+}
+
 UnitDeathPlan base_unit_death_branch(const UnitDeathBranchInput &input) {
   if (input.type_field_bb8 <= 0)
     return {UnitDeathBranch::OrdinaryDeath, input.unit_field_5c0, input.health,

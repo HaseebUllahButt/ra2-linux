@@ -1,5 +1,6 @@
 #pragma once
 #include <optional>
+#include <functional>
 namespace ra2::weapons {
 // Base 005D3D20 through the first HP write. This is an isolated plan, not
 // Simulation damage. Callers must run the original derived and virtual
@@ -17,6 +18,30 @@ struct ObjectDamagePlan {
   int health, damage, severity;
 };
 ObjectDamagePlan base_object_damage_prefix(const ObjectDamageInput &);
+
+// Resolved state for the remainder of 005D3D20. The callback must reproduce
+// each original trigger or virtual call and update this snapshot synchronously.
+// This does not run the Unit or Techno derived handlers.
+struct ObjectDamageState {
+  int health, maximum_health;
+  bool active, has_trigger, redraw, type_present;
+};
+enum class ObjectDamageActionKind { Trigger, HealingVirtual, DeathVirtual,
+                                    DestroyVirtual, RedrawVirtual };
+struct ObjectDamageAction {
+  ObjectDamageActionKind kind;
+  int argument; // Trigger number, or original virtual argument.
+  bool attacker_argument;
+};
+using ObjectDamageCallback =
+    std::function<void(const ObjectDamageAction &, ObjectDamageState &)>;
+struct ObjectDamagePathResult {
+  ObjectDamageState state;
+  int damage, status;
+  bool needs_armor;
+};
+ObjectDamagePathResult base_object_damage_path(const ObjectDamageInput &,
+    ObjectDamageState, bool attacker_present, const ObjectDamageCallback &);
 
 // Base Unit damage 006FCA93..006FCAD5 after its parent returns status 4.
 // Type +BB8, Unit +5C0 and the virtual +360 call need their original owners.
