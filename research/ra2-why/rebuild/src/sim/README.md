@@ -825,3 +825,27 @@ Its missing-lookahead test preserves the distinction between entry dispatch and 
 All 184 earlier native path checks and 88 original vectors per edition remain unchanged.
 The original house threat table is supplied as resolved zero data. Original corner threat lookups still execute in the oracle.
 Live-world goal commands still need staged state and the original Foot goal-wrapper retry logic.
+
+## Movement-component tables and ground lookup
+
+`build_original_movement_regions()` ports the final graph/table phase of base 0054EBD0 and expansion 0056C510.
+It consumes original ordered coarse-region pairs and preserves the neighbor-list order.
+Each movement-zone row uses the original eligibility table, stack traversal, ascending seeds, and word-sized group labels.
+Label one records an ineligible region. Labels two and above identify eligible connected groups.
+The original dummy region zero receives 0xFFFF after each row is built.
+The caller still runs the remaining original goal and entry checks.
+Tube and bridge edges must already be resolved before a caller supplies them to this phase.
+
+`original_ground_component()` ports the ground-only tail of base 0054F8F0 and expansion 0056D230.
+It uses signed X/Y, the original width+height+1 stride, linear aliases, and index clamping.
+Its result reads the selected movement row through the raw region label.
+The above-bridge selection branch remains separate.
+`movement_zones.h` holds the shared original compatibility table used by both component and hierarchy searches.
+
+`original_movement_regions_check.py executable [--base] --vectors` executes the complete original coarse builder, component builder, and ground lookup.
+Its adapters supply memory allocation and fixed edge storage. Original graph decisions execute unchanged.
+It matches 256 complete graph/table/query hashes per edition.
+`test_movement_regions.sh` passes 512 graph hashes, 89,600 ground-query inputs, and ten invalid-state checks.
+The same checks pass with address and undefined-behavior sanitizers.
+All 25,606 existing hierarchy-route checks still pass after the compatibility table is shared.
+The Foot goal wrapper remains the next integration dependency.

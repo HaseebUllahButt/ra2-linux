@@ -1,19 +1,12 @@
 #include "hierarchy_route.h"
 #include "fp.h"
+#include "movement_zones.h"
 #include <algorithm>
 #include <cmath>
 #include <set>
 #include <stdexcept>
 namespace ra2::sim {
 namespace {
-// Base 007E00C4 / expansion 0082A594. One row per original movement-zone value.
-constexpr unsigned compatibility[][8]={
-    {1,2,2,2,2,2,2,3},{1,1,2,2,2,2,2,3},{1,1,1,2,2,2,2,3},
-    {1,1,1,1,1,1,2,3},{1,1,2,1,1,2,2,3},{1,2,2,1,1,2,2,3},
-    {1,1,1,2,2,2,1,3},{1,2,2,2,2,1,2,3},{1,1,1,2,2,1,2,3},
-    {1,1,1,1,1,1,1,3},{2,2,2,2,1,2,2,3},{2,2,2,1,1,2,2,3},
-    {1,1,1,2,2,2,2,3}
-};
 // Base 0079C4A4 / expansion 007E3794. Only category values zero through seven are read here.
 constexpr float category_cost[]={1,0,0,1,1,0,1,1};
 float single_zero(double value) {
@@ -28,7 +21,7 @@ struct Node { std::size_t parent; std::uint16_t zone; float cost; unsigned depth
 constexpr auto none=static_cast<std::size_t>(-1);
 }
 HierarchyRoute find_original_hierarchy_route(const Hierarchy& graph,const HierarchyRouteInputs& input) {
-    if ((input.edition!=DriveEdition::BaseRa2 && input.edition!=DriveEdition::YurisRevenge) || input.movement_zone>=(input.edition==DriveEdition::BaseRa2?12u:13u)) throw std::invalid_argument("original hierarchy movement-zone value is unsupported");
+    if (input.movement_zone>=original_movement_zone_count(input.edition)) throw std::invalid_argument("original hierarchy movement-zone value is unsupported");
     HierarchyRoute result;
     for (unsigned level=0;level<3;++level) {
         const auto& layer=graph.layers[level];
@@ -81,7 +74,7 @@ HierarchyRoute find_original_hierarchy_route(const Hierarchy& graph,const Hierar
                 const float cost=single_zero(fp::add(fp::add(category_cost[destination.category],node.cost),link.diagonal?0.001:0.0));
                 if (output.best_costs[link.node] && !(cost<*output.best_costs[link.node])) continue;
                 if (level<2 && !result.layers[level+1].allowed[destination.parent] && destination.category!=1) continue;
-                const auto compatible=compatibility[input.movement_zone][destination.category];
+                const auto compatible=original_movement_compatibility(input.edition,input.movement_zone,destination.category);
                 if (compatible!=1) continue;
                 if (blocked.count(pair_key(node.zone,link.node))) continue;
                 if (nodes.size()>=10000) throw std::length_error("original hierarchy scratch nodes exceed their verified storage");
