@@ -5,6 +5,18 @@
 #include <limits>
 
 namespace ra2::session {
+UnitUnlimboSuffix unit_unlimbo_suffix(std::uint8_t facing, bool unit_flag,
+    bool unit_suppress_flag, bool type_flag_a, bool type_flag_b, sim::Random& random) {
+    // Base 006FC95E / Yuri 00737BBE. The parent unlimbo must succeed first.
+    UnitUnlimboSuffix result{static_cast<std::uint16_t>(std::uint16_t(facing)<<8),
+                             std::nullopt,0,false};
+    if (unit_flag && !unit_suppress_flag) result.status=2;
+    if (type_flag_a || type_flag_b) {
+        result.timer_length=random.ranged(0,29);
+        result.timer_active=true;
+    }
+    return result;
+}
 std::int32_t multiplayer_house_color(std::int32_t selected_color) noexcept {
     // Base 006715D0 / Yuri 0069A310. Both original tables have these bytes.
     constexpr std::int32_t palette[]={3,11,21,29,13,25,17,15,5};

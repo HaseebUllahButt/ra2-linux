@@ -42,6 +42,16 @@ struct UnitAttemptResult { bool placed; StartPoint cell; };
 struct StartingUnit { std::size_t type_index; StartPoint cell; };
 enum class StartingMission { Guard=5, AreaGuard=11 };
 StartingMission starting_unit_mission(bool human) noexcept;
+// The successful Unit unlimbo suffix, after the parent placement call. Field
+// meanings beyond their original byte offsets remain unresolved.
+struct UnitUnlimboSuffix {
+    std::uint16_t facing_value;
+    std::optional<std::int32_t> status;
+    std::int32_t timer_length;
+    bool timer_active;
+};
+UnitUnlimboSuffix unit_unlimbo_suffix(std::uint8_t facing, bool unit_flag,
+    bool unit_suppress_flag, bool type_flag_a, bool type_flag_b, sim::Random& random);
 struct StartingUnitRun {
     std::vector<StartingUnit> placed;
     std::int32_t remaining_budget;

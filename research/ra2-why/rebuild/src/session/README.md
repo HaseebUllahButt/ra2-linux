@@ -92,6 +92,12 @@ instructions for 8,712 cases per edition. Build `geometry_cases.cpp` with
 index. `original_color_check.py` checks 17 inputs in each original executable.
 The house field copy still uses the selected color before that conversion.
 
+`unit_unlimbo_suffix` covers only the Unit code after its parent placement
+succeeds. It returns the facing argument, conditional status, and timer. The
+timer can consume a shared random draw. The parent placement and facing
+handler are still required. `original_unlimbo_check.py` checks 320 cases per
+edition, supplying success for the parent and observing the facing argument.
+
 For the optional original x86 comparison, build `chooser_cases.cpp` with
 `session.cpp`, `sim/random.cpp`, and `sim/distance.cpp`. Run
 `original_chooser_check.py game.exe chooser_cases` and repeat for `gamemd.exe`.
