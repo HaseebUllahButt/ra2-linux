@@ -5,7 +5,7 @@
 CXX ?= g++
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O2
 
-.PHONY: all test clean fs rules text loop gfx hook
+.PHONY: all test clean fs rules text loop gfx hook run-fs run-rules run-text run-loop run-gfx run-hook
 
 all: test
 
@@ -15,6 +15,12 @@ test: fs rules text loop gfx hook
 fs: run-fs
 
 rules: run-rules
+
+text: run-text
+
+loop: run-loop
+
+gfx: run-gfx
 
 hook: run-hook
 
@@ -42,8 +48,8 @@ clean:
 run-text:
 	$(CXX) $(CXXFLAGS) -I src/text src/text/csf.cpp \
 		src/text/test_csf.cpp -o src/text/test_csf
-	src/text/test_csf ../analysis/extracted/ra2.csf | head -3
-	src/text/test_csf ../analysis/extracted/ra2md.csf | head -3
+	src/text/test_csf ../analysis/extracted/ra2.csf
+	src/text/test_csf ../analysis/extracted/ra2md.csf
 
 run-loop:
 	$(CXX) $(CXXFLAGS) -I src/loop src/loop/game_loop.cpp \
