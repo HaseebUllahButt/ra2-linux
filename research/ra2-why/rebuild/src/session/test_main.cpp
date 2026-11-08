@@ -53,6 +53,18 @@ int main(int argc, char** argv) {
     assert(!session::choose_start_point(invalid,used,random,base));
     assert(!used[1] && !used[2] && !used[3]);
 
+    using session::StartingUnitType;
+    const std::vector<StartingUnitType> unit_types{
+        {true,1,1,100,false,std::nullopt}, {true,3,1,201,false,std::nullopt},
+        {true,1,1,3000,true,true}, {false,std::nullopt,std::nullopt,std::nullopt,false,std::nullopt}};
+    assert(session::starting_unit_budget(10,1,1,unit_types)==1510);
+    assert(session::starting_unit_budget(0,1,1,{})==0);
+    assert(session::starting_unit_budget(10,0,1,unit_types)==0);
+    auto incomplete=unit_types;
+    incomplete[0].cost.reset();
+    assert(!session::starting_unit_budget(10,1,1,incomplete));
+    assert(!session::starting_unit_budget(2147483647,1,1,unit_types));
+
     // Resolve the original BaseUnit order and ownership from each edition.
     for (const auto variant : {fs::GameVariant::RedAlert2,fs::GameVariant::YurisRevenge}) {
         fs::MixFileSystem source(root);
@@ -85,6 +97,22 @@ int main(int argc, char** argv) {
             assert(c!=countries->entries.end());
             return session::select_base_unit(candidates,static_cast<unsigned>(c-countries->entries.begin()));
         };
+        const auto american=std::find_if(countries->entries.begin(),countries->entries.end(),
+                                          [](const auto& entry){return entry.value=="Americans";});
+        const auto russian=std::find_if(countries->entries.begin(),countries->entries.end(),
+                                         [](const auto& entry){return entry.value=="Russians";});
+        assert(american!=countries->entries.end() && russian!=countries->entries.end());
+        const auto american_index=static_cast<unsigned>(american-countries->entries.begin());
+        const auto russian_index=static_cast<unsigned>(russian-countries->entries.begin());
+        const auto e1_cost=overlay.read_integer("E1","Cost",rules.read_integer("E1","Cost",-1));
+        const auto e2_cost=overlay.read_integer("E2","Cost",rules.read_integer("E2","Cost",-1));
+        assert(e1_cost==200 && e2_cost==100);
+        const std::vector<StartingUnitType> infantry{
+            {true,std::uint32_t{1}<<american_index,1,e1_cost,false,std::nullopt},
+            {true,std::uint32_t{1}<<russian_index,1,e2_cost,false,std::nullopt}};
+        assert(session::starting_unit_budget(10,1,std::uint32_t{1}<<american_index,infantry)==2000);
+        assert(session::starting_unit_budget(10,1,(std::uint32_t{1}<<american_index)|
+                                             (std::uint32_t{1}<<russian_index),infantry)==1500);
         const auto allied=for_country("Americans"), soviet=for_country("Russians");
         assert(allied && candidates[*allied].type=="AMCV");
         assert(soviet && candidates[*soviet].type=="SMCV");

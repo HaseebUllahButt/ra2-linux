@@ -22,6 +22,38 @@ std::optional<std::size_t> select_base_unit(const std::vector<BaseUnitCandidate>
     }
     return std::nullopt;
 }
+std::optional<std::int32_t> starting_unit_budget(std::int32_t unit_count,
+    std::int32_t tech_level, std::uint32_t house_mask,
+    const std::vector<StartingUnitType>& types) {
+    // 005D6D80 counts eligible types across the active houses. The engine
+    // excludes BaseUnit vehicles and uses each type's resolved Cost call.
+    if (unit_count<=0) return 0;
+    std::int64_t sum=0, count=0;
+    for (const auto& type : types) {
+        if (!type.allowed) return std::nullopt;
+        if (!*type.allowed) continue;
+        if (!type.owner_mask) return std::nullopt;
+        if (!(*type.owner_mask & house_mask)) continue;
+        if (!type.tech_level) return std::nullopt;
+        if (*type.tech_level>tech_level) continue;
+        if (type.vehicle) {
+            if (!type.base_unit) return std::nullopt;
+            if (*type.base_unit) continue;
+        }
+        if (!type.cost || *type.cost<0) return std::nullopt;
+        sum+=*type.cost;
+        ++count;
+        if (sum>std::numeric_limits<std::int32_t>::max()) return std::nullopt;
+    }
+    if (!count) count=1;
+    // 005D6EB8 rounds the average before multiplying by UnitCount.
+    const auto rounded=(sum+count/2)/count;
+    const auto budget=rounded*unit_count;
+    if (sum+count/2>std::numeric_limits<std::int32_t>::max() ||
+        budget>std::numeric_limits<std::int32_t>::max()) return std::nullopt;
+    return static_cast<std::int32_t>(budget);
+}
+
 namespace {
 std::optional<int> point_distance(StartPoint a, StartPoint b, const sim::OriginalDistance& distance) {
     // Base 005B7920 and expansion 005D6890 narrow the differences and result to signed 16-bit values.

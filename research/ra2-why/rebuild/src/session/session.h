@@ -16,6 +16,18 @@ HouseValues initialize_house_values(std::int32_t credits, std::int32_t color) no
 struct BaseUnitCandidate { std::string type; std::optional<std::uint32_t> owner_mask; };
 std::optional<std::size_t> select_base_unit(const std::vector<BaseUnitCandidate>& candidates,
                                             unsigned country_index);
+// Fields are resolved original type values, including the original Cost call.
+// Unknown fields block the result only when they are needed by the filter.
+struct StartingUnitType {
+    std::optional<bool> allowed;
+    std::optional<std::uint32_t> owner_mask;
+    std::optional<std::int32_t> tech_level, cost;
+    bool vehicle=false;
+    std::optional<bool> base_unit;
+};
+std::optional<std::int32_t> starting_unit_budget(std::int32_t unit_count,
+    std::int32_t tech_level, std::uint32_t house_mask,
+    const std::vector<StartingUnitType>& types);
 // Original waypoint cell coordinates are signed 16-bit values.
 struct StartPoint { std::int16_t x, y; };
 // Inclusive cell bounds and resolved map and object checks. The validation

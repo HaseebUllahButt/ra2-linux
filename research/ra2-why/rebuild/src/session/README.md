@@ -29,36 +29,13 @@ Yuri also validates each retry. The callbacks share the simulation RNG.
 The test compares 21 search traces and complete RNG states per edition against
 the original x86 code. The map and object checks are supplied test inputs.
 
+`starting_unit_budget` filters resolved starting types and computes the shared
+unit budget. Base `0x005B7CE0` and expansion `0x005D6D80` exclude BaseUnit
+vehicles, average eligible costs with original rounding, and multiply by the
+unit count. Unknown required inputs and arithmetic overflow return no result.
+
 This is not a complete skirmish session. House creation, final cash, additional
 units, actual map and unit placement checks, observers, and random waypoint
 fallback remain incomplete. Start must remain disabled.
 `Simulation.load_random_state` can restore the advanced setup RNG before ticks
 or queued commands. The complete session setup must supply that state.
-
-Run the native checks from the project root:
-
-    make -C rebuild session
-
-The test reads the real MP02T2 map from MULTI.MIX and both original executable
-distance tables. It does not write game assets.
-
-For the optional original x86 comparison, build `chooser_cases.cpp` with
-`session.cpp`, `sim/random.cpp`, and `sim/distance.cpp`. Run
-`original_chooser_check.py game.exe chooser_cases` and repeat for `gamemd.exe`.
-It needs Python Unicorn and `sim/original_image.py`. It runs 502 cases per
-edition. It compares the selected point, flags, random indexes, and all random
-state words. It replaces only debug logging.
-
-`original_base_unit_check.py` compares the native BaseUnit choice with the
-original selector. Build `base_unit_cases.cpp` with `session.cpp` and the same
-simulation sources. It runs 320 cases per edition. The country resolver is
-stubbed to provide the already resolved country index. The selector itself runs.
-
-`original_house_check.py` compares the multiplayer house field assignment with
-the original x86 instructions. Build `house_cases.cpp` with `session.cpp` and
-the same simulation sources. It runs 56 cases per edition without stubs.
-
-`original_placement_check.py` compares placement search traces against the
-original code with supplied map and object results. Build `placement_cases.cpp`
-with `session.cpp` and the same simulation sources. The real map occupancy and
-unit placement checks still need integration.
