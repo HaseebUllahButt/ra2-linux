@@ -5,6 +5,13 @@
 #include <limits>
 
 namespace ra2::session {
+std::int32_t multiplayer_house_color(std::int32_t selected_color) noexcept {
+    // Base 006715D0 / Yuri 0069A310. Both original tables have these bytes.
+    constexpr std::int32_t palette[]={3,11,21,29,13,25,17,15,5};
+    if (selected_color==-2) return palette[8];
+    if (selected_color>=0 && selected_color<9) return palette[selected_color];
+    return selected_color;
+}
 HouseValues initialize_house_values(std::int32_t credits, std::int32_t color) noexcept {
     // Base 004E8300; expansion 004FCE00. Both multiplayer human and AI
     // constructors call this before later map and starting-unit processing.

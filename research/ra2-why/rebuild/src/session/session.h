@@ -11,6 +11,8 @@ namespace ra2::session {
 // The multiplayer house constructor copies these values before later setup.
 struct HouseValues { std::int32_t initial_credits, cash, color, house_type_color; };
 HouseValues initialize_house_values(std::int32_t credits, std::int32_t color) noexcept;
+// Original multiplayer setup maps the selected color to a palette index.
+std::int32_t multiplayer_house_color(std::int32_t selected_color) noexcept;
 // Candidate order follows the resolved General/BaseUnit list. An unknown Owner
 // mask blocks selection because it could be the first matching candidate.
 struct BaseUnitCandidate { std::string type; std::optional<std::uint32_t> owner_mask; };
@@ -59,6 +61,15 @@ std::uint16_t finish_starting_unit_generation(sim::Random& random);
 // placement. Both may consume the same RNG. Use only when checks are resolved.
 struct PlacementBounds { std::int16_t left, top, right, bottom; };
 enum class PlacementEdition { Base, Yuri };
+// Original map Size and LocalSize use x, y, width, height.
+struct MapRectangle { std::int32_t x, y, width, height; };
+struct PlacementGeometry { std::int32_t width, height; MapRectangle local; };
+// Returns no geometry for unsupported or empty map dimensions.
+std::optional<PlacementGeometry> resolve_placement_geometry(MapRectangle size, MapRectangle local);
+// height and ramp are the resolved original Cell +11B/+11C. Yuri needs both.
+struct PlacementCell { std::int8_t height; std::uint8_t ramp; };
+std::optional<bool> placement_cell_in_map(StartPoint cell, PlacementEdition edition,
+    const PlacementGeometry& geometry, std::optional<PlacementCell> resolved_cell);
 using PlacementCheck = std::function<bool(StartPoint, sim::Random&)>;
 std::optional<StartPoint> find_initial_placement(StartPoint origin, PlacementBounds bounds,
     PlacementEdition edition, sim::Random& random, const PlacementCheck& valid, const PlacementCheck& place);

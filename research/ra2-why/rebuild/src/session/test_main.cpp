@@ -1,4 +1,5 @@
 #include "session.h"
+#include "placement_terrain.h"
 #include "../sim/distance.h"
 #include "../sim/sim.h"
 #include "../fs/mix_bootstrap.h"
@@ -11,6 +12,11 @@ using namespace ra2;
 int main(int argc, char** argv) {
     if (argc!=2) return 2;
     const std::string root=argv[1];
+    assert(session::multiplayer_house_color(-2)==5);
+    assert(session::multiplayer_house_color(-1)==-1);
+    assert(session::multiplayer_house_color(0)==3);
+    assert(session::multiplayer_house_color(7)==15);
+    assert(session::multiplayer_house_color(9)==9);
     for (int money : {0,2500,5000,10000}) for (int color=0;color<8;++color) {
         const auto fields=session::initialize_house_values(money,color);
         assert(fields.initial_credits==money && fields.cash==money &&
@@ -187,6 +193,54 @@ int main(int argc, char** argv) {
         real.push_back({static_cast<std::int16_t>(*value%1000),static_cast<std::int16_t>(*value/1000)});
     }
     assert(real.size()>=2 && real.size()<=8);
+    auto rectangle=[&](const char* key) {
+        const auto fields=ini.read_list("Map",key);
+        assert(fields.size()==4);
+        std::int32_t values[4];
+        for (std::size_t i=0;i<4;++i) {
+            const auto value=rules::IniFile::integer_value(fields[i]);
+            assert(value); values[i]=*value;
+        }
+        return session::MapRectangle{values[0],values[1],values[2],values[3]};
+    };
+    const auto geometry=session::resolve_placement_geometry(rectangle("Size"),rectangle("LocalSize"));
+    assert(geometry);
+    // Build a complete fixture with real map dimensions. These height and
+    // ramp values are fixtures, not decoded terrain from the map.
+    sim::TerrainCells terrain;
+    for (int y=0;y<512;++y) for (int x=0;x<512;++x) {
+        const session::StartPoint point{static_cast<std::int16_t>(x),static_cast<std::int16_t>(y)};
+        const auto allocated=session::placement_cell_in_map(point,session::PlacementEdition::Base,*geometry,std::nullopt);
+        assert(allocated);
+        if (*allocated) {
+            sim::TerrainCell cell;
+            cell.cell={static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)};
+            cell.height_level=0; cell.ramp_index=0;
+            terrain.push_back(cell);
+        }
+    }
+    auto grid=session::PlacementTerrain::create(*geometry,terrain); assert(grid);
+    for (const auto point:real) {
+        const auto present=grid->in_map(point,session::PlacementEdition::Base);
+        assert(present && *present);
+        const auto actual=grid->in_map(point,session::PlacementEdition::Yuri);
+        const auto expected=session::placement_cell_in_map(point,session::PlacementEdition::Yuri,*geometry,session::PlacementCell{0,0});
+        assert(actual==expected);
+    }
+    terrain.front().height_level.reset();
+    grid=session::PlacementTerrain::create(*geometry,terrain); assert(grid);
+    const session::StartPoint unknown{static_cast<std::int16_t>(terrain.front().cell.x),static_cast<std::int16_t>(terrain.front().cell.y)};
+    assert(!grid->in_map(unknown,session::PlacementEdition::Yuri));
+    // The engine uses a linear index, so x+512 aliases the next grid row.
+    if (unknown.y>0) {
+        const session::StartPoint alias{static_cast<std::int16_t>(unknown.x+512),static_cast<std::int16_t>(unknown.y-1)};
+        assert(!grid->in_map(alias,session::PlacementEdition::Yuri));
+    }
+    auto duplicate=terrain;
+    duplicate.back()=duplicate.front();
+    assert(!session::PlacementTerrain::create(*geometry,duplicate));
+    terrain.push_back(terrain.front());
+    assert(!session::PlacementTerrain::create(*geometry,terrain));
     sim::Random random_base(42), random_yuri(42);
     std::vector<bool> used_base(real.size(),false),used_yuri(real.size(),false);
     for (std::size_t i=0;i<real.size();++i) {

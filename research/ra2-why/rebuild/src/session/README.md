@@ -67,8 +67,24 @@ Run the native checks from the project root:
 
     make -C rebuild session
 
+
 The test reads the real MP02T2 map from MULTI.MIX and both original executable
 distance tables. It does not write game assets.
+
+`PlacementTerrain` takes a complete simulation terrain snapshot. It rejects
+missing or duplicate allocated cells. Unknown height or ramp values remain
+unresolved. It does not check unit occupancy or create houses or units. The
+MP02T2 test uses real map bounds and waypoints with fixture terrain values.
+Use the snapshot from the original placement phase. A later terrain pass can
+change those values.
+
+`original_geometry_check.py` runs original map clipping and map boundary
+instructions for 8,712 cases per edition. Build `geometry_cases.cpp` with
+`map_geometry.cpp`. Supply each original executable and the case binary.
+
+`multiplayer_house_color` converts a selected color to the original palette
+index. `original_color_check.py` checks 17 inputs in each original executable.
+The house field copy still uses the selected color before that conversion.
 
 For the optional original x86 comparison, build `chooser_cases.cpp` with
 `session.cpp`, `sim/random.cpp`, and `sim/distance.cpp`. Run
