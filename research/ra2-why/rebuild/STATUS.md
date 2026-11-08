@@ -1,0 +1,14 @@
+# Rebuild status
+
+| layer | state | verified |
+|---|---|---|
+| fs (MIX archives) | done | yes - all 16 archives, encrypted headers, key cross-check |
+| rules (INI) | done | yes - real rulesmd.ini, 65+80+403+105+12 entries |
+| text (CSF) | done | yes - both tables, 9,690 strings |
+| loop (game loop) | done | yes - six phases, 100 frames, sanitizer clean |
+| gfx (SHP/palette) | done | yes - 12 SHPs, 410 frames, PPM preview |
+| hook (DLL) | skeleton | trampoline tested; Windows cross-compile pending mingw |
+| naming | in flight | job G running: 20 named so far, target 150+ |
+
+One command: make test. Every finished layer compiles and passes
+against the real game data.
