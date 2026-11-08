@@ -81,7 +81,8 @@ change those values.
 `real_terrain_test.cpp` loads ALL02S.MAP and theater assets from the original
 base game. It builds the full cell grid and runs the recovered first terrain
 pass before checking every cell. The boundary comparison tests the adapter;
-it does not execute the original executable on those map cells.
+`--cases` emits the resolved cells for `original_geometry_check.py`. Both
+original executables match all 15,525 real first-pass cell checks.
 
 `original_geometry_check.py` runs original map clipping and map boundary
 instructions for 8,712 cases per edition. Build `geometry_cases.cpp` with

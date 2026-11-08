@@ -7,7 +7,8 @@
 
 using namespace ra2;
 int main(int argc, char** argv) {
-    if (argc!=2) return 2;
+    if (argc<2 || argc>3 || (argc==3 && std::string(argv[2])!="--cases")) return 2;
+    const bool cases=argc==3;
     const std::string game=argv[1], map_name="ALL02S.MAP";
     rules::IniFile map, rules;
     map.parse(original_test_ini(game,map_name,true));
@@ -60,8 +61,18 @@ int main(int argc, char** argv) {
             const auto expected=session::placement_cell_in_map(point,session::PlacementEdition::Yuri,*geometry,
                 session::PlacementCell{static_cast<std::int8_t>(*cell.height_level),static_cast<std::uint8_t>(*cell.ramp_index)});
             assert(result==expected); ++known;
+            if (cases) {
+                const auto raw=rectangle("LocalSize");
+                const auto base=grid->in_map(point,session::PlacementEdition::Base);
+                assert(base && expected);
+                std::cout<<geometry->width<<' '<<geometry->height<<' '
+                    <<raw.x<<' '<<raw.y<<' '<<raw.width<<' '<<raw.height<<' '
+                    <<geometry->local.x<<' '<<geometry->local.y<<' '<<geometry->local.width<<' '<<geometry->local.height<<' '
+                    <<point.x<<' '<<point.y<<' '<<*cell.height_level<<' '<<*cell.ramp_index<<' '
+                    <<int(*base)<<' '<<int(*expected)<<'\n';
+            }
         } else { assert(!result); ++unknown; }
     }
     assert(known>0);
-    std::cout<<map_name<<" first terrain pass: "<<known<<" resolved, "<<unknown<<" unknown cells\n";
+    if (!cases) std::cout<<map_name<<" first terrain pass: "<<known<<" resolved, "<<unknown<<" unknown cells\n";
 }
