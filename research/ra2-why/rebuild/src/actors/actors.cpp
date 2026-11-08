@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <array>
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -24,6 +25,46 @@ unsigned infantry_direction(std::uint8_t map_facing) noexcept {
     static constexpr unsigned facing[32] = {7,7,6,6,6,6,5,5,5,5,4,4,4,4,3,3,
                                              3,3,2,2,2,2,1,1,1,1,0,0,0,0,7,7};
     return facing[((unsigned(map_facing) / 4 + 1) / 2) & 31];
+}
+int projected_height(std::int32_t z) noexcept {
+    // 0x006D1830 and 0x006D18C0 initialize the diagonal and 60-degree
+    // angle. 0x006D1BB0 uses the engine's square-root and sine tables.
+    // These are the exact float table outputs at the fixed input values.
+    constexpr double diagonal = 362.038665771484375;
+    constexpr double sine = 0.86589753627777099609375;
+    constexpr double scale = (60.0 / diagonal) * sine;
+    // 0x006D1F10 adds one at height 728, then 0.5 before truncation.
+    return static_cast<int>(z * scale + (z >= 728 ? 1.0 : 0.0) + 0.5);
+}
+ScreenPoint project_world(WorldPosition position, ScreenPoint viewport) {
+    if (position.z < std::numeric_limits<std::int32_t>::min() ||
+        position.z > std::numeric_limits<std::int32_t>::max())
+        throw std::runtime_error("world height out of range");
+    return project_world(position, projected_height(static_cast<std::int32_t>(position.z)), viewport);
+}
+ScreenPoint project_world(WorldPosition position, int height_pixels, ScreenPoint viewport) {
+    constexpr auto low = std::numeric_limits<std::int32_t>::min();
+    constexpr auto high = std::numeric_limits<std::int32_t>::max();
+    if (position.x < low || position.x > high || position.y < low || position.y > high ||
+        viewport.x < low || viewport.x > high || viewport.y < low || viewport.y > high)
+        throw std::runtime_error("world projection coordinates out of range");
+    // 0x006D2140 projects world XY, subtracts projected Z and viewport.
+    const auto x = (position.x * 30 - position.y * 30) / 256;
+    const auto y = (position.x * 15 + position.y * 15) / 256;
+    return {x - viewport.x, y - height_pixels - viewport.y};
+}
+WorldPosition infantry_position(ra2map::Cell cell, unsigned subcell, std::int32_t z) {
+    // 0x0048E480 initializes the five offsets. 0x0051FB00 adds them
+    // to the cell coordinates and obtains the terrain height separately.
+    static constexpr int offsets[5][2] = {{128,128},{64,64},{192,64},{64,192},{192,192}};
+    if (subcell >= 5) throw std::runtime_error("invalid infantry subcell");
+    return {std::int64_t(cell.x) * 256 + offsets[subcell][0],
+            std::int64_t(cell.y) * 256 + offsets[subcell][1], z};
+}
+WorldPosition building_draw_position(ra2map::Cell cell, std::int32_t z) {
+    // 0x0044F820 stores cell*256+128. The building draw-position virtual
+    // at 0x00459EF0 subtracts 128 from both coordinates.
+    return {std::int64_t(cell.x) * 256, std::int64_t(cell.y) * 256, z};
 }
 WorldPosition building_center(ra2map::Cell cell, unsigned width,
                               unsigned height, std::int32_t z) {

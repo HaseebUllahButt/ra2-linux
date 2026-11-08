@@ -12,6 +12,15 @@ namespace ra2::actors {
 enum class Kind { Infantry, Building, Effect, Terrain };
 struct ScreenPoint { std::int64_t x, y; };
 struct WorldPosition { std::int64_t x, y, z; };
+// Original height projection for the fixed tactical geometry.
+int projected_height(std::int32_t world_z) noexcept;
+ScreenPoint project_world(WorldPosition position, ScreenPoint viewport);
+// Supply an already projected Z value, for callers that have it.
+ScreenPoint project_world(WorldPosition position, int height_pixels, ScreenPoint viewport);
+// Map placement of a stationary infantry unit; world_z is the resolved terrain height.
+WorldPosition infantry_position(ra2map::Cell cell, unsigned subcell, std::int32_t world_z);
+// Base world point used by the building draw caller before projection.
+WorldPosition building_draw_position(ra2map::Cell cell, std::int32_t world_z);
 // Original building center in engine world units, before screen projection.
 WorldPosition building_center(ra2map::Cell cell, unsigned foundation_width,
                               unsigned foundation_height, std::int32_t world_z);

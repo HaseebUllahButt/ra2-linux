@@ -29,10 +29,14 @@ The `load_attached` function resolves named building animation keys, such as
 Terrain objects use the theater-specific extension from the original table.
 
 `building_center` returns the original building center in world units from
-cell and foundation dimensions. `main_canvas_origin` converts an already
-computed screen anchor to a main SHP canvas origin. `0x00705E00` sets the
+cell and foundation dimensions. `building_draw_position` returns the separate
+world point projected by the building draw caller. `infantry_position` uses
+the five original subcell offsets. `project_world` applies the original fixed
+height projection and the viewport offset. `main_canvas_origin` converts the
+resulting screen anchor to a main SHP canvas origin. `0x00705E00` sets the
 centered-draw flag, and `0x004AED70` subtracts half the nominal canvas size.
-The caller must still calculate the anchor and depth.
+The caller supplies terrain height and any locomotor draw offset. Depth remains
+unresolved.
 
 The code does not yet recover automatic animation state
 transitions, fixed-facing changes, building animation overlays, effect timing,
