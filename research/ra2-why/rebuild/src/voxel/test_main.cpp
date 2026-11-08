@@ -67,6 +67,14 @@ int main(int argc, char **argv) {
                                  std::to_string(hash));
     }
     auto h = read_hva(hb);
+    auto base_camera = base_game_camera();
+    if (base_camera[0] != 0.7081906199455261f ||
+        base_camera[6] != 0.865897536277771f)
+      throw std::runtime_error("base camera mismatch");
+    auto base_face = base_facing_transform(0x8000, 17);
+    if (base_face[0] != 0.0015339801320806146f ||
+        base_face[7] != -1.999997615814209f)
+      throw std::runtime_error("base facing mismatch");
     if (v.sections.empty() || v.sections[0].points.empty() || h.frames != 1 ||
         p.tables.size() != 32)
       throw std::runtime_error("asset mismatch");
@@ -238,6 +246,74 @@ int main(int argc, char **argv) {
                                  {-0.671214f, -0.198492f, 0.714194f}, 1);
     if (dark[0] != 0 || dark[253] != 16 || opposite[0] != 16)
       throw std::runtime_error("double light mismatch");
+    auto turret_model = read_vxl(get("htnktur.vxl"));
+    auto turret_animation = read_hva(get("htnktur.hva"));
+    auto barrel_model = read_vxl(get("htnkbarl.vxl"));
+    auto barrel_animation = read_hva(get("htnkbarl.hva"));
+    VehiclePose vehicle;
+    vehicle.hull = {&v, &h, 0, test_light};
+    vehicle.turret = {&turret_model, &turret_animation, 0, test_light};
+    vehicle.barrel = {&barrel_model, &barrel_animation, 0, test_light};
+    vehicle.hull_facing = 0x4000;
+    vehicle.turret_facing = 0x4000;
+    vehicle.turret_offset = 16;
+    auto first_vehicle = draw_vehicle(vehicle, p);
+    vehicle.turret_facing = 0x8000;
+    auto transforms = vehicle_matrices(vehicle);
+    const Matrix expected_turret = {0.0015339801320806146f,
+                                    0.9999988079071045f,
+                                    0,
+                                    0.003067960264161229f,
+                                    -0.9999988079071045f,
+                                    0.0015339801320806146f,
+                                    0,
+                                    -1.999997615814209f,
+                                    0,
+                                    0,
+                                    1,
+                                    0};
+    const Matrix expected_barrel = {0.0015339801320806146f,
+                                    0.9999988079071045f,
+                                    0,
+                                    0.003067731624469161f,
+                                    -0.9999988079071045f,
+                                    0.0015339801320806146f,
+                                    0,
+                                    -1.9999973773956299f,
+                                    0,
+                                    0,
+                                    1,
+                                    0};
+    for (unsigned i = 0; i < 12; ++i)
+      if (std::abs(transforms.turret[i] - expected_turret[i]) > 0.000001f ||
+          std::abs(transforms.barrel[i] - expected_barrel[i]) > 0.000001f)
+        throw std::runtime_error("base vehicle placement mismatch");
+    vehicle.turret_facing = 0x2000;
+    vehicle.barrel_tilt = 0;
+    vehicle.turret_offset = -16;
+    auto tilted = vehicle_matrices(vehicle);
+    const Matrix expected_tilted = {
+        0.0010846876539289951f, -0.7071067690849304f,
+        -0.7071058750152588f,   -0.4157473146915436f,
+        0.0010846876539289951f, 0.7071067690849304f,
+        -0.7071058750152588f,   -0.41574758291244507f,
+        0.9999988079071045f,    0,
+        0.0015339801320806146f, -1.4142117500305176f};
+    for (unsigned i = 0; i < 12; ++i)
+      if (std::abs(tilted.barrel[i] - expected_tilted[i]) > 0.000002f)
+        throw std::runtime_error("base tilted barrel mismatch");
+    vehicle.turret_facing = 0x8000;
+    vehicle.barrel_tilt = 0x4000;
+    vehicle.turret_offset = 16;
+    auto second_vehicle = draw_vehicle(vehicle, p);
+    std::size_t vehicle_diff = 0;
+    for (std::size_t i = 0; i < first_vehicle.image.pixels.size(); ++i) {
+      auto a = first_vehicle.image.pixels[i],
+           b = second_vehicle.image.pixels[i];
+      vehicle_diff += a.r != b.r || a.g != b.g || a.b != b.b || a.a != b.a;
+    }
+    if (!vehicle_diff)
+      throw std::runtime_error("turret facing did not change vehicle");
     auto light = single_light(2, {0.671214f, 0.198492f, -0.714194f});
     if (light[0] != 16 || light[253] != 16 || light[254] != 16 ||
         light[255] != 16)

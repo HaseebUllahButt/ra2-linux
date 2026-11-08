@@ -6,6 +6,8 @@
 #include <stdexcept>
 namespace ra2::voxel {
 namespace {
+#include "base_facing.inc"
+#include "base_tilt.inc"
 #include "normal_vectors.inc"
 void check(const Bytes &b, std::size_t p, std::size_t n) {
   if (p > b.size() || n > b.size() - p)
@@ -496,6 +498,26 @@ Matrix game_camera() {
   return {c, c, 0, 0, -0.5f * c, 0.5f * c, s, 0, s * c, -s * c, 0.5f, 0};
 }
 
+Matrix base_game_camera() {
+  return {0.7081906199455261f,
+          0.706021249294281f,
+          0,
+          0,
+          -0.3531669080257416f,
+          0.35425207018852234f,
+          0.865897536277771f,
+          0,
+          0.6113420128822327f,
+          -0.6132205128669739f,
+          0.5002213716506958f,
+          0};
+}
+Matrix base_facing_transform(std::uint16_t facing, std::int32_t offset) {
+  unsigned direction = (((unsigned(facing) >> 10) + 1) >> 1) & 31;
+  float c = base_facing[direction][0], s = base_facing[direction][1];
+  float distance = float(offset / 8);
+  return {c, -s, 0, c * distance, s, c, 0, s * distance, 0, 0, 1, 0};
+}
 Matrix facing_transform(std::uint16_t facing, std::int32_t offset) {
   unsigned direction = (((unsigned(facing) >> 10) + 1) >> 1) & 31;
   float angle = float((int(direction) - 8) * -0.19634954084936207);
@@ -537,6 +559,53 @@ Matrix barrel_transform(Matrix base, std::uint16_t rotation,
   return base;
 }
 
+static Matrix base_barrel_transform(Matrix base, std::uint16_t rotation,
+                                    std::uint16_t tilt) {
+  for (float value : base)
+    if (!std::isfinite(value))
+      throw std::runtime_error("invalid barrel matrix");
+  auto direction = [](std::uint16_t value) {
+    return (((unsigned(value) >> 10) + 1) >> 1) & 31;
+  };
+  const std::array<float, 3> pivot{base[3], base[7], base[11]};
+  auto translate = [&](float sign) {
+    for (unsigned row = 0; row < 3; ++row)
+      base[row * 4 + 3] +=
+          sign * (base[row * 4] * pivot[0] + base[row * 4 + 1] * pivot[1] +
+                  base[row * 4 + 2] * pivot[2]);
+  };
+  translate(-1);
+  float cz = base_facing[direction(rotation)][0];
+  float sz = base_facing[direction(rotation)][1];
+  for (unsigned row = 0; row < 3; ++row) {
+    float a = base[row * 4], b = base[row * 4 + 1];
+    base[row * 4] = a * cz + b * sz;
+    base[row * 4 + 1] = b * cz - a * sz;
+  }
+  float cy = base_tilt[direction(tilt)][0];
+  float sy = base_tilt[direction(tilt)][1];
+  for (unsigned row = 0; row < 3; ++row) {
+    float a = base[row * 4], b = base[row * 4 + 2];
+    base[row * 4] = a * cy - b * sy;
+    base[row * 4 + 2] = a * sy + b * cy;
+  }
+  translate(1);
+  return base;
+}
+
+static Matrix multiply(const Matrix &a, const Matrix &b) {
+  Matrix result{};
+  for (unsigned row = 0; row < 3; ++row) {
+    for (unsigned column = 0; column < 3; ++column)
+      for (unsigned k = 0; k < 3; ++k)
+        result[row * 4 + column] += a[row * 4 + k] * b[k * 4 + column];
+    result[row * 4 + 3] = a[row * 4 + 3];
+    for (unsigned k = 0; k < 3; ++k)
+      result[row * 4 + 3] += a[row * 4 + k] * b[k * 4 + 3];
+  }
+  return result;
+}
+
 SceneImage draw_scene(const std::vector<ScenePart> &parts,
                       const Lighting &lighting) {
   struct Job {
@@ -548,18 +617,6 @@ SceneImage draw_scene(const std::vector<ScenePart> &parts,
   std::vector<Job> jobs;
   std::array<float, 3> minimum{INFINITY, INFINITY, INFINITY};
   std::array<float, 3> maximum{-INFINITY, -INFINITY, -INFINITY};
-  auto multiply = [](const Matrix &a, const Matrix &b) {
-    Matrix result{};
-    for (unsigned row = 0; row < 3; ++row) {
-      for (unsigned column = 0; column < 3; ++column)
-        for (unsigned k = 0; k < 3; ++k)
-          result[row * 4 + column] += a[row * 4 + k] * b[k * 4 + column];
-      result[row * 4 + 3] = a[row * 4 + 3];
-      for (unsigned k = 0; k < 3; ++k)
-        result[row * 4 + 3] += a[row * 4 + k] * b[k * 4 + 3];
-    }
-    return result;
-  };
   for (const auto &part : parts) {
     if (!part.model || !part.animation ||
         part.frame >= part.animation->frames ||
@@ -622,6 +679,52 @@ SceneImage draw_scene(const std::vector<ScenePart> &parts,
       result.image.pixels[i] = lighting.palette[indices[i]];
   return result;
 }
+VehicleMatrices vehicle_matrices(const VehiclePose &vehicle) {
+  Matrix hull = base_facing_transform(vehicle.hull_facing, 0);
+  Matrix turret =
+      base_facing_transform(vehicle.turret_facing, vehicle.turret_offset);
+  Matrix base = vehicle.turret.model ? turret : Matrix{1, 0, 0, 0, 0, 1,
+                                                       0, 0, 0, 0, 1, 0};
+  auto rotation =
+      vehicle.turret.model ? std::uint16_t(0x4000) : vehicle.turret_facing;
+  Matrix barrel = base_barrel_transform(base, rotation, vehicle.barrel_tilt);
+  return {hull, turret, barrel};
+}
+SceneImage draw_vehicle(const VehiclePose &vehicle, const Lighting &lighting) {
+  if (!vehicle.hull.model || !vehicle.hull.animation)
+    throw std::runtime_error("vehicle hull is missing");
+  std::vector<ScenePart> parts;
+  std::vector<Animation> scaled_animations;
+  scaled_animations.reserve(3);
+  auto append = [&](const VehiclePart &source, const Matrix &local) {
+    if ((source.model == nullptr) != (source.animation == nullptr))
+      throw std::runtime_error("incomplete vehicle part");
+    if (!source.model)
+      return;
+    if (!source.animation->frames)
+      throw std::runtime_error("empty vehicle animation");
+    scaled_animations.push_back(*source.animation);
+    scale_hva_translations(scaled_animations.back(), *source.model);
+    parts.push_back({source.model, &scaled_animations.back(),
+                     multiply(base_game_camera(), local),
+                     source.frame % source.animation->frames,
+                     source.normal_light});
+  };
+  auto matrices = vehicle_matrices(vehicle);
+  append(vehicle.hull, matrices.hull);
+  // Base caller 0x43B14A chooses which side of the turret receives the barrel.
+  const unsigned quadrant =
+      (((unsigned(vehicle.turret_facing) >> 13) + 1) >> 1) & 3;
+  if (quadrant == 0 || quadrant == 3) {
+    append(vehicle.barrel, matrices.barrel);
+    append(vehicle.turret, matrices.turret);
+  } else {
+    append(vehicle.turret, matrices.turret);
+    append(vehicle.barrel, matrices.barrel);
+  }
+  return draw_scene(parts, lighting);
+}
+
 Image raster_rgba(const Section &section, const std::array<float, 12> &matrix,
                   const Lighting &lighting,
                   const std::array<std::uint8_t, 256> &normal_light) {

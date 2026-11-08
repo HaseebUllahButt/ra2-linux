@@ -86,13 +86,36 @@ struct SceneImage {
 };
 // Default game camera from the original initialization at 0x7558CE.
 Matrix game_camera();
+// Original base game.exe values, including its angle lookup precision.
+Matrix base_game_camera();
 // Original 32-step facing and X offset from 0x43E085 through 0x43E0E3.
 Matrix facing_transform(std::uint16_t facing, std::int32_t offset);
+Matrix base_facing_transform(std::uint16_t facing, std::int32_t offset);
 // Pivot rotation sequence at 0x43E439 through 0x43E52D.
 Matrix barrel_transform(Matrix base, std::uint16_t rotation,
                         std::uint16_t tilt);
 // Multi-part alignment remains unverified against the game.
 SceneImage draw_scene(const std::vector<ScenePart> &, const Lighting &);
+// Animation must contain unscaled values from read_hva().
+struct VehiclePart {
+  const Model *model = nullptr;
+  const Animation *animation = nullptr;
+  unsigned frame = 0;
+  std::array<std::uint8_t, 256> normal_light{};
+};
+struct VehiclePose {
+  VehiclePart hull, turret, barrel;
+  std::uint16_t hull_facing = 0, turret_facing = 0, barrel_tilt = 0x4000;
+  std::int32_t turret_offset = 0;
+};
+struct VehicleMatrices {
+  Matrix hull, turret, barrel;
+};
+// Local part matrices before camera projection.
+VehicleMatrices vehicle_matrices(const VehiclePose &);
+// Flat, stationary vehicle. Part order and multi-part alignment remain
+// provisional.
+SceneImage draw_vehicle(const VehiclePose &, const Lighting &);
 // Convert the original 256x256 lit indexed raster to RGBA.
 Image raster_rgba(const Section &, const std::array<float, 12> &matrix,
                   const Lighting &,
