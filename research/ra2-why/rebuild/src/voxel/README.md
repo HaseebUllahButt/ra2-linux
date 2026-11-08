@@ -26,11 +26,11 @@ The caller must supply a light vector in section coordinates. Original projectio
 
 `double_light` follows `0x7586F0` for two section-space light vectors and the original normal tables. The game transforms the lights before this call in `0x753D00`. Light levels are limited to the available 32 VPL rows by this API.
 
-`make_default_lighting` follows `0x758B70` and `0x758EA0`. It selects the closest palette entry inside or outside the reserved range, according to the source index. `team_colors` replaces that reserved range. On the shipped VOXELS.VPL, the generated tables match 8,159 of 8,160 nonzero-index bytes. The remaining byte needs a rounding investigation. The shipped tables remain available unchanged through `read_vpl`.
+`make_default_lighting` follows `0x758B70` and `0x758EA0`. It selects the closest palette entry inside or outside the reserved range, according to the source index. `team_colors` replaces that reserved range. On the shipped VOXELS.VPL, the generated tables match all 8,160 nonzero-index bytes with the documented `-O2` build. An `-O1` build matches 8,159 bytes. The remaining byte needs a rounding investigation. The shipped tables remain available unchanged through `read_vpl`.
 
 Full vehicle projection and coverage remain unresolved. `0x754510` sorts and draws sections. `0x756590` selects a raster routine from `0x846840`. Those routines include `0x7DF7C0`. The decompiler omits floating-point stack values in these paths. The current image is still experimental. Shadow transform and raster behavior also remain unresolved.
 
-The VPL mismatch is row 14, source index 130. The source color is `(199, 175, 115)`. The shipped table selects index 177, `(255, 247, 111)`; this implementation selects index 178, `(255, 235, 107)`. At the ideal factor 1.3, both squared distances equal 1876.19. Floating-point rounding changes the tie. The original VPL bytes remain unchanged when loaded.
+The VPL mismatch is row 14, source index 130. The source color is `(199, 175, 115)`. The shipped table selects index 177, `(255, 247, 111)`; the `-O1` build selects index 178, `(255, 235, 107)`. The documented `-O2` build selects 177. At the ideal factor 1.3, both squared distances equal 1876.19. Floating-point rounding changes the tie. The original VPL bytes remain unchanged when loaded.
 
 `project_ground_corners` implements the ground-bound transforms in `0x753F90`. `ground_coverage` implements the unoccluded column mask in `0x756860`. Its fixed-point buffer is 256 by 256. It marks two horizontal bytes for every occupied column. At the last byte, it clips the second write to keep the result bounded. The original supports a separate occlusion surface, which this API does not implement.
 
@@ -40,4 +40,14 @@ The VPL mismatch is row 14, source index 130. The source color is `(199, 175, 11
 python3 rebuild/src/voxel/verify_coverage_x86.py
 ```
 
-These checks do not establish full vehicle projection or voxel pixel coverage. The lower raster function selected by `0x756590`, including `0x7DF7C0`, still needs reconstruction and original-code comparisons.
+These checks do not establish full vehicle projection or voxel pixel coverage. The non-depth raster paths now have original-code comparisons. Depth-buffer and whole-vehicle composition still need reconstruction and original-code comparisons.
+
+`raster_section` implements the non-depth indexed paths selected by `0x756590`, including `0x7DF7C0`, `0x7DF8C0`, and the per-normal VPL variants. It takes the caller's complete section-to-view matrix. `raster_rgba` applies the selected palette, including team colors, and treats index zero as transparent. It does not assemble a whole vehicle or reproduce the game's camera and depth-buffer paths.
+
+The tests compare all 65,536 indexed pixels by hash for eight HTNK directions, with and without VPL lighting. They also compare two lit MTNKTUR views. These 18 expected hashes come from original x86 execution. Reproduce them with Unicorn and the compiled test executable:
+
+```
+python3 rebuild/src/voxel/verify_raster_x86.py /tmp/voxel_test
+```
+
+The original raster converts fixed-point values by truncation. The ground coverage helper now uses the same conversion.

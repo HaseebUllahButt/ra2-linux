@@ -349,7 +349,7 @@ ground_coverage(const Section &section,
   }
   auto fixed = [](double value) {
     return static_cast<std::uint16_t>(
-        static_cast<std::int64_t>(std::nearbyint(value * 256)));
+        static_cast<std::int64_t>(std::trunc(value * 256)));
   };
   auto x0 = fixed(corners[2][0] + 128.0 - center[0]);
   auto y0 = fixed(corners[2][1] + 128.0 - center[1]);
@@ -374,6 +374,119 @@ ground_coverage(const Section &section,
     y0 = static_cast<std::uint16_t>(y0 + dy_y);
   }
   return result;
+}
+std::vector<std::uint8_t>
+raster_section(const Section &section, const std::array<float, 12> &matrix,
+               const Lighting *lighting,
+               const std::array<std::uint8_t, 256> *normal_light) {
+  if ((lighting == nullptr) != (normal_light == nullptr))
+    throw std::runtime_error("incomplete raster lighting");
+  if (!section.x || !section.y || !section.z)
+    throw std::runtime_error("invalid section dimensions");
+  std::array<std::array<float, 3>, 8> corners{};
+  for (unsigned i = 0; i < 8; ++i) {
+    const float x = (i == 0 || i == 1 || i == 4 || i == 5) ? section.max[0]
+                                                           : section.min[0];
+    const float y = (i == 0 || i == 3 || i == 4 || i == 7) ? section.max[1]
+                                                           : section.min[1];
+    const float z = i < 4 ? section.min[2] : section.max[2];
+    for (unsigned row = 0; row < 3; ++row) {
+      corners[i][row] = matrix[row * 4] * x + matrix[row * 4 + 1] * y +
+                        matrix[row * 4 + 2] * z + matrix[row * 4 + 3];
+      if (!std::isfinite(corners[i][row]) || std::abs(corners[i][row]) > 100000)
+        throw std::runtime_error("invalid raster transform");
+    }
+    corners[i][1] = -corners[i][1];
+  }
+  std::array<float, 3> center{};
+  unsigned nearest = 0;
+  for (unsigned axis = 0; axis < 3; ++axis) {
+    float lo = corners[0][axis], hi = lo;
+    for (auto &corner : corners) {
+      lo = std::min(lo, corner[axis]);
+      hi = std::max(hi, corner[axis]);
+    }
+    center[axis] = (lo + hi) * 0.5f;
+  }
+  for (unsigned i = 1; i < 8; ++i)
+    if (corners[i][2] < corners[nearest][2])
+      nearest = i;
+  static constexpr int order[8][6] = {{0, 3, 1, 4, 1, 1}, {1, 2, 0, 5, 1, 0},
+                                      {2, 1, 3, 6, 0, 0}, {3, 0, 2, 7, 0, 1},
+                                      {4, 7, 5, 0, 1, 1}, {5, 6, 4, 1, 1, 0},
+                                      {6, 5, 7, 2, 0, 0}, {7, 4, 6, 3, 0, 1}};
+  static constexpr int step_x[4] = {-1, -1, 1, 1};
+  static constexpr int step_y[4] = {-1, 1, 1, -1};
+  const auto &v = order[nearest];
+  auto fixed = [](double n) {
+    return std::uint16_t(std::int64_t(std::trunc(n * 256)));
+  };
+  auto pack = [](std::uint16_t x, std::uint16_t y) {
+    return std::uint32_t(x) | (std::uint32_t(y) << 16);
+  };
+  auto delta = [&](unsigned other, unsigned dim) {
+    return pack(fixed((double(corners[other][0]) - corners[v[0]][0]) / dim),
+                fixed((double(corners[other][1]) - corners[v[0]][1]) / dim));
+  };
+  auto position = pack(fixed(double(corners[v[0]][0]) + 128 - center[0]),
+                       fixed(double(corners[v[0]][1]) + 128 - center[1]));
+  auto inc_x = delta(v[1], section.x), inc_y = delta(v[2], section.y),
+       inc_z = delta(v[3], section.z);
+  std::vector<std::vector<Point>> columns(std::size_t(section.x) * section.y);
+  for (auto point : section.points) {
+    if (point.x >= section.x || point.y >= section.y || point.z >= section.z)
+      throw std::runtime_error("invalid voxel point");
+    columns[std::size_t(point.y) * section.x + point.x].push_back(point);
+  }
+  std::vector<std::uint8_t> result(65536);
+  int start_x = v[4] ? section.x - 1 : 0, start_y = v[5] ? section.y - 1 : 0;
+  for (unsigned y = 0; y < section.y; ++y) {
+    auto cursor = position;
+    for (unsigned x = 0; x < section.x; ++x) {
+      auto &points =
+          columns[std::size_t(start_y + int(y) * step_y[nearest % 4]) *
+                      section.x +
+                  start_x + int(x) * step_x[nearest % 4]];
+      if (nearest >= 4)
+        std::reverse(points.begin(), points.end());
+      unsigned height = 0;
+      auto p = cursor;
+      for (auto point : points) {
+        if (nearest >= 4)
+          point.z = section.z - 1 - point.z;
+        if (point.z < height)
+          throw std::runtime_error("unsorted voxel points");
+        auto skip = unsigned(point.z) - height;
+        p += pack(std::uint16_t(std::uint16_t(inc_z) * skip),
+                  std::uint16_t(std::uint16_t(inc_z >> 16) * skip));
+        auto offset = std::size_t((p >> 24) & 255) * 256 + ((p >> 8) & 255);
+        auto color = point.color;
+        if (lighting) {
+          const auto level = (*normal_light)[point.normal];
+          if (level >= lighting->tables.size())
+            throw std::runtime_error("light level outside VPL tables");
+          color = lighting->tables[level][point.color];
+        }
+        result[offset] = color;
+        p += inc_z;
+        height = unsigned(point.z) + 1;
+      }
+      cursor += inc_x;
+    }
+    position += inc_y;
+  }
+  return result;
+}
+Image raster_rgba(const Section &section, const std::array<float, 12> &matrix,
+                  const Lighting &lighting,
+                  const std::array<std::uint8_t, 256> &normal_light) {
+  auto indices = raster_section(section, matrix, &lighting, &normal_light);
+  Image image{256, 256,
+              std::vector<ra2::gfx::Rgba>(indices.size(), {0, 0, 0, 0})};
+  for (std::size_t i = 0; i < indices.size(); ++i)
+    if (indices[i])
+      image.pixels[i] = lighting.palette[indices[i]];
+  return image;
 }
 Image draw(const Model &m, const Animation &a, const Lighting &l,
            unsigned frame, unsigned level, unsigned width, unsigned height,

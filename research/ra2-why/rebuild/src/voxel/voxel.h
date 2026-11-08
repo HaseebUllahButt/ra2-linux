@@ -60,10 +60,20 @@ project_ground_corners(const Section &,
 std::vector<std::uint8_t>
 ground_coverage(const Section &, const std::array<ProjectedCorner, 4> &corners,
                 ProjectedCorner center);
+// Indexed raster for the original non-depth path. Pass both lighting inputs
+// to apply normal-indexed VPL colors, or neither for unlit colors.
+std::vector<std::uint8_t>
+raster_section(const Section &, const std::array<float, 12> &matrix,
+               const Lighting *lighting = nullptr,
+               const std::array<std::uint8_t, 256> *normal_light = nullptr);
 struct Image {
   unsigned width, height;
   std::vector<ra2::gfx::Rgba> pixels;
 };
+// Convert the original 256x256 lit indexed raster to RGBA.
+Image raster_rgba(const Section &, const std::array<float, 12> &matrix,
+                  const Lighting &,
+                  const std::array<std::uint8_t, 256> &normal_light);
 // Experimental orthographic view. A supplied lookup selects per-normal
 // lighting.
 Image draw(const Model &, const Animation &, const Lighting &, unsigned frame,

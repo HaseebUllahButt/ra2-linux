@@ -4,7 +4,7 @@
 #include <iostream>
 #include <stdexcept>
 using namespace ra2::voxel;
-int main() {
+int main(int argc, char **argv) {
   try {
     ra2::fs::MixFileSystem fs("/path/to/user/ra2/game");
     fs.bootstrap();
@@ -16,10 +16,56 @@ int main() {
         throw std::runtime_error(std::string("missing ") + n);
       return *b;
     };
+    if (argc == 3 && std::string(argv[1]) == "--asset") {
+      auto asset = get(argv[2]);
+      std::cout.write(reinterpret_cast<const char *>(asset.data()),
+                      asset.size());
+      return std::cout ? 0 : 1;
+    }
     auto vb = get("htnk.vxl"), hb = get("htnk.hva"), pb = get("voxels.vpl");
     auto v = read_vxl(vb);
-    auto h = read_hva(hb);
     auto p = read_vpl(pb);
+    std::array<std::uint8_t, 256> test_light{};
+    for (unsigned i = 0; i < 256; ++i)
+      test_light[i] = i % 32;
+    const std::array<std::uint64_t, 8> lit_hashes = {
+        0x22033d5fb411b1b6ULL, 0xfacfd818113b9c3bULL, 0x15dd8d3e13071ae8ULL,
+        0x38f42422ba0e9945ULL, 0x27dd6dc261980fd8ULL, 0x54f887d1ece4e457ULL,
+        0xab31afb7bec384e6ULL, 0xdf061d334a8fa1fcULL};
+    const std::array<std::uint64_t, 8> raster_hashes = {
+        0xe94e713a7da26f85ULL, 0x31d5532f1ebb6683ULL, 0x67288c0a6e6dc2a7ULL,
+        0x5a02e9ef37c11204ULL, 0x7accc6d5c7971c81ULL, 0x2b42f044298bacd5ULL,
+        0xe49771ab954cfb16ULL, 0xf8681956dd883719ULL};
+    for (unsigned direction = 0; direction < 8; ++direction) {
+      std::array<float, 12> matrix = {1,
+                                      -1,
+                                      0,
+                                      0,
+                                      .5f,
+                                      .5f,
+                                      1,
+                                      0,
+                                      direction & 1 ? -.2f : .2f,
+                                      direction & 2 ? -.3f : .3f,
+                                      direction & 4 ? -1.f : 1.f,
+                                      0};
+      auto pixels = raster_section(v.sections[0], matrix);
+      std::uint64_t hash = 14695981039346656037ULL;
+      for (auto pixel : pixels)
+        hash = (hash ^ pixel) * 1099511628211ULL;
+      auto lit = raster_section(v.sections[0], matrix, &p, &test_light);
+      std::uint64_t lit_hash = 14695981039346656037ULL;
+      for (auto pixel : lit)
+        lit_hash = (lit_hash ^ pixel) * 1099511628211ULL;
+      if (lit_hash != lit_hashes[direction])
+        throw std::runtime_error("x86 lit raster mismatch direction " +
+                                 std::to_string(direction));
+      if (hash != raster_hashes[direction])
+        throw std::runtime_error("x86 raster mismatch direction " +
+                                 std::to_string(direction) + " actual " +
+                                 std::to_string(hash));
+    }
+    auto h = read_hva(hb);
     if (v.sections.empty() || v.sections[0].points.empty() || h.frames != 1 ||
         p.tables.size() != 32)
       throw std::runtime_error("asset mismatch");
@@ -31,6 +77,31 @@ int main() {
       std::string base(asset);
       auto model = read_vxl(get((base + ".vxl").c_str()));
       auto animation = read_hva(get((base + ".hva").c_str()));
+      if (base == "mtnktur") {
+        for (unsigned direction : {0u, 7u}) {
+          std::array<float, 12> matrix = {1,
+                                          -1,
+                                          0,
+                                          0,
+                                          .5f,
+                                          .5f,
+                                          1,
+                                          0,
+                                          direction & 1 ? -.2f : .2f,
+                                          direction & 2 ? -.3f : .3f,
+                                          direction & 4 ? -1.f : 1.f,
+                                          0};
+          auto pixels =
+              raster_section(model.sections[0], matrix, &p, &test_light);
+          std::uint64_t hash = 14695981039346656037ULL;
+          for (auto pixel : pixels)
+            hash = (hash ^ pixel) * 1099511628211ULL;
+          if (hash !=
+              (direction == 0 ? 0xc923cfb562c50019ULL : 0x058b2abb9bc4edf5ULL))
+            throw std::runtime_error("x86 turret raster mismatch");
+        }
+      }
+
       auto result = draw(model, animation, p, 0, 16, 128, 128, 0, 2);
       if (model.sections.empty() || model.sections[0].points.empty() ||
           std::none_of(result.pixels.begin(), result.pixels.end(),
@@ -104,6 +175,17 @@ int main() {
     colors[p.remap_first] = {123, 45, 67, 255};
     colors[1] = {99, 88, 77, 255};
     auto team = team_colors(p, colors);
+    std::array<float, 12> test_matrix = {1, -1, 0,   0,   .5f, .5f,
+                                         1, 0,  .2f, .3f, 1,   0};
+    auto indices =
+        raster_section(v.sections[0], test_matrix, &team, &test_light);
+    auto rgba = raster_rgba(v.sections[0], test_matrix, team, test_light);
+    for (std::size_t i = 0; i < indices.size(); ++i) {
+      if ((indices[i] == 0 && rgba.pixels[i].a != 0) ||
+          (indices[i] != 0 && (rgba.pixels[i].a != 255 ||
+                               rgba.pixels[i].r != team.palette[indices[i]].r)))
+        throw std::runtime_error("raster RGBA palette mismatch");
+    }
     if (team.palette[p.remap_first].r != 123 ||
         team.palette[1].r != p.palette[1].r || team.tables != p.tables)
       throw std::runtime_error("team range mismatch");
