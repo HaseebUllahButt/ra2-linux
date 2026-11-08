@@ -36,7 +36,7 @@ GFX_OBJECTS = build/native/src/gfx/palette.o build/native/src/gfx/shp_decode.o
 SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS))
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 
-native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-replacement sim-world sim-build-time session
+native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-replacement sim-world sim-build-time session
 	build/ra2-native --game-dir ../game --frames 3 --headless
 	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
@@ -90,6 +90,13 @@ sim-move: build/sim_move_test
 build/sim_move_test: build/native/src/sim/test_move.o build/native/src/sim/test_inputs.o $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
+.PHONY: sim-route
+sim-route: build/sim_route_test
+	build/sim_route_test ../game/game.exe ../game/gamemd.exe
+
+build/sim_route_test: build/native/src/sim/test_route.o build/native/src/sim/drive.o build/native/src/sim/ground.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
 build/native/src/sim/test_inputs.o: src/sim/test_inputs.cpp
 	mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -I src/render -MMD -MP -c $< -o $@
@@ -122,6 +129,15 @@ session: build/session_test
 	build/session_test ../game
 
 build/session_test: build/native/src/session/session.o build/native/src/session/test_main.o build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/rules/ini_file.o $(FS_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/session_chooser_cases: build/native/src/session/session.o build/native/src/session/chooser_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/session_base_unit_cases: build/native/src/session/session.o build/native/src/session/base_unit_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/session_house_cases: build/native/src/session/session.o build/native/src/session/house_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 scene: build/scene_test
