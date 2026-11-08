@@ -30,8 +30,10 @@ The test compares 21 search traces and complete RNG states per edition against
 the original x86 code. The map and object checks are supplied test inputs.
 
 This is not a complete skirmish session. House creation, final cash, additional
-units, actual map and unit placement checks, observers, random waypoint fallback, and RNG state
-handoff to `Simulation` are not implemented. Start must remain disabled.
+units, actual map and unit placement checks, observers, and random waypoint
+fallback remain incomplete. Start must remain disabled.
+`Simulation.load_random_state` can restore the advanced setup RNG before ticks
+or queued commands. The complete session setup must supply that state.
 
 Run the native checks from the project root:
 

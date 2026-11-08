@@ -7,8 +7,9 @@ The game is incomplete. The Linux client shows original menu pages,
 country, color, and opponent choices, plus the credits slider.
 The scene check shows original terrain, trees, full-health building
 main images, standing infantry, and flat base HTNK, MTNK, and 4TNK models.
-It advances the recovered native state. Tests execute one aligned vehicle step
-on verified flat road and clear cells. Full movement, combat, production, AI,
+It advances the recovered native state. Tests execute prepared straight routes
+and final 45-degree or 90-degree turns on verified flat cells.
+Goal pathfinding, full movement, combat, production, AI,
 campaigns, saves, multiplayer, and menus still
 need work. The scene also needs pixel depth, shadows, lighting,
 house colors, other vehicle models, and other actor states.

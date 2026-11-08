@@ -146,6 +146,7 @@ int main(int argc, char** argv) {
             if (!expansion) {
                 auto tank = building;
                 tank.kind = sim::Kind::Unit; tank.type = "HTNK"; tank.facing = 64;
+                tank.turret_facing = 64;
                 tank.position = sim::Coord{80*256+128,96*256+128,0};
                 state.entities = {tank};
                 const auto tank_output = fixture.render(empty, state, view);
@@ -167,6 +168,14 @@ int main(int argc, char** argv) {
                         ++tank_checked;
                     }
                 require(tank_checked == 1052, "Original default HTNK pose pixel count changed");
+                state.entities[0].turret_facing.reset();
+                const auto unknown_turret = fixture.render(empty, state, view);
+                require(unknown_turret.drawn == 0 && unknown_turret.gaps.size() == 1,
+                        "Unknown turret facing became a guessed hull-facing pose");
+                state.entities[0].turret_facing = 32;
+                const auto independent_turret = fixture.render(empty, state, view);
+                require(independent_turret.drawn == 0 && independent_turret.gaps.size() == 1,
+                        "Unverified independent turret pose was drawn");
             }
             // A view beyond the map must not create an out-of-range iterator.
             require(fixture.render(empty, {}, {1000000, 0, 1, 1}).image.rgba.size() == 4,

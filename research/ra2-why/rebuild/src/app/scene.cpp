@@ -179,6 +179,10 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
                     throw std::runtime_error("Damaged vehicle drawing states are unresolved");
                 if (entity.facing < 0 || entity.facing > 255)
                     throw std::runtime_error("Vehicle map facing is outside its original byte range");
+                if (!entity.turret_facing)
+                    throw std::runtime_error("Vehicle turret facing is unresolved");
+                if (*entity.turret_facing != entity.facing)
+                    throw std::runtime_error("Independent vehicle turret poses are unresolved");
                 auto asset = vehicles_.find(entity.type);
                 if (asset == vehicles_.end())
                     asset = vehicles_.emplace(entity.type, VehicleArt::load(files_, art_, rules_, entity.type)).first;

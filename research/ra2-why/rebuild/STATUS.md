@@ -21,8 +21,9 @@ These counts measure names, not implemented gameplay.
 | symbols | 8,584 / 8,584 named - 100% |
 
 The native client also has editable skirmish countries, colors, opponents,
-credits, and map selection. Tests verify adjacent base tank movement on clear
-and road cells. Production-time calculations match both original executables.
+credits, and map selection. Tests verify base tank routes on clear and road
+cells, including final turns. Goal pathfinding remains incomplete.
+Production-time calculations match both original executables.
 Production commands and unit placement remain unsupported.
 
 The original map setup audit passes 87 available base maps and 161 expansion maps.
