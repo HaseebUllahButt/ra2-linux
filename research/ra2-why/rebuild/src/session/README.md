@@ -95,6 +95,9 @@ instructions for 8,712 cases per edition. Build `geometry_cases.cpp` with
 `multiplayer_house_color` converts a selected color to the original palette
 index. `original_color_check.py` checks 17 inputs in each original executable.
 The house field copy still uses the selected color before that conversion.
+`auxiliary_house_types` gives the two later special houses and their named
+color lookup. `original_auxiliary_check.py` checks their original order in
+both editions. It supplies the constructors and color lookup results.
 
 `unit_unlimbo_suffix` covers only the Unit code after its parent placement
 succeeds. It returns the facing argument, conditional status, and timer. The

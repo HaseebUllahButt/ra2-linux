@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -11,6 +12,10 @@ namespace ra2::session {
 // The multiplayer house constructor copies these values before later setup.
 struct HouseValues { std::int32_t initial_credits, cash, color, house_type_color; };
 HouseValues initialize_house_values(std::int32_t credits, std::int32_t color) noexcept;
+// Both editions create these houses after the player houses. The color is a
+// named original color-scheme lookup, not a palette index.
+struct AuxiliaryHouseType { const char* country; const char* color; std::int32_t color_argument; };
+std::array<AuxiliaryHouseType,2> auxiliary_house_types() noexcept;
 // Original multiplayer setup maps the selected color to a palette index.
 std::int32_t multiplayer_house_color(std::int32_t selected_color) noexcept;
 // Candidate order follows the resolved General/BaseUnit list. An unknown Owner

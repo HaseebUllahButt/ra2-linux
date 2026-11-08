@@ -5,6 +5,10 @@
 #include <limits>
 
 namespace ra2::session {
+std::array<AuxiliaryHouseType,2> auxiliary_house_types() noexcept {
+    // Base 0065FF35 / Yuri 006882D1, in original creation order.
+    return {{{"Neutral","LightGrey",53},{"Special","LightGrey",53}}};
+}
 UnitUnlimboSuffix unit_unlimbo_suffix(std::uint8_t facing, bool unit_flag,
     bool unit_suppress_flag, bool type_flag_a, bool type_flag_b, sim::Random& random) {
     // Base 006FC95E / Yuri 00737BBE. The parent unlimbo must succeed first.

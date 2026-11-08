@@ -12,6 +12,9 @@ using namespace ra2;
 int main(int argc, char** argv) {
     if (argc!=2) return 2;
     const std::string root=argv[1];
+    const auto auxiliary=session::auxiliary_house_types();
+    assert(std::string(auxiliary[0].country)=="Neutral" && std::string(auxiliary[1].country)=="Special");
+    assert(std::string(auxiliary[0].color)=="LightGrey" && auxiliary[0].color_argument==53);
     assert(session::multiplayer_house_color(-2)==5);
     assert(session::multiplayer_house_color(-1)==-1);
     assert(session::multiplayer_house_color(0)==3);
