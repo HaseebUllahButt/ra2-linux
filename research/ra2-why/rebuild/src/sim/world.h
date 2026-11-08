@@ -1,6 +1,8 @@
 #pragma once
 #include "../map/map_file.h"
 #include <optional>
+#include <functional>
+#include <string>
 #include <vector>
 namespace ra2::sim {
 // Read-only decoded map inputs. Unknown values stay empty and block dependent commands.
@@ -8,7 +10,8 @@ namespace ra2::sim {
 // and overlay-type index +44. Ramp/floor values need the decoded TMP evidence.
 struct TerrainCell {
     ra2map::Cell cell;
-    std::uint32_t tile_index=0;
+    std::uint32_t tile_index=0; // Raw packed-map index.
+    std::optional<std::uint32_t> resolved_tile_index; // Live Cell +38; keep the 0xFFFF sentinel.
     std::uint8_t subtile=0;
     std::optional<std::uint8_t> tmp_terrain; // Raw TMP byte, not final Cell LandType.
     std::optional<std::int32_t> land_type;
@@ -19,6 +22,17 @@ struct TerrainCell {
     std::optional<std::int32_t> overlay_type_index; // -1 means no overlay.
 };
 using TerrainCells=std::vector<TerrainCell>;
+// 00545150 catalog order. The vector index is the original TileSet number.
+struct TileSetRange { std::uint32_t first=0,count=0; };
+struct TileMetadata { std::uint8_t terrain=0,ramp=0; };
+struct TheaterInputs {
+    std::string theater_name;
+    rules::IniFile settings; // Original theater INI; [General] values name TileSet numbers.
+    std::vector<TileSetRange> tile_sets; // Live indexes after LastTilesInSet expansion.
+    // Read static original TMP data by live index. Do not apply map-index shifts again.
+    // Initialization uses this callback synchronously and does not retain it.
+    std::function<std::optional<TileMetadata>(std::uint32_t,std::uint8_t)> resolved_metadata;
+};
 }
 
 namespace ra2::sim {
