@@ -14,12 +14,14 @@ struct Options {
     std::filesystem::path game, map;
     std::size_t frames = 0;
     bool headless = false;
+    ra2::fs::GameVariant variant = ra2::fs::GameVariant::RedAlert2;
 };
 Options options(int argc, char** argv) {
     Options result;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--headless") result.headless = true;
+        else if (arg == "--yuri") result.variant = ra2::fs::GameVariant::YurisRevenge;
         else if (arg == "--game-dir" || arg == "--map" || arg == "--frames") {
             if (++i == argc) throw std::runtime_error("Missing value for " + arg);
             if (arg == "--game-dir") result.game = argv[i];
@@ -35,7 +37,7 @@ Options options(int argc, char** argv) {
         } else throw std::runtime_error("Unknown argument: " + arg);
     }
     if (result.game.empty() || result.map.empty())
-        throw std::runtime_error("Usage: ra2-native --game-dir <owned-game-folder> --map <map-file> [--frames N] [--headless]");
+        throw std::runtime_error("Usage: ra2-native --game-dir <owned-game-folder> --map <map-file> [--yuri] [--frames N] [--headless]");
     if (result.headless && !result.frames)
         throw std::runtime_error("Headless checks need a frame budget");
     return result;
@@ -113,7 +115,7 @@ int main(int argc, char** argv) {
         const auto terrain = ra2::pack::load_terrain(ini);
         const auto geometry = ra2::render::MapGeometry::from_ini(ini);
         ra2::fs::MixFileSystem files(args.game);
-        files.bootstrap(ra2::fs::GameVariant::RedAlert2);
+        files.bootstrap(args.variant);
         auto art = ra2::render::TheaterArt::load(files, ini.read_string("Map", "Theater"));
         const auto battlefield = ra2::render::render_minimap(terrain, geometry, art);
         ra2::app::Window window("Red Alert 2 native rebuild: terrain", 1024, 768, !args.headless);

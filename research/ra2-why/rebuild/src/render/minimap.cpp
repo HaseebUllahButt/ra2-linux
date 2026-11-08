@@ -40,18 +40,23 @@ TheaterArt TheaterArt::load(fs::MixFileSystem& files, std::string_view theater) 
     static constexpr Theater theaters[] = {
         {"TEMPERATE", "TEMPERAT", "ISOTEMP", "ISOTEMMD", "TEM"},
         {"SNOW", "SNOW", "ISOSNOW", "ISOSNOMD", "SNO"},
+        {"URBAN", "URBAN", "ISOURB", "ISOURBMD", "URB"},
+        {"DESERT", "DESERT", "ISODES", "ISODESMD", "DES"},
         {"NEWURBAN", "URBANN", "ISOUBN", "ISOUBNMD", "UBN"},
+        {"LUNAR", "LUNAR", "ISOLUN", "ISOLUNMD", "LUN"},
     };
     const Theater* selected = nullptr;
     for (const auto& t : theaters) if (theater == t.name) selected = &t;
     if (!selected) throw RenderError("Unsupported theater: " + std::string(theater));
     const auto& t = *selected;
+    // Names come from the six original 0x70-byte records at 0x007E1B78.
+    const bool expansion = files.variant() == fs::GameVariant::YurisRevenge;
     // The MIX API searches first mount first. Expansion art must precede base.
-    files.mount("ISOGENMD.MIX", false);
+    if (expansion) files.mount("ISOGENMD.MIX", false);
     files.mount("ISOGEN.MIX", false);
-    files.mount(std::string(t.root)+"MD.MIX", false);
+    if (expansion) files.mount(std::string(t.root)+"MD.MIX", false);
     files.mount(std::string(t.root)+".MIX");
-    files.mount(std::string(t.iso_md)+".MIX", false);
+    if (expansion) files.mount(std::string(t.iso_md)+".MIX", false);
     files.mount(std::string(t.iso)+".MIX");
     TheaterArt art; art.files_ = &files;
     art.palette_name_ = "ISO"+std::string(t.extension)+".PAL";
@@ -59,7 +64,7 @@ TheaterArt TheaterArt::load(fs::MixFileSystem& files, std::string_view theater) 
     if (!palette) throw RenderError("Missing theater palette " + art.palette_name_);
     art.palette_ = gfx::Palette::from_bytes(*palette);
     if (const auto loc = files.locate(art.palette_name_)) art.palette_archive_ = loc->archive->name();
-    auto data = files.read_file(std::string(t.root)+"MD.INI");
+    auto data = expansion ? files.read_file(std::string(t.root)+"MD.INI") : std::nullopt;
     if (!data) data = files.read_file(std::string(t.root)+".INI");
     if (!data) throw RenderError("Missing theater tileset INI");
     rules::IniFile ini;

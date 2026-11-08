@@ -1,8 +1,6 @@
 // Windows-only DLL entry for the proxy winmm.dll.
-// Compile with mingw-w64 (not available on this ARM REFERENCE_SYSTEM yet):
-//   x86_64-w64-mingw32-g++ -shared -m32 dll_main.cpp hooks.cpp
-//     trampoline.cpp -o winmm.dll -static-libgcc -static-libstdc++
-// The .def file forwards every real winmm export to the system DLL.
+// Build with the hook-local Makefile; see HOOKING.md.
+// The .def file forwards the listed winmm exports to winmm_real.dll.
 #include <cstdint>
 #include <cstdio>
 #include <windows.h>
@@ -17,13 +15,14 @@ static uint8_t* game_image_base()
     return reinterpret_cast<uint8_t*>(GetModuleHandleA(nullptr));
 }
 
-extern "C" BOOL WINAPI DllMain(HINSTANCE, DWORD reason, LPVOID) {
+extern "C" BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
-        // The loader lock is held; keep work minimal. Real hook
-        // installation runs on a thread spawned here once the exe's
-        // import table is fully bound.
-        DisableThreadLibraryCalls(static_cast<HINSTANCE>(nullptr));
-        ra2hook::install_hooks(game_image_base());
+        // Patch synchronously before the EXE can call Bootstrap. Only page
+        // protection, the E9 write, and debugger logging occur here; archive
+        // loading waits until the game calls the replacement outside DllMain.
+        DisableThreadLibraryCalls(module);
+        if (ra2hook::install_hooks(game_image_base()) != 1)
+            OutputDebugStringA("[ra2hook] Bootstrap hook installation failed\n");
     }
     return TRUE;
 }

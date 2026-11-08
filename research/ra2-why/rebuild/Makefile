@@ -22,7 +22,7 @@ build/native/%.o: %.cpp
 
 all: test
 
-.PHONY: native platform run-platform
+.PHONY: native platform run-platform catalog
 
 platform: run-platform
 
@@ -34,6 +34,13 @@ build/platform_test: build/native/src/app/platform.o build/native/src/app/test_p
 	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -o $@
 
 native: build/ra2-native
+
+catalog: build/catalog_test
+	build/catalog_test ../game ../analysis/extracted/maps
+
+build/catalog_test: build/native/src/render/catalog_test.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 build/ra2-native: $(NATIVE_OBJECTS)
 	mkdir -p build
