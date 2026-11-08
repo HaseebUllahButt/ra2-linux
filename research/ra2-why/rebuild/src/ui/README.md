@@ -5,8 +5,10 @@ original images and font glyphs. It does not yet draw a complete main menu,
 skirmish setup, or sidebar. It does not enable gameplay.
 `MenuNavigation` provides the four verified main, single-player and skirmish
 page changes by control ID. It ignores Skirmish Start and unsupported IDs.
-Exit returns `Action::Quit` as a request. The original confirmation dialog
-at `0x0052DDBA` is not implemented.
+Exit opens the original two-button confirmation dialog at `0x0052DDBA`.
+`Action::Quit` is returned only after OK. Cancel returns to the main page.
+The dialog uses the original panel, button frames, palettes, and text.
+Escape cancels the confirmation through `key_down(Key::Escape)`.
 
 `load_dialog` reads the original `gamemd.exe` 32-bit PE resource directory.
 It supports the extended dialog templates used by the supplied game. Page IDs
@@ -33,7 +35,7 @@ itself reconstruct the original dialog screens.
 It uses original frames 2, 3, and 4 for normal, hover, and pressed states
 (`0x00612EAA`). Unsupported actions are disabled. Skirmish Start is disabled.
 Skirmish setup controls, page headings, other screen sizes, sounds, and
-keyboard input are not yet implemented. The menu uses the 300x163 calibration
+other keyboard input are not yet implemented. The menu uses the 300x163 calibration
 of the 200x100 dialog-unit reference at `0x00775BC0`. For these button rows,
 the result stays the same for reference font heights from 8 to 24 pixels.
 The original Windows font base units remain unverified.

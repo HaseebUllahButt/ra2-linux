@@ -21,8 +21,9 @@ struct Control {
     std::string label_key, label;
 };
 enum class Page { Main, SinglePlayer, Skirmish };
-// Quit requests exit. The original confirmation dialog is not implemented.
+// Quit is returned after confirmation.
 enum class Action { None, PageChanged, Quit };
+enum class Key { Escape };
 // Activates only the supported page changes. IDs are from the original dialog.
 class MenuNavigation {
 public:
@@ -71,14 +72,19 @@ public:
     static Menu load(const fs::MixFileSystem& files, const std::vector<std::uint8_t>& exe,
                      const ra2text::CsfFile& strings);
     Page page() const noexcept { return navigation_.page(); }
+    bool confirming_exit() const noexcept { return confirming_exit_; }
     gfx::RgbaImage render() const;
     void pointer_move(int x, int y);
     void pointer_down(int x, int y);
     Action pointer_up(int x, int y);
+    Action key_down(Key key) noexcept;
 private:
     struct Button { std::uint32_t id; Rect bounds; std::string label; bool enabled; };
     std::vector<Button> buttons() const;
     gfx::RgbaImage background_, normal_, hover_, pressed_;
+    gfx::RgbaImage popup_, popup_normal_, popup_hover_, popup_pressed_;
+    std::string exit_prompt_, exit_ok_, exit_cancel_;
+    bool confirming_exit_ = false;
     GameFont font_;
     Dialog main_, single_, skirmish_;
     MenuNavigation navigation_;
