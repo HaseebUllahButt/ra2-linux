@@ -115,3 +115,85 @@ Production needs the complete 006F47A0 build-time formula, house multipliers, pr
 The factory primitive accepts resolved inputs to avoid inventing those numbers.
 The native frame uses 64 bits and rejects overflow; the original frame counter wraps at 32 bits.
 The core does not claim replay parity with original network events or original autonomous object updates.
+
+## Recovered ground movement state
+
+`ground.h` exposes `GroundMotion`, `GroundGuards`, and world coordinates.
+These are verified movement primitives. They do not execute map movement ticks.
+`GroundMotion::move_to()` ports the destination setter at 004AFD40.
+The caller supplies four resolved Foot virtual results and the resolved bridge height adjustment.
+Each true guard leaves the destination unchanged.
+A cleared optional coordinate represents the original runtime empty-coordinate sentinel.
+The code does not read an uninitialized data section as that sentinel's value.
+
+The locomotor interface vtable at 007E7EB0 proves the dispatch:
+slot +40 contains 004B0500, and slot +44 contains 004AFD40.
+004B0500 calls 004B2630 to prepare paths and 004B0F20 to follow track samples.
+The supplied decompilation omits 004B0500; its original instructions were inspected.
+Complete-object offsets are four bytes above the interface offsets in 004AFD40.
+
+`GroundMotion::transform()` ports 004B4780.
+It uses all 64 original reflection flags from the table at 007E7B28.
+It returns curve x, y, and facing, without inventing height.
+`consume_one_path_direction()` ports the 23-dword forward shift in 004B2630.
+The original leaves the last path entry unchanged.
+The typed default uses an explicitly empty native path.
+It does not claim a complete original constructor or save-state layout.
+
+The native tests compare all 64 transforms with original x86 results.
+`original_ground_check.py` reproduces these vectors with Unicorn.
+The original routine leaves output z untouched; the evidence check verifies this too.
+
+Ground movement still needs linked Foot virtual slots +1AC, +2CC, +480, +484, +534, +538, and +544.
+Path planning at 004D3920, map lookup at 00565730/005657A0, and bridge/occupancy callbacks remain missing.
+004B0F20 also needs sample transition tables, linked movement speed, and cell entry/exit effects.
+Commands that only store a destination must not be reported as completed map movement.
+
+Target recovery reached 006F8DF0 and its candidate predicate 006F7CA0.
+The unbounded list branch keeps the first eligible candidate with the greatest signed score above -1.
+The predicate spans 482 decompiled lines and depends on weapon choice, diplomacy, visibility, armor, range, and target virtual methods.
+Bounded scans additionally call 006F8960 and map iterators.
+A nearest-enemy rule would not reproduce this selection, so Attack remains unsupported.
+
+## Recovered damage and target primitives
+
+`combat.h` exposes `total_damage()` from 00489180.
+Original instructions recover the floating-point operands omitted from its decompilation:
+
+- +124 holds single-precision CellSpread; multiply it by 256 and truncate for the radius.
+- +12C holds single-precision PercentAtMax; store scaled damage in single precision.
+- Interpolate between initial and scaled damage by distance, then truncate.
+- Clamp this intermediate damage to zero.
+- Multiply by the selected double-precision armor verse at +A0+armor*8, then truncate.
+- Cap the result at Rules +16C8, MaxDamage.
+- Negative damage applies unchanged below distance eight and becomes zero at distance eight.
+- Zero damage, an absent warhead, or scenario flag 20 returns zero.
+
+The caller supplies resolved warhead inputs and the armor coefficient.
+This function does not parse missing warhead defaults or choose armor automatically.
+Interpolation currently supports exact binary radii within a documented numeric domain.
+Other radii and uncertain x87 integer boundaries throw errors.
+This restriction prevents a Linux floating-point approximation from silently changing gameplay.
+`original_damage_check.py` verifies 28 vectors against original x86 instructions.
+The vectors use TankOGas's real CellSpread, PercentAtMax, and one armor verse.
+
+`select_resolved_table_target()` ports the global-table maximum reduction in 006F8DF0.
+The caller must supply candidates in original scan order with resolved eligibility and scores.
+It keeps the first maximum and excludes scores at or below -1.
+`threat_categories()` ports the original threat-mask conversion.
+These functions do not replace 006F7CA0's eligibility and scoring logic.
+
+`target.h` ports the first decision stage of 006F7CA0 through 006F7E24.
+Inputs use typed optional fields where the full object model is not yet available.
+The result distinguishes Reject, Continue, and NeedsInput.
+NeedsInput identifies the exact original address or virtual slot that needs data.
+Continue only passes this stage. It does not establish complete eligibility.
+The stage covers fire errors, armor threshold, cell category, health, concealed ownership, mission control, and height.
+Fifteen decisions match original x86 execution with explicit virtual/map callback outputs.
+Run `original_target_check.py` to reproduce this evidence check with Unicorn.
+
+Damage arithmetic uses the recovered 00000E7F floating-point control mode.
+This selects 53-bit arithmetic and truncation toward zero, including single-precision stores.
+Linux's default nearest rounding changed several test results, so the port applies truncation explicitly.
+The code also uses a fused multiply residual to resolve armor multiplication rounding.
+The original damage evidence check starts with this control mode explicitly enabled.

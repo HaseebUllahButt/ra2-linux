@@ -1,4 +1,7 @@
 #include "sim.h"
+#include "ground.h"
+#include "combat.h"
+#include "target.h"
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -114,6 +117,103 @@ int main(int argc,char** argv) try {
     try { r.ranged(std::numeric_limits<int>::min(),std::numeric_limits<int>::max()); } catch(const std::range_error&) { rejected=true; }
     check(rejected,"overflow range explicit error");
     check(factory_stage_frames(0)==1 && factory_stage_frames(54)==1 && factory_stage_frames(108)==2 && factory_stage_frames(999999)==255,"factory interval clamps");
+    DamageInputs damage;
+    damage.damage=weapon.damage.value(); damage.maximum=rules.read_integer("CombatDamage","MaxDamage");
+    if (!damage.maximum) damage.maximum=rules.read_integer("General","MaxDamage");
+    damage.cell_spread=static_cast<float>(rules.read_double("TankOGas","CellSpread"));
+    damage.percent_at_max=static_cast<float>(rules.read_double("TankOGas","PercentAtMax"));
+    const auto verses=rules.read_list("TankOGas","Verses");
+    Ini verse_input; verse_input.parse("[Verse]\nValue="+verses.at(5)+"\n");
+    damage.armor_verse=verse_input.read_double("Verse","Value");
+    check(total_damage(damage)==damage.damage/4,"original armor multiplier");
+    damage.distance=128; check(total_damage(damage)<=damage.damage/4,"original range falloff");
+    const int distances[]={0,7,8,16,64,128,256};
+    const int original_damage[4][7]={
+        {22,22,22,22,21,20,17},{30,29,29,29,28,26,23},
+        {2500,2486,2484,2468,2374,2249,1999},{-50,-50,0,0,0,0,0}};
+    const int raw_damage[]={90,120,10000,-50};
+    for (unsigned i=0;i<4;++i) for (unsigned j=0;j<7;++j) {
+        damage.damage=raw_damage[i]; damage.distance=distances[j];
+        const auto actual_damage=total_damage(damage);
+        if (actual_damage!=original_damage[i][j]) std::cerr<<"damage="<<damage.damage<<" distance="<<damage.distance<<" actual="<<actual_damage<<" expected="<<original_damage[i][j]<<" maximum="<<damage.maximum<<"\n";
+        check(actual_damage==original_damage[i][j],"original x86 total damage vector");
+    }
+    damage.damage=90; damage.distance=0; damage.cell_spread=.3f;
+    bool unsupported_radius=false;
+    try { total_damage(damage); } catch(const std::range_error&) { unsupported_radius=true; }
+    check(unsupported_radius,"unverified x87 radius fails explicitly");
+    damage.cell_spread=.5f;
+    damage.damage=-50; damage.distance=7; check(total_damage(damage)==-50,"original healing distance seven");
+    damage.distance=8; check(total_damage(damage)==0,"original healing distance eight");
+    damage.scenario_inert=true; check(total_damage(damage)==0,"original inert scenario damage");
+    check(select_resolved_table_target({{1,true,0},{2,true,0}})==1,"original score tie keeps first");
+    check(select_resolved_table_target({{1,false,100},{2,true,1},{3,true,2}})==3,"original eligible maximum");
+    check(!select_resolved_table_target({{1,true,-1}}),"original score minus one excluded");
+    check(threat_categories(0x100)==0x8042 && threat_categories(4)==4 && threat_categories(0)==0,"original threat category conversion");
+    CandidatePrefix prefix;
+    check(check_candidate_prefix(prefix).status==CandidateStatus::NeedsInput,"missing target evidence stays explicit");
+    prefix.threat=0; prefix.fire_status=0; prefix.initial_health=256;
+    prefix.weapon_warhead_present=true; prefix.armor_verse=1;
+    prefix.attacker_type_604=0; prefix.target_flag_81=false;
+    prefix.current_health=100; prefix.target_state_220=0;
+    prefix.target_flag_3d5=true; prefix.mission_control_flag_4=false; prefix.target_height=0;
+    check(check_candidate_prefix(prefix).status==CandidateStatus::Continue,"verified target prefix continues without claiming eligibility");
+    auto trial=prefix; trial.fire_status=5;
+    check(check_candidate_prefix(trial).status==CandidateStatus::Reject,"original fire status five rejection");
+    trial.threat=0x18200; check(check_candidate_prefix(trial).status==CandidateStatus::Continue,"original threat mask bypass");
+    trial=prefix; trial.initial_health=0; trial.attacker_type_394=2;
+    check(check_candidate_prefix(trial).status==CandidateStatus::Reject,"original initial health category check");
+    trial=prefix; trial.armor_verse=static_cast<double>(.02f);
+    check(check_candidate_prefix(trial).status==CandidateStatus::Reject,"original two percent verse boundary");
+    trial.armor_verse=std::numeric_limits<double>::quiet_NaN();
+    check(check_candidate_prefix(trial).status==CandidateStatus::Reject,"original unordered verse rejection");
+    trial=prefix; trial.attacker_type_604=2; trial.target_slot_50=true; trial.target_cell_ec=1;
+    check(check_candidate_prefix(trial).status==CandidateStatus::Reject,"original cell category check");
+    trial=prefix; trial.target_flag_81=true;
+    check(check_candidate_prefix(trial).status==CandidateStatus::Reject,"original target flag check");
+    trial=prefix; trial.current_health=0;
+    check(check_candidate_prefix(trial).status==CandidateStatus::Reject,"original zero health rejection");
+    trial=prefix; trial.target_state_220=2; trial.cell_visible=false; trial.same_house=false;
+    check(check_candidate_prefix(trial).status==CandidateStatus::Reject,"original concealed foreign owner check");
+    trial.same_house=true; check(check_candidate_prefix(trial).status==CandidateStatus::Continue,"original same house exception");
+    trial=prefix; trial.target_flag_3d5=false;
+    check(check_candidate_prefix(trial).status==CandidateStatus::Reject,"original inactive target check");
+    trial=prefix; trial.mission_control_flag_4=true;
+    check(check_candidate_prefix(trial).status==CandidateStatus::Reject,"original mission control rejection");
+    trial=prefix; trial.target_height=-21;
+    check(check_candidate_prefix(trial).status==CandidateStatus::Reject,"original height below minus twenty");
+    trial.target_height=-20; check(check_candidate_prefix(trial).status==CandidateStatus::Continue,"original height boundary");
+    GroundMotion ground;
+    GroundGuards guards;
+    auto center=ground_cell_center(54,69);
+    check(center.x==13952 && center.y==17792,"original cell center coordinates");
+    check(ground.move_to(center,guards),"ground destination accepted");
+    check(ground.destination->x==center.x,"ground destination retained");
+    for (unsigned bit=0;bit<4;++bit) {
+        GroundGuards blocked;
+        if (bit==0) blocked.slot_37c=true;
+        if (bit==1) blocked.slot_380=true;
+        if (bit==2) blocked.slot_1d4=true;
+        if (bit==3) blocked.slot_1d8=true;
+        check(!ground.move_to(Coord{1,2,3},blocked) && ground.destination->x==center.x,"all original move guards");
+    }
+    check(ground.move_to(Coord{1,2,3},guards,400) && ground.destination->z==403,"resolved bridge adjustment");
+    check(ground.move_to(std::nullopt,guards) && !ground.destination,"empty destination");
+    ground.anchor=Coord{100,200,300}; ground.track=0;
+    auto sample=ground.transform({17,-9,42},23);
+    check(sample.x==117 && sample.y==191 && sample.facing==23,"unreflected ground curve");
+    const int ground_golden[][3]={
+#include "ground_golden.inc"
+    };
+    for (int track=0;track<64;++track) {
+        ground.track=track; const auto result=ground.transform({17,-9,42},23);
+        check(result.x==ground_golden[track][0] && result.y==ground_golden[track][1] && result.facing==ground_golden[track][2],"original x86 curve result");
+    }
+    ground.track=8; sample=ground.transform({17,-9,42},23);
+    check(sample.x==109 && sample.y==183 && sample.facing==41,"original reflected ground curve");
+    for (unsigned i=0;i<24;++i) ground.path[i]=static_cast<int>(i%8);
+    ground.consume_one_path_direction();
+    check(ground.path[0]==1 && ground.path[22]==7 && ground.path[23]==7,"original 23 direction shift");
     House h; h.cash=tank.cost.value(); Factory f; f.begin(tank.cost.value(),108,0);
     f.tick(h,1); check(f.progress==0,"factory waits");
     for (int frame=2;frame<=108;++frame) f.tick(h,frame);
