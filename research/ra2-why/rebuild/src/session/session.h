@@ -81,6 +81,13 @@ struct PlacementCell { std::int8_t height; std::uint8_t ramp; };
 std::optional<bool> placement_cell_in_map(StartPoint cell, PlacementEdition edition,
     const PlacementGeometry& geometry, std::optional<PlacementCell> resolved_cell);
 using PlacementCheck = std::function<bool(StartPoint, sim::Random&)>;
+// A null result means unresolved input, not a blocked cell. The callback must
+// use private scratch world state. On an unresolved result, RNG is unchanged.
+using ResolvedPlacementCheck = std::function<std::optional<bool>(StartPoint, sim::Random&)>;
+struct PlacementSearchResult { std::optional<StartPoint> point; };
+std::optional<PlacementSearchResult> find_initial_placement_checked(StartPoint origin,
+    PlacementBounds bounds, std::int32_t start_radius, PlacementEdition edition,
+    sim::Random& random, const ResolvedPlacementCheck& valid, const ResolvedPlacementCheck& place);
 std::optional<StartPoint> find_initial_placement(StartPoint origin, PlacementBounds bounds,
     PlacementEdition edition, sim::Random& random, const PlacementCheck& valid, const PlacementCheck& place);
 // The extra-unit generator starts at radius 4. Negative radii are unsupported.

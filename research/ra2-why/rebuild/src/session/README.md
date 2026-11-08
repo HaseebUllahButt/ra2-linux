@@ -121,6 +121,10 @@ original code with supplied map and object results. Build `placement_cases.cpp`
 with `session.cpp` and the same simulation sources. The real map occupancy and
 unit placement checks still need integration.
 
+`find_initial_placement_checked` distinguishes an exhausted search from an
+unknown check. Unknown checks leave the shared random state unchanged. Its
+callbacks must use private scratch world state until the whole plan succeeds.
+
 `original_budget_check.py` compares the budget prefix with original x86. Build
 `budget_cases.cpp` with `session.cpp` and the same simulation sources. It tests
 192 cases per edition. The type Cost virtual returns the supplied resolved cost;

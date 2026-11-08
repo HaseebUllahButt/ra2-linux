@@ -31,6 +31,29 @@ int main(int argc, char** argv) {
     auto first=session::choose_start_point(points,used,random,base);
     assert(first && *first==static_cast<std::size_t>(draw));
     assert(random.table()==expected.table() && random.first()==expected.first());
+    {
+        const session::PlacementBounds bounds{0,0,20,20};
+        sim::Random state(88);
+        const auto initial=state.state();
+        int calls=0;
+        const auto unresolved=session::find_initial_placement_checked({5,5},bounds,1,session::PlacementEdition::Yuri,state,
+            [&](session::StartPoint,sim::Random& rng)->std::optional<bool> {
+                rng.next(); return ++calls==1 ? std::optional<bool>{false} : std::nullopt;
+            },[](session::StartPoint,sim::Random&)->std::optional<bool> { return true; });
+        assert(!unresolved && state.state().table==initial.table && state.first()==initial.first && state.second()==initial.second);
+        const auto unresolved_place=session::find_initial_placement_checked({5,5},bounds,1,session::PlacementEdition::Base,state,
+            [](session::StartPoint,sim::Random& rng)->std::optional<bool> { rng.next(); return true; },
+            [](session::StartPoint,sim::Random& rng)->std::optional<bool> { rng.next(); return {}; });
+        assert(!unresolved_place && state.state().table==initial.table && state.first()==initial.first && state.second()==initial.second);
+        const auto exhausted=session::find_initial_placement_checked({5,5},bounds,32,session::PlacementEdition::Yuri,state,
+            [](session::StartPoint,sim::Random&)->std::optional<bool> { return false; },
+            [](session::StartPoint,sim::Random&)->std::optional<bool> { return true; });
+        assert(exhausted && !exhausted->point);
+        const auto found=session::find_initial_placement_checked({5,5},bounds,1,session::PlacementEdition::Base,state,
+            [](session::StartPoint,sim::Random&)->std::optional<bool> { return true; },
+            [](session::StartPoint,sim::Random&)->std::optional<bool> { return true; });
+        assert(found && found->point && found->point->x==5 && found->point->y==5);
+    }
     used={true,false,false,false};
     const auto before=random.table();
     auto farthest_one=session::choose_start_point(points,used,random,base);

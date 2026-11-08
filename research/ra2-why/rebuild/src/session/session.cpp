@@ -167,32 +167,55 @@ std::optional<StartPoint> find_initial_placement(StartPoint origin, PlacementBou
 std::optional<StartPoint> find_initial_placement(StartPoint origin, PlacementBounds bounds,
     std::int32_t start_radius, PlacementEdition edition, sim::Random& random,
     const PlacementCheck& valid, const PlacementCheck& place) {
+    if (!valid || !place) return std::nullopt;
+    const auto result=find_initial_placement_checked(origin,bounds,start_radius,edition,random,
+        [&](StartPoint point,sim::Random& state)->std::optional<bool> { return valid(point,state); },
+        [&](StartPoint point,sim::Random& state)->std::optional<bool> { return place(point,state); });
+    return result ? result->point : std::nullopt;
+}
+std::optional<PlacementSearchResult> find_initial_placement_checked(StartPoint origin,
+    PlacementBounds bounds, std::int32_t start_radius, PlacementEdition edition, sim::Random& random,
+    const ResolvedPlacementCheck& valid, const ResolvedPlacementCheck& place) {
     // Base 00660B60; expansion 00688ED0. Callers resolve both operations.
-    if (!valid || !place || start_radius<0 || bounds.left>bounds.right || bounds.top>bounds.bottom)
+    if (!valid || !place || start_radius<0 || bounds.left>bounds.right || bounds.top>bounds.bottom ||
+        (edition!=PlacementEdition::Base && edition!=PlacementEdition::Yuri))
         return std::nullopt;
-    if (valid(origin,random) && place(origin,random)) return origin;
+    auto working=random;
+    const auto initial_valid=valid(origin,working);
+    if (!initial_valid) return std::nullopt;
+    if (*initial_valid) {
+        const auto initial_place=place(origin,working);
+        if (!initial_place) return std::nullopt;
+        if (*initial_place) { random=working; return PlacementSearchResult{origin}; }
+    }
     static constexpr int dx[8]={0,1,1,1,0,-1,-1,-1};
     static constexpr int dy[8]={-1,-1,0,1,1,1,0,-1};
     for (int radius=start_radius;radius<32;++radius) {
-        int direction=random.ranged(0,7);
+        int direction=working.ranged(0,7);
         for (int pass=0;pass<2;++pass) for (int i=0;i<8;++i) {
             int x=std::clamp(int(origin.x)+dx[direction]*radius,int(bounds.left),int(bounds.right));
             int y=std::clamp(int(origin.y)+dy[direction]*radius,int(bounds.top),int(bounds.bottom));
             if (pass) {
-                const int x_step=random.ranged(0,1);
-                const int x_sign=random.ranged(0,99);
+                const int x_step=working.ranged(0,1);
+                const int x_sign=working.ranged(0,99);
                 x=std::clamp(x+(x_sign<50 ? x_step : -x_step),int(bounds.left),int(bounds.right));
-                const int y_step=random.ranged(0,1);
-                const int y_sign=random.ranged(0,99);
+                const int y_step=working.ranged(0,1);
+                const int y_sign=working.ranged(0,99);
                 y=std::clamp(y+(y_sign<50 ? y_step : -y_step),int(bounds.top),int(bounds.bottom));
             }
             const StartPoint point{static_cast<std::int16_t>(x),static_cast<std::int16_t>(y)};
-            const bool cell_valid=edition==PlacementEdition::Base || valid(point,random);
-            if (cell_valid && (point.x!=origin.x || point.y!=origin.y) && place(point,random)) return point;
+            const auto cell_valid=edition==PlacementEdition::Base ? std::optional<bool>{true} : valid(point,working);
+            if (!cell_valid) return std::nullopt;
+            if (*cell_valid && (point.x!=origin.x || point.y!=origin.y)) {
+                const auto placed=place(point,working);
+                if (!placed) return std::nullopt;
+                if (*placed) { random=working; return PlacementSearchResult{point}; }
+            }
             direction=(direction+1)&7;
         }
     }
-    return std::nullopt;
+    random=working;
+    return PlacementSearchResult{std::nullopt};
 }
 std::optional<std::size_t> choose_start_point(const std::vector<StartPoint>& points,
     std::vector<bool>& used, sim::Random& random,
