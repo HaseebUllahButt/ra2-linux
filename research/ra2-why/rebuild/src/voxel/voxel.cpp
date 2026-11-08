@@ -375,10 +375,12 @@ ground_coverage(const Section &section,
   }
   return result;
 }
-std::vector<std::uint8_t>
-raster_section(const Section &section, const std::array<float, 12> &matrix,
-               const Lighting *lighting,
-               const std::array<std::uint8_t, 256> *normal_light) {
+static std::vector<std::uint8_t>
+raster_section_impl(const Section &section, const std::array<float, 12> &matrix,
+                    const Lighting *lighting,
+                    const std::array<std::uint8_t, 256> *normal_light,
+                    const std::array<float, 3> *shared_center,
+                    const std::vector<std::uint8_t> *previous) {
   if ((lighting == nullptr) != (normal_light == nullptr))
     throw std::runtime_error("incomplete raster lighting");
   if (!section.x || !section.y || !section.z)
@@ -408,6 +410,8 @@ raster_section(const Section &section, const std::array<float, 12> &matrix,
     }
     center[axis] = (lo + hi) * 0.5f;
   }
+  if (shared_center)
+    center = *shared_center;
   for (unsigned i = 1; i < 8; ++i)
     if (corners[i][2] < corners[nearest][2])
       nearest = i;
@@ -438,7 +442,8 @@ raster_section(const Section &section, const std::array<float, 12> &matrix,
       throw std::runtime_error("invalid voxel point");
     columns[std::size_t(point.y) * section.x + point.x].push_back(point);
   }
-  std::vector<std::uint8_t> result(65536);
+  std::vector<std::uint8_t> result =
+      previous ? *previous : std::vector<std::uint8_t>(65536);
   int start_x = v[4] ? section.x - 1 : 0, start_y = v[5] ? section.y - 1 : 0;
   for (unsigned y = 0; y < section.y; ++y) {
     auto cursor = position;
@@ -475,6 +480,146 @@ raster_section(const Section &section, const std::array<float, 12> &matrix,
     }
     position += inc_y;
   }
+  return result;
+}
+std::vector<std::uint8_t>
+raster_section(const Section &section, const std::array<float, 12> &matrix,
+               const Lighting *lighting,
+               const std::array<std::uint8_t, 256> *normal_light) {
+  return raster_section_impl(section, matrix, lighting, normal_light, nullptr,
+                             nullptr);
+}
+Matrix game_camera() {
+  // 0x7558CE applies RotateX(-60 degrees), then RotateZ(-45 degrees).
+  constexpr float c = 0.7071067811865475f;
+  constexpr float s = 0.8660254037844386f;
+  return {c, c, 0, 0, -0.5f * c, 0.5f * c, s, 0, s * c, -s * c, 0.5f, 0};
+}
+
+Matrix facing_transform(std::uint16_t facing, std::int32_t offset) {
+  unsigned direction = (((unsigned(facing) >> 10) + 1) >> 1) & 31;
+  float angle = float((int(direction) - 8) * -0.19634954084936207);
+  float c = std::cos(angle), s = std::sin(angle);
+  float distance = float(offset / 8);
+  return {c, -s, 0, c * distance, s, c, 0, s * distance, 0, 0, 1, 0};
+}
+
+Matrix barrel_transform(Matrix base, std::uint16_t rotation,
+                        std::uint16_t tilt) {
+  for (float value : base)
+    if (!std::isfinite(value))
+      throw std::runtime_error("invalid barrel matrix");
+  auto direction_angle = [](std::uint16_t value) {
+    unsigned step = (((unsigned(value) >> 10) + 1) >> 1) & 31;
+    return float((int(step) - 8) * -0.19634954084936207);
+  };
+  const std::array<float, 3> pivot{base[3], base[7], base[11]};
+  auto translate = [&](float sign) {
+    for (unsigned row = 0; row < 3; ++row)
+      base[row * 4 + 3] +=
+          sign * (base[row * 4] * pivot[0] + base[row * 4 + 1] * pivot[1] +
+                  base[row * 4 + 2] * pivot[2]);
+  };
+  translate(-1);
+  float az = direction_angle(rotation), cz = std::cos(az), sz = std::sin(az);
+  for (unsigned row = 0; row < 3; ++row) {
+    float a = base[row * 4], b = base[row * 4 + 1];
+    base[row * 4] = a * cz + b * sz;
+    base[row * 4 + 1] = b * cz - a * sz;
+  }
+  float ay = -direction_angle(tilt), cy = std::cos(ay), sy = std::sin(ay);
+  for (unsigned row = 0; row < 3; ++row) {
+    float a = base[row * 4], b = base[row * 4 + 2];
+    base[row * 4] = a * cy - b * sy;
+    base[row * 4 + 2] = a * sy + b * cy;
+  }
+  translate(1);
+  return base;
+}
+
+SceneImage draw_scene(const std::vector<ScenePart> &parts,
+                      const Lighting &lighting) {
+  struct Job {
+    const Section *section;
+    Matrix matrix;
+    const std::array<std::uint8_t, 256> *light;
+    float depth;
+  };
+  std::vector<Job> jobs;
+  std::array<float, 3> minimum{INFINITY, INFINITY, INFINITY};
+  std::array<float, 3> maximum{-INFINITY, -INFINITY, -INFINITY};
+  auto multiply = [](const Matrix &a, const Matrix &b) {
+    Matrix result{};
+    for (unsigned row = 0; row < 3; ++row) {
+      for (unsigned column = 0; column < 3; ++column)
+        for (unsigned k = 0; k < 3; ++k)
+          result[row * 4 + column] += a[row * 4 + k] * b[k * 4 + column];
+      result[row * 4 + 3] = a[row * 4 + 3];
+      for (unsigned k = 0; k < 3; ++k)
+        result[row * 4 + 3] += a[row * 4 + k] * b[k * 4 + 3];
+    }
+    return result;
+  };
+  for (const auto &part : parts) {
+    if (!part.model || !part.animation ||
+        part.frame >= part.animation->frames ||
+        std::uint64_t(part.animation->frames) * part.animation->names.size() !=
+            part.animation->matrices.size())
+      throw std::runtime_error("invalid scene part");
+    auto first = jobs.size();
+    for (const auto &section : part.model->sections) {
+      auto it = std::find(part.animation->names.begin(),
+                          part.animation->names.end(), section.name);
+      if (it == part.animation->names.end())
+        throw std::runtime_error("VXL section missing in HVA");
+      auto matrix = multiply(
+          part.matrix,
+          part.animation
+              ->matrices[std::size_t(part.frame) *
+                             part.animation->names.size() +
+                         std::size_t(it - part.animation->names.begin())]);
+      float depth = INFINITY;
+      for (unsigned i = 0; i < 8; ++i) {
+        float x = (i & 1) ? section.max[0] : section.min[0];
+        float y = (i & 2) ? section.max[1] : section.min[1];
+        float z = (i & 4) ? section.max[2] : section.min[2];
+        for (unsigned axis = 0; axis < 3; ++axis) {
+          float value = matrix[axis * 4] * x + matrix[axis * 4 + 1] * y +
+                        matrix[axis * 4 + 2] * z + matrix[axis * 4 + 3];
+          if (axis == 1)
+            value = -value;
+          if (!std::isfinite(value) || std::abs(value) > 100000)
+            throw std::runtime_error("invalid scene matrix");
+          minimum[axis] = std::min(minimum[axis], value);
+          maximum[axis] = std::max(maximum[axis], value);
+          if (axis == 2)
+            depth = std::min(depth, value);
+        }
+      }
+      jobs.push_back({&section, matrix, &part.normal_light, depth});
+    }
+    std::stable_sort(
+        jobs.begin() + first, jobs.end(),
+        [](const Job &a, const Job &b) { return a.depth < b.depth; });
+  }
+  if (jobs.empty())
+    throw std::runtime_error("empty scene");
+  if (maximum[0] - minimum[0] > 254 || maximum[1] - minimum[1] > 254)
+    throw std::runtime_error("scene exceeds voxel surface");
+  std::array<float, 3> center{};
+  for (unsigned axis = 0; axis < 3; ++axis)
+    center[axis] = (minimum[axis] + maximum[axis]) * 0.5f;
+  std::vector<std::uint8_t> indices(65536);
+  for (const auto &job : jobs)
+    indices = raster_section_impl(*job.section, job.matrix, &lighting,
+                                  job.light, &center, &indices);
+  SceneImage result{
+      {256, 256, std::vector<ra2::gfx::Rgba>(65536, {0, 0, 0, 0})},
+      int(std::trunc(center[0])) - 128,
+      int(std::trunc(center[1])) - 128};
+  for (std::size_t i = 0; i < indices.size(); ++i)
+    if (indices[i])
+      result.image.pixels[i] = lighting.palette[indices[i]];
   return result;
 }
 Image raster_rgba(const Section &section, const std::array<float, 12> &matrix,

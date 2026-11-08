@@ -5,6 +5,7 @@ Requires Python unicorn and the owner's original gamemd.exe. No game code runs
 outside the emulator. This checks synthetic inputs, not a complete game frame.
 """
 import struct
+import math
 from pathlib import Path
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32
 from unicorn.x86_const import UC_X86_REG_ECX, UC_X86_REG_EDX, UC_X86_REG_ESP
@@ -85,3 +86,66 @@ for corners, expected in cases:
     assert coverage(corners) == expected
 assert project() == [(20, -30, 0), (20, -15, 0), (10, -15, 0), (10, -30, 0)]
 print('Original x86: three coverage cases and one ground projection case passed')
+
+# Run original matrix rotations with explicit sine and cosine values.
+machine, word, real = setup()
+matrix = BASE + 0xa00
+for i, value in enumerate((1,0,0,0,0,1,0,0,0,0,1,0)):
+    real(matrix + i*4, value)
+for function, angle in ((0x5af000, -math.pi/3), (0x5af240, -math.pi/4)):
+    word(STACK, STOP)
+    real(STACK+4, math.sin(angle))
+    real(STACK+8, math.cos(angle))
+    machine.reg_write(UC_X86_REG_ECX, matrix)
+    machine.reg_write(UC_X86_REG_ESP, STACK)
+    machine.emu_start(function, STOP, count=100000)
+actual = struct.unpack('<12f', machine.mem_read(matrix, 48))
+expected_camera = (.70710678,.70710678,0,0,-.35355339,.35355339,.8660254,0,.61237244,-.61237244,.5,0)
+assert all(abs(a-b) < 0.000001 for a,b in zip(actual, expected_camera))
+print('Original x86: default camera matrix passed')
+
+# 0x43E085 rotates a 32-step facing and translates by integer offset / 8.
+machine, word, real = setup()
+for i, value in enumerate((1,0,0,0,0,1,0,0,0,0,1,0)):
+    real(matrix + i*4, value)
+word(STACK, STOP)
+real(STACK+4, math.sin(math.pi/2))
+real(STACK+8, math.cos(math.pi/2))
+machine.reg_write(UC_X86_REG_ECX, matrix)
+machine.reg_write(UC_X86_REG_ESP, STACK)
+machine.emu_start(0x5af240, STOP, count=100000)
+word(STACK, STOP)
+real(STACK+4, 2)
+machine.reg_write(UC_X86_REG_ECX, matrix)
+machine.reg_write(UC_X86_REG_ESP, STACK)
+machine.emu_start(0x5ae980, STOP, count=100000)
+facing = struct.unpack('<12f', machine.mem_read(matrix,48))
+assert abs(facing[0]) < .000001 and abs(facing[4]-1) < .000001
+assert abs(facing[3]) < .000001 and abs(facing[7]-2) < .000001
+print('Original x86: facing rotation and offset passed')
+
+# The barrel path translates by minus the stored pivot, rotates, then restores it.
+machine, word, real = setup()
+for i, value in enumerate((0,-1,0,0,1,0,0,2,0,0,1,0)):
+    real(matrix + i*4, value)
+vector = BASE + 0xb00
+for sign, steps in ((-1, (0x5af240, 0x5af120)), (1, ())):
+    for i, value in enumerate((0,sign*2,0)):
+        real(vector+i*4, value)
+    word(STACK, STOP)
+    word(STACK+4, vector)
+    machine.reg_write(UC_X86_REG_ECX, matrix)
+    machine.reg_write(UC_X86_REG_ESP, STACK)
+    machine.emu_start(0x5ae8f0, STOP, count=100000)
+    for function in steps:
+        angle = math.pi/2 if function == 0x5af240 else -math.pi/2
+        word(STACK, STOP)
+        real(STACK+4, math.sin(angle))
+        real(STACK+8, math.cos(angle))
+        machine.reg_write(UC_X86_REG_ECX, matrix)
+        machine.reg_write(UC_X86_REG_ESP, STACK)
+        machine.emu_start(function, STOP, count=100000)
+barrel = struct.unpack('<12f', machine.mem_read(matrix,48))
+expected_barrel = (0,0,1,2,0,-1,0,0,1,0,0,0)
+assert all(abs(a-b)<.00001 for a,b in zip(barrel,expected_barrel)), barrel
+print('Original x86: barrel pivot rotation passed')

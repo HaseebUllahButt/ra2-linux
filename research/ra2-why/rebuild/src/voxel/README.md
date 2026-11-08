@@ -51,3 +51,9 @@ python3 rebuild/src/voxel/verify_raster_x86.py /tmp/voxel_test
 ```
 
 The original raster converts fixed-point values by truncation. The ground coverage helper now uses the same conversion.
+
+`game_camera()` returns the game's default voxel camera matrix. Original startup code at `0x7558CE` applies X rotation −60 degrees and Z rotation −45 degrees. The optional x86 test executes the original rotation helpers for those values.
+
+`facing_transform()` follows `0x43E085` through `0x43E0E3`: it rounds the 16-bit facing to 32 directions, rotates around Z, and applies the integer X offset divided by eight. `barrel_transform()` follows `0x43E439` through `0x43E52D`: it translates around the stored pivot, applies facing and tilt rotations, and restores the pivot. The optional x86 test checks a synthetic pivot. The full hull, turret, and barrel setup still needs reconstruction. The Ghidra function export omits this original x86 routine; its machine code is present.
+
+`draw_scene()` accepts ordered model and animation pairs, complete part matrices, frames, and per-part light tables. It combines HVA section matrices, sorts each part's sections by projected depth, and draws into one 256 by 256 image. It returns the image and its top-left position relative to the screen anchor. Scale each HVA translation once with `scale_hva_translations()` before use. Callers supply complete part transforms and the original draw order. The API does not yet calculate the full hull, turret, or barrel transforms. Multi-part output and depth-buffer behavior need original-game comparison. The image position matches the original `0x754510` output for the tested HTNK transform.

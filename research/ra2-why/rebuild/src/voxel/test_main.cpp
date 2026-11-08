@@ -1,6 +1,7 @@
 #include "../fs/mix_bootstrap.h"
 #include "voxel.h"
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 using namespace ra2::voxel;
@@ -69,6 +70,38 @@ int main(int argc, char **argv) {
     if (v.sections.empty() || v.sections[0].points.empty() || h.frames != 1 ||
         p.tables.size() != 32)
       throw std::runtime_error("asset mismatch");
+    ScenePart hull{
+        &v, &h, {1, -1, 0, 0, .5f, .5f, 1, 0, .2f, .3f, 1, 0}, 0, test_light};
+    auto scene = draw_scene({hull}, p);
+    if (scene.left != -125 || scene.top != -135)
+      throw std::runtime_error("x86 scene origin mismatch");
+    auto oracle = raster_rgba(v.sections[0], hull.matrix, p, test_light);
+    if (scene.image.pixels.size() != oracle.pixels.size())
+      throw std::runtime_error("scene size mismatch");
+    for (std::size_t i = 0; i < oracle.pixels.size(); ++i)
+      if (scene.image.pixels[i].r != oracle.pixels[i].r ||
+          scene.image.pixels[i].g != oracle.pixels[i].g ||
+          scene.image.pixels[i].b != oracle.pixels[i].b ||
+          scene.image.pixels[i].a != oracle.pixels[i].a)
+        throw std::runtime_error("scene section mismatch");
+    auto face = facing_transform(0x4000, 17);
+    if (std::abs(face[0] - 1) > 0.00001f || std::abs(face[3] - 2) > 0.00001f ||
+        std::abs(face[7]) > 0.00001f)
+      throw std::runtime_error("facing transform mismatch");
+    auto north = facing_transform(0, 17);
+    if (std::abs(north[0]) > 0.00001f || std::abs(north[4] - 1) > 0.00001f ||
+        std::abs(north[3]) > 0.00001f || std::abs(north[7] - 2) > 0.00001f)
+      throw std::runtime_error("facing quarter turn mismatch");
+    Matrix base_barrel = {0, -1, 0, 0, 1, 0, 0, 2, 0, 0, 1, 0};
+    auto barrel = barrel_transform(base_barrel, 0, 0);
+    Matrix barrel_expected = {0, 0, 1, 2, 0, -1, 0, 0, 1, 0, 0, 0};
+    for (unsigned i = 0; i < 12; ++i)
+      if (std::abs(barrel[i] - barrel_expected[i]) > .00001f)
+        throw std::runtime_error("barrel pivot mismatch");
+    auto camera = game_camera();
+    if (std::abs(camera[0] - 0.70710678f) > 0.00001f ||
+        std::abs(camera[6] - 0.8660254f) > 0.00001f)
+      throw std::runtime_error("game camera mismatch");
     auto image = draw(v, h, p, 0, 16, 128, 128, 0, 2);
     if (std::none_of(image.pixels.begin(), image.pixels.end(),
                      [](auto x) { return x.a != 0; }))
@@ -78,6 +111,17 @@ int main(int argc, char **argv) {
       auto model = read_vxl(get((base + ".vxl").c_str()));
       auto animation = read_hva(get((base + ".hva").c_str()));
       if (base == "mtnktur") {
+        ScenePart turret{&model, &animation, hull.matrix, 0, test_light};
+        turret.matrix[3] += 4;
+        auto combined = draw_scene({hull, turret}, p);
+        std::size_t changed = 0;
+        for (std::size_t i = 0; i < combined.image.pixels.size(); ++i)
+          changed += combined.image.pixels[i].r != scene.image.pixels[i].r ||
+                     combined.image.pixels[i].g != scene.image.pixels[i].g ||
+                     combined.image.pixels[i].b != scene.image.pixels[i].b ||
+                     combined.image.pixels[i].a != scene.image.pixels[i].a;
+        if (!changed)
+          throw std::runtime_error("turret had no effect");
         for (unsigned direction : {0u, 7u}) {
           std::array<float, 12> matrix = {1,
                                           -1,

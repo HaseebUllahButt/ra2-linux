@@ -69,6 +69,13 @@ def render(direction, lit):
     machine.reg_write(UC_X86_REG_ESP, STACK)
     machine.emu_start(0x756590, STOP, count=10000000)
     pixels = machine.mem_read(0xb2ff78, 65536)
+    if not lit and direction == 0 and width == 46:
+        output = BASE + 0xa00
+        word(STACK, STOP)
+        machine.reg_write(UC_X86_REG_ECX, output)
+        machine.reg_write(UC_X86_REG_ESP, STACK)
+        machine.emu_start(0x754510, STOP, count=10000000)
+        assert struct.unpack('<6i', machine.mem_read(output, 24)) == (-40,-36,85,99,86,58)
     value = 14695981039346656037
     for pixel in pixels:
         value = ((value ^ pixel) * 1099511628211) & 0xffffffffffffffff

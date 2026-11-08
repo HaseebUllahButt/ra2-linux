@@ -70,6 +70,29 @@ struct Image {
   unsigned width, height;
   std::vector<ra2::gfx::Rgba> pixels;
 };
+using Matrix = std::array<float, 12>;
+// Section matrices are combined with each part matrix. Supply parts in draw
+// order.
+struct ScenePart {
+  const Model *model = nullptr;
+  const Animation *animation = nullptr;
+  Matrix matrix{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+  unsigned frame = 0;
+  std::array<std::uint8_t, 256> normal_light{};
+};
+struct SceneImage {
+  Image image;
+  int left, top;
+};
+// Default game camera from the original initialization at 0x7558CE.
+Matrix game_camera();
+// Original 32-step facing and X offset from 0x43E085 through 0x43E0E3.
+Matrix facing_transform(std::uint16_t facing, std::int32_t offset);
+// Pivot rotation sequence at 0x43E439 through 0x43E52D.
+Matrix barrel_transform(Matrix base, std::uint16_t rotation,
+                        std::uint16_t tilt);
+// Multi-part alignment remains unverified against the game.
+SceneImage draw_scene(const std::vector<ScenePart> &, const Lighting &);
 // Convert the original 256x256 lit indexed raster to RGBA.
 Image raster_rgba(const Section &, const std::array<float, 12> &matrix,
                   const Lighting &,
