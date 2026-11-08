@@ -20,9 +20,12 @@ rebuild/hook/winmm.dll
 # Generated tests must be rebuilt for the current Linux CPU.
 /rebuild/src/fs/mix_test
 /rebuild/src/gfx/gfx_test
+/rebuild/src/gfx/shp_view
 /rebuild/src/loop/loop_test
 /rebuild/src/map/map_test
+/rebuild/src/pack/pack_test
 /rebuild/src/render/render_test
+/rebuild/src/render/*.ppm
 /rebuild/src/rules/rules_test
 /rebuild/src/text/test_csf
 /rebuild/hook/*.o
