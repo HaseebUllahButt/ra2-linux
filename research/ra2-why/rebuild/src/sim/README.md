@@ -377,7 +377,8 @@ These checks prove this resolved track slice. They do not prove unrecovered call
 
 Run `rebuild/src/sim/test_move.sh` for the real-map command check.
 This optional integration test reads the parent's current renderer sources through `RA2_SHARED_SOURCE`.
-Its default is `/path/to/user/ra2/rebuild/src`.
+Its default is `/path/to/user/ra2-native-integration/rebuild/src`.
+The shared asset reader uses its normal optimized build. SIM_TEST_FLAGS instruments the simulation and its INI/map dependencies.
 It loads original C1A02MD.MAP, the original ART INI, and exact TMP metadata from original MIX archives.
 Original YTNK entity 259 moves from 113,115 to 113,114 in 12 movement ticks.
 Each position matches original x86 output at its real Speed=6, converted to 15.
@@ -400,3 +401,19 @@ Those supported cells therefore receive the original false bridge state.
 `original_land_check.py executable [--base]` checks 4,096 original branch cases in each edition.
 Both produce hash BC614341. The native tests compare the same grid.
 This does not yet port autotile replacement at 0047CA80, bridge creation, tunnel flags, or overlay-specific land decisions.
+
+## Tile replacement decisions
+
+`replacement.h` ports the full tile-index decision at base 00471D10 and expansion 0047CA80.
+`TileReplacementRules::from_theater()` binds original General TileSet numbers to their live first indexes.
+It preserves disabled groups and the original Lunar overrides from 00545150.
+The decision uses four cardinal neighbor indexes and ramp states.
+Missing required neighbors return an explicit unresolved decision.
+The caller separately loads changed tile metadata through `TheaterInputs::resolved_metadata`.
+
+Run `test_replacement.sh` for 19,084 native decisions.
+`original_replacement_check.py executable [--base]` runs the same resolved-input grid in each original executable.
+All three produce hash 60DC1EC1.
+The grid covers all four terrain borders, extra connected groups, and all 20 ramp indexes.
+These numeric indexes are isolated test inputs. They do not assign gameplay values to original maps.
+Map-wide integration still needs the original cell order and both scenario initialization passes.
