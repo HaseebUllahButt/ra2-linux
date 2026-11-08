@@ -18,6 +18,20 @@ sim::CandidateDecision assess_target_for_scan(const sim::CandidatePrefix &);
 int base_ballistic_launch_speed(int distance, double gravity,
                                 const sim::OriginalDistance &);
 
+// Base 0x47F8B0 / 0x47F9B0, including the executable's angle table.
+// A missing result means the original reports no usable solution, or the
+// second-solution value needed by its caller cannot be established.
+class BaseBallisticAngles {
+public:
+  static BaseBallisticAngles from_executable(const std::string &path);
+  std::optional<std::uint16_t> angle(int speed, int horizontal_distance,
+                                      int height_delta, double gravity,
+                                      bool alternate) const;
+private:
+  sim::OriginalDistance distance_;
+  std::array<float, 4097> angles_{};
+};
+
 // Use only after the original firing checks and weapon selection have been
 // resolved. This event does not mean that firing eligibility was checked.
 struct ResolvedTankFire {

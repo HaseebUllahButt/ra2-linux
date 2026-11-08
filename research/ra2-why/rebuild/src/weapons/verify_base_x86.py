@@ -68,6 +68,49 @@ for (distance, gravity), expected in zip(speeds, native):
     assert actual == expected, ((distance, gravity), actual, expected)
 assert len(native) == len(speeds)
 
+# Original ballistic angle and lookup table. Cases stay in the verified
+# square-root domain used by the native shared distance primitive.
+angle_cases = [
+    (v, d, h, gravity, a)
+    for v in (80, 120, 200)
+    for d in (100, 256, 512, 1000)
+    for h in (-32, 0, 32)
+    for gravity in (3, 6, 12)
+    for a in (0, 1)
+    if (v, d, h, gravity, a) != (200, 100, 0, 3, 1)
+]
+angle_cases += [(40, 1000, 0, 6, a) for a in (0, 1)]
+angle_cases += [(80, 256, 0, 0, a) for a in (0, 1)]
+angle_cases += [
+    (native[i], distance, 0, gravity, alternate)
+    for i, (distance, gravity) in enumerate(speeds)
+    if gravity == 6 and distance >= 64
+    for alternate in (0, 1)
+]
+angle_input = "".join(" ".join(map(str, c)) + "\n" for c in angle_cases)
+angle_native = subprocess.check_output(
+    [sys.argv[1], "--angle"], input=angle_input, text=True
+).splitlines()
+for case, expected in zip(angle_cases, angle_native):
+    speed, distance, height, gravity, alternate = case
+    w(stack, stop)
+    w(stack + 4, distance)
+    w(stack + 8, height)
+    f(stack + 12, gravity)
+    w(stack + 20, base + 0x200)
+    u.reg_write(UC_X86_REG_ECX, alternate)
+    u.reg_write(UC_X86_REG_EDX, speed)
+    u.reg_write(UC_X86_REG_ESP, stack)
+    u.reg_write(UC_X86_REG_FPCW, 0xE7F)
+    u.emu_start(0x47F8B0, stop, count=100000)
+    result = (
+        struct.unpack("<H", u.mem_read(base + 0x200, 2))[0]
+        if u.reg_read(UC_X86_REG_EAX) & 255
+        else -1
+    )
+    assert result == int(expected), (case, result, expected)
+assert len(angle_native) == len(angle_cases)
+
 # Load gravity onto x87, then execute the actual arc update instructions.
 # At 460397 the original x87 stack already holds gravity.
 stub = base + 0x5000
@@ -253,5 +296,5 @@ for case, line in zip(impact_cases, impact_native):
     assert actual == int(line), (case, actual, line)
 assert len(impact_native) == len(impact_cases)
 print(
-    f"Base game.exe: {len(speeds)} ballistic speeds, {len(cases)} arc proposals, {len(fire_cases)} fire events, and {len(impact_cases)} impact checks match"
+    f"Base game.exe: {len(speeds)} ballistic speeds, {len(angle_cases)} launch angles, {len(cases)} arc proposals, {len(fire_cases)} fire events, and {len(impact_cases)} impact checks match"
 )

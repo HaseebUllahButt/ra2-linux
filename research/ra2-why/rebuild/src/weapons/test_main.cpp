@@ -6,6 +6,16 @@
 using namespace ra2::weapons;
 int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--angle") {
+      auto tables = BaseBallisticAngles::from_executable("/path/to/user/ra2/game/game.exe");
+      int speed, distance, height, alternate;
+      double gravity;
+      while (std::cin >> speed >> distance >> height >> gravity >> alternate) {
+        auto angle = tables.angle(speed, distance, height, gravity, alternate != 0);
+        std::cout << (angle ? int(*angle) : -1) << '\n';
+      }
+      return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--impact") {
       int hit, height, unit;
       while (std::cin >> hit >> height >> unit) {
@@ -77,6 +87,20 @@ int main(int argc, char **argv) {
       base_arc_proposal({{0, 0, 0}, {1, 2, 3}, -1});
       throw std::runtime_error("accepted negative gravity");
     } catch (const std::invalid_argument &) {}
+    try {
+      BaseBallisticAngles::from_executable("/path/to/user/ra2/game/gamemd.exe");
+      throw std::runtime_error("accepted the wrong angle table edition");
+    } catch (const std::runtime_error &error) {
+      if (std::string(error.what()) == "accepted the wrong angle table edition")
+        throw;
+    }
+    {
+      auto tables = BaseBallisticAngles::from_executable("/path/to/user/ra2/game/game.exe");
+      try {
+        (void)tables.angle(200, 100, 0, 3, true);
+        throw std::runtime_error("accepted unverified subunit square root");
+      } catch (const std::range_error &) {}
+    }
     std::cout << "Firing prefix, damage event and invalid input checks passed\n";
     return 0;
   } catch (const std::exception &error) {

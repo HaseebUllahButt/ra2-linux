@@ -17,7 +17,13 @@ eligibility, target, muzzle, weapon, damage and IDs. It matches the base
 `0x6CAC65` fire fragment for ROT=0. It uses `0x733F70` and `0x47FB70` to
 calculate launch speed from horizontal distance and gravity. The table input
 must be read from base `game.exe`. The event retains muzzle and target
-coordinates. It does not calculate the launch angle or initial velocity.
+coordinates. It does not calculate the initial velocity.
+
+`BaseBallisticAngles::angle()` implements `0x47F8B0` and `0x47F9B0`. It loads
+the base executable's angle table. A missing result indicates no usable
+solution or an unresolved second-solution value. Inputs outside the shared
+square-root helper's verified domain throw. The caller must supply the
+original branch selection and compute the initial velocity separately.
 
 `base_arc_proposal()` matches `0x460397..0x460435`. It subtracts gravity from
 vertical velocity, then applies velocity to the integer position. It returns a
@@ -37,5 +43,6 @@ that the original damage dispatch completed.
 The asset test reads base `rules.ini`: HTNK uses 120mm; its damage is 90,
 ROF 65, projectile Cannon, speed 40 and warhead AP. Cannon is arcing and
 checks cliffs, elevation and walls. Gravity is 6 in `[AudioVisual]`. The x86
-test compares 40 launch speeds, 1,024 arc proposals, 256 fire events and 96
-impact checks. Its terrain trace and impact height are resolved stubs.
+test compares 40 launch speeds, 235 launch angles, 1,024 arc proposals, 256 fire
+events and 96 impact checks. Its terrain trace and impact height are resolved
+stubs.
