@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tmp_decode.h"
+#include "../map/map_file.h"
 #include "../fs/mix_bootstrap.h"
 #include "../pack/map_pack.h"
 #include <map>
@@ -55,6 +56,11 @@ private:
 // Native-resolution terrain artwork, clipped to LocalSize. Includes elevation
 // and TMP extras/depth planes. Does not draw objects, overlays or map lighting.
 Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry,
-                      TheaterArt& art);
+                      TheaterArt& art,
+                      const ra2map::MapFile* objects = nullptr);
 void write_ppm(const Bitmap& image, const std::filesystem::path& path);
+
+// Draws object placement markers (houses, units, infantry, aircraft)
+// over the composed terrain. Aircraft hover at their flight level.
+// Colors follow the standard RA2 multiplayer scheme per house.
 } // namespace ra2::render
