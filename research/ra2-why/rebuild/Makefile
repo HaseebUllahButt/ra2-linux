@@ -14,7 +14,7 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/ui/ui.cpp src/ui/shell.cpp src/ui/skirmish.cpp src/text/csf.cpp \
     src/pack/map_pack.cpp src/rules/ini_file.cpp src/map/map_file.cpp \
     src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
-    src/sim/combat.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp src/sim/path.cpp src/sim/cell_entry.cpp src/sim/coarse_category.cpp src/sim/regions.cpp src/sim/hierarchy.cpp src/sim/hierarchy_route.cpp src/sim/production.cpp \
+    src/sim/combat.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp src/sim/path.cpp src/sim/path_smoothing.cpp src/sim/cell_entry.cpp src/sim/coarse_category.cpp src/sim/regions.cpp src/sim/hierarchy.cpp src/sim/hierarchy_route.cpp src/sim/production.cpp \
     src/sim/world.cpp src/sim/world_init.cpp src/sim/drive.cpp src/sim/movement.cpp src/sim/replacement.cpp src/sim/build_time.cpp src/voxel/voxel.cpp
 NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
 
@@ -37,7 +37,7 @@ SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS))
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 SESSION_OBJECTS = build/native/src/session/session.o build/native/src/session/map_geometry.o build/native/src/session/placement_terrain.o
 
-native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-filtered-path sim-entry-height sim-category sim-regions sim-hierarchy sim-hierarchy-route sim-replacement sim-world sim-build-time sim-production session session-terrain weapons
+native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-filtered-path sim-smoothing sim-entry-height sim-category sim-regions sim-hierarchy sim-hierarchy-route sim-replacement sim-world sim-build-time sim-production session session-terrain weapons
 	build/ra2-native --game-dir ../game --frames 3 --headless
 	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
@@ -102,14 +102,21 @@ build/sim_route_test: build/native/src/sim/test_route.o build/native/src/sim/dri
 sim-path: build/sim_path_test
 	build/sim_path_test ../game/game.exe ../game/gamemd.exe
 
-build/sim_path_test: build/native/src/sim/test_path.o build/native/src/sim/path.o build/native/src/sim/cell_entry.o build/native/src/sim/distance.o
+build/sim_path_test: build/native/src/sim/test_path.o build/native/src/sim/path.o build/native/src/sim/path_smoothing.o build/native/src/sim/cell_entry.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 .PHONY: sim-filtered-path
 sim-filtered-path: build/sim_filtered_path_test
 	build/sim_filtered_path_test ../game/game.exe ../game/gamemd.exe
 
-build/sim_filtered_path_test: build/native/src/sim/test_filtered_path.o build/native/src/sim/path.o build/native/src/sim/cell_entry.o build/native/src/sim/distance.o
+build/sim_filtered_path_test: build/native/src/sim/test_filtered_path.o build/native/src/sim/path.o build/native/src/sim/path_smoothing.o build/native/src/sim/cell_entry.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+.PHONY: sim-smoothing
+sim-smoothing: build/sim_smoothing_test
+	build/sim_smoothing_test
+
+build/sim_smoothing_test: build/native/src/sim/test_smoothing.o build/native/src/sim/path_smoothing.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 sim-entry-height: build/sim_entry_height_test
