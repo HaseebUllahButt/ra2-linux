@@ -19,8 +19,8 @@ struct ResolvedGroundPathCell {
     std::optional<int> entry_status;
     std::optional<EntryHeightCell> height;
     std::optional<std::uint16_t> hierarchy_zone=std::nullopt;
-    std::optional<bool> marked_40000=std::nullopt; // Required with explicit postprocessing; true regular-search costs remain unsupported.
     std::optional<std::uint8_t> occupancy_neighbors=std::nullopt; // Original Cell +122, read only outside allowed zones.
+    std::optional<bool> marked_40000=std::nullopt; // Required with explicit postprocessing; true regular-search costs remain unsupported.
 };
 struct PathPostprocessing { std::optional<double> actor_threat_weight; };
 struct PathHierarchyFilter { std::vector<bool> allowed_zones; };
