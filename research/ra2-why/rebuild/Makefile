@@ -172,6 +172,9 @@ build/session_unit_choice_cases: build/native/src/session/session.o build/native
 build/session_unit_loop_cases: build/native/src/session/session.o build/native/src/session/unit_loop_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
+build/session_mission_cases: build/native/src/session/session.o build/native/src/session/mission_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
 .PHONY: weapons
 weapons: build/weapons_test build/weapons_asset_test build/weapons_lobber_asset_test
 	build/weapons_test
