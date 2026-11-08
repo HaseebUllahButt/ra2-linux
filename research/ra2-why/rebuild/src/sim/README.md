@@ -378,7 +378,7 @@ These checks prove this resolved track slice. They do not prove unrecovered call
 
 Run `rebuild/src/sim/test_move.sh` for the real-map command check.
 This optional integration test reads the parent's current renderer sources through `RA2_SHARED_SOURCE`.
-Its default is `/path/to/user/ra2-native-integration/rebuild/src`.
+Its default is `/path/to/user/ra2/rebuild/src`.
 The shared asset reader uses its normal optimized build. SIM_TEST_FLAGS instruments the simulation and its INI/map dependencies.
 It loads original C1A02MD.MAP, the original ART INI, and exact TMP metadata from original MIX archives.
 Add `/path/to/user/ra2/game /path/to/user/ra2/analysis/extracted --base` to test base ALL02S.MAP.
@@ -553,3 +553,32 @@ Straight supported movement preserves the initial turret value.
 A command with a turn clears the value before movement starts.
 Original Unit AI turret updates remain unrecovered. The renderer must keep an unknown turret explicit.
 Other entity kinds have no recovered turret initialization here.
+
+## Regular goal-path search
+
+`find_original_flat_path()` ports base 00427370 and expansion 00429A90 with their original node creation helpers.
+The input is a resolved flat search graph. It does not infer UnitClass eligibility from map artwork.
+Its contract requires equal floor levels, no bridges, tubes, marked terrain, or hierarchical search.
+The ordinary Unit profile has type +C94 and +E0C clear, with the constructor cost weight of one.
+A missing graph record means an unallocated original cell. An empty entry status means an unresolved callback.
+This slice accepts only original entry results zero and seven.
+Other entry results need occupant-dependent costs from 00429830 and return Unsupported.
+
+The search keeps the original eight-direction order, float stores, lookup square root, and open-list tie behavior.
+It marks cells when it creates nodes. It does not replace those records with a generic decrease-key search.
+It preserves the separate last-child choice before it compares the open-list root.
+Blocked goals can return a partial path that stops short of the requested cell.
+The result distinguishes Found, Partial, NoPath, NeedsInput, and Unsupported.
+The native command layer does not yet call this search. The original Foot wrapper and cell eligibility remain required.
+
+Monotone paths keep their original reconstructed direction list.
+Paths that reverse an axis require the unported 0042B210/0042B7F0 postprocessing and return Unsupported.
+The original default expansion limit is 0xFFF7. The original 10,000-expansion failure case is also preserved.
+The original 65,536-node storage bound produces an explicit native error before overflow.
+
+`original_path_check.py executable [--base] --vectors` executes the original search, node creation, and path postprocessing.
+It supplies a resolved flat 9x9 test graph through the CanEnterCell callback.
+It tests all 81 goals, a blocked goal, an impassable row, and an alternate monotone route.
+Both original editions return identical paths and node-cost float bits.
+`test_path.sh` compares those 84 cases in each edition and eight explicit input/limit checks.
+These 176 checks also verify unknown eligibility and unported nonmonotone postprocessing.

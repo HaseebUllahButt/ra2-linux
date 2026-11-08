@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eu
 cd "$(dirname "$0")"
-shared=${RA2_SHARED_SOURCE:-/path/to/user/ra2-native-integration/rebuild/src}
+shared=${RA2_SHARED_SOURCE:-/path/to/user/ra2/rebuild/src}
 build=$(mktemp -d /tmp/ra2-sim-move-test.XXXXXX)
 trap 'rm -rf "$build"' EXIT
 # The read-only asset reader is shared code. Keep its RSA work outside sim instrumentation.
