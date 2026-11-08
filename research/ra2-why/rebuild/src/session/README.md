@@ -78,6 +78,11 @@ MP02T2 test uses real map bounds and waypoints with fixture terrain values.
 Use the snapshot from the original placement phase. A later terrain pass can
 change those values.
 
+`real_terrain_test.cpp` loads ALL02S.MAP and theater assets from the original
+base game. It builds the full cell grid and runs the recovered first terrain
+pass before checking every cell. The boundary comparison tests the adapter;
+it does not execute the original executable on those map cells.
+
 `original_geometry_check.py` runs original map clipping and map boundary
 instructions for 8,712 cases per edition. Build `geometry_cases.cpp` with
 `map_geometry.cpp`. Supply each original executable and the case binary.
