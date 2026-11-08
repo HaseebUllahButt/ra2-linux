@@ -16,3 +16,12 @@ rebuild/hook/winmm.dll
 /analysis/base-ra2/*.gpr
 /analysis/base-ra2/*.rep/
 /analysis/base-ra2/*.lock*
+
+# generated test binaries and build output
+rebuild/src/*/[a-z]*_test
+rebuild/src/*/test_[a-z]*
+!rebuild/src/*/test_*.cpp
+!rebuild/src/*/[a-z]*_test*.cc
+rebuild/hook/*.o
+rebuild/src/render/*.ppm
+rebuild/src/gfx/shp_view
