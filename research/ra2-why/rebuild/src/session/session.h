@@ -7,6 +7,9 @@
 
 namespace ra2::sim { class Random; class OriginalDistance; }
 namespace ra2::session {
+// The multiplayer house constructor copies these values before later setup.
+struct HouseValues { std::int32_t initial_credits, cash, color, house_type_color; };
+HouseValues initialize_house_values(std::int32_t credits, std::int32_t color) noexcept;
 // Candidate order follows the resolved General/BaseUnit list. An unknown Owner
 // mask blocks selection because it could be the first matching candidate.
 struct BaseUnitCandidate { std::string type; std::optional<std::uint32_t> owner_mask; };

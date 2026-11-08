@@ -5,6 +5,11 @@
 #include <limits>
 
 namespace ra2::session {
+HouseValues initialize_house_values(std::int32_t credits, std::int32_t color) noexcept {
+    // Base 004E8300; expansion 004FCE00. Both multiplayer human and AI
+    // constructors call this before later map and starting-unit processing.
+    return {credits,credits,color,color};
+}
 std::optional<std::size_t> select_base_unit(const std::vector<BaseUnitCandidate>& candidates,
                                             unsigned country_index) {
     // 005D7030 passes RulesClass BaseUnit to 00505310. The latter scans

@@ -11,6 +11,11 @@ using namespace ra2;
 int main(int argc, char** argv) {
     if (argc!=2) return 2;
     const std::string root=argv[1];
+    for (int money : {0,2500,5000,10000}) for (int color=0;color<8;++color) {
+        const auto fields=session::initialize_house_values(money,color);
+        assert(fields.initial_credits==money && fields.cash==money &&
+               fields.color==color && fields.house_type_color==color);
+    }
     const auto base=sim::OriginalDistance::from_executable(root+"/game.exe");
     const auto yuri=sim::OriginalDistance::from_executable(root+"/gamemd.exe");
     const std::vector<session::StartPoint> points{{10,10},{13,14},{20,10},{30,10}};

@@ -18,7 +18,11 @@ The mode calls `0x005D7030`, which uses `0x00505310`. The caller supplies
 fully resolved Owner masks. An unknown earlier mask prevents selection. Real
 rules select AMCV for Americans, SMCV for Russians, and Yuri PCV in expansion.
 
-This is not a complete skirmish session. House creation, credits, additional
+`initialize_house_values` copies the selected credits and color to the original
+multiplayer house fields. It represents the initial assignment, before later
+map and unit processing. Base `0x004E8300` and expansion `0x004FCE00` match.
+
+This is not a complete skirmish session. House creation, final cash, additional
 units, placement, observer handling, random waypoint fallback, and RNG state
 handoff to `Simulation` are not implemented. Start must remain disabled.
 
@@ -40,3 +44,7 @@ state words. It replaces only debug logging.
 original selector. Build `base_unit_cases.cpp` with `session.cpp` and the same
 simulation sources. It runs 320 cases per edition. The country resolver is
 stubbed to provide the already resolved country index. The selector itself runs.
+
+`original_house_check.py` compares the multiplayer house field assignment with
+the original x86 instructions. Build `house_cases.cpp` with `session.cpp` and
+the same simulation sources. It runs 56 cases per edition without stubs.
