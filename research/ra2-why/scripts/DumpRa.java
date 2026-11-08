@@ -21,7 +21,6 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Instruction;
-import gh0program.placeholder;
 import ghidra.program.model.symbol.Reference;
 
 public class DumpRa extends GhidraScript {
