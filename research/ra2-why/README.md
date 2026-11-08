@@ -6,7 +6,7 @@ Date: 2026-11-07. Machine: REFERENCE_SYSTEM (ARM64). Source: your install on the
 
 - Full Red Alert 2 + Yuri's Revenge install: 1.9 GB, 498 files.
 - Now at `/path/to/user/ra2/game` (game.exe, gamemd.exe, ra2.mix, language.mix, ra2md.mix, langmd.mix, thememd.mix, maps, videos).
-- Note: this install has no `theme.mix` (base-game music). Yuri's Revenge music is in `thememd.mix`.
+- Note: base-game music IS present as `THEME.MIX` (uppercase name; 16 tracks, all matching the mod music list). Yuri Revenge music is in `thememd.mix` (10 WAV tracks).
 
 ## REA findings (evidence from REA 6.7.0 + Ghidra 12.1.4, run locally)
 
@@ -105,3 +105,25 @@ Continued reverse engineering for preservation. Full report:
   matches community documentation for YR 1.001.
 
 Analysis-only work; no EA program code rebuilt or redistributed.
+
+---
+
+## Verified end to end on Linux (2026-11-08)
+
+The game was driven with real input under a virtual display. All steps
+ran on this ARM64 REFERENCE_SYSTEM, native Linux, no Wine:
+
+1. First-run screens -> main menu (Allied + Soviet logos render).
+2. Skirmish lobby -> original Westwood map "Snowball's Chance" ->
+   live match with an AI opponent; game timer advanced.
+3. Dedicated server on port 1234 -> client auto-joined with
+   Launch.Connect -> live multiplayer match on "Pinch Point".
+
+Fixes that made it work:
+- Content links belong in ~/.config/openra/Content/ra2 (modern Linux
+  support dir), not only ~/.openra.
+- A broken theme.mix link fails the content check; links now point at
+  the real THEME.MIX (16 tracks, full base soundtrack).
+
+Evidence screenshots: analysis/verification/.
+Setup script updated: scripts/setup-native-linux.sh.

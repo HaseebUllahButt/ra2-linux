@@ -28,10 +28,18 @@ echo "3/6 Fetch pinned engine + build"
 make all
 
 echo "4/6 Content folder from your game files"
-CONTENT="${HOME}/.openra/Content/ra2"
-mkdir -p "$CONTENT"
-for f in ra2.mix language.mix ra2md.mix langmd.mix thememd.mix theme.mix; do
-    [ -f "$GAME_DIR/$f" ] && ln -sfn "$GAME_DIR/$f" "$CONTENT/$f"
+# OpenRA on Linux uses ~/.config/openra when it exists, else ~/.openra.
+# Create the links in BOTH locations and skip files the install lacks
+# (a broken link makes the content check fail).
+for CONTENT in "${HOME}/.config/openra/Content/ra2" "${HOME}/.openra/Content/ra2"; do
+    mkdir -p "$CONTENT"
+    for f in ra2.mix language.mix ra2md.mix langmd.mix thememd.mix theme.mix; do
+        if [ -f "$GAME_DIR/$f" ]; then
+            ln -sfn "$GAME_DIR/$f" "$CONTENT/$f"
+        else
+            rm -f "$CONTENT/$f"
+        fi
+    done
 done
 
 echo "5/6 Done. Play:"
