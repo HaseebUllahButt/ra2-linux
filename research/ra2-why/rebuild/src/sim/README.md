@@ -113,7 +113,8 @@ Target selection needs 006F8DF0 and its virtual eligibility/threat handlers.
 004D9920 only wraps that selection. 006FCDB0 also applies transport and target eligibility rules.
 Combat still needs projectile updates and derived damage/destruction handlers.
 The forced health primitive must not replace those handlers.
-Production needs the complete 006F47A0 build-time formula, house multipliers, prerequisites, and placement handlers.
+Production still needs House::CanBuild, full queues, and placement handlers.
+The separate build_time and prerequisite-list modules recover timing and list checks with resolved external inputs.
 The factory primitive accepts resolved inputs to avoid inventing those numbers.
 The native frame uses 64 bits and rejects overflow; the original frame counter wraps at 32 bits.
 The core does not claim replay parity with original network events or original autonomous object updates.
@@ -693,3 +694,28 @@ Only runtime-type virtual answers and usable-area answers are adapted by the ori
 The same checks pass with address and undefined-behavior sanitizers.
 The producer does not recover overlay constructors, occupant placement order, or the fields it requires from those objects.
 The terrain adapter must supply the resolved original inputs, or keep that cell category unknown.
+
+## Hierarchy route search
+
+`find_original_hierarchy_route()` ports base 00429B60 and expansion 0042C290 with zero actor-threat contribution.
+It searches levels two through zero using the original ordered graph, float costs, heap ties, and parent-region filter.
+Inputs include explicit edition, endpoint cell indices, movement-zone value, and blocked edges for each level.
+The result retains each selected region route, allowed-region marks, and optional best-cost floats.
+A failed level preserves the earlier levels' completed state, matching the original search.
+This is the hierarchy primitive. It does not run the Foot goal wrapper or choose new blocked edges after drive failures.
+
+The compatibility table is at base 007E00C4 and expansion 0082A594.
+The first twelve rows match. Expansion adds a thirteenth row.
+Base INI reader 0046A300 accepts twelve MovementZone values; expansion 00474E40 accepts thirteen.
+Category costs match at base 0079C4A4 and expansion 007E3794.
+The original double diagonal cost is 0.001 at base 0079C528 and expansion 007E3818.
+Native arithmetic preserves the original E7F rounding and float stores.
+Invalid graph inputs, unknown editions, unsupported zone values, and original storage bounds produce explicit errors.
+
+`original_hierarchy_route_check.py executable [--base] --vectors` executes the original full hierarchy builder and route search.
+It supplies zero actor-threat contribution and selected blocked edges through the original input state.
+It checks four endpoint pairs and every valid movement-zone row across 256 resolved graphs.
+Base executes 12,288 searches. Expansion executes 13,312 searches.
+`test_hierarchy_route.sh` checks all 25,600 routes, allowed marks, generated-node cost bits, and six invalid-input cases.
+The same 25,606 checks pass with address and undefined-behavior sanitizers.
+Threat weighting, Foot wrapper retries, regular-search hierarchy filtering, and live-world inputs remain separate recovery work.
