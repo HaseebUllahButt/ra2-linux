@@ -1,4 +1,6 @@
+#include <fstream>
 #include "minimap.h"
+#include "../map/map_file.h"
 
 #include <functional>
 #include <iostream>
@@ -94,7 +96,8 @@ int main(int argc, char** argv) {
         require(argc == 1 || argc == 3, "Usage (from repo root): render_test [game-dir map-dir] | --self-test");
         const std::filesystem::path game = argc == 3 ? argv[1] : "game";
         const std::filesystem::path maps = argc == 3 ? argv[2] : "analysis/extracted/maps";
-        const std::filesystem::path output = "rebuild/src/render";
+        const std::filesystem::path output = "rebuild/build/render";
+        std::filesystem::create_directories(output);
         struct Expected { const char* name; int width, height; };
         for (const auto expected : {Expected{"2PEAKS", 4560, 2700}, {"DOWNTOWN", 4560, 2460}, {"FRSTBITE", 5700, 2610}}) {
             const auto* name = expected.name;
@@ -104,7 +107,16 @@ int main(int argc, char** argv) {
             ra2::fs::MixFileSystem files(game); files.bootstrap();
             const auto theater = ini.read_string("Map", "Theater");
             auto art = TheaterArt::load(files, theater);
-            const auto image = render_minimap(terrain, geometry, art);
+            std::ifstream map_stream(maps / (std::string(name) + ".MAP"));
+            const std::string map_text((std::istreambuf_iterator<char>(map_stream)),
+                                       std::istreambuf_iterator<char>());
+            ra2map::MapFile map_data;
+            map_data.parse(map_text);
+            const std::size_t placed = map_data.structures().size() +
+                map_data.units().size() + map_data.infantry().size() +
+                map_data.aircraft().size();
+            require(placed > 0, std::string(name) + ": no placed objects");
+            const auto image = render_minimap(terrain, geometry, art, &map_data);
             const auto s = stats(image);
             require(image.width == geometry.local.width*60 && image.height == geometry.local.height*30,
                     "Wrong native LocalSize dimensions");

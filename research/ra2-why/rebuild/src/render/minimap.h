@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tmp_decode.h"
+#include "../map/map_file.h"
 #include "../fs/mix_bootstrap.h"
 #include "../pack/map_pack.h"
 #include <map>
@@ -69,5 +70,12 @@ TerrainFrame render_terrain(const pack::Terrain& terrain, const MapGeometry& geo
                            TheaterArt& art, TileIndexSpace indexes = TileIndexSpace::PackedMap);
 Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry,
                       TheaterArt& art, TileIndexSpace indexes = TileIndexSpace::PackedMap);
+// Optional schematic placement overlay for the standalone debug renderer.
+Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry,
+                      TheaterArt& art, const ra2map::MapFile* objects);
 void write_ppm(const Bitmap& image, const std::filesystem::path& path);
+
+// Draws object placement markers (houses, units, infantry, aircraft)
+// over the composed terrain. Aircraft hover at their flight level.
+// Colors are schematic. The native actor renderer uses original game artwork.
 } // namespace ra2::render
