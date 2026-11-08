@@ -5,6 +5,7 @@
 #include <optional>
 
 namespace ra2::fs {
+enum class GameVariant { RedAlert2, YurisRevenge };
 struct MixLocation {
     std::shared_ptr<const MixArchive> archive;
     MixEntry entry;
@@ -18,7 +19,9 @@ class MixFileSystem {
 public:
     explicit MixFileSystem(std::filesystem::path directory);
     std::shared_ptr<MixArchive> mount(std::string_view name, bool required = true);
-    void bootstrap();       // 0x005301A0
+    // Base: game.exe 0x00515C90; expansion: gamemd.exe 0x005301A0.
+    void bootstrap(GameVariant variant = GameVariant::YurisRevenge);
+    GameVariant variant() const noexcept { return variant_.value_or(GameVariant::YurisRevenge); }
     void mount_overlays();  // 0x00530000; called separately after bootstrap.
     void mount_resources(ResourceOptions options = {}); // 0x00530460
     std::optional<MixLocation> locate(std::string_view filename,
@@ -38,6 +41,7 @@ private:
     std::vector<std::string> discover(std::string_view pattern) const;
     std::shared_ptr<MixArchive> generic(std::string_view name, bool required = true);
     std::filesystem::path directory_;
+    std::optional<GameVariant> variant_;
     std::vector<std::shared_ptr<MixArchive>> mixes_, array_, maps_, movies_;
     std::map<std::string, std::shared_ptr<MixArchive>> mounted_, generics_;
 };

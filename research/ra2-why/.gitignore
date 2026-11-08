@@ -15,3 +15,4 @@ rebuild/hook/winmm.dll
 /rebuild/build/
 /analysis/base-ra2/*.gpr
 /analysis/base-ra2/*.rep/
+/analysis/base-ra2/*.lock*

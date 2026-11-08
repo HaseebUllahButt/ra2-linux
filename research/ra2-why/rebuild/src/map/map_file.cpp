@@ -5,15 +5,15 @@ namespace ra2map {
 namespace {
 using Ini = ra2::rules::IniFile;
 
-// [Waypoints]/[Terrain] values are cell coords packed as X*1000 + Y.
-// Verified from the game's own decoder (FUN_0068bdc0): value/1000 and
-// value%1000, each stored as u16.
+// Modern [Waypoints]/[Terrain] coordinates are Y*1000 + X.
+// 0068BDC0 and 0071CA70 put remainder in the low word (X), quotient
+// in the high word (Y). 0071CB90 writes X + Y*1000.
 Cell parse_cell_number(std::string_view text) {
     Cell c{};
     const auto v = Ini::integer_value(Ini::trim(text));
     if (!v || *v < 0) return c;
-    c.x = static_cast<std::uint16_t>(*v / 1000);
-    c.y = static_cast<std::uint16_t>(*v % 1000);
+    c.x = static_cast<std::uint16_t>(*v % 1000);
+    c.y = static_cast<std::uint16_t>(*v / 1000);
     return c;
 }
 

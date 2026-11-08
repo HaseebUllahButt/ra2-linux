@@ -85,6 +85,20 @@ int main(int argc, char** argv) {
     try {
         self_tests();
         if (argc > 1 && std::string_view(argv[1]) == "--self-test") return 0;
+        if (argc == 3 && std::string_view(argv[1]) == "--base-game") {
+            MixFileSystem base(argv[2]);
+            base.bootstrap(GameVariant::RedAlert2);
+            require(base.read_file("RULES.INI").has_value(), "Base rules are missing");
+            require(!base.read_file("RULESMD.INI"), "Expansion rules leaked into base game");
+            for (const auto* name : {"RA2MD.MIX", "CACHEMD.MIX", "LOCALMD.MIX"})
+                require(base.generics().count(name) == 0, "Expansion archive loaded by base game");
+            bool rejected = false;
+            try { base.bootstrap(GameVariant::YurisRevenge); }
+            catch (const MixError&) { rejected = true; }
+            require(rejected, "Changing game variant kept stale archives");
+            std::cout << "Base RA2 archives and rules pass without expansion content.\n";
+            return 0;
+        }
         if (argc == 3 && std::string_view(argv[1]) == "--archive") {
             print_archive(*MixArchive::open(argv[2])); return 0;
         }

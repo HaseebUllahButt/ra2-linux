@@ -3,8 +3,20 @@
 # tests against the real game data in game/ (read-only).
 
 CXX ?= g++
+.DEFAULT_GOAL := all
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O2
 SDL_FLAGS = $(shell pkg-config --cflags --libs sdl2)
+NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp \
+    src/render/tmp_decode.cpp src/render/minimap.cpp src/loop/game_loop.cpp \
+    src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp src/fs/filename_hash.cpp \
+    src/gfx/palette.cpp src/pack/map_pack.cpp src/rules/ini_file.cpp
+NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
+
+build/native/%.o: %.cpp
+	mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(shell pkg-config --cflags sdl2) -MMD -MP -c $< -o $@
+
+-include $(NATIVE_OBJECTS:.o=.d) build/native/src/app/test_platform.d
 
 .PHONY: all test clean fs rules text map pack loop gfx hook run-fs run-rules run-text run-map run-pack run-loop run-gfx run-hook
 
@@ -14,18 +26,18 @@ all: test
 
 platform: run-platform
 
-run-platform:
-	mkdir -p build
-	$(CXX) $(CXXFLAGS) src/app/platform.cpp src/app/test_platform.cpp $(SDL_FLAGS) -o build/platform_test
+run-platform: build/platform_test
 	SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy build/platform_test
 
-native:
+build/platform_test: build/native/src/app/platform.o build/native/src/app/test_platform.o
 	mkdir -p build
-	$(CXX) $(CXXFLAGS) src/app/platform.cpp src/app/main.cpp \
-		src/render/tmp_decode.cpp src/render/minimap.cpp src/loop/game_loop.cpp \
-		src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp src/fs/filename_hash.cpp \
-		src/gfx/palette.cpp src/pack/map_pack.cpp src/rules/ini_file.cpp \
-		$(SDL_FLAGS) -ldl -o build/ra2-native
+	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -o $@
+
+native: build/ra2-native
+
+build/ra2-native: $(NATIVE_OBJECTS)
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
 
 test: fs rules text map pack loop gfx hook
 	@echo "== all layer tests passed =="

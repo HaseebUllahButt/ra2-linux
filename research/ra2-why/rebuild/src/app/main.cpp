@@ -113,7 +113,7 @@ int main(int argc, char** argv) {
         const auto terrain = ra2::pack::load_terrain(ini);
         const auto geometry = ra2::render::MapGeometry::from_ini(ini);
         ra2::fs::MixFileSystem files(args.game);
-        files.bootstrap();
+        files.bootstrap(ra2::fs::GameVariant::RedAlert2);
         auto art = ra2::render::TheaterArt::load(files, ini.read_string("Map", "Theater"));
         const auto battlefield = ra2::render::render_minimap(terrain, geometry, art);
         ra2::app::Window window("Red Alert 2 native rebuild: terrain", 1024, 768, !args.headless);

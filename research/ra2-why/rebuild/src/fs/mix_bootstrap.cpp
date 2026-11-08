@@ -80,10 +80,19 @@ std::shared_ptr<MixArchive> MixFileSystem::generic(std::string_view name, bool r
     if (archive) generics_[upper(name)] = archive;
     return archive;
 }
-void MixFileSystem::bootstrap() {
+void MixFileSystem::bootstrap(GameVariant variant) {
+    if (variant_ && *variant_ != variant)
+        throw MixError("Use a fresh filesystem when changing game variant");
+    variant_ = variant;
+    const bool expansion = variant == GameVariant::YurisRevenge;
     for (int i = 99; i >= 0; --i)
-        if (auto archive = mount(numbered("EXPANDMD", i), false))
+        if (auto archive = mount(numbered(expansion ? "EXPANDMD" : "EXPAND", i), false))
             if (std::find(array_.begin(), array_.end(), archive) == array_.end()) array_.push_back(archive);
+    if (!expansion) {
+        // game.exe 0x00515C90: base archives only, in this search order.
+        for (const char* name : {"RA2.MIX", "CACHE.MIX", "LOCAL.MIX"}) generic(name);
+        return;
+    }
     for (const char* name : {"RA2MD.MIX", "RA2.MIX", "CACHEMD.MIX", "CACHE.MIX", "LOCALMD.MIX", "LOCAL.MIX"})
         generic(name);
     // 0x005B43E0 and 0x005B43F0 are unconditional-success stubs in this executable.

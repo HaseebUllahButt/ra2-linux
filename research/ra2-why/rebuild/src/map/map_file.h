@@ -4,8 +4,8 @@
 // layer parses every gameplay section into typed structures.
 //
 // Verified from the game's own code:
-// - [Waypoints] values are cell coords packed as X*1000 + Y
-//   (FUN_0068bdc0: value/1000 -> u16 X, value%1000 -> u16 Y).
+// - [Waypoints] values are cell coords packed as Y*1000 + X
+//   (FUN_0068bdc0: value%1000 -> u16 X, value/1000 -> u16 Y).
 // - [Header] carries StartX/StartY/Width/Height/NumberStartingPoints
 //   plus "Waypoint%d=X,Y" pairs for each starting spot
 //   (FUN_00689d30).

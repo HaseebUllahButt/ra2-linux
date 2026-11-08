@@ -3,11 +3,23 @@
 #include <cstdio>
 #include <fstream>
 #include <iterator>
+#include <stdexcept>
 #include <vector>
 
 using namespace ra2map;
 
 int main(int argc, char** argv) {
+    MapFile coordinate_check;
+    coordinate_check.parse("[Waypoints]\n0=59092\n[Terrain]\n59092=TREE01\n");
+    if (coordinate_check.waypoints().size() != 1 ||
+        coordinate_check.waypoints()[0].cell.x != 92 ||
+        coordinate_check.waypoints()[0].cell.y != 59 ||
+        coordinate_check.terrain().size() != 1 ||
+        coordinate_check.terrain()[0].cell.x != 92 ||
+        coordinate_check.terrain()[0].cell.y != 59) {
+        std::fprintf(stderr, "Original packed cell coordinate check failed\n");
+        return 1;
+    }
     if (argc < 2) {
         std::fprintf(stderr, "usage: map_test <file.map>\n");
         return 2;
