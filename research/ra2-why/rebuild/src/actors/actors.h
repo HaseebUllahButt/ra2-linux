@@ -10,6 +10,10 @@
 
 namespace ra2::actors {
 enum class Kind { Infantry, Building, Effect, Terrain };
+struct WorldPosition { std::int64_t x, y, z; };
+// Original building center in engine world units, before screen projection.
+WorldPosition building_center(ra2map::Cell cell, unsigned foundation_width,
+                              unsigned foundation_height, std::int32_t world_z);
 struct Sequence { int first, count, stride; std::string fixed_facing; int delay; };
 class ActorArt {
 public:

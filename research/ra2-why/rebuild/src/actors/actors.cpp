@@ -18,6 +18,15 @@ bool speed_scaled_delay(std::string_view name) {
     return name == "Idle1" || name == "Idle2" || name == "WetIdle1" || name == "WetIdle2" || name == "Hover" || name == "Cheer";
 }
 }
+WorldPosition building_center(ra2map::Cell cell, unsigned width,
+                              unsigned height, std::int32_t z) {
+    if (!width || !height || width > 256 || height > 256)
+        throw std::runtime_error("invalid foundation size");
+    // 0x0044F820 converts cells to world coordinates. 0x00447AC0
+    // offsets the building center by half of the extra foundation cells.
+    return {std::int64_t(cell.x) * 256 + 128 + std::int64_t(width - 1) * 128,
+            std::int64_t(cell.y) * 256 + 128 + std::int64_t(height - 1) * 128, z};
+}
 ActorArt::ActorArt(gfx::ShpImage image, std::string filename, Kind kind, bool remappable)
     : image_(std::move(image)), filename_(std::move(filename)), kind_(kind), remappable_(remappable) {}
 

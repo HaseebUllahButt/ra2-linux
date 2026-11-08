@@ -5,6 +5,8 @@
 using namespace ra2;
 int main(int argc, char** argv) {
     if (argc != 2) return 2;
+    auto center=actors::building_center({2,3},3,2,60);
+    assert(center.x==896 && center.y==1024 && center.z==60);
     fs::MixFileSystem files(argv[1]);
     files.bootstrap(); files.mount_overlays(); files.mount("CONQMD.MIX"); files.mount("CONQUER.MIX"); files.mount("GENERIC.MIX"); files.mount("GENERMD.MIX", false); files.mount("TEMPERAT.MIX"); files.mount("URBANN.MIX"); files.mount("ISOUBN.MIX"); files.mount("ISOGENMD.MIX", false); files.mount("ISOGEN.MIX", false); files.mount("ISOURBMD.MIX", false); files.mount("ISOURB.MIX", false); files.mount("ISOTEMP.MIX", false); files.mount("TEM.MIX", false);
     auto art_data=files.read_file("artmd.ini"); auto rules_data=files.read_file("rulesmd.ini");

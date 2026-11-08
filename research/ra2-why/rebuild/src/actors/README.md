@@ -27,6 +27,9 @@ The `load_attached` function resolves named building animation keys, such as
 `ActiveAnim`. The caller still chooses its frame and whether it is active.
 Terrain objects use the theater-specific extension from the original table.
 
+`building_center` returns the original building center in world units from
+cell and foundation dimensions. It does not return a screen anchor or depth.
+
 The code does not yet recover map-facing conversion, automatic animation state
 transitions, fixed-facing changes, building animation overlays, effect timing,
 health-dependent frames, team-color tables, lighting, or shadow compositing.
