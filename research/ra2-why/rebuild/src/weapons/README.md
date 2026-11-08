@@ -40,6 +40,11 @@ trace returns `NeedsTrace`. Cannon has `Level`, `FlakScatter` and `AA` off.
 It has cliff and wall checks on. These flags and its arcing setting come from
 the shipped rules, not this API's defaults.
 
+`base_area_impact_enabled()` matches the original area-damage entry gate.
+`base_resolved_impact_recipient()` matches the final recipient checks and returns
+a damage request. Resolve recipient state again after each request. The caller
+must collect candidates in original order.
+
 `resolved_damage_event()` calls `sim::total_damage()` with caller-resolved
 warhead, armor and distance inputs. Simulation owns health and event
 application. Area target collection at `0x47E2C0`, derived health handlers,
@@ -51,6 +56,6 @@ ROF 65, projectile Cannon, speed 40 and warhead AP. Cannon is arcing and
 checks cliffs, elevation and walls. Gravity is 6 in `[AudioVisual]`. The x86
 test compares 40 launch speeds, 235 launch angles, 517 headings, 514 horizontal
 vectors, 512 speed limits, 512 pitch vectors, 515 Lobber branches, 256 connected
-launches, 1,024 arc proposals, 256 fire events and 96 impact checks. The
+launches, 1,024 arc proposals, 256 fire events, 96 impact checks, 1,024 damage recipients and 12 impact gates. The
 connected launch uses a resolved branch stub. Terrain trace and impact height
 are resolved stubs.

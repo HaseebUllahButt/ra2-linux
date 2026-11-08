@@ -274,6 +274,31 @@ ImpactStatus base_cannon_impact(const CannonImpactInputs &input) {
   return ImpactStatus::Continue;
 }
 
+bool base_area_impact_enabled(int raw_damage, bool scenario_blocks_damage,
+                              bool warhead_present) {
+  return raw_damage != 0 && !scenario_blocks_damage && warhead_present;
+}
+
+std::optional<DamageRequest>
+base_resolved_impact_recipient(const ResolvedImpactRecipient &input) {
+  if (!input.target_id || input.distance < 0 || input.radius < 0)
+    throw std::invalid_argument("invalid impact recipient");
+  if (!base_area_impact_enabled(input.raw_damage, input.scenario_blocks_damage,
+                                input.warhead_id != 0))
+    return std::nullopt;
+  if (!input.active || (input.original_type == 6 && input.type6_immune) ||
+      (input.special_group && (!input.special_flag || !input.special_virtual)))
+    return std::nullopt;
+  const int distance = input.original_type == 2 && input.type2_virtual_54
+                           ? input.distance / 2
+                           : input.distance;
+  if (input.health <= 0 || !input.receives_damage || input.in_limbo ||
+      distance > input.radius)
+    return std::nullopt;
+  return DamageRequest{input.target_id, input.attacker_id, input.warhead_id,
+                       input.raw_damage, distance};
+}
+
 DamageEvent resolved_damage_event(std::uint32_t target_id,
                                   const sim::DamageInputs &input) {
   if (!target_id)

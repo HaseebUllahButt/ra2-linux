@@ -6,6 +6,37 @@
 using namespace ra2::weapons;
 int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--impact-gate") {
+      int damage, blocked, warhead;
+      while (std::cin >> damage >> blocked >> warhead)
+        std::cout << base_area_impact_enabled(damage, blocked, warhead) << '\n';
+      return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--recipient") {
+      int active, receives, limbo, immune, group, flag, special_virtual, half;
+      ResolvedImpactRecipient input{};
+      input.target_id = 0x1001000;
+      input.attacker_id = 0x1002000;
+      input.warhead_id = 0x1003000;
+      while (std::cin >> input.raw_damage >> input.distance >> input.radius >>
+             input.original_type >> input.health >> active >> receives >> limbo >>
+             immune >> group >> flag >> special_virtual >> half) {
+        input.active = active;
+        input.receives_damage = receives;
+        input.in_limbo = limbo;
+        input.type6_immune = immune;
+        input.special_group = group;
+        input.special_flag = flag;
+        input.special_virtual = special_virtual;
+        input.type2_virtual_54 = half;
+        const auto request = base_resolved_impact_recipient(input);
+        if (request)
+          std::cout << request->raw_damage << ' ' << request->distance << '\n';
+        else
+          std::cout << "none\n";
+      }
+      return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--lobber") {
       auto table = ra2::sim::OriginalDistance::from_executable("/path/to/user/ra2/game/game.exe");
       int present, lobber, target_present;

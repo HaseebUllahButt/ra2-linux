@@ -524,6 +524,128 @@ for case, line in zip(impact_cases, impact_native):
     actual = u.reg_read(UC_X86_REG_EAX) & 255
     assert actual == int(line), (case, actual, line)
 assert len(impact_native) == len(impact_cases)
+
+# Entry gate before area candidate collection at 0x47E2E8.
+gate_result = None
+
+
+def gate_hook(cpu, address, size, unused):
+    global gate_result
+    gate_result = address == 0x47E321
+    cpu.emu_stop()
+
+
+u.hook_add(UC_HOOK_CODE, gate_hook, begin=0x47E321, end=0x47E321)
+u.hook_add(UC_HOOK_CODE, gate_hook, begin=0x47F494, end=0x47F494)
+gate_cases = [(damage, blocked, warhead) for damage in (-1, 0, 90)
+              for blocked in (0, 1) for warhead in (0, 1)]
+gate_native = subprocess.check_output(
+    [sys.argv[1], "--impact-gate"],
+    input="".join(" ".join(map(str, c)) + "\n" for c in gate_cases), text=True
+).splitlines()
+for (damage, blocked, warhead), line in zip(gate_cases, gate_native):
+    gate_result = None
+    w(0xA3D290, base + 0x50000)
+    u.mem_write(base + 0x50000, bytes([0x20 if blocked else 0]))
+    w(stack + 12, base + 0x3000 if warhead else 0)
+    u.reg_write(UC_X86_REG_EBP, stack)
+    u.reg_write(UC_X86_REG_ESP, stack - 0x100)
+    u.reg_write(UC_X86_REG_EDI, damage & 0xFFFFFFFF)
+    u.emu_start(0x47E2E8, stop, count=1000)
+    assert gate_result is not None and gate_result == bool(int(line)), (damage, blocked, warhead, gate_result, line)
+assert len(gate_native) == len(gate_cases)
+
+# Final original area-damage recipient loop, after its candidate scan.
+victim, victim_vtable, victim_kind, record, entries, frame = [
+    base + n for n in (0x1000, 0x20000, 0x30000, 0x40000, 0x41000, 0x42000)
+]
+w(victim, victim_vtable)
+w(victim + 0x418, victim_kind)
+w(entries, record)
+w(record, victim)
+for offset, stub in ((0x2C, 0x300), (0x54, 0x310), (0x32C, 0x320), (0x158, 0x330)):
+    w(victim_vtable + offset, stop + stub)
+victim_type = victim_special = victim_half = 0
+requests = []
+
+
+def recipient_hook(cpu, address, size, unused):
+    if address == stop + 0x300:
+        return_stub(cpu, victim_type, 0)
+    elif address == stop + 0x310:
+        return_stub(cpu, victim_half, 0)
+    elif address == stop + 0x320:
+        return_stub(cpu, victim_special, 0)
+    elif address == stop + 0x330:
+        sp = cpu.reg_read(UC_X86_REG_ESP)
+        args = struct.unpack("<6I", cpu.mem_read(sp + 4, 24))
+        damage = struct.unpack("<i", cpu.mem_read(args[0], 4))[0]
+        requests.append((damage, s(args[1]), args[2], args[3]))
+        return_stub(cpu, 0, 6)
+
+
+u.hook_add(UC_HOOK_CODE, recipient_hook, begin=stop + 0x300, end=stop + 0x330)
+recipient_cases = []
+for _ in range(1024):
+    recipient_cases.append(
+        (
+            heading_rng.choice((-30, 35, 90, 120)),
+            heading_rng.randrange(0, 300),
+            heading_rng.randrange(0, 200),
+            heading_rng.choice((1, 2, 6)),
+            heading_rng.choice((-1, 0, 1, 100)),
+            *(heading_rng.randrange(2) for _ in range(8)),
+        )
+    )
+recipient_input = "".join(" ".join(map(str, c)) + "\n" for c in recipient_cases)
+recipient_native = subprocess.check_output(
+    [sys.argv[1], "--recipient"], input=recipient_input, text=True
+).splitlines()
+for case, line in zip(recipient_cases, recipient_native):
+    (
+        damage,
+        distance,
+        radius,
+        victim_type,
+        health,
+        active,
+        receives,
+        limbo,
+        immune,
+        group,
+        flag,
+        victim_special,
+        victim_half,
+    ) = case
+    u.mem_write(victim + 0x7D, bytes([active]))
+    u.mem_write(victim + 0x74, bytes([receives]))
+    u.mem_write(victim + 0x76, bytes([limbo]))
+    u.mem_write(victim + 0x14, bytes([flag]))
+    u.mem_write(victim_kind + 0x1385, bytes([immune]))
+    w(victim + 0x6C, health)
+    w(record + 4, distance)
+    w(stack + 0x40, entries)
+    w(stack + 0x24, 0)
+    w(stack + 0x4C, 1)
+    w(stack + 0x78, radius)
+    w(stack + 0x30, damage)
+    u.mem_write(stack + 0x13, bytes([group]))
+    w(frame + 8, base + 0x3000)
+    w(frame + 12, base + 0x2000)
+    u.reg_write(UC_X86_REG_EBP, frame)
+    u.reg_write(UC_X86_REG_ESP, stack)
+    before = len(requests)
+    u.emu_start(0x47E9DC, 0x47EAA1, count=100000)
+    if line == "none":
+        assert len(requests) == before, (case, requests[-1:])
+    else:
+        expected = tuple(map(int, line.split()))
+        assert len(requests) == before + 1 and requests[-1] == (
+            *expected,
+            base + 0x2000,
+            base + 0x3000,
+        ), (case, requests[-1:], expected)
+assert len(recipient_native) == len(recipient_cases)
 print(
-    f"Base game.exe: {len(speeds)} ballistic speeds, {len(angle_cases)} launch angles, {len(heading_cases)} headings, {len(velocity_cases)} horizontal vectors, {len(limit_cases)} speed limits, {len(pitch_cases)} pitch vectors, {len(lobber_cases)} Lobber branches, {len(launch_cases)} connected launches, {len(cases)} arc proposals, {len(fire_cases)} fire events, and {len(impact_cases)} impact checks match"
+    f"Base game.exe: {len(speeds)} ballistic speeds, {len(angle_cases)} launch angles, {len(heading_cases)} headings, {len(velocity_cases)} horizontal vectors, {len(limit_cases)} speed limits, {len(pitch_cases)} pitch vectors, {len(lobber_cases)} Lobber branches, {len(launch_cases)} connected launches, {len(cases)} arc proposals, {len(fire_cases)} fire events, and {len(impact_cases)} impact checks, {len(recipient_cases)} damage recipients, and {len(gate_cases)} impact gates match"
 )

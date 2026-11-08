@@ -111,6 +111,29 @@ struct CannonImpactInputs {
 // Level, FlakScatter and AA off. Does not perform the terrain trace.
 ImpactStatus base_cannon_impact(const CannonImpactInputs &);
 
+// Original area-damage entry checks at 0x47E2E8..0x47E31B.
+bool base_area_impact_enabled(int raw_damage, bool scenario_blocks_damage,
+                              bool warhead_present);
+
+// A single already-collected recipient of base 0x47E9DC..0x47EAA1.
+// Resolve these fields again after each preceding damage event.
+struct ResolvedImpactRecipient {
+  std::uint32_t target_id, attacker_id, warhead_id;
+  int raw_damage, distance, radius, original_type, health;
+  bool active, receives_damage, in_limbo, type6_immune;
+  bool special_group, special_flag, special_virtual;
+  bool type2_virtual_54;
+  bool scenario_blocks_damage = false;
+};
+struct DamageRequest {
+  std::uint32_t target_id, attacker_id, warhead_id;
+  int raw_damage, distance;
+};
+// Returns the original damage callback request, or no request. Candidate
+// collection and subsequent derived health and death handlers remain open.
+std::optional<DamageRequest>
+base_resolved_impact_recipient(const ResolvedImpactRecipient &);
+
 // This event carries only the shared damage arithmetic. Simulation owns health,
 // target selection, death effects, shields, and all damage dispatch decisions.
 struct DamageEvent {
