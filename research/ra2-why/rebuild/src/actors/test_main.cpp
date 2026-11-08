@@ -17,6 +17,11 @@ int main(int argc, char** argv) {
     assert(infantry.x==704 && infantry.y==960 && infantry.z==60);
     auto draw_position=actors::building_draw_position({2,3},60);
     assert(draw_position.x==512 && draw_position.y==768 && draw_position.z==60);
+    assert(actors::object_y_sort(draw_position)==1280);
+    assert(actors::building_y_sort(draw_position,true,true)==1296);
+    rules::IniFile sort_rules;
+    sort_rules.parse("[GateType]\nImage=GateArt\nGate=yes\nTurretAnimIsVoxel=yes\n");
+    assert(actors::building_y_sort(draw_position,sort_rules,"GateType")==1296);
     auto center=actors::building_center({2,3},3,2,60);
     assert(center.x==896 && center.y==1024 && center.z==60);
     auto screen=actors::project_world(center,15,{10,20});

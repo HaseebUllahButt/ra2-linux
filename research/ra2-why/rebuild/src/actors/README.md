@@ -35,8 +35,10 @@ the five original subcell offsets. `project_world` applies the original fixed
 height projection and the viewport offset. `main_canvas_origin` converts the
 resulting screen anchor to a main SHP canvas origin. `0x00705E00` sets the
 centered-draw flag, and `0x004AED70` subtracts half the nominal canvas size.
-The caller supplies terrain height and any locomotor draw offset. Depth remains
-unresolved.
+The caller supplies terrain height and any locomotor draw offset.
+`object_y_sort` returns the original X + Y ordering key. `building_y_sort`
+applies the Gate and TurretAnimIsVoxel adjustments from building rules.
+Per-pixel depth remains unresolved.
 
 The code does not yet recover automatic animation state
 transitions, fixed-facing changes, building animation overlays, effect timing,

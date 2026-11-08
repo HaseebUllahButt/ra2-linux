@@ -17,6 +17,12 @@ int projected_height(std::int32_t world_z) noexcept;
 ScreenPoint project_world(WorldPosition position, ScreenPoint viewport);
 // Supply an already projected Z value, for callers that have it.
 ScreenPoint project_world(WorldPosition position, int height_pixels, ScreenPoint viewport);
+// Original world-space object ordering key, not the per-pixel depth buffer.
+std::int64_t object_y_sort(WorldPosition draw_position, int adjustment = 0);
+// The original TurretAnimIsVoxel and Gate flags add +32 and -16.
+std::int64_t building_y_sort(WorldPosition draw_position, bool turret_anim_is_voxel, bool gate);
+std::int64_t building_y_sort(WorldPosition draw_position, const rules::IniFile& rules,
+                             std::string_view type);
 // Map placement of a stationary infantry unit; world_z is the resolved terrain height.
 WorldPosition infantry_position(ra2map::Cell cell, unsigned subcell, std::int32_t world_z);
 // Base world point used by the building draw caller before projection.

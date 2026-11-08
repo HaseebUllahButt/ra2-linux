@@ -53,6 +53,24 @@ ScreenPoint project_world(WorldPosition position, int height_pixels, ScreenPoint
     const auto y = (position.x * 15 + position.y * 15) / 256;
     return {x - viewport.x, y - height_pixels - viewport.y};
 }
+std::int64_t object_y_sort(WorldPosition position, int adjustment) {
+    constexpr auto low = std::numeric_limits<std::int32_t>::min();
+    constexpr auto high = std::numeric_limits<std::int32_t>::max();
+    if (position.x < low || position.x > high || position.y < low || position.y > high)
+        throw std::runtime_error("sort coordinates out of range");
+    // 0x005F6BD0 adds the X and Y components of the draw-position virtual.
+    return position.x + position.y + adjustment;
+}
+std::int64_t building_y_sort(WorldPosition position, bool turret_anim_is_voxel, bool gate) {
+    // 0x00449410 adds these building-type dependent offsets.
+    return object_y_sort(position, (turret_anim_is_voxel ? 32 : 0) - (gate ? 16 : 0));
+}
+std::int64_t building_y_sort(WorldPosition position, const rules::IniFile& rules,
+                             std::string_view type) {
+    // 0x00460A00 and 0x00464638 read these building rules.
+    return building_y_sort(position, rules.read_bool(type, "TurretAnimIsVoxel", false),
+                           rules.read_bool(type, "Gate", false));
+}
 WorldPosition infantry_position(ra2map::Cell cell, unsigned subcell, std::int32_t z) {
     // 0x0048E480 initializes the five offsets. 0x0051FB00 adds them
     // to the cell coordinates and obtains the terrain height separately.
