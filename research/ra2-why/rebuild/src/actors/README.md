@@ -44,8 +44,10 @@ The caller supplies terrain height and any locomotor draw offset.
 applies the Gate and TurretAnimIsVoxel adjustments from building rules.
 Per-pixel depth remains unresolved.
 
-The code does not yet recover automatic animation state
-transitions, fixed-facing changes, automatic building animation overlays,
+`infantry_motion_sequence` selects the recovered standing and walking states,
+including prone and water-capable branches. The caller supplies those states.
+The code does not yet recover combat and other automatic state transitions,
+fixed-facing changes, automatic building animation overlays,
 health-dependent frames, team-color tables, lighting, or shadow compositing.
 Effects accept an explicit SHP frame.
 Do not treat this as a complete in-game actor renderer. `0x0044F820` skips an

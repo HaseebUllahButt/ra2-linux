@@ -5,6 +5,9 @@
 using namespace ra2;
 int main(int argc, char** argv) {
     if (argc != 2) return 2;
+    assert(actors::infantry_motion_sequence(actors::InfantryMotion::Standing,false,false)=="Ready");
+    assert(actors::infantry_motion_sequence(actors::InfantryMotion::Walking,true,false)=="Crawl");
+    assert(actors::infantry_motion_sequence(actors::InfantryMotion::Walking,false,true)=="Swim");
     assert(actors::infantry_direction(0)==7);
     assert(actors::infantry_direction(64)==5);
     assert(actors::infantry_direction(128)==3);

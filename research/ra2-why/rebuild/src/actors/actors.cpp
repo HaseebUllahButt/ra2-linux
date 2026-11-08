@@ -19,6 +19,13 @@ bool speed_scaled_delay(std::string_view name) {
     return name == "Idle1" || name == "Idle2" || name == "WetIdle1" || name == "WetIdle2" || name == "Hover" || name == "Cheer";
 }
 }
+std::string_view infantry_motion_sequence(InfantryMotion motion, bool prone, bool water) noexcept {
+    // 0x00520AE0 selects Ready/Walk or Prone/Crawl based on locomotion.
+    // 0x0051D6F0 maps those states to Tread/Swim in the water branch.
+    if (water) return motion == InfantryMotion::Walking ? "Swim" : "Tread";
+    if (motion == InfantryMotion::Walking) return prone ? "Crawl" : "Walk";
+    return prone ? "Prone" : "Ready";
+}
 unsigned infantry_direction(std::uint8_t map_facing) noexcept {
     // 0x006F6D94 stores map facing in the high byte of the direction.
     // 0x00518F52 rounds it to 32 directions and indexes table 0x007EAEFC.

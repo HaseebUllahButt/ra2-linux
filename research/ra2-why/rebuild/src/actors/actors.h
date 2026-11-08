@@ -11,6 +11,10 @@
 
 namespace ra2::actors {
 enum class Kind { Infantry, Building, Effect, Terrain };
+// Basic locomotion state; action, death, deployment, and combat states are separate.
+// water means the original water-capable, water-cell, non-airborne branch applies.
+enum class InfantryMotion { Standing, Walking };
+std::string_view infantry_motion_sequence(InfantryMotion motion, bool prone, bool water) noexcept;
 struct ScreenPoint { std::int64_t x, y; };
 struct WorldPosition { std::int64_t x, y, z; };
 // Original height projection for the fixed tactical geometry.
