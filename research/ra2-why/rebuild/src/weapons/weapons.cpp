@@ -455,7 +455,7 @@ std::optional<AreaDamageEvent> base_standard_area_impact(
       : static_cast<std::int64_t>(product) - 0x100000000LL;
   const int damage = static_cast<int>(signed_product >= 0 ? signed_product / 256
                                       : -((-signed_product + 255) / 256));
-  return AreaDamageEvent{input.position, input.attacker_id, input.warhead_id, damage};
+  return AreaDamageEvent{input.position, input.attacker_id, input.warhead_id, damage, true};
 }
 
 bool base_area_impact_enabled(int raw_damage, bool scenario_blocks_damage,

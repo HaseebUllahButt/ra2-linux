@@ -219,6 +219,7 @@ struct AreaDamageEvent {
   sim::Coord position;
   std::uint32_t attacker_id, warhead_id;
   int damage;
+  bool area_flag; // Final original 0x47E2C0 stack argument, true on this path.
 };
 std::optional<AreaDamageEvent> base_standard_area_impact(
     const StandardAreaImpactInput &);

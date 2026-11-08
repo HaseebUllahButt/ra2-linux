@@ -82,7 +82,7 @@ for (damage, multiplier), line in zip(cases, lines):
     u.reg_write(UC_X86_REG_ESP, stack)
     observed = None
     u.emu_start(0x462110, stop, count=10000)
-    expected = tuple(map(int, line.split())) + (1,)
+    expected = tuple(map(int, line.split()))
     assert observed == expected, ((damage, multiplier), observed, expected)
 assert len(lines) == len(cases)
 print(f"Base game.exe: {len(cases)} standard area-impact calls match")

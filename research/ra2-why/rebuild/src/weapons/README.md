@@ -12,6 +12,8 @@ make -C rebuild build/weapons_fractional_tick_test
 RA2_GAME_DIR="$PWD/game" python3 rebuild/src/weapons/verify_fractional_x86.py rebuild/build/weapons_fractional_tick_test
 make -C rebuild build/weapons_near_ground_test
 RA2_GAME_DIR="$PWD/game" python3 rebuild/src/weapons/verify_near_ground_x86.py rebuild/build/weapons_near_ground_test
+make -C rebuild build/weapons_area_impact_test
+RA2_GAME_DIR="$PWD/game" python3 rebuild/src/weapons/verify_area_impact_x86.py rebuild/build/weapons_area_impact_test
 
 ```
 
@@ -90,6 +92,11 @@ with the original executable. The floor comes from the real map. Height,
 object, building, and terrain trace results remain supplied test inputs.
 
 `base_area_impact_enabled()` matches the original area-damage entry gate.
+`base_standard_area_impact()` builds the standard detonation request with its
+original wrapping damage multiply and final area flag. Special warheads and
+earlier effects must be resolved and absent. The original comparison checks
+1,073 complete area calls, including negative damage and integer overflow.
+Target adjustment, recipient collection, and projectile removal remain open.
 `base_resolved_impact_recipient()` matches the final recipient checks and returns
 a damage request. Resolve recipient state again after each request. The caller
 must collect candidates in original order.

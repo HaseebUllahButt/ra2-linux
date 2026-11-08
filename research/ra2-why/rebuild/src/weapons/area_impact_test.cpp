@@ -13,7 +13,7 @@ int main() {
       if (!event) throw std::runtime_error("standard area event missing");
       std::cout << event->position.x << ' ' << event->position.y << ' ' << event->position.z
                 << ' ' << event->attacker_id << ' ' << event->warhead_id << ' '
-                << event->damage << '\n';
+                << event->damage << ' ' << event->area_flag << '\n';
     }
     input.special_warhead=true;
     if (base_standard_area_impact(input)) throw std::runtime_error("special warhead accepted");
