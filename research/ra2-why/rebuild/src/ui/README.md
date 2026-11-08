@@ -34,8 +34,8 @@ itself reconstruct the original dialog screens.
 `Menu` draws the main and single-player shell buttons and captions at 800x600.
 It uses original frames 2, 3, and 4 for normal, hover, and pressed states
 (`0x00612EAA`). Unsupported actions are disabled. Skirmish Start is disabled.
-Skirmish map and player controls, the other sliders, other screen sizes, sounds, and
-other keyboard input are not yet implemented. The menu uses the 300x163 calibration
+Map preview, the other sliders, other screen sizes, sounds, and other keyboard
+input are not yet implemented. The menu uses the 300x163 calibration
 of the 200x100 dialog-unit reference at `0x00775BC0`. For these button rows,
 the result stays the same for reference font heights from 8 to 24 pixels.
 The original Windows font base units remain unverified.
@@ -48,7 +48,7 @@ when their original dialog control is enabled. A change returns
 The credits slider draws the original grip and value trough. Pointer clicks
 and dragging use the original value mapping in `credit_from_slider_pointer`.
 Its original background shading is not yet reproduced.
-Start and Choose Map stay disabled. `0x00697F10` reads the
+Start stays disabled. Choose Map opens after catalogs are configured. `0x00697F10` reads the
 original saved skirmish settings; `0x006980C0` reads player preferences.
 `load_skirmish_maps` reads the original `MultiMaps` packet in catalog order.
 It resolves CSF names, checks files through the prepared filesystem, and adds
@@ -98,7 +98,14 @@ prepared filesystem. `select_mode` and `select_map` validate programmatic
 selection. Explicit map selection stores its file and source archive in
 `setup()`. The saved scenario index is preserved as a saved value. Selection
 does not update it because the original filtered and sorted index is unknown.
-Changing mode clears the selected file until the original fallback is recovered. The on-screen map picker remains unimplemented. Match Start remains disabled.
+Changing mode clears the selected file until the original fallback is recovered.
+The on-screen map picker stages mode and available map selections. Use Map
+applies them; Cancel and Escape discard them. `choosing_map()` reports the
+picker state. `pointer_scroll(x,y,delta)` scrolls the list under the pointer.
+The native list frame, 23-pixel rows, scrolling, and popup positioning are
+platform choices. Catalog order is used until original sorting is recovered.
+The map preview and random map generator remain unavailable. Match Start stays
+disabled.
 
 `combo_item_metrics` returns the original selection and list item heights.
 The original Windows window border and popup bounds remain unresolved.

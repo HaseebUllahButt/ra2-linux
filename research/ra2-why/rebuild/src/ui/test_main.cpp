@@ -345,6 +345,39 @@ int main(int argc,char** argv) {
     assert(!menu.setup().map_filename && menu.setup().scenario_index==saved_scenario);
     assert(menu.select_map(0)==ui::Action::None);
     assert(menu.select_mode(1)==ui::Action::SetupChanged);
+    const auto map_dialog=ui::load_map_selection_dialog(base_exe,base_strings);
+    auto list_rect=[&](std::uint32_t id) {
+        const auto c=std::find_if(map_dialog.controls.begin(),map_dialog.controls.end(),
+                                  [id](const auto& control){return control.id==id;});
+        assert(c!=map_dialog.controls.end());
+        return ui::Rect{(c->bounds.x*3+1)/2,(c->bounds.y*163+50)/100,
+                        (c->bounds.width*3+1)/2+1,(c->bounds.height*163+50)/100+1};
+    };
+    const auto mode_list=list_rect(1771), map_list=list_rect(1363);
+    assert(click(645,284)==ui::Action::None && menu.choosing_map());
+    assert(click(mode_list.x+4,mode_list.y+3+23)==ui::Action::None);
+    assert(menu.setup().game_mode==1 && !menu.setup().map_filename);
+    assert(click(645,536)==ui::Action::None && !menu.choosing_map());
+    assert(menu.setup().game_mode==1 && !menu.setup().map_filename);
+    assert(click(645,284)==ui::Action::None && menu.choosing_map());
+    const auto first_list=menu.render();
+    menu.pointer_scroll(map_list.x+4,map_list.y+4,-1);
+    assert(menu.render().pixels!=first_list.pixels);
+    menu.pointer_scroll(map_list.x+4,map_list.y+4,1);
+    assert(menu.render().pixels==first_list.pixels);
+    assert(click(map_list.x+map_list.width-4,map_list.y+map_list.height-4)==ui::Action::None);
+    assert(menu.render().pixels!=first_list.pixels);
+    assert(click(map_list.x+map_list.width-4,map_list.y+4)==ui::Action::None);
+    assert(menu.render().pixels==first_list.pixels);
+    menu.pointer_scroll(map_list.x+4,map_list.y+4,std::numeric_limits<int>::min());
+    menu.pointer_scroll(map_list.x+4,map_list.y+4,std::numeric_limits<int>::max());
+    assert(menu.render().pixels==first_list.pixels);
+    assert(click(map_list.x+4,map_list.y+3)==ui::Action::None);
+    assert(!menu.setup().map_filename);
+    assert(click(645,200)==ui::Action::SetupChanged && !menu.choosing_map());
+    assert(menu.setup().map_filename=="MP02T2.MAP" && menu.setup().scenario_index==saved_scenario);
+    assert(click(645,284)==ui::Action::None && menu.choosing_map());
+    assert(menu.key_down(ui::Key::Escape)==ui::Action::None && !menu.choosing_map());
     menu.select_opponent(1,ui::Opponent::Easy);
     assert(menu.select_opponent(1,ui::Opponent::Closed)==ui::Action::SetupChanged);
     assert(menu.select_country(1,0)==ui::Action::None);
@@ -371,7 +404,8 @@ int main(int argc,char** argv) {
         menu.pointer_down(x,y); assert(menu.pointer_up(x,y)==ui::Action::None);
     }
     menu.pointer_down(645,242); assert(menu.pointer_up(645,242)==ui::Action::None);
-    menu.pointer_down(645,284); assert(menu.pointer_up(645,284)==ui::Action::None);
+    menu.pointer_down(645,284); assert(menu.pointer_up(645,284)==ui::Action::None && menu.choosing_map());
+    menu.pointer_down(645,536); assert(menu.pointer_up(645,536)==ui::Action::None && !menu.choosing_map());
     menu.pointer_down(645,536); assert(menu.pointer_up(645,536)==ui::Action::PageChanged);
     assert(menu.page()==ui::Page::SinglePlayer);
     auto expansion_menu=ui::Menu::load(files,exe,strings);
@@ -387,6 +421,20 @@ int main(int argc,char** argv) {
     assert(expansion_menu.render().pixels!=exp_closed.pixels);
     assert(expansion_menu.key_down(ui::Key::Escape)==ui::Action::None);
     assert(expansion_menu.render().pixels==exp_closed.pixels);
+    expansion_menu.configure_maps(expansion_maps,expansion_modes);
+    expansion_menu.select_mode(1);
+    assert(exp_click(645,284)==ui::Action::None && expansion_menu.choosing_map());
+    assert(expansion_menu.render().pixels!=exp_closed.pixels);
+    const auto exp_map_dialog=ui::load_map_selection_dialog(exe,strings);
+    const auto exp_map=std::find_if(exp_map_dialog.controls.begin(),exp_map_dialog.controls.end(),
+                                    [](const auto& c){return c.id==1363;});
+    assert(exp_map!=exp_map_dialog.controls.end());
+    const int exp_map_x=(exp_map->bounds.x*3+1)/2, exp_map_y=(exp_map->bounds.y*163+50)/100;
+    assert(exp_click(exp_map_x+4,exp_map_y+3)==ui::Action::None);
+    assert(exp_click(645,200)==ui::Action::SetupChanged && !expansion_menu.choosing_map());
+    assert(expansion_menu.setup().map_filename==expansion_maps[0].filename);
+    assert(exp_click(645,284)==ui::Action::None && expansion_menu.choosing_map());
+    assert(expansion_menu.key_down(ui::Key::Escape)==ui::Action::None && !expansion_menu.choosing_map());
     fails([&]{ui::draw_shell_background(files,640,480);});
     auto damaged=*title;damaged.resize(140); fails([&]{ui::decode_pcx(damaged);});
     damaged=*title;damaged[0]=0;fails([&]{ui::decode_pcx(damaged);});

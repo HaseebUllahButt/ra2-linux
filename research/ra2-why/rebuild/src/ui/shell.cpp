@@ -138,7 +138,15 @@ Menu Menu::load(const fs::MixFileSystem& files, const std::vector<std::uint8_t>&
     result.main_ = load_dialog(exe, Page::Main, strings);
     result.single_ = load_dialog(exe, Page::SinglePlayer, strings);
     result.skirmish_ = load_dialog(exe, Page::Skirmish, strings);
+    result.map_dialog_ = load_map_selection_dialog(exe,strings);
+    // 0x0072D120 loads this expansion-specific selector background.
+    if (files.variant()==fs::GameVariant::YurisRevenge)
+    if (const auto pixels=files.read_file("MnScrnLCustomizeBattle.shp")) {
+        if (const auto palette=files.read_file("MnScrnLCustomizeBattle.pal"))
+            result.map_background_=gfx::ShpImage::parse(*pixels).decode_frame(0,gfx::Palette::from_bytes(*palette));
+    }
     result.font_ = GameFont::parse(required(files, "GAME.FNT"));
+    result.arrow_up_ = decode_pcx(required(files, "uparrowr.pcx"));
     result.arrow_normal_ = decode_pcx(required(files, "dnarrowr.pcx"));
     result.arrow_pressed_ = decode_pcx(required(files, "dnarrowp.pcx"));
     result.check_on_ = decode_pcx(required(files, "cce_i.pcx"));
@@ -195,7 +203,7 @@ std::vector<Menu::Button> Menu::buttons() const {
                 {2, {486,422,126,25}, exit_cancel_, true}};
     const Dialog* dialog = &main_;
     if (page() == Page::SinglePlayer) dialog = &single_;
-    if (page() == Page::Skirmish) dialog = &skirmish_;
+    if (page() == Page::Skirmish) dialog = choosing_map_ ? &map_dialog_ : &skirmish_;
     std::vector<Button> result;
     for (const auto& control : dialog->controls) {
         const auto id = control.id;
@@ -203,9 +211,10 @@ std::vector<Menu::Button> Menu::buttons() const {
             (id == 1667 || id == 1668 || id == 1400 || id == 1670 || id == 1372 || id == 1006);
         const bool single_button = page() == Page::SinglePlayer &&
             (id == 1672 || id == 1673 || id == 1401 || id == 1670);
-        const bool skirmish_button = page() == Page::Skirmish &&
+        const bool skirmish_button = page() == Page::Skirmish && !choosing_map_ &&
                                       (id == 1559 || id == 1450 || id == 1472);
-        if (!main_button && !single_button && !skirmish_button) continue;
+        const bool map_button = choosing_map_ && (id==1472 || id==1733 || id==1411);
+        if (!main_button && !single_button && !skirmish_button && !map_button) continue;
         const bool back = (page() == Page::Main && id == 1006) ||
                           (page() == Page::SinglePlayer && id == 1670) ||
                           (page() == Page::Skirmish && id == 1472);
@@ -219,7 +228,9 @@ std::vector<Menu::Button> Menu::buttons() const {
         const int y = back ? 535 : 199 + row * 42;
         const bool enabled = (page() == Page::Main && (id == 1667 || id == 1006)) ||
                              (page() == Page::SinglePlayer && (id == 1401 || id == 1670)) ||
-                             (page() == Page::Skirmish && id == 1472);
+                             (page() == Page::Skirmish && !choosing_map_ &&
+                              (id == 1472 || (id==1450 && !maps_.empty() && !modes_.empty()))) ||
+                             (choosing_map_ && (id==1472 || (id==1733 && pending_map_ && pending_mode_)));
         result.push_back({id, {644, y, 156, 42}, control.label, enabled});
     }
     return result;
@@ -227,7 +238,7 @@ std::vector<Menu::Button> Menu::buttons() const {
 
 std::vector<Menu::Button> Menu::checks() const {
     std::vector<Button> result;
-    if (confirming_exit_ || page()!=Page::Skirmish) return result;
+    if (confirming_exit_ || choosing_map_ || page()!=Page::Skirmish) return result;
     for (const auto& control : skirmish_.controls) {
         const auto id=control.id;
         if (id!=1358 && id!=1683 && id!=1686 && id!=1690 && id!=1693) continue;
@@ -244,9 +255,26 @@ std::vector<Menu::Button> Menu::checks() const {
     return result;
 }
 
+std::optional<Rect> Menu::map_list_bounds(std::uint32_t id) const {
+    if (!choosing_map_) return std::nullopt;
+    for (const auto& c : map_dialog_.controls) if (c.id==id) {
+        return Rect{(c.bounds.x*3+1)/2,(c.bounds.y*163+50)/100,
+                    (c.bounds.width*3+1)/2+1,(c.bounds.height*163+50)/100+1};
+    }
+    return std::nullopt;
+}
+std::vector<std::size_t> Menu::visible_map_indices() const {
+    std::vector<std::size_t> result;
+    if (!pending_mode_) return result;
+    const auto mode=std::find_if(modes_.begin(),modes_.end(),[&](const auto& m){return m.id==*pending_mode_;});
+    if (mode==modes_.end()) return result;
+    for (std::size_t i=0;i<maps_.size();++i)
+        if (maps_[i].available && skirmish_map_matches_mode(maps_[i],*mode)) result.push_back(i);
+    return result;
+}
 std::vector<Menu::Dropdown> Menu::dropdowns() const {
     std::vector<Dropdown> result;
-    if (confirming_exit_ || page()!=Page::Skirmish) return result;
+    if (confirming_exit_ || choosing_map_ || page()!=Page::Skirmish) return result;
     for (const auto& c : skirmish_.controls) {
         int kind=-1;
         std::size_t slot=0;
@@ -303,7 +331,7 @@ Rect Menu::dropdown_list_bounds(const Dropdown& d) const {
     return {d.bounds.x,std::max(0,y),d.bounds.width,height};
 }
 std::optional<Rect> Menu::credit_bounds() const {
-    if (confirming_exit_ || page()!=Page::Skirmish || !setup_.credits ||
+    if (confirming_exit_ || choosing_map_ || page()!=Page::Skirmish || !setup_.credits ||
         setup_.min_credits<0 || setup_.max_credits>65535 ||
         setup_.min_credits>=setup_.max_credits || setup_.credit_increment<=0) return std::nullopt;
     for (const auto& control : skirmish_.controls) {
@@ -344,6 +372,23 @@ void Menu::pointer_move(int x, int y) {
     }
 }
 void Menu::pointer_down(int x, int y) {
+    if (choosing_map_) {
+        for (const auto id : {1771u,1363u}) if (const auto list=map_list_bounds(id)) {
+            if (!contains(*list,x,y) || y<list->y+2 || y>=list->y+list->height-2) continue;
+            const auto count=id==1771 ? modes_.size() : visible_map_indices().size();
+            const auto rows=static_cast<std::size_t>(std::max(1,(list->height-4)/23));
+            if (count>rows && x>=list->x+list->width-20) {
+                held_map_scroll_=true;
+                if (y<list->y+24) pointer_scroll(x,y,1);
+                else if (y>=list->y+list->height-24) pointer_scroll(x,y,-1);
+                return;
+            }
+            const auto row=static_cast<std::size_t>((y-list->y-2)/23);
+            held_map_list_=id;
+            held_map_row_=row+(id==1771 ? mode_scroll_ : map_scroll_);
+            return;
+        }
+    }
     const auto drops=dropdowns();
     if (open_dropdown_) {
         held_dropdown_item_=-1;
@@ -373,7 +418,39 @@ void Menu::pointer_down(int x, int y) {
         move_credit(x);
     }
 }
+void Menu::pointer_scroll(int x, int y, int delta) {
+    if (!choosing_map_ || !delta) return;
+    for (const auto id : {1771u,1363u}) if (const auto list=map_list_bounds(id)) {
+        if (!contains(*list,x,y)) continue;
+        auto& offset=id==1771 ? mode_scroll_ : map_scroll_;
+        const auto count=id==1771 ? modes_.size() : visible_map_indices().size();
+        const auto rows=static_cast<std::size_t>(std::max(1,(list->height-4)/23));
+        const auto maximum=count>rows ? count-rows : 0;
+        // Do not negate INT_MIN in int arithmetic.
+        const auto next=std::int64_t(offset)-std::int64_t(delta);
+        offset=static_cast<std::size_t>(std::clamp<std::int64_t>(next,0,static_cast<std::int64_t>(maximum)));
+        return;
+    }
+}
 Action Menu::pointer_up(int x, int y) {
+    if (held_map_scroll_) {held_map_scroll_=false;return Action::None;}
+    if (held_map_list_) {
+        const auto id=*held_map_list_;
+        const auto held=held_map_row_;
+        held_map_list_.reset(); held_map_row_.reset();
+        const auto list=map_list_bounds(id);
+        if (!list || !held || !contains(*list,x,y) || y<list->y+2 || y>=list->y+list->height-2)
+            return Action::None;
+        const auto row=static_cast<std::size_t>((y-list->y-2)/23)+(id==1771 ? mode_scroll_ : map_scroll_);
+        if (row!=*held) return Action::None;
+        if (id==1771 && row<modes_.size()) {
+            if (pending_mode_!=modes_[row].id) {pending_mode_=modes_[row].id;pending_map_.reset();map_scroll_=0;}
+        } else if (id==1363) {
+            const auto indices=visible_map_indices();
+            if (row<indices.size()) pending_map_=indices[row];
+        }
+        return Action::None;
+    }
     if (held_dropdown_item_) {
         const int held=*held_dropdown_item_;
         held_dropdown_item_.reset();
@@ -411,7 +488,30 @@ Action Menu::pointer_up(int x, int y) {
     const auto activated = held_ && hovered_ && *held_ == *hovered_ ? held_ : std::nullopt;
     held_.reset();
     if (!activated) return Action::None;
-    if (!confirming_exit_ && page()==Page::Skirmish) {
+    if (choosing_map_) {
+        if (*activated==1472) {choosing_map_=false;hovered_.reset();return Action::None;}
+        if (*activated==1733 && pending_mode_ && pending_map_) {
+            const auto mode=select_mode(*pending_mode_);
+            const auto map=select_map(*pending_map_);
+            choosing_map_=false;hovered_.reset();
+            return mode==Action::SetupChanged || map==Action::SetupChanged ? Action::SetupChanged : Action::None;
+        }
+        return Action::None;
+    }
+    if (!confirming_exit_ && page()==Page::Skirmish && *activated==1450) {
+        choosing_map_=true;
+        pending_mode_.reset(); pending_map_.reset(); mode_scroll_=0;map_scroll_=0;
+        const auto saved=std::find_if(modes_.begin(),modes_.end(),[&](const auto& mode){return setup_.game_mode==mode.id;});
+        if (saved!=modes_.end()) pending_mode_=saved->id;
+        else if (!modes_.empty()) pending_mode_=modes_.front().id;
+        const auto indices=visible_map_indices();
+        for (auto index : indices) if (setup_.map_filename==maps_[index].filename &&
+                                        setup_.map_archive==maps_[index].source_archive) {
+            pending_map_=index;break;
+        }
+        hovered_.reset();return Action::None;
+    }
+    if (!confirming_exit_ && !choosing_map_ && page()==Page::Skirmish) {
         auto* value=option(setup_,*activated);
         if (value && value->has_value()) {
             *value = !**value;
@@ -436,6 +536,10 @@ Action Menu::pointer_up(int x, int y) {
 Action Menu::key_down(Key key) noexcept {
     // 0x005D4D50 routes dialog keys through IsDialogMessageA; Escape sends
     // IDCANCEL (2), which 0x005D3711 maps to the cancel result.
+    if (choosing_map_ && key==Key::Escape) {
+        choosing_map_=false; held_map_scroll_=false; held_map_list_.reset(); held_map_row_.reset(); hovered_.reset(); held_.reset();
+        return Action::None;
+    }
     if (open_dropdown_ && key == Key::Escape) {
         open_dropdown_.reset(); held_dropdown_.reset(); held_dropdown_item_.reset();
         return Action::None;
@@ -447,6 +551,7 @@ Action Menu::key_down(Key key) noexcept {
     return Action::None;
 }
 void Menu::configure_maps(std::vector<SkirmishMap> maps, std::vector<SkirmishMode> modes) {
+    choosing_map_=false; pending_map_.reset(); pending_mode_.reset();
     maps_=std::move(maps);
     modes_=std::move(modes);
     setup_.map_filename.reset();
@@ -547,9 +652,10 @@ gfx::RgbaImage Menu::render() const {
         // 0x00615A91 selects left alignment and 0x00615DF7 selects yellow.
         font_.draw_text(image, exit_prompt_, 235, 202, {255,255,0,255});
     } else {
+        if (choosing_map_ && map_background_.width) blit(image,map_background_,0,0);
         const Dialog* dialog = &main_;
         if (page() == Page::SinglePlayer) dialog = &single_;
-        if (page() == Page::Skirmish) dialog = &skirmish_;
+        if (page() == Page::Skirmish) dialog = choosing_map_ ? &map_dialog_ : &skirmish_;
         for (const auto& control : dialog->controls) {
             if (control.id != 1684 || control.label.empty()) continue;
             // 0x0060B1D0 centers the heading in the 168-pixel panel;
@@ -590,7 +696,7 @@ gfx::RgbaImage Menu::render() const {
         const int y=c.bounds.y+(c.bounds.height-static_cast<int>(font_.line_height()))/2;
         font_.draw_text(image,c.label,c.bounds.x+26,y,color);
     }
-    if (!confirming_exit_ && page()==Page::Skirmish) {
+    if (!confirming_exit_ && !choosing_map_ && page()==Page::Skirmish) {
         for (const auto& control : skirmish_.controls) {
             const auto id=control.id;
             if (id!=1689 && id!=1691 && id!=1692 &&
@@ -619,7 +725,7 @@ gfx::RgbaImage Menu::render() const {
             font_.draw_text(image,text,text_x,text_y,{255,255,0,255});
         }
     }
-    if (!confirming_exit_ && page()==Page::Skirmish) {
+    if (!confirming_exit_ && !choosing_map_ && page()==Page::Skirmish) {
         const auto drops=dropdowns();
         auto draw_choice=[&](Rect bounds,const DropChoice& choice,bool enabled) {
             if (choice.swatch) {
@@ -657,6 +763,44 @@ gfx::RgbaImage Menu::render() const {
                 draw_choice(r,d.choices[i],d.enabled);
             }
             break;
+        }
+    }
+    if (choosing_map_) {
+        for (const auto& c : map_dialog_.controls) {
+            if (c.label_key!="GUI:SelectEngagement" && c.label_key!="GUI:GameType" &&
+                c.label_key!="GUI:GameMap") continue;
+            const int x=(c.bounds.x*3+1)/2, y=(c.bounds.y*163+50)/100;
+            const int width=(c.bounds.width*3+1)/2;
+            font_.draw_text(image,c.label,x+(width-static_cast<int>(font_.text_width(c.label)))/2,y,{255,255,0,255});
+        }
+        const auto map_indices=visible_map_indices();
+        for (const auto id : {1771u,1363u}) if (const auto list=map_list_bounds(id)) {
+            // Windows list borders and scrollbars are platform-owned. Linux
+            // uses a two-pixel frame and a 23-pixel native row.
+            fill(image,*list,{104,122,128,255});
+            fill(image,{list->x+2,list->y+2,list->width-4,list->height-4},{0,0,0,255});
+            const auto offset=id==1771 ? mode_scroll_ : map_scroll_;
+            const auto count=id==1771 ? modes_.size() : map_indices.size();
+            const auto rows=static_cast<std::size_t>(std::max(0,(list->height-4)/23));
+            const bool scrollbar=count>rows;
+            if (scrollbar) {
+                const int bar_x=list->x+list->width-20;
+                fill(image,{bar_x,list->y+2,18,list->height-4},{48,48,48,255});
+                blit(image,arrow_up_,bar_x,list->y+2);
+                blit(image,arrow_normal_,bar_x,list->y+list->height-24);
+            }
+            for (std::size_t row=0;row<rows && offset+row<count;++row) {
+                const auto index=offset+row;
+                const bool selected=id==1771 ? pending_mode_==modes_[index].id : pending_map_==map_indices[index];
+                const auto& label=id==1771 ? modes_[index].name : maps_[map_indices[index]].name;
+                Rect r{list->x+2,list->y+2+static_cast<int>(row)*23,list->width-(scrollbar ? 22 : 4),23};
+                if (selected) fill(image,r,{80,80,80,255});
+                if (r.width<=4) continue;
+                gfx::RgbaImage text{static_cast<std::uint16_t>(r.width-4),23,
+                    std::vector<std::uint8_t>(static_cast<std::size_t>(r.width-4)*23*4)};
+                font_.draw_text(text,label,0,3,{255,255,0,255});
+                blit(image,text,r.x+2,r.y);
+            }
         }
     }
     return image;

@@ -151,11 +151,14 @@ public:
                      const ra2text::CsfFile& strings);
     Page page() const noexcept { return navigation_.page(); }
     bool confirming_exit() const noexcept { return confirming_exit_; }
+    bool choosing_map() const noexcept { return choosing_map_; }
     const SkirmishSetup& skirmish_setup() const noexcept { return setup_; }
     const SkirmishSetup& setup() const noexcept { return setup_; }
     gfx::RgbaImage render() const;
     void pointer_move(int x, int y);
     void pointer_down(int x, int y);
+    // Positive delta scrolls up. Coordinates are in the 800x600 client.
+    void pointer_scroll(int x, int y, int delta);
     Action pointer_up(int x, int y);
     Action key_down(Key key) noexcept;
     // Configure catalogs from the prepared filesystem before selecting a map.
@@ -174,15 +177,24 @@ private:
     Rect dropdown_list_bounds(const Dropdown& dropdown) const;
     struct Button { std::uint32_t id; Rect bounds; std::string label; bool enabled; };
     std::vector<Button> buttons() const;
+    std::optional<Rect> map_list_bounds(std::uint32_t id) const;
+    std::vector<std::size_t> visible_map_indices() const;
     std::vector<Button> checks() const;
     std::optional<Rect> credit_bounds() const;
     void move_credit(int x);
-    gfx::RgbaImage background_, normal_, hover_, pressed_;
+    gfx::RgbaImage background_, map_background_, normal_, hover_, pressed_;
     gfx::RgbaImage popup_, popup_normal_, popup_hover_, popup_pressed_;
-    gfx::RgbaImage check_on_, check_off_, arrow_normal_, arrow_pressed_;
+    gfx::RgbaImage check_on_, check_off_, arrow_normal_, arrow_pressed_, arrow_up_;
     gfx::RgbaImage slider_grip_, slider_left_, slider_middle_, slider_right_;
     std::string exit_prompt_, exit_ok_, exit_cancel_;
     bool confirming_exit_ = false;
+    bool choosing_map_ = false;
+    bool held_map_scroll_ = false;
+    std::optional<int> pending_mode_;
+    std::optional<std::size_t> pending_map_;
+    std::size_t mode_scroll_=0, map_scroll_=0;
+    std::optional<std::uint32_t> held_map_list_;
+    std::optional<std::size_t> held_map_row_;
     bool credit_changed_ = false;
     SkirmishSetup setup_;
     std::vector<SkirmishCountry> countries_;
@@ -191,7 +203,7 @@ private:
     std::vector<SkirmishMap> maps_;
     std::vector<SkirmishMode> modes_;
     GameFont font_;
-    Dialog main_, single_, skirmish_;
+    Dialog main_, single_, skirmish_, map_dialog_;
     MenuNavigation navigation_;
     std::optional<std::uint32_t> hovered_, held_, open_dropdown_, held_dropdown_;
     std::optional<int> held_dropdown_item_;
