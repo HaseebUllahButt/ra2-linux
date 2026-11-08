@@ -7,7 +7,7 @@ Data: decomp index + call edges + symbols.
 | functions | 8584 |
 | decompiled ok | 8583
 | code bytes | 2590052
-| community-named | 4067
+| community-named | 4894
 
 ## Largest functions
 
@@ -30,8 +30,8 @@ Data: decomp index + call edges + symbols.
 | 00545150 | Theater_LoadIsometricTileResources | 7233 |
 | 006FDD50 | Techno_FireWeaponAtTarget | 7167 |
 | 00532150 | Commands_RegisterBuiltinsAndDefaultHotkeys | 7118 |
-| 005E00B0 | FUN_005e00b0 | 6995 |
-| 00547CF0 | FUN_00547cf0 | 6967 |
+| 005E00B0 | LANLobby_ProcessIncomingEvents_005E00B0 | 6995 |
+| 00547CF0 | IsometricTile_RenderClippedWithDepthAndAlpha_00547CF0 | 6967 |
 | 006CC390 | SuperClass::Launch | 6835 |
 
 
@@ -51,9 +51,9 @@ Data: decomp index + call edges + symbols.
 | 005DC350 | 238 | LAN_JoinGameHandshake |
 | 006DD8B0 | 224 | TActionClass::Execute |
 | 00672AE0 | 222 | RulesClass::Read_AI |
-| 005E00B0 | 211 | FUN_005e00b0 |
+| 005E00B0 | 211 | LANLobby_ProcessIncomingEvents_005E00B0 |
 | 00532150 | 193 | Commands_RegisterBuiltinsAndDefaultHotkeys |
-| 0061F210 | 192 | FUN_0061f210 |
+| 0061F210 | 192 | InterfaceAssets_PreloadPCXLibrary_0061F210 |
 
 ## Busiest callees (fan-in)
 

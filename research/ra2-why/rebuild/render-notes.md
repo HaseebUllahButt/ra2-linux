@@ -185,6 +185,14 @@ dimensions, more than 50 colors, channel variance above 100, at least 98%
 coverage and a complete PPM byte count. Every referenced tile resolves to
 real artwork; errors stop the test instead of silently dropping cells.
 
+An additional build with `-O1 -g -fsanitize=address,undefined
+-fno-omit-frame-pointer` passed the parser checks and all three real-map
+renders with `ASAN_OPTIONS=detect_leaks=1`, exit status zero and no sanitizer
+reports. `src/render/verification.txt` and
+`src/render/sanitizer-verification.txt` contain the identical measured results.
+Independent PPM reads checked the headers and exact `width*height*3` payload
+lengths; SHA-256 checks confirmed deterministic repeat output.
+
 | Map | Theater | Tile records | Loaded TMPs / decoded subtiles | PPM dimensions | RGB colors | Opaque pixels | Summed channel variance |
 | --- | --- | ---: | ---: | --- | ---: | ---: | ---: |
 | 2PEAKS | TEMPERATE | 16,218 | 213 / 691 | 4560 x 2700 | 232 | 12,312,000 / 12,312,000 | 6006.07 |
