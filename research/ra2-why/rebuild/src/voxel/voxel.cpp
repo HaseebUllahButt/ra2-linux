@@ -76,6 +76,7 @@ Model read_vxl(const Bytes &b) {
       if (!(section.min[axis] < section.max[axis]))
         throw std::runtime_error("invalid VXL bounds");
     std::size_t count = std::size_t(section.x) * section.y;
+    section.occupied_columns.resize(count);
     auto starts = u32(b, t), ends = u32(b, t + 4), data = u32(b, t + 8);
     if (starts > body_size || ends > body_size || data > body_size ||
         count * 4 > body_size - starts || count * 4 > body_size - ends)
@@ -84,6 +85,7 @@ Model read_vxl(const Bytes &b) {
       auto a = u32(b, body + starts + i * 4), z = u32(b, body + ends + i * 4);
       if (a == 0xffffffff && z == 0xffffffff)
         continue;
+      section.occupied_columns[i] = 1;
       if (a > z || z >= body_size - data)
         throw std::runtime_error("invalid VXL span");
       std::size_t p = body + data + a, end = body + data + z + 1;
@@ -288,6 +290,89 @@ std::array<std::uint8_t, 256> single_light(unsigned normal_type,
         std::clamp(std::nearbyint(dot * 16), 0.0f, 31.0f));
   }
   result[253] = result[254] = result[255] = 16;
+  return result;
+}
+std::array<ProjectedCorner, 4>
+project_ground_corners(const Section &section,
+                       const std::array<float, 12> &section_matrix,
+                       const std::array<float, 12> &view_matrix,
+                       const std::array<float, 3> &offset) {
+  const std::array<std::array<float, 3>, 4> corners = {
+      {{section.max[0], section.max[1], section.min[2]},
+       {section.max[0], section.min[1], section.min[2]},
+       {section.min[0], section.min[1], section.min[2]},
+       {section.min[0], section.max[1], section.min[2]}}};
+  auto transform = [](const std::array<float, 12> &matrix,
+                      const std::array<float, 3> &point) {
+    std::array<float, 3> result{};
+    for (unsigned row = 0; row < 3; ++row)
+      result[row] = matrix[row * 4] * point[0] +
+                    matrix[row * 4 + 1] * point[1] +
+                    matrix[row * 4 + 2] * point[2] + matrix[row * 4 + 3];
+    return result;
+  };
+  std::array<ProjectedCorner, 4> result{};
+  for (unsigned i = 0; i < 4; ++i) {
+    auto point = transform(section_matrix, corners[i]);
+    point[2] = 0;
+    point = transform(view_matrix, point);
+    result[i] = {point[0] + offset[0], -(point[1] + offset[1])};
+    if (!std::isfinite(result[i][0]) || !std::isfinite(result[i][1]))
+      throw std::runtime_error("invalid projected corner");
+  }
+  return result;
+}
+std::vector<std::uint8_t>
+ground_coverage(const Section &section,
+                const std::array<ProjectedCorner, 4> &corners,
+                ProjectedCorner center) {
+  if (!section.x || !section.y)
+    throw std::runtime_error("invalid VXL dimensions");
+  for (const auto &corner : corners)
+    for (float coordinate : corner)
+      if (!std::isfinite(coordinate) || std::abs(coordinate) > 1000000)
+        throw std::runtime_error("invalid projected corner");
+  for (float coordinate : center)
+    if (!std::isfinite(coordinate) || std::abs(coordinate) > 1000000)
+      throw std::runtime_error("invalid projected center");
+  std::vector<bool> occupied(std::size_t(section.x) * section.y);
+  if (!section.occupied_columns.empty()) {
+    if (section.occupied_columns.size() != occupied.size())
+      throw std::runtime_error("invalid VXL column count");
+    for (std::size_t i = 0; i < occupied.size(); ++i)
+      occupied[i] = section.occupied_columns[i] != 0;
+  }
+  for (const auto &point : section.points) {
+    if (point.x >= section.x || point.y >= section.y)
+      throw std::runtime_error("point outside VXL section");
+    occupied[std::size_t(point.y) * section.x + point.x] = true;
+  }
+  auto fixed = [](double value) {
+    return static_cast<std::uint16_t>(
+        static_cast<std::int64_t>(std::nearbyint(value * 256)));
+  };
+  auto x0 = fixed(corners[2][0] + 128.0 - center[0]);
+  auto y0 = fixed(corners[2][1] + 128.0 - center[1]);
+  const auto dx_x = fixed((corners[1][0] - corners[2][0]) / section.x);
+  const auto dx_y = fixed((corners[1][1] - corners[2][1]) / section.x);
+  const auto dy_x = fixed((corners[3][0] - corners[2][0]) / section.y);
+  const auto dy_y = fixed((corners[3][1] - corners[2][1]) / section.y);
+  std::vector<std::uint8_t> result(65536);
+  for (unsigned y = 0; y < section.y; ++y) {
+    auto x_fixed = x0, y_fixed = y0;
+    for (unsigned x = 0; x < section.x; ++x) {
+      if (occupied[std::size_t(y) * section.x + x]) {
+        auto offset = std::size_t(y_fixed >> 8) * 256 + (x_fixed >> 8);
+        result[offset] = 1;
+        if (offset + 1 < result.size())
+          result[offset + 1] = 1;
+      }
+      x_fixed = static_cast<std::uint16_t>(x_fixed + dx_x);
+      y_fixed = static_cast<std::uint16_t>(y_fixed + dx_y);
+    }
+    x0 = static_cast<std::uint16_t>(x0 + dy_x);
+    y0 = static_cast<std::uint16_t>(y0 + dy_y);
+  }
   return result;
 }
 Image draw(const Model &m, const Animation &a, const Lighting &l,

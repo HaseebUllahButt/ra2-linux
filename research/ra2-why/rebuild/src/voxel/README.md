@@ -28,4 +28,16 @@ The caller must supply a light vector in section coordinates. Original projectio
 
 `make_default_lighting` follows `0x758B70` and `0x758EA0`. It selects the closest palette entry inside or outside the reserved range, according to the source index. `team_colors` replaces that reserved range. On the shipped VOXELS.VPL, the generated tables match 8,159 of 8,160 nonzero-index bytes. The remaining byte needs a rounding investigation. The shipped tables remain available unchanged through `read_vpl`.
 
-Projection and coverage remain unresolved. `0x753F90` transforms the section bounds and reverses the projected Y coordinate. `0x754510` sorts and draws sections. `0x756860` marks ground coverage, and `0x756590` selects a raster routine from `0x846840`. Those routines include `0x7DF7C0`. The decompiler omits floating-point stack values in these paths. The current image is still experimental. Shadow transform and raster behavior also remain unresolved.
+Full vehicle projection and coverage remain unresolved. `0x754510` sorts and draws sections. `0x756590` selects a raster routine from `0x846840`. Those routines include `0x7DF7C0`. The decompiler omits floating-point stack values in these paths. The current image is still experimental. Shadow transform and raster behavior also remain unresolved.
+
+The VPL mismatch is row 14, source index 130. The source color is `(199, 175, 115)`. The shipped table selects index 177, `(255, 247, 111)`; this implementation selects index 178, `(255, 235, 107)`. At the ideal factor 1.3, both squared distances equal 1876.19. Floating-point rounding changes the tie. The original VPL bytes remain unchanged when loaded.
+
+`project_ground_corners` implements the ground-bound transforms in `0x753F90`. `ground_coverage` implements the unoccluded column mask in `0x756860`. Its fixed-point buffer is 256 by 256. It marks two horizontal bytes for every occupied column. At the last byte, it clips the second write to keep the result bounded. The original supports a separate occlusion surface, which this API does not implement.
+
+`verify_coverage_x86.py` uses Unicorn to execute the original functions from `/path/to/user/ra2/game/gamemd.exe`. It checks one synthetic transform and three coverage cases. The C++ test checks the same expected results. Run the optional check with a Python environment that has `unicorn` installed:
+
+```
+python3 rebuild/src/voxel/verify_coverage_x86.py
+```
+
+These checks do not establish full vehicle projection or voxel pixel coverage. The lower raster function selected by `0x756590`, including `0x7DF7C0`, still needs reconstruction and original-code comparisons.

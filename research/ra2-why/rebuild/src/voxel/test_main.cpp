@@ -39,6 +39,38 @@ int main() {
       std::cout << asset << " points=" << model.sections[0].points.size()
                 << '\n';
     }
+    Section projection_section{};
+    projection_section.min = {-1, -2, 1};
+    projection_section.max = {4, 3, 5};
+    std::array<float, 12> section_matrix = {1, 0, 1, 2, 0, 1, 2, 3, 0, 0, 1, 4};
+    std::array<float, 12> view_matrix = {2, 0, 0, 1, 0, 3, 0, -1, 0, 0, 1, 0};
+    auto projected = project_ground_corners(projection_section, section_matrix,
+                                            view_matrix, {5, 7, 0});
+    const std::array<ProjectedCorner, 4> projected_expected = {
+        {{20, -30}, {20, -15}, {10, -15}, {10, -30}}};
+    if (projected != projected_expected)
+      throw std::runtime_error("ground projection mismatch");
+    Section coverage_section{};
+    coverage_section.x = 2;
+    coverage_section.y = 2;
+    coverage_section.occupied_columns = {1, 0, 0, 1};
+    auto coverage_case =
+        [&](std::array<ProjectedCorner, 4> corners,
+            std::initializer_list<std::pair<unsigned, unsigned>> expected) {
+          auto coverage = ground_coverage(coverage_section, corners, {0, 0});
+          if (std::count(coverage.begin(), coverage.end(), 1) !=
+              static_cast<int>(expected.size()))
+            throw std::runtime_error("coverage count mismatch");
+          for (auto xy : expected)
+            if (!coverage[xy.second * 256 + xy.first])
+              throw std::runtime_error("coverage position mismatch");
+        };
+    coverage_case({{{0, 0}, {4, 0}, {0, 0}, {0, 4}}},
+                  {{128, 128}, {129, 128}, {130, 130}, {131, 130}});
+    coverage_case({{{0, 0}, {-1.5f, 1}, {3.5f, -2}, {5.5f, 5}}},
+                  {{131, 126}, {132, 126}, {130, 131}, {131, 131}});
+    coverage_case({{{0, 0}, {129, 0}, {127, 0}, {127, 2}}},
+                  {{255, 128}, {0, 129}, {1, 129}});
     auto scaled = h;
     scaled.matrices[0][3] = 12;
     scaled.matrices[0][7] = -8;
@@ -59,6 +91,10 @@ int main() {
         bool dest_remap = out >= p.remap_first && out <= p.remap_last;
         if (source_remap != dest_remap)
           throw std::runtime_error("lighting range crossed");
+        if (out != p.tables[row][col])
+          std::cout << "VPL mismatch row=" << row << " color=" << col
+                    << " got=" << unsigned(out)
+                    << " expected=" << unsigned(p.tables[row][col]) << '\n';
         equal += out == p.tables[row][col];
       }
     if (equal < 8100)

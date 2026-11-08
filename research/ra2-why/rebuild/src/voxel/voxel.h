@@ -16,6 +16,7 @@ struct Section {
   std::array<float, 12> transform;
   std::array<float, 3> min, max;
   std::vector<Point> points;
+  std::vector<std::uint8_t> occupied_columns;
 };
 struct Model {
   std::vector<Section> sections;
@@ -47,6 +48,18 @@ std::array<std::uint8_t, 256> double_light(unsigned normal_type,
 // coordinates.
 std::array<std::uint8_t, 256> single_light(unsigned normal_type,
                                            std::array<float, 3> direction);
+// Ground coverage from 0x756860. Corners are in the order produced by
+// 0x753F90; center is the projected bounds center. The result is 256x256.
+using ProjectedCorner = std::array<float, 2>;
+// Applies section and view matrices to the four ground bounds, as in 0x753F90.
+std::array<ProjectedCorner, 4>
+project_ground_corners(const Section &,
+                       const std::array<float, 12> &section_matrix,
+                       const std::array<float, 12> &view_matrix,
+                       const std::array<float, 3> &offset);
+std::vector<std::uint8_t>
+ground_coverage(const Section &, const std::array<ProjectedCorner, 4> &corners,
+                ProjectedCorner center);
 struct Image {
   unsigned width, height;
   std::vector<ra2::gfx::Rgba> pixels;
