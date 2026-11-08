@@ -3,6 +3,7 @@
 #include <sim/combat.h>
 #include <sim/distance.h>
 #include <sim/target.h>
+#include <sim/world.h>
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -190,11 +191,17 @@ struct FlatCannonTickResult {
   ArcProposal state;
   std::uint32_t object_id;
 };
-// Near-ground, bridge, interception and slow initial-velocity paths remain
-// unresolved. Impact means a detonation decision, not damage dispatch.
+// Ownerless near-ground motion, bridge, interception and slow initial-velocity
+// paths remain unresolved. Impact does not dispatch damage.
 FlatCannonTickResult base_flat_cannon_tick(const FlatCannonTickInput &,
                                            const TerrainTraceLookup &,
                                            const sim::OriginalDistance &);
+
+// Bind a no-overlay, resolved flat source and proposed cell from Simulation.
+// Leave the input unchanged on false. This only resolves floor and bridge;
+// object, building, trace and original height inputs remain the caller's job.
+bool bind_flat_tick_cells(FlatCannonTickInput &, const sim::TerrainCell &old_cell,
+                          const sim::TerrainCell &proposed_cell);
 
 // Original area-damage entry checks at 0x47E2E8..0x47E31B.
 bool base_area_impact_enabled(int raw_damage, bool scenario_blocks_damage,

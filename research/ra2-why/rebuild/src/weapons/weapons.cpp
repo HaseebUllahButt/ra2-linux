@@ -372,7 +372,8 @@ FlatCannonTickResult base_flat_cannon_tick(const FlatCannonTickInput &input,
     return unknown();
   ArcProposal proposed = base_arc_proposal(input.arc);
   const double exact_z = sim::fp::add(input.arc.position[2], proposed.velocity[2]);
-  if (exact_z <= static_cast<double>(input.proposed_floor) + 150.0)
+  if (!input.source_id &&
+      exact_z <= static_cast<double>(input.proposed_floor) + 150.0)
     return unknown();
   if (!input.proposed_building_id || !input.target_building_id ||
       !input.building_intercepts || *input.building_intercepts)
@@ -415,6 +416,30 @@ FlatCannonTickResult base_flat_cannon_tick(const FlatCannonTickInput &input,
   return {impact == ImpactStatus::Impact ? FlatCannonTickStatus::Impact
                                          : FlatCannonTickStatus::Continue,
           proposed, 0};
+}
+
+bool bind_flat_tick_cells(FlatCannonTickInput &input,
+                          const sim::TerrainCell &old_cell,
+                          const sim::TerrainCell &proposed_cell) {
+  const auto proposal = base_arc_proposal(input.arc);
+  const auto matches = [](const sim::TerrainCell &cell, int x, int y) {
+    // The map cells use unsigned 16-bit coordinates after truncation.
+    const auto cx = static_cast<std::uint16_t>(x / 256);
+    const auto cy = static_cast<std::uint16_t>(y / 256);
+    return cell.cell.x == cx && cell.cell.y == cy &&
+           cell.tile_replacement_resolved && cell.ramp_index &&
+           *cell.ramp_index == 0 && cell.height_level &&
+           *cell.height_level >= -128 && *cell.height_level <= 127 &&
+           cell.floor_world_height && cell.overlay_type_index &&
+           *cell.overlay_type_index == -1 && cell.bridge && !*cell.bridge;
+  };
+  if (!matches(old_cell, input.arc.position[0], input.arc.position[1]) ||
+      !matches(proposed_cell, proposal.position[0], proposal.position[1]))
+    return false;
+  input.proposed_floor = *proposed_cell.floor_world_height;
+  input.old_cell_bridge_100 = false;
+  input.proposed_cell_bridge_100 = false;
+  return true;
 }
 
 bool base_area_impact_enabled(int raw_damage, bool scenario_blocks_damage,
