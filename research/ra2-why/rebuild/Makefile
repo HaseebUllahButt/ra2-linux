@@ -104,6 +104,9 @@ sim-world: build/sim_world_test
 build/sim_world_test: build/native/src/sim/test_world_init.o build/native/src/sim/world_init.o build/native/src/sim/replacement.o build/native/src/sim/world.o build/native/src/sim/floor.o build/native/src/rules/ini_file.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
+build/terrain_depth_test: build/native/src/render/test_depth.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
 scene: build/scene_test
 	build/scene_test ../game ../analysis/extracted/maps/2PEAKS.MAP
 

@@ -1,4 +1,5 @@
 #include "minimap.h"
+#include "depth.h"
 
 #include <algorithm>
 #include <fstream>
@@ -192,8 +193,8 @@ std::int32_t TheaterArt::terrain_land_type(std::uint8_t raw) {
     return table[raw];
 }
 
-Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry, TheaterArt& art,
-                      TileIndexSpace indexes) {
+TerrainFrame render_terrain(const pack::Terrain& terrain, const MapGeometry& geometry, TheaterArt& art,
+                            TileIndexSpace indexes) {
     const auto& local = geometry.local;
     if (local.width <= 0 || local.height <= 0 || local.width > 512 || local.height > 512 ||
         local.x < 0 || local.y < 0 || local.x > 512 || local.y > 512 ||
@@ -202,11 +203,13 @@ Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry,
         local.x+local.width > geometry.size.width || local.y+local.height > geometry.size.height)
         throw RenderError("Invalid minimap geometry");
     const int tw = art.tile_width(), th = art.tile_height();
-    Bitmap image{local.width*tw, local.height*th, {}};
+    TerrainFrame result;
+    auto& image = result.image;
+    image = {local.width*tw, local.height*th, {}};
     const auto pixels = std::size_t(image.width)*image.height;
     if (pixels > 64*1024*1024) throw RenderError("Minimap exceeds pixel limit");
     image.rgba.resize(pixels*4);
-    std::vector<int> depth(pixels, std::numeric_limits<int>::min());
+    result.depth.assign(pixels, 0xffff);
     std::vector<const pack::Tile*> order;
     for (const auto& tile : terrain.tiles) order.push_back(&tile);
     std::stable_sort(order.begin(), order.end(), [](auto a, auto b) {
@@ -231,18 +234,25 @@ Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry,
                 const auto source = std::size_t(sy)*b.width+sx;
                 if (!b.rgba[source*4+3]) continue;
                 const auto target = std::size_t(top+sy)*image.width+left+sx;
-                // 0x00547CF0 uses smaller Z as nearer. Reverse its sign here:
-                // global - screenY - th - height*th/2 + z -> groundY+th-z.
-                const int z = ground_y+th-(layer.z.empty() ? 0 : layer.z[source]);
-                if (z < depth[target]) continue;
-                depth[target] = z;
+                // The original non-Z path copies colors without a depth test.
+                if (!layer.z.empty()) {
+                    const auto z = original_tile_depth(result.depth_base, result.depth_origin_y,
+                        y, static_cast<std::int8_t>(level), layer.z[source]);
+                    if (z > result.depth[target]) continue;
+                    result.depth[target] = z;
+                }
                 std::copy_n(b.rgba.begin()+source*4, 4, image.rgba.begin()+target*4);
             }
         };
         draw(decoded.diamond);
         if (decoded.extra) draw(*decoded.extra);
     }
-    return image;
+    return result;
+}
+
+Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry, TheaterArt& art,
+                      TileIndexSpace indexes) {
+    return render_terrain(terrain, geometry, art, indexes).image;
 }
 
 void write_ppm(const Bitmap& image, const std::filesystem::path& path) {

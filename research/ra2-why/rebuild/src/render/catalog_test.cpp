@@ -37,6 +37,24 @@ int main(int argc, char** argv) {
                 flat.tiles.push_back({2,3,0xffff,0,0,0});
                 const ra2::render::MapGeometry small{{0,0,4,4},{0,0,4,4}};
                 const auto zero = ra2::render::render_minimap(flat, small, art);
+                const auto with_depth = ra2::render::render_terrain(flat, small, art);
+                if (with_depth.image.rgba != zero.rgba ||
+                    with_depth.depth.size() != std::size_t(zero.width)*zero.height ||
+                    with_depth.depth_base != 0x8000 || with_depth.depth_origin_y != 0)
+                    throw std::runtime_error("Original terrain depth surface changed image geometry");
+                const auto& diamond = art.tile(0xffff, 0).diamond;
+                if (diamond.z.empty()) throw std::runtime_error("Original clear tile lost its depth plane");
+                std::size_t checked = 0;
+                for (int sy = 0; sy < 30; ++sy) for (int sx = 0; sx < 60; ++sx) {
+                    const auto source = std::size_t(sy)*60+sx;
+                    const auto target = std::size_t(sy)*zero.width+60+sx;
+                    const auto expected = diamond.bitmap.rgba[source*4+3] ?
+                        static_cast<std::uint16_t>(32738+diamond.z[source]) : std::uint16_t(65535);
+                    if (with_depth.depth[target] != expected)
+                        throw std::runtime_error("Original clear diamond depth moved or changed scale");
+                    checked += diamond.bitmap.rgba[source*4+3] != 0;
+                }
+                if (checked != 900) throw std::runtime_error("Original depth diamond did not cover 900 pixels");
                 flat.tiles.front().height = 255;
                 const auto below = ra2::render::render_minimap(flat, small, art);
                 for (int y = 0; y < zero.height-15; ++y)

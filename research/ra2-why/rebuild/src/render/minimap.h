@@ -58,6 +58,15 @@ private:
 // Native-resolution terrain artwork, clipped to LocalSize. Includes elevation
 // and TMP extras/depth planes. Does not draw objects, overlays or map lighting.
 enum class TileIndexSpace { PackedMap, LiveCell };
+struct TerrainFrame {
+    Bitmap image;
+    std::vector<std::uint16_t> depth;
+    // Use these original buffer inputs when comparing actor depth.
+    std::uint16_t depth_base = 0x8000;
+    std::int32_t depth_origin_y = 0;
+};
+TerrainFrame render_terrain(const pack::Terrain& terrain, const MapGeometry& geometry,
+                           TheaterArt& art, TileIndexSpace indexes = TileIndexSpace::PackedMap);
 Bitmap render_minimap(const pack::Terrain& terrain, const MapGeometry& geometry,
                       TheaterArt& art, TileIndexSpace indexes = TileIndexSpace::PackedMap);
 void write_ppm(const Bitmap& image, const std::filesystem::path& path);
