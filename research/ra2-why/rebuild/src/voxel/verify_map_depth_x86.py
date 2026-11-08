@@ -7,6 +7,7 @@ import subprocess
 import sys
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32
 from unicorn.x86_const import (
+    UC_X86_REG_EAX,
     UC_X86_REG_EBX,
     UC_X86_REG_ECX,
     UC_X86_REG_EDI,
@@ -30,6 +31,16 @@ def w(address, value):
 
 def s(value):
     return struct.unpack("<i", struct.pack("<I", value))[0]
+
+
+# The interface installed by 0x4FB8D0 supplies these two results.
+for offset, expected in ((0x38, 0), (0x3C, 2)):
+    target = struct.unpack("<I", u.mem_read(0x7A31EC + offset, 4))[0]
+    w(stack, stop)
+    w(stack + 4, base)
+    u.reg_write(UC_X86_REG_ESP, stack)
+    u.emu_start(target, stop, count=100)
+    assert u.reg_read(UC_X86_REG_EAX) == expected
 
 
 w(0x839C6C, base)
@@ -111,4 +122,6 @@ for case, line in zip(cases, native):
     expected = list(map(int, line.split()))
     assert actual == expected, (case, actual, expected)
 assert len(native) == len(cases)
-print("Base game.exe: 256 row gradients and 5 raw blits match original x86")
+print(
+    "Base game.exe: locomotor defaults, 256 row gradients and 5 raw blits match original x86"
+)
