@@ -16,6 +16,8 @@ std::int16_t signed16(std::uint16_t value) {
     return static_cast<std::int16_t>(value <= 0x7fff ? int(value) : int(value) - 0x10000);
 }
 void check_pixels(std::uint16_t width, std::uint16_t height, std::size_t limit) {
+    if (width > 0x7fff || height > 0x7fff)
+        throw GraphicsError("Negative SHP dimension is unsupported");
     const auto count = std::uint64_t(width) * height;
     if (count > limit || count > std::numeric_limits<std::size_t>::max() / 4)
         throw GraphicsError("SHP pixel limit exceeded");
@@ -30,6 +32,7 @@ ShpImage ShpImage::parse(std::vector<std::uint8_t> bytes, std::size_t max_pixels
     if (le16(bytes, 0) != 0) throw GraphicsError("Unsupported SHP header marker (expected TS/RA2)");
     ShpImage shp;
     shp.header_ = {le16(bytes, 2), le16(bytes, 4), le16(bytes, 6)};
+    if (shp.header_.frame_count > 0x7fff) throw GraphicsError("Negative SHP frame count");
     check_pixels(shp.header_.width, shp.header_.height, max_pixels);
     const std::size_t table_end = 8 + std::size_t(shp.header_.frame_count) * 24;
     if (table_end > bytes.size()) throw GraphicsError("Truncated SHP frame table");
@@ -94,20 +97,22 @@ RgbaImage ShpImage::decode_frame(std::size_t index, const Palette& palette) cons
         const auto row_end = p + row_size;
         p += 2;
         unsigned x = 0;
-        while (p < row_end) {
+        while (x < f.width) {
+            if (p == row_end) throw GraphicsError("SHP scanline ends before frame width");
             const auto color = bytes_[p++];
             if (color == 0) {
                 if (p == row_end) throw GraphicsError("SHP scanline ends in a missing skip count");
                 const unsigned skip = bytes_[p++];
-                if (skip == 0 || skip > unsigned(f.width) - x)
-                    throw GraphicsError("SHP zero run is empty or crosses scanline");
+                // The game stops when remaining width <= 0. Real frames
+                // include final zero runs that extend past the crop width.
                 x += skip;
             } else {
-                if (x == f.width) throw GraphicsError("SHP literal crosses scanline");
                 put_pixel(x++, y, color);
             }
         }
-        if (x != f.width) throw GraphicsError("SHP scanline does not cover frame width");
+        // The row length, not the consumed tokens, locates the next row.
+        // Remaining bytes after width is satisfied are ignored by the game.
+        p = row_end;
     }
     return result;
 }

@@ -92,7 +92,7 @@ FrameResult GameLoop::step() {
         return FrameResult::Paused;
     }
 
-    // 0x0055D821..0x0055D8xx: input/presentation precedes collection updates.
+    // The input/presentation block precedes collection updates in 0x0055D360.
     if (state_.window_active && state_.presentation_enabled) present();
     update();
     dispatch();

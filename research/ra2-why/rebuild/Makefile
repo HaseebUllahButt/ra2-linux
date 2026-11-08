@@ -5,11 +5,11 @@
 CXX ?= g++
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O2
 
-.PHONY: all test clean fs rules hook
+.PHONY: all test clean fs rules text hook
 
 all: test
 
-test: fs rules hook
+test: fs rules text hook
 	@echo "== all layer tests passed =="
 
 fs: run-fs
@@ -38,3 +38,9 @@ run-hook:
 clean:
 	rm -f src/fs/mix_test src/rules/rules_test hook/test_trampoline \
 		src/fs/crypto_test
+
+run-text:
+	$(CXX) $(CXXFLAGS) -I src/text src/text/csf.cpp \
+		src/text/test_csf.cpp -o src/text/test_csf
+	src/text/test_csf ../analysis/extracted/ra2.csf | head -3
+	src/text/test_csf ../analysis/extracted/ra2md.csf | head -3
