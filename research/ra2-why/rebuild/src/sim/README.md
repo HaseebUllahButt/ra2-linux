@@ -743,3 +743,21 @@ For a restricted zone with a permitted endpoint row, the original shortens direc
 Its reported search cost still describes the three unsmoothed steps.
 The native API now rejects extra-step monotone paths until 0042B7F0 and its callbacks are recovered.
 It does not return the unsmoothed path as a verified original route.
+
+## Monotone path smoothing
+
+`path_smoothing.h` exposes the recovered monotone slice of base 004290C0 and expansion 0042B7F0.
+It includes the backward window finder at 00429570/0042BCA0 and replacement checks at 004296F0/0042BE20.
+The caller supplies raw directions, the original per-step layer inputs, explicit zero actor threat weight, and a read-only cell probe.
+The probe supplies resolved Unit entry results, signed cell level, and independent Cell flags 0x100 and 0x40000.
+Unknown fields remain optional and fail only when the original branch needs them.
+
+The code preserves both candidate orders, early blocked probes, bridge-level updates, and deleted raw slots.
+It processes only the first twenty raw slots, then compacts the full path as the original does.
+Nonmonotone paths, tubes, nonzero threat weight, and missing required state stay explicit.
+`original_smoothing_check.py executable [--base] --vectors` executes the original whole smoothing pass.
+It supplies resolved virtual-entry answers and cell lookups, and records every ordered query.
+Both editions match all 256 paths, returned lengths, query orders, headings, and layer values.
+The fixtures cover all four monotone quadrants, blocked cells, marked cells, bridge flags, changing levels, and paths beyond twenty slots.
+`test_smoothing.sh` passes 266 checks, also with address and undefined-behavior sanitizers.
+This primitive is separate from regular search until the caller provides its required actor and cell state.
