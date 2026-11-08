@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Compare original base projectile arithmetic using Unicorn and real game.exe."""
 
+import os
+from pathlib import Path
 import random
 import struct
 import subprocess
@@ -19,9 +21,12 @@ from unicorn.x86_const import (
     UC_X86_REG_EIP,
 )
 
+game_directory = Path(os.environ.get("RA2_GAME_DIR", Path(__file__).resolve().parents[3] / "game")).resolve()
+os.environ.setdefault("RA2_GAME_DIR", str(game_directory))
+
 if len(sys.argv) != 2:
     raise SystemExit("usage: verify_base_x86.py weapons_test")
-exe = open("/path/to/user/ra2/game/game.exe", "rb").read()
+exe = (game_directory / "game.exe").read_bytes()
 u = Uc(UC_ARCH_X86, UC_MODE_32)
 u.mem_map(0x400000, 0x800000)
 u.mem_write(0x400000, exe[:0x431000])

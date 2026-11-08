@@ -1,4 +1,6 @@
 #include "weapons.h"
+#include <cstdlib>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
@@ -6,9 +8,15 @@
 using namespace ra2::weapons;
 int main(int argc, char **argv) {
   try {
+    const char* configured = std::getenv("RA2_GAME_DIR");
+    const auto game_directory = configured ? std::filesystem::path(configured) :
+        (std::filesystem::exists("game/game.exe") ? std::filesystem::path("game") :
+                                                    std::filesystem::path("../game"));
+    const auto base_executable = (game_directory / "game.exe").string();
+    const auto expansion_executable = (game_directory / "gamemd.exe").string();
     if (argc == 2 && std::string(argv[1]) == "--flat-tick") {
       const auto distance = ra2::sim::OriginalDistance::from_executable(
-          "/path/to/user/ra2/game/game.exe");
+          base_executable);
       FlatCannonTickInput input{};
       int map_valid, preserve, count, trace_hit;
       std::uint32_t building, target_building;
@@ -49,7 +57,7 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && std::string(argv[1]) == "--object-collision") {
       const auto distance = ra2::sim::OriginalDistance::from_executable(
-          "/path/to/user/ra2/game/game.exe");
+          base_executable);
       ra2::sim::Coord position{};
       std::uint32_t source;
       int preserve, count;
@@ -145,7 +153,7 @@ int main(int argc, char **argv) {
       return 0;
     }
     if (argc == 2 && std::string(argv[1]) == "--lobber") {
-      auto table = ra2::sim::OriginalDistance::from_executable("/path/to/user/ra2/game/game.exe");
+      auto table = ra2::sim::OriginalDistance::from_executable(base_executable);
       int present, lobber, target_present;
       LobberInputs input;
       ra2::sim::Coord target;
@@ -159,7 +167,7 @@ int main(int argc, char **argv) {
       return 0;
     }
     if (argc == 2 && std::string(argv[1]) == "--tank-launch") {
-      auto tables = BaseBallisticAngles::from_executable("/path/to/user/ra2/game/game.exe");
+      auto tables = BaseBallisticAngles::from_executable(base_executable);
       int speed, alternate; double gravity;
       std::array<std::int32_t, 3> displacement{};
       std::cout << std::setprecision(17);
@@ -173,20 +181,20 @@ int main(int argc, char **argv) {
       return 0;
     }
     if (argc == 2 && std::string(argv[1]) == "--heading-angle") {
-      auto tables = BaseBallisticAngles::from_executable("/path/to/user/ra2/game/game.exe");
+      auto tables = BaseBallisticAngles::from_executable(base_executable);
       std::int32_t x, y;
       while (std::cin >> x >> y) std::cout << tables.heading(x, y) << '\n';
       return 0;
     }
     if (argc == 2 && std::string(argv[1]) == "--limit-speed") {
-      auto table = ra2::sim::OriginalDistance::from_executable("/path/to/user/ra2/game/game.exe");
+      auto table = ra2::sim::OriginalDistance::from_executable(base_executable);
       int speed; std::array<std::int32_t, 3> displacement{};
       while (std::cin >> speed >> displacement[0] >> displacement[1] >> displacement[2])
         std::cout << base_limit_initial_speed(speed, displacement, table) << '\n';
       return 0;
     }
     if (argc == 2 && std::string(argv[1]) == "--heading") {
-      auto tables = BaseBallisticAngles::from_executable("/path/to/user/ra2/game/game.exe");
+      auto tables = BaseBallisticAngles::from_executable(base_executable);
       int speed, heading;
       std::cout << std::setprecision(17);
       while (std::cin >> speed >> heading) {
@@ -197,7 +205,7 @@ int main(int argc, char **argv) {
       return 0;
     }
     if (argc == 2 && std::string(argv[1]) == "--pitch") {
-      auto tables = BaseBallisticAngles::from_executable("/path/to/user/ra2/game/game.exe");
+      auto tables = BaseBallisticAngles::from_executable(base_executable);
       std::array<double, 3> velocity{};
       int pitch;
       std::cout << std::setprecision(17);
@@ -209,7 +217,7 @@ int main(int argc, char **argv) {
       return 0;
     }
     if (argc == 2 && std::string(argv[1]) == "--angle") {
-      auto tables = BaseBallisticAngles::from_executable("/path/to/user/ra2/game/game.exe");
+      auto tables = BaseBallisticAngles::from_executable(base_executable);
       int speed, distance, height, alternate;
       double gravity;
       while (std::cin >> speed >> distance >> height >> gravity >> alternate) {
@@ -230,7 +238,7 @@ int main(int argc, char **argv) {
       return 0;
     }
     if (argc == 2 && std::string(argv[1]) == "--fire") {
-      auto table = ra2::sim::OriginalDistance::from_executable("/path/to/user/ra2/game/game.exe");
+      auto table = ra2::sim::OriginalDistance::from_executable(base_executable);
       ResolvedTankFire input{};
       input.source_id = 0x1001000;
       input.target_id = 0x1002000;
@@ -249,7 +257,7 @@ int main(int argc, char **argv) {
       return 0;
     }
     if (argc == 2 && std::string(argv[1]) == "--speed") {
-      auto table = ra2::sim::OriginalDistance::from_executable("/path/to/user/ra2/game/game.exe");
+      auto table = ra2::sim::OriginalDistance::from_executable(base_executable);
       int distance; double gravity;
       while (std::cin >> distance >> gravity)
         std::cout << base_ballistic_launch_speed(distance, gravity, table) << '\n';
@@ -278,7 +286,7 @@ int main(int argc, char **argv) {
     }
     {
       const auto distance = ra2::sim::OriginalDistance::from_executable(
-          "/path/to/user/ra2/game/game.exe");
+          base_executable);
       FlatCannonTickInput input{};
       input.arc.position = {0, 0, 500};
       input.arc.velocity = {20, 0, 0};
@@ -316,14 +324,14 @@ int main(int argc, char **argv) {
       throw std::runtime_error("accepted negative gravity");
     } catch (const std::invalid_argument &) {}
     try {
-      BaseBallisticAngles::from_executable("/path/to/user/ra2/game/gamemd.exe");
+      BaseBallisticAngles::from_executable(expansion_executable);
       throw std::runtime_error("accepted the wrong angle table edition");
     } catch (const std::runtime_error &error) {
       if (std::string(error.what()) == "accepted the wrong angle table edition")
         throw;
     }
     {
-      auto tables = BaseBallisticAngles::from_executable("/path/to/user/ra2/game/game.exe");
+      auto tables = BaseBallisticAngles::from_executable(base_executable);
       try {
         (void)tables.angle(200, 100, 0, 3, true);
         throw std::runtime_error("accepted unverified subunit square root");

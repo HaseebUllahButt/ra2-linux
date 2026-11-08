@@ -12,6 +12,7 @@ python3 rebuild/src/weapons/verify_tick_x86.py rebuild/build/weapons_test
 ```
 
 
+Set `RA2_GAME_DIR` when the owned assets are outside the project game folder.
 The optional x86 check needs Python Unicorn and the owned base executable at
 `game/game.exe`. The asset check reads the base archives. No image is produced.
 

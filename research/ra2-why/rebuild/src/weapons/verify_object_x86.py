@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Run original cell selection and projectile object collision in base game.exe."""
 
+import os
+from pathlib import Path
 import random
 import struct
 import subprocess
@@ -8,9 +10,12 @@ import sys
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
 from unicorn.x86_const import *
 
+game_directory = Path(os.environ.get("RA2_GAME_DIR", Path(__file__).resolve().parents[3] / "game")).resolve()
+os.environ.setdefault("RA2_GAME_DIR", str(game_directory))
+
 u = Uc(UC_ARCH_X86, UC_MODE_32)
 u.mem_map(0x400000, 0x800000)
-u.mem_write(0x400000, open("/path/to/user/ra2/game/game.exe", "rb").read()[:0x431000])
+u.mem_write(0x400000, (game_directory / "game.exe").read_bytes()[:0x431000])
 u.mem_map(0x1000000, 0x100000)
 u.mem_map(0x2000000, 0x100000)
 u.mem_map(0x3000000, 0x1000)
