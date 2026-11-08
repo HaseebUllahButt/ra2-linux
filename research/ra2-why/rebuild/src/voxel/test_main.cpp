@@ -23,6 +23,34 @@ int main(int argc, char **argv) {
                       asset.size());
       return std::cout ? 0 : 1;
     }
+    if (argc == 2 && (std::string(argv[1]) == "--vehicle" ||
+                      std::string(argv[1]) == "--vehicle-hull" ||
+                      std::string(argv[1]) == "--vehicle-zero")) {
+      auto hull_model = read_vxl(get("htnk.vxl"));
+      auto hull_animation = read_hva(get("htnk.hva"));
+      auto turret_model = read_vxl(get("htnktur.vxl"));
+      auto turret_animation = read_hva(get("htnktur.hva"));
+      auto barrel_model = read_vxl(get("htnkbarl.vxl"));
+      auto barrel_animation = read_hva(get("htnkbarl.hva"));
+      auto light = read_vpl(get("voxels.vpl"));
+      VehiclePose input;
+      input.hull = {&hull_model, &hull_animation};
+      if (std::string(argv[1]) != "--vehicle-hull") {
+        input.turret = {&turret_model, &turret_animation};
+        input.barrel = {&barrel_model, &barrel_animation};
+      }
+      input.hull_facing = input.turret_facing = 0x4000;
+      input.turret_offset = std::string(argv[1]) == "--vehicle-zero" ? 0 : 16;
+      auto output = draw_vehicle(input, light);
+      std::int32_t origin[] = {output.left, output.top};
+      std::cout.write(reinterpret_cast<const char *>(origin), sizeof origin);
+      for (auto pixel : output.image.pixels) {
+        char rgba[] = {char(pixel.r), char(pixel.g), char(pixel.b),
+                       char(pixel.a)};
+        std::cout.write(rgba, sizeof rgba);
+      }
+      return std::cout ? 0 : 1;
+    }
     auto vb = get("htnk.vxl"), hb = get("htnk.hva"), pb = get("voxels.vpl");
     auto v = read_vxl(vb);
     auto p = read_vpl(pb);
@@ -67,6 +95,25 @@ int main(int argc, char **argv) {
                                  std::to_string(hash));
     }
     auto h = read_hva(hb);
+    auto initial_pose = vehicle_pose_from_map(0x72);
+    if (initial_pose.hull_facing != 0x7200 ||
+        initial_pose.turret_facing != 0x7200 ||
+        initial_pose.barrel_tilt != 0x4000 || initial_pose.turret_offset != 0)
+      throw std::runtime_error("base map facing mismatch");
+    const Matrix light_identity = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+    const std::array<std::uint64_t, 4> light_hashes = {
+        0xa63457ac98d80794ULL, 0x64f4499b06f451ecULL, 0x44480f1599dcda35ULL,
+        0xf4c3d01914adbea1ULL};
+    unsigned light_case = 0;
+    for (const auto &matrix : {light_identity, base_game_camera()})
+      for (unsigned type : {2u, 4u}) {
+        auto table = base_vehicle_light(matrix, type);
+        std::uint64_t digest = 14695981039346656037ULL;
+        for (auto value : table)
+          digest = (digest ^ value) * 1099511628211ULL;
+        if (digest != light_hashes[light_case++])
+          throw std::runtime_error("base vehicle light mismatch");
+      }
     auto base_camera = base_game_camera();
     if (base_camera[0] != 0.7081906199455261f ||
         base_camera[6] != 0.865897536277771f)

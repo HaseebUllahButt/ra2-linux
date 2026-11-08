@@ -91,6 +91,9 @@ Matrix base_game_camera();
 // Original 32-step facing and X offset from 0x43E085 through 0x43E0E3.
 Matrix facing_transform(std::uint16_t facing, std::int32_t offset);
 Matrix base_facing_transform(std::uint16_t facing, std::int32_t offset);
+// Base vehicle light selection for a complete part-to-view matrix.
+std::array<std::uint8_t, 256> base_vehicle_light(const Matrix &,
+                                                 unsigned normal_type);
 // Pivot rotation sequence at 0x43E439 through 0x43E52D.
 Matrix barrel_transform(Matrix base, std::uint16_t rotation,
                         std::uint16_t tilt);
@@ -107,7 +110,11 @@ struct VehiclePose {
   VehiclePart hull, turret, barrel;
   std::uint16_t hull_facing = 0, turret_facing = 0, barrel_tilt = 0x4000;
   std::int32_t turret_offset = 0;
+  // Use the original base-game directional light when true.
+  bool original_lighting = true;
 };
+// Base map placement initializes both facings from the map's 8-bit value.
+VehiclePose vehicle_pose_from_map(std::uint8_t facing);
 struct VehicleMatrices {
   Matrix hull, turret, barrel;
 };

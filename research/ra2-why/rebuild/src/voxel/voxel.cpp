@@ -268,7 +268,7 @@ std::array<std::uint8_t, 256> double_light(unsigned normal_type,
     float highlight = denominator != 0 ? specular / denominator : 0;
     float value = std::max(0.0f, diffuse) + std::max(0.0f, highlight);
     result[i] = static_cast<std::uint8_t>(
-        std::clamp(std::nearbyint(value * 16), 0.0f, 31.0f));
+        std::clamp(std::trunc(value * 16), 0.0f, 31.0f));
   }
   result[253] = result[254] = result[255] = 16;
   return result;
@@ -287,9 +287,9 @@ std::array<std::uint8_t, 256> single_light(unsigned normal_type,
     float dot = 0;
     for (unsigned axis = 0; axis < 3; ++axis)
       dot += vectors[i][axis] * direction[axis];
-    // 0x758670 clamps negative values, multiplies by 16 and rounds.
+    // 0x758670 clamps negative values, multiplies by 16 and truncates.
     result[i] = static_cast<std::uint8_t>(
-        std::clamp(std::nearbyint(dot * 16), 0.0f, 31.0f));
+        std::clamp(std::trunc(dot * 16), 0.0f, 31.0f));
   }
   result[253] = result[254] = result[255] = 16;
   return result;
@@ -518,6 +518,17 @@ Matrix base_facing_transform(std::uint16_t facing, std::int32_t offset) {
   float distance = float(offset / 8);
   return {c, -s, 0, c * distance, s, c, 0, s * distance, 0, 0, 1, 0};
 }
+std::array<std::uint8_t, 256> base_vehicle_light(const Matrix &matrix,
+                                                 unsigned normal_type) {
+  constexpr std::array<float, 3> light = {
+      -0.49999943375587463f, -0.7071059942245483f, 0.49999943375587463f};
+  std::array<float, 3> local{};
+  for (unsigned axis = 0; axis < 3; ++axis) {
+    for (unsigned row = 0; row < 3; ++row)
+      local[axis] += matrix[row * 4 + axis] * light[row];
+  }
+  return double_light(normal_type, local, {0, 0, 1}, 3);
+}
 Matrix facing_transform(std::uint16_t facing, std::int32_t offset) {
   unsigned direction = (((unsigned(facing) >> 10) + 1) >> 1) & 31;
   float angle = float((int(direction) - 8) * -0.19634954084936207);
@@ -679,6 +690,11 @@ SceneImage draw_scene(const std::vector<ScenePart> &parts,
       result.image.pixels[i] = lighting.palette[indices[i]];
   return result;
 }
+VehiclePose vehicle_pose_from_map(std::uint8_t facing) {
+  VehiclePose result;
+  result.hull_facing = result.turret_facing = std::uint16_t(facing) << 8;
+  return result;
+}
 VehicleMatrices vehicle_matrices(const VehiclePose &vehicle) {
   Matrix hull = base_facing_transform(vehicle.hull_facing, 0);
   Matrix turret =
@@ -705,10 +721,15 @@ SceneImage draw_vehicle(const VehiclePose &vehicle, const Lighting &lighting) {
       throw std::runtime_error("empty vehicle animation");
     scaled_animations.push_back(*source.animation);
     scale_hva_translations(scaled_animations.back(), *source.model);
-    parts.push_back({source.model, &scaled_animations.back(),
-                     multiply(base_game_camera(), local),
-                     source.frame % source.animation->frames,
-                     source.normal_light});
+    Matrix view = multiply(base_game_camera(), local);
+    if (source.model->sections.empty())
+      throw std::runtime_error("empty vehicle model");
+    auto light = vehicle.original_lighting
+                     ? base_vehicle_light(
+                           view, source.model->sections.front().normal_type)
+                     : source.normal_light;
+    parts.push_back({source.model, &scaled_animations.back(), view,
+                     source.frame % source.animation->frames, light});
   };
   auto matrices = vehicle_matrices(vehicle);
   append(vehicle.hull, matrices.hull);
@@ -722,7 +743,41 @@ SceneImage draw_vehicle(const VehiclePose &vehicle, const Lighting &lighting) {
     append(vehicle.turret, matrices.turret);
     append(vehicle.barrel, matrices.barrel);
   }
-  return draw_scene(parts, lighting);
+  // The original caller renders each vehicle part into its own surface before
+  // compositing it at that part's screen offset.
+  std::vector<SceneImage> layers;
+  int min_x = 1000000, min_y = 1000000, max_x = -1000000, max_y = -1000000;
+  for (const auto &part : parts) {
+    layers.push_back(draw_scene({part}, lighting));
+    const auto &layer = layers.back();
+    for (unsigned y = 0; y < layer.image.height; ++y)
+      for (unsigned x = 0; x < layer.image.width; ++x)
+        if (layer.image.pixels[std::size_t(y) * layer.image.width + x].a) {
+          min_x = std::min(min_x, layer.left + int(x));
+          min_y = std::min(min_y, layer.top + int(y));
+          max_x = std::max(max_x, layer.left + int(x));
+          max_y = std::max(max_y, layer.top + int(y));
+        }
+  }
+  if (max_x < min_x)
+    return {{256, 256, std::vector<ra2::gfx::Rgba>(65536, {0, 0, 0, 0})}, 0, 0};
+  if (max_x - min_x >= 256 || max_y - min_y >= 256)
+    throw std::runtime_error("vehicle exceeds voxel surface");
+  SceneImage result{
+      {256, 256, std::vector<ra2::gfx::Rgba>(65536, {0, 0, 0, 0})},
+      min_x,
+      min_y};
+  for (const auto &layer : layers)
+    for (unsigned y = 0; y < layer.image.height; ++y)
+      for (unsigned x = 0; x < layer.image.width; ++x) {
+        const auto pixel =
+            layer.image.pixels[std::size_t(y) * layer.image.width + x];
+        if (!pixel.a)
+          continue;
+        auto dx = layer.left + int(x) - min_x, dy = layer.top + int(y) - min_y;
+        result.image.pixels[std::size_t(dy) * 256 + std::size_t(dx)] = pixel;
+      }
+  return result;
 }
 
 Image raster_rgba(const Section &section, const std::array<float, 12> &matrix,
