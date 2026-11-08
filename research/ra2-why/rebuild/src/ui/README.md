@@ -56,6 +56,9 @@ loose PKT and MMX/YRO packet entries. Local entries use sorted Linux order;
 the original Windows enumeration order is not guaranteed. YRM entries and
 fallback selection for the active game mode are not yet implemented. A saved
 scenario index is therefore not guaranteed to resolve to the same map.
+`load_skirmish_modes` reads the original mode declarations. The conservative
+`resolve_saved_skirmish_map` resolves only an available built-in map that
+matches its saved mode. It does not emulate the original fallback.
 `load_skirmish_countries` returns the original random entry and selectable
 country IDs and names in rules order. Country controls are not editable yet.
 `load_skirmish_colors` returns the original random entry, eight color IDs,

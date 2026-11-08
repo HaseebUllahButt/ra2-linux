@@ -45,6 +45,50 @@ std::vector<SkirmishOpponentChoice> load_skirmish_opponents(const ra2text::CsfFi
     return result;
 }
 
+std::vector<SkirmishMode> load_skirmish_modes(const fs::MixFileSystem& files,
+                                               const ra2text::CsfFile& strings) {
+    // 0x005D7CE0 loads these sections. 0x005D7590 inserts modes by numeric ID.
+    const auto data=files.read_file(files.variant()==fs::GameVariant::RedAlert2 ?
+                                   "MPModes.ini" : "MPModesMD.ini");
+    if (!data) throw std::runtime_error("Missing original multiplayer modes");
+    rules::IniFile ini;
+    ini.parse(std::string_view(reinterpret_cast<const char*>(data->data()),data->size()));
+    std::vector<SkirmishMode> result;
+    for (const char* section : {"Battle","ManBattle","Siege","Unholy","FreeForAll","Cooperative"}) {
+        const auto* entries=ini.find_section(section);
+        if (!entries) continue;
+        for (const auto& entry : entries->entries) {
+            const auto id=rules::IniFile::integer_value(entry.key);
+            const auto fields=rules::IniFile::split_list(entry.value);
+            if (!id || fields.size()<4) continue;
+            const auto* name=strings.find(fields[0]);
+            result.push_back({*id,name ? name->text : std::string{},fields[0],fields[2],fields[3]});
+        }
+    }
+    std::stable_sort(result.begin(),result.end(),[](const auto& a,const auto& b){return a.id<b.id;});
+    return result;
+}
+
+std::optional<SkirmishMap> resolve_saved_skirmish_map(const SkirmishSetup& setup,
+    const std::vector<SkirmishMap>& maps, const std::vector<SkirmishMode>& modes) {
+    if (!setup.scenario_index || !setup.game_mode || *setup.scenario_index<0 ||
+        static_cast<std::size_t>(*setup.scenario_index)>=maps.size()) return std::nullopt;
+    const auto& map=maps[static_cast<std::size_t>(*setup.scenario_index)];
+    if (!map.built_in || !map.available) return std::nullopt;
+    const auto mode=std::find_if(modes.begin(),modes.end(),[&](const auto& m){return m.id==*setup.game_mode;});
+    if (mode==modes.end()) return std::nullopt;
+    auto upper=[](std::string value) {
+        std::transform(value.begin(),value.end(),value.begin(),[](unsigned char c){return static_cast<char>(std::toupper(c));});
+        return value;
+    };
+    const auto filter=upper(mode->map_filter);
+    // 0x0069AE10 treats a missing map mode list as standard.
+    if (map.modes.empty()) return filter=="STANDARD" ? std::optional(map) : std::nullopt;
+    for (const auto& allowed : map.modes)
+        if (upper(allowed)==filter) return map;
+    return std::nullopt;
+}
+
 std::optional<int> credit_from_slider_pointer(int local_x, int width,
                                               int minimum, int maximum, int increment) noexcept {
     // 0x0061DA52 reserves 50 pixels for the value and 13 for the grip.
@@ -147,6 +191,7 @@ std::vector<SkirmishMap> load_skirmish_maps(const fs::MixFileSystem& files,
         map.id = id;
         map.filename = map.id + ".MAP";
         map.source_archive = source;
+        map.built_in = required;
         const auto* description_text = ini.find(map.id, "DescriptionText");
         if (description_text) map.name = description_text->value;
         else if (const auto* description = ini.find(map.id, "Description")) {

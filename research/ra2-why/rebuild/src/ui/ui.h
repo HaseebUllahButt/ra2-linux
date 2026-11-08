@@ -50,7 +50,18 @@ struct SkirmishMap {
     int min_players = 2, max_players = 4;
     std::vector<std::string> modes;
     bool available = false;
+    bool built_in = false;
 };
+struct SkirmishMode {
+    int id;
+    std::string name, name_key, rules_file, map_filter;
+};
+std::vector<SkirmishMode> load_skirmish_modes(const fs::MixFileSystem& files,
+                                               const ra2text::CsfFile& strings);
+// Returns a saved built-in map only when it exists and matches the mode.
+// Local Windows enumeration order and original fallback rules remain unknown.
+std::optional<SkirmishMap> resolve_saved_skirmish_map(const SkirmishSetup& setup,
+    const std::vector<SkirmishMap>& maps, const std::vector<SkirmishMode>& modes);
 struct SkirmishCountry {
     int index;
     std::string id, name, name_key;

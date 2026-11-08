@@ -104,6 +104,10 @@ int main(int argc,char** argv) {
     assert(base_shell.width==800 && base_shell.height==600);
     auto base_maps=ui::load_skirmish_maps(base,base_strings);
     auto expansion_maps=ui::load_skirmish_maps(files,strings);
+    auto base_modes=ui::load_skirmish_modes(base,base_strings);
+    auto expansion_modes=ui::load_skirmish_modes(files,strings);
+    assert(base_modes.size()==8 && expansion_modes.size()==9);
+    assert(base_modes[0].id==1 && base_modes[0].map_filter=="standard" && !base_modes[0].name.empty());
     auto base_countries=ui::load_skirmish_countries(base,base_strings);
     auto expansion_countries=ui::load_skirmish_countries(files,strings);
     auto colors=ui::load_skirmish_colors(base_strings);
@@ -127,6 +131,13 @@ int main(int argc,char** argv) {
     assert(expansion_maps[0].id=="XMP29U2" && !expansion_maps[0].name.empty());
     assert(std::any_of(base_maps.begin(),base_maps.end(),[](const auto& map){return map.available;}));
     assert(std::any_of(expansion_maps.begin(),expansion_maps.end(),[](const auto& map){return map.available;}));
+    ui::SkirmishSetup known_map; known_map.game_mode=1; known_map.scenario_index=0;
+    const auto resolved=ui::resolve_saved_skirmish_map(known_map,base_maps,base_modes);
+    assert(resolved && resolved->filename=="MP02T2.MAP");
+    known_map.game_mode=8;
+    assert(!ui::resolve_saved_skirmish_map(known_map,base_maps,base_modes));
+    known_map.game_mode=1; known_map.scenario_index=static_cast<int>(base_maps.size());
+    assert(!ui::resolve_saved_skirmish_map(known_map,base_maps,base_modes));
     assert(std::any_of(base_maps.begin(),base_maps.end(),[](const auto& map){
         return map.source_archive=="Grinder.mmx" && map.filename=="Grinder.MAP" && map.available && !map.name.empty();
     }));
