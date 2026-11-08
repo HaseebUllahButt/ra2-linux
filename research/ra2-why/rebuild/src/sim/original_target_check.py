@@ -7,9 +7,12 @@ import pathlib
 import struct
 import sys
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
-from unicorn.x86_const import UC_X86_REG_ECX, UC_X86_REG_ESP
+from unicorn.x86_const import UC_X86_REG_ECX, UC_X86_REG_ESP, UC_X86_REG_FPCW
 
 image = pathlib.Path(sys.argv[1]).read_bytes()
+base = '--base' in sys.argv
+entry, boundary, rejected = (0x6c5570,0x6c56c2,0x6c611a) if base else (0x6f7ca0,0x6f7e24,0x6f894f)
+map_lookup, visibility, mission_control = (0x548000,0x47c2e0,0x5950d0) if base else (0x565730,0x4870d0,0x5b3a00)
 cases = [
     ({}, 'Continue'),
     ({'fire': 5}, 'Reject'),
@@ -27,6 +30,10 @@ cases = [
     ({'height': -21}, 'Reject'),
     ({'height': -20}, 'Continue'),
 ]
+if base:
+    cases = [(changed, 'Continue' if 'type604' in changed else expected)
+             for changed, expected in cases if not ('verse' in changed and changed['verse'] != changed['verse'])]
+    cases += [({'verse':0.},'Continue'),({'verse':.01},'Reject'),({'verse':.02},'Continue')]
 for changed, expected in cases:
     v = dict(fire=0, threat=0, initial=256, type394=0, verse=1., type604=0,
              slot50=0, cell_ec=2, flag81=0, hp=100, state220=0,
@@ -36,8 +43,15 @@ for changed, expected in cases:
     cpu.mem_map(0x400000, 0x500000)
     cpu.mem_write(0x400000, image[:0x500000])
     cpu.mem_map(0x1000000, 0x20000)
+    cpu.reg_write(UC_X86_REG_FPCW, 0xe7f)
 
     def write(address, value):
+        if base:
+            remap={0x1005000+0x394:0x1005000+0x364,
+                   0x1002000+0x220:0x1002000+0x1b8,
+                   0x1000000+0x21c:0x1000000+0x1b4,
+                   0x1002000+0x21c:0x1002000+0x1b4}
+            address=remap.get(address,address)
         cpu.mem_write(address, struct.pack('<I', value & 0xffffffff))
 
     stub_address = 0x1010000
@@ -46,6 +60,9 @@ for changed, expected in cases:
         global stub_address
         address = stub_address
         stub_address += 16
+        if base:
+            remap={0x330:0x304,0x2e4:0x2b8,0x3f8:0x39c,0x3bc:0x364,0x84:0x80,0x1c8:0x1b0}
+            slot=remap.get(slot,slot)
         write(table + slot, address)
         code = b'\xb8' + struct.pack('<I', result & 0xffffffff)
         code += b'\xc2' + struct.pack('<H', pop) if pop else b'\xc3'
@@ -71,27 +88,27 @@ for changed, expected in cases:
     write(0x1005000 + 0x394, v['type394'])
     write(0x1005000 + 0x604, v['type604'])
     write(0x1006000 + 0xec, v['cell_ec'])
-    cpu.mem_write(0x1002000 + 0x81, bytes([v['flag81']]))
+    cpu.mem_write(0x1002000 + (0x76 if base else 0x81), bytes([v['flag81']]))
     write(0x1002000 + 0x220, v['state220'])
-    cpu.mem_write(0x1002000 + 0x3d5, bytes([v['flag3d5']]))
+    cpu.mem_write(0x1002000 + (0x32d if base else 0x3d5), bytes([v['flag3d5']]))
     cpu.mem_write(0x1007000 + 4, bytes([v['mission4']]))
     write(0x1000000 + 0x21c, 0x100c000)
     write(0x1002000 + 0x21c, 0x100c000 if v['same_house'] else 0x100d000)
     # Explicit external map/mission outputs; this check does not claim their recovery.
-    cpu.mem_write(0x565730, b'\xb8' + struct.pack('<I', 0x1006000) + b'\xc2\x04\x00')
-    cpu.mem_write(0x4870d0, b'\xb8' + struct.pack('<I', v['visible']) + b'\xc2\x04\x00')
-    cpu.mem_write(0x5b3a00, b'\xb8' + struct.pack('<I', 0x1007000) + b'\xc3')
+    cpu.mem_write(map_lookup, b'\xb8' + struct.pack('<I', 0x1006000) + b'\xc2\x04\x00')
+    cpu.mem_write(visibility, b'\xb8' + struct.pack('<I', v['visible']) + b'\xc2\x04\x00')
+    cpu.mem_write(mission_control, b'\xb8' + struct.pack('<I', 0x1007000) + b'\xc3')
     result = []
 
     def stop_at_boundary(cpu, address, size, user):
-        if address in (0x6f7e24, 0x6f894f):
-            result.append('Continue' if address == 0x6f7e24 else 'Reject')
+        if address in (boundary, rejected):
+            result.append('Continue' if address == boundary else 'Reject')
             cpu.emu_stop()
 
     cpu.hook_add(UC_HOOK_CODE, stop_at_boundary)
     cpu.reg_write(UC_X86_REG_ECX, 0x1000000)
     cpu.reg_write(UC_X86_REG_ESP, 0x101f000)
     cpu.mem_write(0x101f000, struct.pack('<8I', 0x101e000, v['threat'], 0, 0, 0x1002000, 0, 0, 0))
-    cpu.emu_start(0x6f7ca0, 0x101e000, count=10000)
+    cpu.emu_start(entry, 0x101e000, count=10000)
     assert result == [expected], (changed, result, expected)
-print('15 target prefix decisions match original x86 instructions with resolved virtual inputs')
+print(f'{len(cases)} target prefix decisions match original x86 instructions with resolved virtual inputs')

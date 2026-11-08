@@ -52,7 +52,7 @@ This primitive does not create or place an entity.
 
 Addresses refer to the supplied **gamemd.exe** analysis.
 The symbol CSV supplies discovery names; decompiled bodies supply primary evidence.
-The supplied evidence does not establish base `game.exe` address or behavior parity.
+The Base RA2 checks section records independently checked base addresses and specific behavior equivalences.
 
 | Behavior | Evidence |
 | --- | --- |
@@ -197,3 +197,103 @@ This selects 53-bit arithmetic and truncation toward zero, including single-prec
 Linux's default nearest rounding changed several test results, so the port applies truncation explicitly.
 The code also uses a fused multiply residual to resolve armor multiplication rounding.
 The original damage evidence check starts with this control mode explicitly enabled.
+
+## Threat score recovery
+
+`threat_score()` ports 0070CD10 using resolved type, weapon, house, and distance inputs.
+It preserves the original signed retaliation term, armor effectiveness, special threat, health ratio, and preferred enemy bonus.
+It adds the original 100000 score bias from 007F4E90.
+The score uses current health divided by Strength through 005F5C60.
+It uses complete-object type fields +2C8, +2D0, +2D8, +2E0, and +2E8 for its five coefficients.
+These correspond to MyEffectiveness, TargetEffectiveness, TargetSpecialThreat, TargetStrength, and TargetDistance coefficients.
+The caller resolves the normal or dumb coefficient set before calling.
+
+The original explicit-origin branch preserves distance in world units.
+The default-origin branch divides resolved distance by 256.
+Both branches subtract range divided by 256 and clamp the difference to zero.
+The port preserves this unusual unit difference instead of replacing it with a new distance model.
+Five score cases match original x86 arithmetic with fixed virtual outputs and fixed square-root outputs.
+`original_score_check.py` reproduces those checks.
+The original square-root helper 004CAC40 uses a lookup table, so this API accepts its resolved integer output.
+The port does not substitute the standard library square root for the original lookup table.
+
+`fp.h` applies the original 53-bit truncation mode to score operations without changing the process rounding mode.
+It uses exact residuals for addition, multiplication, and division within a bounded normal numeric domain.
+Its host arithmetic assumes the ordinary nearest-rounding environment and excludes fast-math builds.
+Nonfinite, extreme, and subnormal-domain inputs return explicit errors.
+
+## Base RA2 checks
+
+The separate base export now supplies evidence under `rebuild/decomp-base/`.
+Its indexes live under `analysis/base-ra2/indexes/`.
+The following equivalences were checked against base bodies and original `game.exe` instructions:
+
+| Behavior | Base RA2 | Yuri's Revenge |
+| --- | --- | --- |
+| Random seed, draw, range | 00638790 / 00638840 / 006388A0 | 0065C6D0 / 0065C780 / 0065C7E0 |
+| Armor/range damage | 0047E1C0 | 00489180 |
+| Guarded drive destination | 0049FE30 | 004AFD40 |
+| Ground path processing | 004A2670 | 004B2630 |
+| Ground curve transform | 004A4740 | 004B4780 |
+| Lookup distance helper | 004BA410 | 004CAC40 |
+| Lookup distance table | 00817DFC | 008650BC |
+| Floating-point integer conversion | 0077F110 | 007C5F00 |
+| Floating-point control word | 007D8964: 00000E7F | 00822D80: 00000E7F |
+
+Base x86 checks reproduce the same 15 random draws, 28 damage vectors, and 64 curve vectors.
+Both random constant arrays match exactly.
+All 16,384 distance table words match exactly.
+These are specific shared primitives, not a claim that all engine behavior matches.
+
+Ground destination guards use base virtual offsets +324, +328, +1BC, and +1C0.
+Their expansion counterparts are +37C, +380, +1D4, and +1D8.
+`GroundGuards` retains the expansion field labels, but inputs represent the four ordered predicate results.
+The base Foot path array starts at +4D0 instead of expansion +5E0.
+The typed native state does not read either original memory layout directly.
+
+The three RNG, ground, and damage evidence scripts accept `--base` with a `game.exe` path.
+Base target differences and base score checks are documented below.
+Current map/rule fixtures are original expansion data, because no base RULES.INI is present in the supplied extracted configuration directory.
+
+`OriginalDistance::from_executable()` recognizes both verified helper signatures.
+It reads the appropriate table from either original executable without executing it.
+Its typed coordinate method preserves the original lookup approximation, including its integer truncation.
+The native tests also compare nine lookup outputs by their exact float bits.
+
+## Unknown map types
+
+The original object readers skip missing type-registry entries before allocating an object.
+Evidence includes expansion 00743270, 0051FB00, 0041B110, and 0044F820, plus base unit reader 00706AE0.
+The native loader now follows this branch and reports each skipped object in `snapshot().skipped_objects`.
+A type registered under another category does not satisfy the requested category.
+Case-insensitive type ID matching follows the original registry lookup behavior.
+
+A missing rule section does not prove a missing type.
+For example, original BuildingTypes declares CALA02 and CALOND02 even though their sections are commented out.
+The native registry keeps those declared types and leaves unresolved fields unknown.
+It does not guess their original constructor defaults.
+
+Run `rebuild/src/sim/test.sh /path/to/user/ra2/analysis/extracted --all-maps` for the full map audit.
+Each map checks that imported and explicitly skipped records account for all original object rows.
+The audit prints skipped type IDs with reasons.
+
+## Base target differences
+
+The prefix defaults to base RA2. Set `CandidateEdition::YuriRevenge` explicitly for the expansion path.
+Base 006C560D–006C5622 multiplies the armor verse by double 100, truncates, and rejects exactly one.
+Expansion 006F7D3D–006F7D4F compares against float 0.02 and rejects lower, equal, and unordered values.
+The base prefix does not contain the expansion's +604 cell gate.
+Optional field labels retain expansion offsets, while diagnostics identify the selected edition's actual address and field.
+Base exceptional armor conversion remains an explicit unresolved case.
+Seventeen base prefix decisions match original x86 instructions with resolved callback inputs.
+Base score function 006D7550 also reproduces the five score vectors from expansion 0070CD10.
+
+Base factory update 004B9300 uses the same verified cash-only stage and payment decisions as expansion 004C9B20.
+The update pointer appears in base factory vtable 007A0EE0 at slot +5C.
+Base interval calculation is 004B9780, and its timer helper is 00453EB0.
+Base cash debit 004E5280 has the corresponding cash-first branch at house +24C.
+The expansion stores that cash at house +30C.
+`original_factory_check.py` executes both original factory updates with a resolved cash-only adapter.
+Both editions produce replay hash 72681CC7 across all 108 test frames.
+Both stall without money and resume with money.
+The native test checks the same per-frame progress, remaining cost, cash, and spent hash.

@@ -10,7 +10,7 @@ std::uint32_t asr16(std::uint32_t n) {
 }
 }
 Random::Random(std::uint32_t seed) {
-    // Read-only gamemd.exe bytes at 00839644 and 00839694.
+    // Base game.exe 007EE4AC/007EE4FC; identical expansion bytes at 00839644/00839694.
     constexpr std::uint32_t a[]={0xbaa96887,0x1e17d32c,0x03bcdc3c,0x0f33d1b2};
     constexpr std::uint32_t b[]={0x4b0f3b58,0xe874f0c3,0x6955c5a6,0x55a7ca46};
     for (std::uint32_t i=0;i<table_.size();++i) {

@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace ra2::sim {
-// gamemd.exe 0065C6D0/0065C780/0065C7E0. Not the CRT rand().
+// Base 00638790/00638840/006388A0; expansion 0065C6D0/0065C780/0065C7E0.
 class Random {
 public:
     explicit Random(std::uint32_t seed);
@@ -68,9 +68,11 @@ struct Result {
     std::int64_t value=0;
     std::string detail;
 };
+struct SkippedObject { Kind kind; std::string type,house,reason; };
 struct Snapshot {
     std::uint64_t frame=0;
     std::vector<Entity> entities;
+    std::vector<SkippedObject> skipped_objects;
     std::vector<House> houses;
     std::vector<Result> results; // Commands executed on the last tick.
     std::vector<std::string> gaps;

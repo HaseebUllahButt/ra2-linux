@@ -3,7 +3,7 @@
 #include <optional>
 #include <vector>
 namespace ra2::sim {
-// Resolved inputs for 00489180. These are not guessed warhead defaults.
+// Base 0047E1C0 / expansion 00489180. Resolved inputs, not guessed defaults.
 struct DamageInputs {
     int damage=0, distance=0, maximum=0;
     float cell_spread=0, percent_at_max=0;

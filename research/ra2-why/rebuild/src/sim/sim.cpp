@@ -23,6 +23,16 @@ std::optional<std::int32_t> number(const Fields& f,const std::string& key) {
     return Ini::integer_value(get(f,key));
 }
 Result failure(Error error,const std::string& text) { return {0,error,0,text}; }
+void object_fields(Entity&,const ra2map::Structure&) {}
+void object_fields(Entity& e,const ra2map::Unit& obj) { e.mission=obj.mission; }
+void object_fields(Entity& e,const ra2map::Aircraft& obj) { e.mission=obj.mission; }
+void object_fields(Entity& e,const ra2map::Infantry& obj) { e.mission=obj.mission; e.subcell=obj.subcell; }
+bool equal_ascii_case(const std::string& a,const std::string& b) {
+    if (a.size()!=b.size()) return false;
+    auto upper=[](unsigned char c){return c>='a' && c<='z'?c-'a'+'A':c;};
+    for (std::size_t i=0;i<a.size();++i) if (upper(a[i])!=upper(b[i])) return false;
+    return true;
+}
 }
 Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed):random_(seed) {
     // Registry names remain authored inputs. No guessed constructor defaults.
@@ -71,8 +81,16 @@ Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed):random
         for (const auto& obj:objects) {
             Entity e; e.id=static_cast<std::uint32_t>(state_.entities.size()+1); e.kind=kind;
             e.type=obj.type; e.house=obj.house; e.cell=obj.cell; e.facing=obj.facing; e.map_health=obj.health;
-            const auto t=types_.find(e.type);
-            if (t==types_.end()) throw std::runtime_error("unknown map object type: "+e.type);
+            auto t=types_.find(e.type);
+            if (t==types_.end()) t=std::find_if(types_.begin(),types_.end(),[&](const auto& type){return equal_ascii_case(type.first,e.type);});
+            const char* expected=kind==Kind::Structure?"BuildingTypes":kind==Kind::Unit?"VehicleTypes":kind==Kind::Infantry?"InfantryTypes":"AircraftTypes";
+            if (t==types_.end() || t->second.category!=expected) {
+                // 00743270 / base 00706AE0 gate creation on a valid type-registry index.
+                state_.skipped_objects.push_back({kind,e.type,e.house,"type is absent from its original category registry"});
+                continue;
+            }
+            e.type=t->first;
+            object_fields(e,obj);
             if (std::none_of(state_.houses.begin(),state_.houses.end(),[&](const House& h){return h.name==e.house;}))
                 {
                 House house; house.name=e.house;
@@ -92,15 +110,8 @@ Simulation::Simulation(const Ini& base,const Ini& map,std::uint32_t seed):random
     };
     append(parsed.structures(),Kind::Structure);
     append(parsed.units(),Kind::Unit);
-    auto offset=parsed.structures().size();
-    for (std::size_t i=0;i<parsed.units().size();++i) state_.entities[offset+i].mission=parsed.units()[i].mission;
-    offset=state_.entities.size(); append(parsed.infantry(),Kind::Infantry);
-    for (std::size_t i=0;i<parsed.infantry().size();++i) {
-        state_.entities[offset+i].mission=parsed.infantry()[i].mission;
-        state_.entities[offset+i].subcell=parsed.infantry()[i].subcell;
-    }
-    offset=state_.entities.size(); append(parsed.aircraft(),Kind::Aircraft);
-    for (std::size_t i=0;i<parsed.aircraft().size();++i) state_.entities[offset+i].mission=parsed.aircraft()[i].mission;
+    append(parsed.infantry(),Kind::Infantry);
+    append(parsed.aircraft(),Kind::Aircraft);
     state_.gaps.push_back("Map missions are loaded, not executed; autonomous object updates are unsupported");
 }
 Result Simulation::issue(const Command& c) {

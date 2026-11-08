@@ -3,7 +3,7 @@
 #include <limits>
 namespace ra2::sim {
 namespace {
-// Third dword of each 12-byte row at 007E7B28, read from original gamemd.exe.
+// Third dword of each row: base table 007A0180, expansion 007E7B28. All flags match.
 constexpr std::uint32_t flags[64]={
     0,8,8,0,0,0,10,10,15,0,8,8,0,0,0,15,
     15,15,3,11,11,0,0,0,0,12,12,4,11,11,0,0,

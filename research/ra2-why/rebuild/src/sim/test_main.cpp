@@ -2,8 +2,11 @@
 #include "ground.h"
 #include "combat.h"
 #include "target.h"
+#include "distance.h"
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <filesystem>
 #include <limits>
 #include <stdexcept>
 using namespace ra2::sim;
@@ -69,6 +72,12 @@ int main(int argc,char** argv) try {
         check(imported_state.entities.size()==count,"all real map object categories imported");
         std::cout<<file<<" objects="<<count<<"\n";
     }
+    check(a.types().count("CALA02") && a.types().count("CALOND02"),"declared types survive missing rule sections");
+    Ini missing_type;
+    missing_type.parse("[Houses]\n0=Neutral\n[Units]\n0=Neutral,NOT_A_REGISTERED_UNIT,256,1,2,0,Guard\n1=Neutral,"+first.type+",256,54,69,0,Guard\n");
+    Simulation skipped(rules,missing_type,0);
+    check(skipped.snapshot().entities.size()==1 && skipped.snapshot().skipped_objects.size()==1,"original missing type branch skips with diagnostics");
+    check(skipped.snapshot().entities[0].mission=="Guard","skipped rows preserve later mission fields");
     // Test original unit row health boundary conversion with real Strength.
     Ini slice;
     std::string input="[Houses]\n0="+first.house+"\n["+first.house+"]\nCredits=0\n[Units]\n";
@@ -110,9 +119,11 @@ int main(int argc,char** argv) try {
     }
     check(r.first()==0 && r.second()==103,"both ring indices wrap");
     Random reverse(9), forward(9);
+    std::uint32_t ranged_hash=2166136261u;
     for (int i=0;i<1000;++i) {
-        auto n=reverse.ranged(17,-10); check(n>=-10 && n<=17 && n==forward.ranged(-10,17),"inclusive reverse range");
+        auto n=reverse.ranged(17,-10); ranged_hash=(ranged_hash^static_cast<std::uint32_t>(n))*16777619u; check(n>=-10 && n<=17 && n==forward.ranged(-10,17),"inclusive reverse range");
     }
+    check(ranged_hash==0xb4adaea7u,"1000 original x86 ranged draws");
     bool rejected=false;
     try { r.ranged(std::numeric_limits<int>::min(),std::numeric_limits<int>::max()); } catch(const std::range_error&) { rejected=true; }
     check(rejected,"overflow range explicit error");
@@ -150,7 +161,40 @@ int main(int argc,char** argv) try {
     check(select_resolved_table_target({{1,false,100},{2,true,1},{3,true,2}})==3,"original eligible maximum");
     check(!select_resolved_table_target({{1,true,-1}}),"original score minus one excluded");
     check(threat_categories(0x100)==0x8042 && threat_categories(4)==4 && threat_categories(0)==0,"original threat category conversion");
-    CandidatePrefix prefix;
+    const auto distance_table=OriginalDistance::from_executable(root+"/../../game/game.exe");
+    check(distance_table.square_root(0)==0,"original zero distance");
+    check(distance_table.between({0,0,0},{3,4,0})==5,"original table distance");
+    check(distance_table.between({0,0,0},{0,0,256},true)==0,"original planar distance");
+    check(distance_table.between({0,0,0},{0,0,256})==256,"original vertical distance");
+    check(distance_table.between({0,0,0},{1792,0,0})==1792,"original threat distance input");
+    const auto expansion_distance=OriginalDistance::from_executable(root+"/../../game/gamemd.exe");
+    const double squared_vectors[]={0,1,2,3,25,10000,3211264,123456789,68719476736.0};
+    const std::uint32_t distance_bits[]={0,0x3f800000,0x3fb504f3,0x3fddb3d7,0x40a00000,0x42c80000,0x44e00000,0x462d9bd7,0x48800000};
+    for (unsigned i=0;i<9;++i) {
+        const float value=distance_table.square_root(squared_vectors[i]);
+        std::uint32_t bits; std::memcpy(&bits,&value,4);
+        check(bits==distance_bits[i],"original lookup square root bits");
+        check(expansion_distance.square_root(squared_vectors[i])==value,"base and expansion distance table parity");
+    }
+    ThreatScoreInputs scoring;
+    scoring.coefficients={rules.read_double("General","MyEffectivenessCoefficientDefault"),
+        rules.read_double("General","TargetEffectivenessCoefficientDefault"),
+        rules.read_double("General","TargetSpecialThreatCoefficientDefault"),
+        rules.read_double("General","TargetStrengthCoefficientDefault"),
+        rules.read_double("General","TargetDistanceCoefficientDefault")};
+    scoring.target_health=tank.strength.value(); scoring.target_strength=tank.strength.value();
+    scoring.range_world_units=1280; scoring.resolved_distance_world_units=1792;
+    scoring.forward_armor_verse=1; scoring.reverse_armor_verse=1;
+    check(threat_score(scoring)==99780,"original threat formula with real coefficients");
+    scoring.target_targets_attacker=true;
+    check(threat_score(scoring)==100180,"original retaliation sign");
+    scoring.preferred_enemy_house=true; scoring.enemy_house_bonus=rules.read_double("General","EnemyHouseThreatBonus");
+    check(threat_score(scoring)==100580,"original preferred enemy bonus");
+    scoring.explicit_scan_origin=true;
+    check(threat_score(scoring)==82730,"original explicit scan origin distance units");
+    scoring.target_type_present=false;
+    check(threat_score(scoring)==0,"missing original target type score");
+    CandidatePrefix prefix; prefix.edition=CandidateEdition::YuriRevenge;
     check(check_candidate_prefix(prefix).status==CandidateStatus::NeedsInput,"missing target evidence stays explicit");
     prefix.threat=0; prefix.fire_status=0; prefix.initial_health=256;
     prefix.weapon_warhead_present=true; prefix.armor_verse=1;
@@ -183,6 +227,15 @@ int main(int argc,char** argv) try {
     trial=prefix; trial.target_height=-21;
     check(check_candidate_prefix(trial).status==CandidateStatus::Reject,"original height below minus twenty");
     trial.target_height=-20; check(check_candidate_prefix(trial).status==CandidateStatus::Continue,"original height boundary");
+    auto base_prefix=prefix; base_prefix.edition=CandidateEdition::BaseRa2;
+    base_prefix.armor_verse=0;
+    check(check_candidate_prefix(base_prefix).status==CandidateStatus::Continue,"base zero verse preserves original prefix behavior");
+    base_prefix.armor_verse=.01;
+    check(check_candidate_prefix(base_prefix).status==CandidateStatus::Reject,"base one percent verse rejection");
+    base_prefix.armor_verse=.02;
+    check(check_candidate_prefix(base_prefix).status==CandidateStatus::Continue,"base two percent verse survives prefix");
+    base_prefix.attacker_type_604=2; base_prefix.target_slot_50=true; base_prefix.target_cell_ec=1;
+    check(check_candidate_prefix(base_prefix).status==CandidateStatus::Continue,"base omits expansion cell gate");
     GroundMotion ground;
     GroundGuards guards;
     auto center=ground_cell_center(54,69);
@@ -216,10 +269,34 @@ int main(int argc,char** argv) try {
     check(ground.path[0]==1 && ground.path[22]==7 && ground.path[23]==7,"original 23 direction shift");
     House h; h.cash=tank.cost.value(); Factory f; f.begin(tank.cost.value(),108,0);
     f.tick(h,1); check(f.progress==0,"factory waits");
-    for (int frame=2;frame<=108;++frame) f.tick(h,frame);
+    std::uint32_t factory_hash=2166136261u;
+    auto hash_factory=[&](){
+        for (auto value:{static_cast<std::uint32_t>(f.progress),static_cast<std::uint32_t>(f.remaining_cost),static_cast<std::uint32_t>(h.cash.value()),static_cast<std::uint32_t>(h.spent)})
+            factory_hash=(factory_hash^value)*16777619u;
+    };
+    hash_factory();
+    for (int frame=2;frame<=108;++frame) { f.tick(h,frame); hash_factory(); }
+    check(factory_hash==0x72681cc7u,"108-frame original x86 factory replay");
     check(f.done() && f.suspended && f.remaining_cost==0 && h.cash==0 && h.spent==tank.cost.value(),"54 paid factory stages");
     h.cash=0; h.spent=0; f.begin(tank.cost.value(),54,0); f.tick(h,1);
     check(f.progress==0 && f.insufficient_funds && f.remaining_cost==tank.cost.value(),"factory stalls without money");
     h.cash=tank.cost.value(); f.tick(h,2); check(f.progress==1 && !f.insufficient_funds,"factory resumes with money");
+    if (argc>2 && std::string(argv[2])=="--all-maps") {
+        std::size_t maps=0, imported=0, skipped_count=0;
+        for (const auto& file:std::filesystem::directory_iterator(root+"/maps")) {
+            if (file.path().extension()!=".MAP") continue;
+            auto original_map=Ini::from_file(file.path().string());
+            Simulation imported_map(rules,original_map,1);
+            const auto view=imported_map.snapshot();
+            std::size_t expected=0;
+            for (const auto* category:{"Structures","Units","Infantry","Aircraft"})
+                if (const auto* section=original_map.find_section(category)) expected+=section->entries.size();
+            check(view.entities.size()+view.skipped_objects.size()==expected,"all-map object accounting");
+            for (const auto& object:view.skipped_objects)
+                std::cout<<file.path().filename().string()<<" skipped "<<object.type<<": "<<object.reason<<"\n";
+            ++maps; imported+=view.entities.size(); skipped_count+=view.skipped_objects.size();
+        }
+        std::cout<<"All-map audit: "<<maps<<" maps, "<<imported<<" imported objects, "<<skipped_count<<" explicitly skipped\n";
+    }
     std::cout<<checks<<" checks passed; AUSTINTX.MAP objects="<<snap.entities.size()<<", types="<<a.types().size()<<", weapons="<<a.weapons().size()<<"\n";
 } catch(const std::exception& e) { std::cerr<<e.what()<<"\n"; return EXIT_FAILURE; }

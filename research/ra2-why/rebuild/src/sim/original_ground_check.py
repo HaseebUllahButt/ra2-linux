@@ -10,6 +10,8 @@ from unicorn import Uc, UC_ARCH_X86, UC_MODE_32
 from unicorn.x86_const import UC_X86_REG_ECX, UC_X86_REG_ESP
 
 image = pathlib.Path(sys.argv[1]).read_bytes()
+base = '--base' in sys.argv
+transform_address = 0x4a4740 if base else 0x4b4780
 cpu = Uc(UC_ARCH_X86, UC_MODE_32)
 cpu.mem_map(0x400000, 0x500000)
 cpu.mem_write(0x400000, image[:0x500000])
@@ -24,7 +26,7 @@ for track in range(64):
     cpu.reg_write(UC_X86_REG_ECX, 0x1000000)
     cpu.reg_write(UC_X86_REG_ESP, 0x101f000)
     cpu.mem_write(0x101f000, struct.pack('<4I', 0x101e000, 0x1003000, 0x1001000, 0x1002000))
-    cpu.emu_start(0x4b4780, 0x101e000, count=10000)
+    cpu.emu_start(transform_address, 0x101e000, count=10000)
     x, y, z = struct.unpack('<iii', cpu.mem_read(0x1003000, 12))
     angle = struct.unpack('<I', cpu.mem_read(0x1002000, 4))[0]
     assert z == 999  # Original routine leaves output z untouched.
