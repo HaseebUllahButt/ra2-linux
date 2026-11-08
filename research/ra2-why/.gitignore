@@ -12,3 +12,4 @@ __pycache__/
 *.log
 
 rebuild/hook/winmm.dll
+/rebuild/build/

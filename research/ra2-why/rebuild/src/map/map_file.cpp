@@ -51,6 +51,7 @@ void MapFile::parse(std::string_view text) {
     waypoints_.clear();
     iso_pack_.clear();
     overlay_pack_.clear();
+    packed_terrain_ = {};
 
     Ini ini;
     ini.parse(text);
@@ -156,6 +157,7 @@ void MapFile::parse(std::string_view text) {
     if (const Ini::Section* s = ini.find_section("OverlayPack")) {
         for (const auto& e : s->entries) overlay_pack_ += e.value;
     }
+    if (ini.find_section("IsoMapPack5")) packed_terrain_ = ra2::pack::load_terrain(ini);
 }
 
 } // namespace ra2map

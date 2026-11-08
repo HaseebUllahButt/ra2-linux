@@ -5,11 +5,11 @@
 CXX ?= g++
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O2
 
-.PHONY: all test clean fs rules text map loop gfx hook run-fs run-rules run-text run-map run-loop run-gfx run-hook
+.PHONY: all test clean fs rules text map pack loop gfx hook run-fs run-rules run-text run-map run-pack run-loop run-gfx run-hook
 
 all: test
 
-test: fs rules text map loop gfx hook
+test: fs rules text map pack loop gfx hook
 	@echo "== all layer tests passed =="
 
 fs: run-fs
@@ -71,7 +71,16 @@ shp_view:
 
 map: run-map
 
+pack: run-pack
+
+run-pack:
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) -I src/pack -I src/rules src/pack/map_pack.cpp \
+		src/rules/ini_file.cpp src/pack/test_main.cpp -ldl -o build/pack_test
+	build/pack_test ../analysis/extracted/maps
+
 run-map:
 	$(CXX) $(CXXFLAGS) -I src/map -I src/rules src/map/map_file.cpp \
-		src/rules/ini_file.cpp src/map/test_main.cpp -o src/map/map_test
+		src/rules/ini_file.cpp src/pack/map_pack.cpp src/map/test_main.cpp \
+		-ldl -o src/map/map_test
 	src/map/map_test ../analysis/extracted/maps/2PEAKS.MAP

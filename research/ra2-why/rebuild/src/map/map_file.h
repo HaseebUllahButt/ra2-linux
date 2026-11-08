@@ -10,11 +10,11 @@
 //   plus "Waypoint%d=X,Y" pairs for each starting spot
 //   (FUN_00689d30).
 //
-// Tile/terrain byte arrays (IsoMapPack5, OverlayPack) are stored raw;
-// decoding them is future work (findings in naming-notes file).
+// Packed terrain and overlays are decoded by the native pack reader.
 #pragma once
 
 #include "../rules/ini_file.h"
+#include "../pack/map_pack.h"
 
 #include <cstdint>
 #include <string>
@@ -100,7 +100,9 @@ public:
     const std::vector<TerrainObject>& terrain() const noexcept { return terrain_; }
     const std::vector<Waypoint>& waypoints() const noexcept { return waypoints_; }
 
-    // Raw pack sections (undecoded byte streams, base64 text as stored).
+    const ra2::pack::Terrain& packed_terrain() const noexcept { return packed_terrain_; }
+
+    // Original base64 text is also retained for inspection.
     const std::string& iso_map_pack5() const noexcept { return iso_pack_; }
     const std::string& overlay_pack() const noexcept { return overlay_pack_; }
 
@@ -125,6 +127,7 @@ private:
     std::vector<Waypoint> waypoints_;
     std::string iso_pack_;
     std::string overlay_pack_;
+    ra2::pack::Terrain packed_terrain_;
     ra2::rules::IniFile::Statistics stats_;
 };
 

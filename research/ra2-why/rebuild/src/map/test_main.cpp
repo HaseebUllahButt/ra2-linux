@@ -45,5 +45,9 @@ int main(int argc, char** argv) {
     }
     std::printf("iso pack: %zu bytes, overlay pack: %zu bytes\n",
                 map.iso_map_pack5().size(), map.overlay_pack().size());
+    const auto& packed = map.packed_terrain();
+    std::printf("decoded tiles: %zu, overlay cells: %zu, overlay data cells: %zu\n",
+                packed.tiles.size(), packed.overlay.size(), packed.overlay_data.size());
+    if (map.iso_map_pack5().size() && packed.tiles.empty()) return 1;
     return 0;
 }
