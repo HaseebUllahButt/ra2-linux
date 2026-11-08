@@ -27,6 +27,9 @@ original branch selection. `tank_launch()` combines the original heading,
 speed limit, horizontal vector and pitch. It covers normal non-burst Cannon
 launches with caller-resolved displacement and branch selection. It returns
 the initial velocity without changing simulation state.
+`base_lobber_branch()` resolves the original `0x6D7D20` branch. It checks
+the weapon's `Lobber` rule and the actor's current target position. It does
+not decide firing eligibility. The base HTNK 120mm weapon has `Lobber=false`.
 
 `base_arc_proposal()` matches `0x460397..0x460435`. It subtracts gravity from
 vertical velocity, then applies velocity to the integer position. It returns a
@@ -47,6 +50,7 @@ The asset test reads base `rules.ini`: HTNK uses 120mm; its damage is 90,
 ROF 65, projectile Cannon, speed 40 and warhead AP. Cannon is arcing and
 checks cliffs, elevation and walls. Gravity is 6 in `[AudioVisual]`. The x86
 test compares 40 launch speeds, 235 launch angles, 517 headings, 514 horizontal
-vectors, 512 speed limits, 512 pitch vectors, 256 connected launches, 1,024
-arc proposals, 256 fire events and 96 impact checks. Its launch-branch choice,
-terrain trace and impact height are resolved stubs.
+vectors, 512 speed limits, 512 pitch vectors, 515 Lobber branches, 256 connected
+launches, 1,024 arc proposals, 256 fire events and 96 impact checks. The
+connected launch uses a resolved branch stub. Terrain trace and impact height
+are resolved stubs.

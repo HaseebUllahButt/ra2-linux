@@ -210,6 +210,65 @@ for case, line in zip(pitch_cases, pitch_native):
     assert actual == expected, (case, actual, expected)
 assert len(pitch_native) == len(pitch_cases)
 
+# Resolve the actual 0x6D7D20 Lobber branch, with only object access stubbed.
+(
+    lobber_unit,
+    lobber_vtable,
+    lobber_weapon,
+    lobber_slot,
+    lobber_target,
+    lobber_target_vtable,
+    lobber_pos,
+) = [base + n for n in (0xA000, 0xB000, 0xC000, 0xD000, 0xE000, 0xF000, 0x10000)]
+w(lobber_unit, lobber_vtable)
+w(lobber_vtable + 0x39C, stop + 0x200)
+w(lobber_target, lobber_target_vtable)
+w(lobber_target_vtable + 0x48, stop + 0x210)
+
+
+def lobber_hook(cpu, address, size, unused):
+    if address not in (stop + 0x200, stop + 0x210):
+        return
+    sp = cpu.reg_read(UC_X86_REG_ESP)
+    result = lobber_slot if address == stop + 0x200 else lobber_pos
+    cpu.reg_write(UC_X86_REG_EAX, result)
+    cpu.reg_write(UC_X86_REG_EIP, struct.unpack("<I", cpu.mem_read(sp, 4))[0])
+    cpu.reg_write(UC_X86_REG_ESP, sp + 8)
+
+
+u.hook_add(UC_HOOK_CODE, lobber_hook, begin=stop + 0x200, end=stop + 0x210)
+lobber_cases = []
+for _ in range(512):
+    present = heading_rng.randrange(2)
+    lobber = heading_rng.randrange(2)
+    target_present = heading_rng.randrange(2)
+    shooter = tuple(heading_rng.randrange(-5000, 5001) for _ in range(3))
+    target = tuple(heading_rng.randrange(-5000, 5001) for _ in range(3))
+    lobber_cases.append((present, lobber, target_present, *shooter, *target))
+lobber_cases += [(1, 0, 1, 0, 0, 0, 3, 4, z) for z in (4, 5, 6)]
+lobber_input = "".join(" ".join(map(str, c)) + "\n" for c in lobber_cases)
+lobber_native = subprocess.check_output(
+    [sys.argv[1], "--lobber"], input=lobber_input, text=True
+).splitlines()
+for case, line in zip(lobber_cases, lobber_native):
+    present, lobber, target_present, *coords = case
+    shooter = coords[:3]
+    target = coords[3:]
+    w(lobber_slot, lobber_weapon if present else 0)
+    u.mem_write(lobber_weapon + 0x10A, bytes([lobber]))
+    w(lobber_unit + 0x228, lobber_target if target_present else 0)
+    u.mem_write(lobber_unit + 0x88, struct.pack("<3i", *shooter))
+    u.mem_write(lobber_pos, struct.pack("<3i", *target))
+    w(stack, stop)
+    w(stack + 4, 0)
+    u.reg_write(UC_X86_REG_ECX, lobber_unit)
+    u.reg_write(UC_X86_REG_ESP, stack)
+    u.reg_write(UC_X86_REG_FPCW, 0xE7F)
+    u.emu_start(0x6D7D20, stop, count=100000)
+    actual = u.reg_read(UC_X86_REG_EAX) & 255
+    assert actual == int(line), (case, actual, line)
+assert len(lobber_native) == len(lobber_cases)
+
 # Execute the connected normal Cannon launch path. The 0x6D7D20 branch
 # is supplied as a resolved original virtual result.
 launch_type, launch_bullet, launch_rules, launch_frame = (
@@ -466,5 +525,5 @@ for case, line in zip(impact_cases, impact_native):
     assert actual == int(line), (case, actual, line)
 assert len(impact_native) == len(impact_cases)
 print(
-    f"Base game.exe: {len(speeds)} ballistic speeds, {len(angle_cases)} launch angles, {len(heading_cases)} headings, {len(velocity_cases)} horizontal vectors, {len(limit_cases)} speed limits, {len(pitch_cases)} pitch vectors, {len(launch_cases)} connected launches, {len(cases)} arc proposals, {len(fire_cases)} fire events, and {len(impact_cases)} impact checks match"
+    f"Base game.exe: {len(speeds)} ballistic speeds, {len(angle_cases)} launch angles, {len(heading_cases)} headings, {len(velocity_cases)} horizontal vectors, {len(limit_cases)} speed limits, {len(pitch_cases)} pitch vectors, {len(lobber_cases)} Lobber branches, {len(launch_cases)} connected launches, {len(cases)} arc proposals, {len(fire_cases)} fire events, and {len(impact_cases)} impact checks match"
 )

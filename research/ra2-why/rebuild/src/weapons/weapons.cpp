@@ -38,6 +38,20 @@ ProjectileSpawn base_resolved_tank_fire(const ResolvedTankFire &input,
           input.projectile_flag};
 }
 
+bool base_lobber_branch(const LobberInputs &input,
+                        const sim::OriginalDistance &lookup) {
+  if (!input.weapon_present || input.lobber) return true;
+  if (!input.current_target) return false;
+  const auto &target = *input.current_target;
+  const auto dx = std::int64_t(input.shooter.x) - target.x;
+  const auto dy = std::int64_t(input.shooter.y) - target.y;
+  const auto dz = std::int64_t(target.z) - input.shooter.z;
+  if (dx < -100000 || dx > 100000 || dy < -100000 || dy > 100000 ||
+      dz < std::numeric_limits<int>::min() || dz > std::numeric_limits<int>::max())
+    throw std::range_error("lobber target outside verified range");
+  return dz > 0 && lookup.between(input.shooter, target, true) < dz;
+}
+
 int base_ballistic_launch_speed(int distance, double gravity,
                                 const sim::OriginalDistance &lookup) {
   if (distance < 0 || !std::isfinite(gravity) || gravity < 0)

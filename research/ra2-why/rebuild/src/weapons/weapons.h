@@ -69,6 +69,14 @@ struct ResolvedTankFire {
   double gravity;
   std::uint8_t projectile_flag;
 };
+struct LobberInputs {
+  bool weapon_present = false;
+  bool lobber = false; // WeaponType [Lobber], +0x10A.
+  sim::Coord shooter;
+  std::optional<sim::Coord> current_target;
+};
+// Base 0x6D7D20. This selects an arc branch; it does not approve firing.
+bool base_lobber_branch(const LobberInputs &, const sim::OriginalDistance &);
 struct ProjectileSpawn {
   std::uint32_t source_id, target_id, projectile_type_id, warhead_type_id;
   std::array<std::int32_t, 3> muzzle, target;

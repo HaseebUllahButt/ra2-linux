@@ -6,6 +6,20 @@
 using namespace ra2::weapons;
 int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--lobber") {
+      auto table = ra2::sim::OriginalDistance::from_executable("/path/to/user/ra2/game/game.exe");
+      int present, lobber, target_present;
+      LobberInputs input;
+      ra2::sim::Coord target;
+      while (std::cin >> present >> lobber >> target_present >> input.shooter.x >>
+             input.shooter.y >> input.shooter.z >> target.x >> target.y >> target.z) {
+        input.weapon_present = present != 0;
+        input.lobber = lobber != 0;
+        input.current_target = target_present ? std::optional<ra2::sim::Coord>(target) : std::nullopt;
+        std::cout << base_lobber_branch(input, table) << '\n';
+      }
+      return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--tank-launch") {
       auto tables = BaseBallisticAngles::from_executable("/path/to/user/ra2/game/game.exe");
       int speed, alternate; double gravity;
