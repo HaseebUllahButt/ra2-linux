@@ -582,3 +582,17 @@ It tests all 81 goals, a blocked goal, an impassable row, and an alternate monot
 Both original editions return identical paths and node-cost float bits.
 `test_path.sh` compares those 84 cases in each edition and eight explicit input/limit checks.
 These 176 checks also verify unknown eligibility and unported nonmonotone postprocessing.
+
+## Cell height-entry gate
+
+`original_height_entry()` ports base 004C8730 and expansion 004D9C60.
+It keeps destination/source signed levels, ramp bytes, and independent Cell flag bits 0x100 and 0x200.
+It returns the original zero/seven decision and both mutated outputs: layer height and bridge selection.
+A blocked decision can still update the layer-height output, matching the original branch order.
+The direction -1 query has its separate bridge-level behavior.
+A missing required source lookup and signed-difference overflow produce explicit errors.
+
+This function proves only the height gate. It does not prove full UnitClass eligibility or enable ramp movement.
+`original_entry_height_check.py executable [--base]` executes 112,896 cases in each original executable.
+Both return hash 5D4CC105.
+`test_entry_height.sh` checks the same complete native grid and explicit missing-input/overflow errors.
