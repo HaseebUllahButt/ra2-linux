@@ -23,3 +23,10 @@ Run the native checks from the project root:
 
 The test reads the real MP02T2 map from MULTI.MIX and both original executable
 distance tables. It does not write game assets.
+
+For the optional original x86 comparison, build `chooser_cases.cpp` with
+`session.cpp`, `sim/random.cpp`, and `sim/distance.cpp`. Run
+`original_chooser_check.py game.exe chooser_cases` and repeat for `gamemd.exe`.
+It needs Python Unicorn and `sim/original_image.py`. It runs 502 cases per
+edition. It compares the selected point, flags, random indexes, and all random
+state words. It replaces only debug logging.
