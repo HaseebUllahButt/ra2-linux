@@ -26,6 +26,16 @@ Random::Random(std::uint32_t seed) {
         table_[i]=right;
     }
 }
+Random::Random(const RandomState& state) {
+    // Constructor starts at (0,103). Both original draw functions advance both indexes together.
+    if (state.first>=250 || state.second>=250 || (state.first+103)%250!=state.second)
+        throw std::invalid_argument("invalid original random ring indexes");
+    table_=state.table; first_=state.first; second_=state.second;
+}
+void Simulation::load_random_state(const RandomState& state) {
+    if (state_.frame || !queue_.empty()) throw std::logic_error("load original random state before ticks or queued commands");
+    const Random restored(state); random_=restored;
+}
 std::uint32_t Random::next() {
     auto result=table_[first_]^table_[second_];
     table_[first_]=result;

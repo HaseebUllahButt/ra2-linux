@@ -11,10 +11,16 @@
 #include <vector>
 
 namespace ra2::sim {
+struct RandomState {
+    std::array<std::uint32_t,250> table{};
+    unsigned first=0,second=103;
+};
 // Base 00638790/00638840/006388A0; expansion 0065C6D0/0065C780/0065C7E0.
 class Random {
 public:
     explicit Random(std::uint32_t seed);
+    explicit Random(const RandomState&);
+    RandomState state() const { return {table_,first_,second_}; }
     std::uint32_t next();
     // Inclusive; reversed endpoints are swapped. Equal endpoints consume no draw.
     std::int32_t ranged(std::int32_t low, std::int32_t high);
@@ -105,6 +111,7 @@ public:
     static std::vector<Capability> capabilities();
     const TerrainCells& terrain() const { return terrain_; }
     void load_ground_assets(const std::string& original_executable,const Ini& art);
+    void load_random_state(const RandomState&); // Before ticks or queued commands; preserves setup draws.
 private:
     Result execute(const Command&);
     Result start_move(const Command&);

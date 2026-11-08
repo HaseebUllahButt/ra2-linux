@@ -531,3 +531,13 @@ The real base map test also moves unchanged ALL02S HTNK 61 through paths {4,4}, 
 These take 23, 26, and 19 movement ticks.
 Every real-map position and facing matches separately captured base x86 vectors.
 The real-map tests replay each route and reject invalid paths without changing the entity.
+
+## Setup random-state handoff
+
+`Random::state()` exports all 250 words and both indexes as `RandomState`.
+`Random(RandomState)` restores the original stream without drawing or reseeding it.
+It checks the original index bounds and the fixed 103-entry separation.
+`Simulation::load_random_state(state)` accepts this value before ticks or queued commands.
+This preserves draws already consumed by original skirmish setup.
+The tests resume original x86 golden sequences and continue the setup stream through a queued command.
+Invalid indexes and state replacement after command issue or ticks produce explicit errors.

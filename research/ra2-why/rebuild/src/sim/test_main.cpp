@@ -112,6 +112,31 @@ int main(int argc,char** argv) try {
         Random original(seeds[i]);
         for (auto expected:golden[i]) check(original.next()==expected,"original x86 random golden vector");
     }
+    for (unsigned i=0;i<3;++i) {
+        Random setup(seeds[i]); setup.next(); setup.next();
+        Random resumed(setup.state());
+        for (unsigned draw=2;draw<5;++draw) check(resumed.next()==golden[i][draw],"restored original x86 random vectors");
+    }
+    for (const auto& indexes:{std::pair<unsigned,unsigned>{250,103},{0,250},{0,102}}) {
+        auto invalid=Random(1).state(); invalid.first=indexes.first; invalid.second=indexes.second;
+        bool rejected=false;
+        try { (void)Random(invalid); } catch(const std::invalid_argument&) { rejected=true; }
+        check(rejected,"invalid original random indexes rejected");
+    }
+    Random setup_random(9); for (unsigned draw=0;draw<251;++draw) setup_random.next();
+    const auto setup_state=setup_random.state();
+    Simulation imported_random(rules,map,0); imported_random.load_random_state(setup_state);
+    check(imported_random.snapshot().random_table==setup_state.table && imported_random.snapshot().random_first==setup_state.first && imported_random.snapshot().random_second==setup_state.second,"setup random state imported without draws");
+    Command random_command; random_command.op=Op::RandomRange; random_command.amount=-10; random_command.high=17;
+    imported_random.issue(random_command);
+    bool queued_import_rejected=false;
+    try { imported_random.load_random_state(Random(0).state()); } catch(const std::logic_error&) { queued_import_rejected=true; }
+    check(queued_import_rejected && imported_random.snapshot().random_table==setup_state.table,"queued commands prevent random replacement");
+    imported_random.tick();
+    check(imported_random.snapshot().results.at(0).value==setup_random.ranged(-10,17),"simulation continues setup random stream");
+    bool late_import_rejected=false;
+    try { imported_random.load_random_state(setup_state); } catch(const std::logic_error&) { late_import_rejected=true; }
+    check(late_import_rejected,"ticks prevent random replacement");
     Random r(1), same(1); auto table=r.table();
     check(r.ranged(7,7)==7 && r.first()==0,"equal range consumes no draw");
     for (unsigned i=0;i<1000;++i) {
