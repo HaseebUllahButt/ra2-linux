@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 namespace ra2::ui {
 namespace {
@@ -19,15 +20,30 @@ std::optional<bool> boolean(const rules::IniFile& ini, const char* key) {
     return entry ? rules::IniFile::bool_value(entry->value) : std::nullopt;
 }
 std::optional<Opponent> opponent(int value) {
+    // 0x006AE6E0 maps saved 4/5/6 to Hard/Normal/Easy respectively.
     switch (value) {
     case 1: return Opponent::Closed;
-    case 4: return Opponent::Easy;
+    case 4: return Opponent::Hard;
     case 5: return Opponent::Medium;
-    case 6: return Opponent::Hard;
+    case 6: return Opponent::Easy;
     default: return std::nullopt;
     }
 }
 } // namespace
+
+std::vector<SkirmishOpponentChoice> load_skirmish_opponents(const ra2text::CsfFile& strings) {
+    // 0x006AE7AA adds these choices in this order; 0x006AE6E0 maps the
+    // list data to the saved SlotNN difficulty values.
+    const std::array<std::pair<Opponent,const char*>,4> choices{{
+        {Opponent::Closed,"GUI:None"}, {Opponent::Easy,"GUI:AIEasy"},
+        {Opponent::Medium,"GUI:AINormal"}, {Opponent::Hard,"GUI:AIHard"}}};
+    std::vector<SkirmishOpponentChoice> result;
+    for (const auto& choice : choices) {
+        const auto* value=strings.find(choice.second);
+        result.push_back({choice.first,value ? value->text : std::string{},choice.second});
+    }
+    return result;
+}
 
 std::optional<int> credit_from_slider_pointer(int local_x, int width,
                                               int minimum, int maximum, int increment) noexcept {
@@ -41,6 +57,28 @@ std::optional<int> credit_from_slider_pointer(int local_x, int width,
     const auto value=(std::int64_t(minimum)+offset)/increment*increment;
     if (value<std::numeric_limits<int>::min() || value>std::numeric_limits<int>::max()) return std::nullopt;
     return static_cast<int>(value);
+}
+
+std::vector<SkirmishColor> load_skirmish_colors(const ra2text::CsfFile& strings) {
+    // 0x004E43C0 builds these nine labels and COLORREFs at 0x008316A8.
+    static constexpr const char* keys[]={"GUI:GoldAbbrev","GUI:RedAbbrev","GUI:BlueAbbrev",
+        "GUI:GreenAbbrev","GUI:OrangeAbbrev","GUI:SkyBlueAbbrev","GUI:PurpleAbbrev",
+        "GUI:PinkAbbrev","GUI:GrayAbbrev"};
+    static constexpr std::uint32_t colors[]={0x0de2dd,0x1919ff,0xe2742a,0x2ed13e,0x19a0ff,
+                                              0xe6d732,0xbd2895,0xeb9aff,0x606060};
+    auto text = [&](const char* key) {
+        const auto* value=strings.find(key);
+        return value ? value->text : std::string{};
+    };
+    std::vector<SkirmishColor> result;
+    result.push_back({-2,std::nullopt,text("GUI:RandomAsSymbols"),"GUI:RandomAsSymbols"});
+    for (int i=0;i<9;++i) {
+        const auto c=colors[i];
+        const gfx::Rgba rgb{static_cast<std::uint8_t>(c),static_cast<std::uint8_t>(c>>8),
+                            static_cast<std::uint8_t>(c>>16),255};
+        result.push_back({i,rgb,text(keys[i]),keys[i]});
+    }
+    return result;
 }
 
 std::vector<SkirmishCountry> load_skirmish_countries(const fs::MixFileSystem& files,
@@ -185,7 +223,7 @@ SkirmishSetup read_skirmish_setup(const rules::IniFile& preferences,
     for (std::size_t i=0; i<setup.opponents.size(); ++i) {
         auto& slot = setup.opponents[i];
         // 0x006980C0 passes 6 for the first slot and 1 for the others.
-        slot.opponent = i == 0 ? Opponent::Hard : Opponent::Closed;
+        slot.opponent = i == 0 ? Opponent::Easy : Opponent::Closed;
         char name[7]; std::snprintf(name, sizeof name, "Slot%02u", static_cast<unsigned>(i+1));
         const auto* entry = preferences.find("Skirmish", name);
         if (!entry) continue;

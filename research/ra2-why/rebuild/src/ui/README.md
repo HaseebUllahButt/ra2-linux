@@ -58,6 +58,10 @@ fallback selection for the active game mode are not yet implemented. A saved
 scenario index is therefore not guaranteed to resolve to the same map.
 `load_skirmish_countries` returns the original random entry and selectable
 country IDs and names in rules order. Country controls are not editable yet.
+`load_skirmish_colors` returns the original random entry, nine color IDs,
+swatches, and labels. Color controls are not editable yet.
+`load_skirmish_opponents` returns the four original difficulty choices and
+their saved values. Opponent controls are not editable yet.
 
 `draw_shell_background` draws the static 800x600 shell into RGBA, using a
 prepared filesystem. Mount `NEUTRAL.MIX` for the base game and mount

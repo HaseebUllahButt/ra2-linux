@@ -26,7 +26,12 @@ enum class Page { Main, SinglePlayer, Skirmish };
 // Quit is returned after confirmation.
 enum class Action { None, PageChanged, SetupChanged, Quit };
 enum class Key { Escape };
-enum class Opponent { Closed = 1, Easy = 4, Medium = 5, Hard = 6 };
+enum class Opponent { Closed = 1, Hard = 4, Medium = 5, Easy = 6 };
+struct SkirmishOpponentChoice {
+    Opponent value;
+    std::string name, name_key;
+};
+std::vector<SkirmishOpponentChoice> load_skirmish_opponents(const ra2text::CsfFile& strings);
 struct OpponentSlot {
     std::optional<Opponent> opponent;
     int country = -2; // Original default sentinel.
@@ -50,6 +55,12 @@ struct SkirmishCountry {
     int index;
     std::string id, name, name_key;
 };
+struct SkirmishColor {
+    int index;
+    std::optional<gfx::Rgba> swatch;
+    std::string name, name_key;
+};
+std::vector<SkirmishColor> load_skirmish_colors(const ra2text::CsfFile& strings);
 // Original country order and random option, from the edition's rules.
 std::vector<SkirmishCountry> load_skirmish_countries(const fs::MixFileSystem& files,
                                                        const ra2text::CsfFile& strings);

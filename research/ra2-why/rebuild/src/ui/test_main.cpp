@@ -106,6 +106,17 @@ int main(int argc,char** argv) {
     auto expansion_maps=ui::load_skirmish_maps(files,strings);
     auto base_countries=ui::load_skirmish_countries(base,base_strings);
     auto expansion_countries=ui::load_skirmish_countries(files,strings);
+    auto colors=ui::load_skirmish_colors(base_strings);
+    assert(colors.size()==10 && colors[0].index==-2 && !colors[0].swatch);
+    assert(colors[2].index==1 && colors[2].swatch && colors[2].swatch->r==255 &&
+           colors[2].swatch->g==25 && colors[2].swatch->b==25);
+    for (const auto& color : colors) assert(!color.name.empty());
+    for (const auto& color : ui::load_skirmish_colors(strings)) assert(!color.name.empty());
+    auto opponents=ui::load_skirmish_opponents(base_strings);
+    assert(opponents.size()==4 && opponents[0].value==ui::Opponent::Closed &&
+           opponents[1].value==ui::Opponent::Easy && opponents[2].value==ui::Opponent::Medium &&
+           opponents[3].value==ui::Opponent::Hard);
+    for (const auto& choice : opponents) assert(!choice.name.empty());
     assert(base_countries.size()==10 && expansion_countries.size()==11);
     assert(base_countries.front().index==-2 && base_countries[1].id=="Americans");
     assert(expansion_countries.back().id=="YuriCountry" && expansion_countries.back().index==9);
@@ -127,7 +138,7 @@ int main(int argc,char** argv) {
     auto empty_setup=ui::read_skirmish_setup(defaults);
     assert(empty_setup.scenario_index==0 && empty_setup.credits==10000 && empty_setup.game_speed==6);
     assert(empty_setup.short_game==false && empty_setup.super_weapons==true);
-    assert(empty_setup.opponents[0].opponent==ui::Opponent::Hard);
+    assert(empty_setup.opponents[0].opponent==ui::Opponent::Easy);
     assert(empty_setup.opponents[1].opponent==ui::Opponent::Closed);
     rules::IniFile defaults_rules; defaults_rules.parse("[MultiplayerDialogSettings]\nMoney=7000\nMinMoney=1000\nMoneyIncrement=250\nShortGame=yes\n");
     auto rules_setup=ui::read_skirmish_setup(defaults,&defaults_rules);
@@ -141,7 +152,7 @@ int main(int argc,char** argv) {
     rules::IniFile saved; saved.parse("[MultiPlayer]\nSide=Russians\nColor=2\n[Skirmish]\nCredits=10000\nSlot01=4,-2,-2\n");
     auto setup=ui::read_skirmish_setup(saved);
     assert(setup.country=="Russians" && setup.color==2 && setup.credits==10000);
-    assert(setup.opponents[0].opponent==ui::Opponent::Easy && setup.opponents[0].country==-2);
+    assert(setup.opponents[0].opponent==ui::Opponent::Hard && setup.opponents[0].country==-2);
     auto actual=rules::IniFile::from_file(std::string(argv[1])+"/RA2.INI");
     assert(menu.skirmish_setup().credits==actual.read_integer("Skirmish","Credits"));
     // Reference dialog normalization at 0x00775BC0, followed by cell snapping.
