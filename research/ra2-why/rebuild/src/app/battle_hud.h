@@ -1,15 +1,17 @@
 #pragma once
-// In-game battle HUD: fixed 220 pixel right sidebar in a 1024x768 view.
-// Draw once per frame, then run handle_click for each sidebar click.
+// In-game battle HUD in the original base RA2 1024x768 layout:
+// - a 168 pixel sidebar at x 856: credits, two top buttons, radar with the
+//   eagle logo, repair and sell, four tabs, a 2x10 cameo grid, power bar;
+// - a 32 pixel command bar under the battlefield (y 736..767).
+// The art is the installed original art (see hud_art.h). Without it the
+// HUD draws plain shapes in the same places, so clicks work the same.
+// Draw once per frame, then run handle_click for each HUD click.
 // The root validates every action and moves the camera itself.
-// A non-empty result draws a VICTORY / DEFEAT / DRAW banner over the
-// battlefield. The status line shows in the sidebar.
-// Fallback TODO-ORIGINAL art: minimal embedded bitmap font and plain
-// rectangles stand in for the original sidebar shapes.
 
-#include "../render/minimap.h"
+#include "hud_art.h"
 #include "../gfx/palette.h"
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -17,47 +19,41 @@
 namespace ra2::fs { class MixFileSystem; }
 namespace ra2::rules { class IniFile; }
 
-// The sidebar API needs a plain 2-D point. Render had no point type, so the
-// HUD owns this one.
-namespace ra2::render {
-struct Point { int x = 0, y = 0; };
-} // namespace ra2::render
-
 namespace ra2::app {
 
-// One purchasable entry in the build palette.
-enum class BuildCategory { All, Buildings, Infantry, Vehicles, Aircraft };
+// Defenses: buildings with BuildCat=Combat. load_assets also finds them
+// from rules, so the root may keep sending Buildings.
+enum class BuildCategory { All, Buildings, Infantry, Vehicles, Aircraft, Defenses };
 
 struct BuildChoice {
     std::string type;     // Rules type name, the Build action payload.
-    std::string name;     // Short display label.
-    int cost = 0;         // Credits shown on the button.
+    std::string name;     // Display name for the tooltip.
+    int cost = 0;         // Credits shown in the tooltip.
     bool enabled = false; // False dims the entry and rejects clicks.
     int progress = 0;     // 0..1000 production clock, 1000 means ready.
     BuildCategory category = BuildCategory::All;
-    int queued = 0;       // Queue length including the active item. 1+ shows a count badge.
+    int queued = 0;       // Queue length including the active item. 2+ shows a count.
     bool held = false;    // Manual production hold. Left click resumes.
 };
 
-// Everything the sidebar needs for one draw pass.
+// Everything the HUD needs for one draw pass.
 struct HudState {
     int cash = 0;
     int power_output = 0; // Power produced.
     int power_drain = 0;  // Power consumed.
-    std::vector<std::string> selected_labels; // Names of selected units.
+    std::vector<std::string> selected_labels; // Kept for the root; the original sidebar shows none.
     std::vector<BuildChoice> choices;         // Build palette entries.
-    render::Bitmap minimap;                   // Optional radar image.
+    render::Bitmap minimap;                   // Radar image. Empty means radar off (eagle logo).
     render::Rectangle camera;                 // Viewport rect in map pixels.
     int map_width = 0;                        // Full map size in map pixels.
     int map_height = 0;
-    std::string status;                       // Sidebar status line, e.g. "BUILDING: GVGIANT".
+    std::string status;                       // Message line, top left of the battlefield.
     std::string result;                       // Empty, or VICTORY / DEFEAT / DRAW end banner.
-    int pointer_x = -1;                       // Mouse position, view pixels. -1 hides the tooltip.
+    int pointer_x = -1;                       // Mouse position, view pixels. -1 hides hover and tooltip.
     int pointer_y = -1;
-    bool can_deploy = false;                   // Root sets this from selected live MCVs. DEPLOY shows only when true.
+    bool can_deploy = false;                  // Enables the Deploy button of the command bar.
 };
 
-// Click results. The root executes them and moves the camera.
 enum class HudActionKind { None, Build, Deploy, Minimap };
 
 struct HudAction {
@@ -68,55 +64,81 @@ struct HudAction {
 
 class BattleHud {
 public:
-    // Fixed sidebar layout, in view pixels.
+    // Fixed layout, in view pixels. Matched against original screenshots.
     static constexpr int view_width = 1024;
     static constexpr int view_height = 768;
-    static constexpr int sidebar_width = 220;
-    static constexpr int sidebar_x = view_width - sidebar_width; // 804.
+    static constexpr int sidebar_width = 168;
+    static constexpr int sidebar_x = view_width - sidebar_width; // 856.
+    static constexpr int command_bar_y = 736;                     // Battlefield is 856x736.
+    static constexpr int command_bar_height = view_height - command_bar_y;
     static constexpr int build_columns = 2;
-    static constexpr int build_rows = 8;
-    static constexpr int build_button_width = 104;
-    static constexpr int build_button_height = 56;
-    static constexpr int build_button_pitch_x = 108; // 104 button + 4 gap.
-    static constexpr int build_button_pitch_y = 62;  // 56 button + 6 gap.
-    static constexpr int palette_x = 808;            // First button origin.
-    static constexpr int palette_y = 60;
-    static constexpr int deploy_width = 212;
-    static constexpr int deploy_height = 40;
-    static constexpr int deploy_y = 560;
-    static constexpr int minimap_x = sidebar_x; // Region, see minimap_bounds.
-    static constexpr int minimap_y = 672;
-    static constexpr int minimap_region_width = sidebar_width;
-    static constexpr int minimap_region_height = 96;
+    static constexpr int build_rows = 10;
+    static constexpr int build_button_width = 60;   // Cameo size.
+    static constexpr int build_button_height = 48;
+    static constexpr int build_button_pitch_x = 63;
+    static constexpr int build_button_pitch_y = 50; // SIDE2.SHP strip height.
+    static constexpr int palette_x = 878;           // First cameo origin.
+    static constexpr int palette_y = 228;
+    static constexpr int strip_y = 227;             // First SIDE2.SHP strip.
+    static constexpr int tab_y = 197;
+    static constexpr int command_slot_x = 48;       // First command bar button.
+    static constexpr int command_slot_width = 52;
+    static constexpr int command_slots = 15;
+    // [AdvancedCommandBar] ButtonList in UI.INI: Team01, Team02, TypeSelect,
+    // Deploy, Guard, PlanningMode. Deploy is the fourth button.
+    static constexpr int deploy_slot = 3;
+    static constexpr int deploy_width = command_slot_width;
+    static constexpr int deploy_height = command_bar_height;
+    static constexpr int deploy_y = command_bar_y;
+    static constexpr int minimap_x = 868;           // Radar screen inside RADAR.SHP.
+    static constexpr int minimap_y = 48;
+    static constexpr int minimap_region_width = 142;
+    static constexpr int minimap_region_height = 110;
 
-    // Register cameo images. Decode them on first draw. Files must outlive this HUD.
-    // Missing images use the fallback art.
+    // Load the sidebar art of one side, the cameos and the font.
+    // Files must outlive this HUD. Missing art uses the fallback shapes.
     void load_assets(const fs::MixFileSystem& files, const rules::IniFile& rules,
-                     const rules::IniFile& art, const std::vector<BuildChoice>& choices);
+                     const rules::IniFile& art, const std::vector<BuildChoice>& choices,
+                     bool soviet = false);
+    bool original_art() const noexcept { return art_.ready(); }
 
-    // Draw the whole sidebar over the frame. Clips against the frame.
+    // Draw the sidebar and the command bar over the frame. Clips against the frame.
     void draw(render::Bitmap& frame, const HudState& state) const;
 
-    // Map a sidebar click to an action. Needs the same state as draw.
+    // Map a HUD click to an action. Needs the same state as draw.
+    // Tab and scroll clicks change the HUD and return None.
     HudAction handle_click(int x, int y, const HudState& state) const;
 
     // Fixed regions, in view pixels.
-    static render::Rectangle build_button_bounds(int index);
+    static render::Rectangle build_button_bounds(int index); // Visible slot 0..19.
     static render::Rectangle minimap_bounds();
     static render::Rectangle deploy_bounds();
+    static render::Rectangle scroll_up_bounds();   // R-UP.SHP.
+    static render::Rectangle scroll_down_bounds(); // R-DN.SHP.
+    render::Rectangle tab_bounds(int tab) const;   // Tab 0..3: buildings, defenses, infantry, vehicles.
+    // Tab of one choice, and the slot rect of a choice when its tab is active
+    // and it is scrolled into view. Empty rect otherwise.
+    int tab_of(const BuildChoice& choice) const;
+    int active_tab() const noexcept { return active_tab_; }
+    render::Rectangle choice_bounds(const HudState& state, const std::string& type) const;
 private:
-    mutable int page_=0;
-    mutable int panel_page_=-1;
-    mutable BuildCategory active_category_ = BuildCategory::All;
-    mutable bool panel_valid_=false;
-    mutable BuildCategory panel_category_=BuildCategory::All;
+    mutable int active_tab_ = 0;
+    mutable int top_row_ = 0;
+    mutable int radar_frame_ = 0;  // 0 eagle .. 32 open radar.
+    mutable bool panel_valid_ = false;
+    mutable int panel_tab_ = -1, panel_row_ = -1;
     mutable HudState panel_state_;
     mutable render::Bitmap panel_;
+    HudArt art_;
+    std::set<std::string> defenses_;
     bool same_panel(const HudState& state) const;
-    void draw_panel(render::Bitmap& frame,const HudState& state) const;
-    const fs::MixFileSystem* cameo_files_=nullptr;
+    void settle(const HudState& state) const;
+    std::vector<const BuildChoice*> visible(const HudState& state) const;
+    void draw_panel(render::Bitmap& frame, const HudState& state) const;
+    void draw_fallback_panel(render::Bitmap& frame, const HudState& state) const;
+    const fs::MixFileSystem* cameo_files_ = nullptr;
     std::optional<gfx::Palette> cameo_palette_;
-    std::unordered_map<std::string,std::string> cameo_names_;
+    std::unordered_map<std::string, std::string> cameo_names_;
     mutable std::unordered_map<std::string, render::Bitmap> cameos_;
     const render::Bitmap* cameo(const std::string& type) const;
 };

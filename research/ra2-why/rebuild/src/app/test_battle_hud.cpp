@@ -9,380 +9,295 @@
 using namespace ra2;
 using namespace ra2::app;
 namespace {
-render::Bitmap frame(int w=1024,int h=768) {
-    return {w,h,render::Bytes(static_cast<std::size_t>(w)*h*4,17)};
+render::Bitmap frame(int w = 1024, int h = 768) {
+    return {w, h, render::Bytes(static_cast<std::size_t>(w) * h * 4, 17)};
 }
-bool same(const render::Bitmap& a,const render::Bitmap& b,render::Rectangle r) {
-    for(int y=r.y;y<r.y+r.height;++y) for(int x=r.x;x<r.x+r.width;++x)
-        for(int c=0;c<4;++c) if(a.rgba[(y*a.width+x)*4+c]!=b.rgba[(y*b.width+x)*4+c]) return false;
+bool same(const render::Bitmap& a, const render::Bitmap& b, render::Rectangle r) {
+    for (int y = r.y; y < r.y + r.height; ++y) for (int x = r.x; x < r.x + r.width; ++x)
+        for (int c = 0; c < 4; ++c) if (a.rgba[(y * a.width + x) * 4 + c] != b.rgba[(y * b.width + x) * 4 + c]) return false;
     return true;
 }
+bool rect_eq(render::Rectangle a, render::Rectangle b) {
+    return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height;
 }
+int count_rgb(const render::Bitmap& img, render::Rectangle box, int r, int g, int b) {
+    int hits = 0;
+    for (int y = box.y; y < box.y + box.height; ++y) for (int x = box.x; x < box.x + box.width; ++x) {
+        const auto i = (static_cast<std::size_t>(y) * img.width + x) * 4;
+        if (img.rgba[i] == r && img.rgba[i + 1] == g && img.rgba[i + 2] == b) ++hits;
+    }
+    return hits;
+}
+// Independent decode of one original sidebar SHP frame, straight from the side MIX.
+gfx::RgbaImage side_frame(const fs::MixFileSystem& files, const char* mix, const char* shp, int index) {
+    const auto at = files.locate(mix); assert(at);
+    const auto archive = at->archive->open_nested(at->entry, mix);
+    const auto* pal = archive->find("sidebar.pal"); assert(pal);
+    const auto palette = gfx::Palette::from_bytes(archive->read(*pal));
+    const auto* entry = archive->find(shp);
+    auto bytes = entry ? archive->read(*entry) : *files.read_file(shp);
+    return gfx::ShpImage::parse(bytes).decode_frame(index, palette);
+}
+// Counts the opaque pixels of the original frame that show unchanged at (x, y).
+int exact(const render::Bitmap& screen, const gfx::RgbaImage& image, int x, int y, int max_y = 768) {
+    int total = 0;
+    for (int yy = 0; yy < image.height; ++yy) for (int xx = 0; xx < image.width; ++xx) {
+        if (y + yy >= max_y) continue;
+        const auto* p = &image.pixels[(std::size_t(yy) * image.width + xx) * 4];
+        if (!p[3]) continue;
+        const auto* d = &screen.rgba[(std::size_t(y + yy) * screen.width + x + xx) * 4];
+        total += d[0] == p[0] && d[1] == p[1] && d[2] == p[2];
+    }
+    return total;
+}
+}
+
 int main(int argc, char** argv) {
     // Power loss cannot move a tank button onto a different product.
     SidebarChoices stable;
-    auto initial=stable.update({{"GAREFN","REFINERY",2000,true,0},
-                               {"MTNK","GRIZZLY",700,true,0}});
-    assert(initial.size()==2 && initial[1].type=="MTNK");
-    auto low_power=stable.update({{"MTNK","GRIZZLY",700,true,300}});
-    assert(low_power.size()==2 && !low_power[0].enabled && low_power[1].type=="MTNK");
-    assert(low_power[1].progress==300);
-    auto restored=stable.update({{"GAREFN","REFINERY",2000,true,0},
-                                 {"MTNK","GRIZZLY",700,true,600},
-                                 {"NAFLAK","FLAK",1000,true,0}});
-    assert(restored[0].enabled && restored[1].type=="MTNK" && restored[2].type=="NAFLAK");
+    auto initial = stable.update({{"GAREFN", "REFINERY", 2000, true, 0}, {"MTNK", "GRIZZLY", 700, true, 0}});
+    assert(initial.size() == 2 && initial[1].type == "MTNK");
+    auto low_power = stable.update({{"MTNK", "GRIZZLY", 700, true, 300}});
+    assert(low_power.size() == 2 && !low_power[0].enabled && low_power[1].type == "MTNK");
+    assert(low_power[1].progress == 300);
+
+    // Original 1024x768 layout: 168 pixel sidebar, 2x10 cameos of 60x48,
+    // radar screen at the top, command bar under the battlefield.
+    static_assert(BattleHud::sidebar_x == 856 && BattleHud::command_bar_y == 736);
+    assert(rect_eq(BattleHud::build_button_bounds(0), {878, 228, 60, 48}));
+    assert(rect_eq(BattleHud::build_button_bounds(1), {941, 228, 60, 48}));
+    assert(rect_eq(BattleHud::build_button_bounds(19), {941, 678, 60, 48}));
+    assert(BattleHud::build_button_bounds(20).width == 0);
+    assert(rect_eq(BattleHud::minimap_bounds(), {868, 48, 142, 110}));
+    assert(rect_eq(BattleHud::deploy_bounds(), {204, 736, 52, 32}));
 
     BattleHud hud; HudState s;
-    s.choices={{"E1","INFANTRY",100,true,500},{"MTNK","TANK",800,false,0}};
-    auto r=BattleHud::build_button_bounds(0);
-    assert(hud.handle_click(r.x,r.y,s).type=="E1");
-    assert(hud.handle_click(r.x+r.width-1,r.y+r.height-1,s).kind==HudActionKind::Build);
-    assert(hud.handle_click(r.x+r.width,r.y,s).kind==HudActionKind::None);
-    assert(hud.handle_click(916,44,s).kind==HudActionKind::None);
-    assert(hud.handle_click(r.x,r.y,s).kind==HudActionKind::None);
-    hud.handle_click(808,44,s);
-    s.can_deploy=true;
-    assert(hud.handle_click(808,117,s).kind==HudActionKind::None);
-    assert(hud.handle_click(808,560,s).kind==HudActionKind::Deploy);
-    assert(hud.handle_click(808,600,s).kind==HudActionKind::None);
-    assert(hud.handle_click(803,560,s).kind==HudActionKind::None);
-    assert(hud.handle_click(804,672,s).kind==HudActionKind::None);
-    s.map_width=440;s.map_height=192;
-    auto a=hud.handle_click(914,720,s);
-    assert(a.kind==HudActionKind::Minimap && a.position.x==220 && a.position.y==96);
-    a=hud.handle_click(1023,767,s);assert(a.position.x==438 && a.position.y==190);
-    assert(hud.handle_click(1024,720,s).kind==HudActionKind::None);
-    assert(hud.handle_click(914,768,s).kind==HudActionKind::None);
-    assert(BattleHud::build_button_bounds(16).width==0);
-    s.choices.resize(17,{"EXTRA","EXTRA",1,true,0});
-    assert(hud.handle_click(808,556,s).kind==HudActionKind::None);
-    hud.handle_click(808,44,s); // Return to the first page.
-    auto blank=frame(), b=blank;hud.draw(b,s);
-    assert(same(blank,b,{0,0,804,768}));
-    assert(!same(blank,b,{804,0,220,768}));
-    auto changed=b;
-    s.cash=12345;s.power_output=50;s.power_drain=100;
-    s.selected_labels={"GI","MCV"};s.status="LOW POWER";s.choices[0].progress=1000;
-    hud.draw(changed,s);
-    for(auto region: {render::Rectangle{808,0,212,31},{808,606,212,40},{808,658,212,6},r})
-        assert(!same(b,changed,region));
-    auto repeated=frame();hud.draw(repeated,s);
-    assert(repeated.rgba==changed.rgba); // Cached controls must fully cover a fresh frame.
-    s.minimap={2,1,{10,20,30,255,40,50,60,255}};
-    hud.draw(b,s);
-    assert(b.rgba[(700*1024+805)*4]==10);
-    assert(b.rgba[(700*1024+1023)*4]==40);
-    s.camera={110,48,220,96};hud.draw(changed,s);
-    assert(changed.rgba[(696*1024+859)*4]==224);
-    assert(!same(b,changed,{804,672,220,96}));
-    s.result="VICTORY";hud.draw(changed,s);
-    assert(!same(b,changed,{100,330,604,60}));
-    // The banner is large, centered and color-coded: VICTORY green,
-    // DEFEAT red, DRAW gold. It never paints into the sidebar.
-    auto banner=frame();
-    const auto count_rgb=[&](unsigned char r,unsigned char g,unsigned char bl) {
-        int hits=0;
-        for(int y=330;y<390;++y) for(int x=100;x<704;++x) {
-            const auto i=(static_cast<std::size_t>(y)*1024+x)*4;
-            if(banner.rgba[i]==r&&banner.rgba[i+1]==g&&banner.rgba[i+2]==bl) ++hits;
-        }
-        return hits;
-    };
-    hud.draw(banner,s);
-    assert(count_rgb(70,190,90)>400);
-    s.result="DEFEAT";hud.draw(banner,s);
-    assert(count_rgb(220,75,60)>400 && count_rgb(70,190,90)==0);
-    s.result="DRAW";hud.draw(banner,s);
-    assert(count_rgb(255,214,64)>400 && count_rgb(220,75,60)==0);
-    assert(banner.rgba[(360*1024+99)*4]==17 && banner.rgba[(360*1024+705)*4]==17);
-    auto small=frame(810,50);hud.draw(small,s);
-    assert(small.rgba.size()==810*50*4);
-    render::Bitmap malformed{1024,768,{1,2,3}};hud.draw(malformed,s);
-    assert(malformed.rgba.size()==3);
-    s.minimap=malformed; hud.draw(changed,s);
+    s.choices = {{"GAPOWR", "Power Plant", 800, true, 0, BuildCategory::Buildings},
+                 {"GAREFN", "Ore Refinery", 2000, false, 0, BuildCategory::Buildings}};
+    auto r = BattleHud::build_button_bounds(0);
+    assert(hud.handle_click(r.x, r.y, s).type == "GAPOWR");
+    assert(hud.handle_click(r.x + r.width - 1, r.y + r.height - 1, s).kind == HudActionKind::Build);
+    assert(hud.handle_click(r.x + r.width, r.y, s).kind == HudActionKind::None); // Gap between cameos.
+    auto r1 = BattleHud::build_button_bounds(1);
+    assert(hud.handle_click(r1.x + 5, r1.y + 5, s).kind == HudActionKind::None); // Disabled.
+    assert(rect_eq(hud.choice_bounds(s, "GAREFN"), r1));
+
+    // Deploy is the fourth command bar button and works only when allowed.
+    const auto d = BattleHud::deploy_bounds();
+    assert(hud.handle_click(d.x + 8, d.y + 8, s).kind == HudActionKind::None);
+    s.can_deploy = true;
+    assert(hud.handle_click(d.x + 8, d.y + 8, s).kind == HudActionKind::Deploy);
+    assert(hud.handle_click(d.x - 1, d.y + 8, s).kind == HudActionKind::None);
+    s.can_deploy = false;
+
+    // Radar clicks need a live radar image and a map size.
+    const auto m = BattleHud::minimap_bounds();
+    s.map_width = 1420; s.map_height = 1100;
+    assert(hud.handle_click(m.x + 71, m.y + 55, s).kind == HudActionKind::None);
+    s.minimap = {2, 1, {10, 20, 30, 255, 40, 50, 60, 255}};
+    auto a = hud.handle_click(m.x + 71, m.y + 55, s);
+    assert(a.kind == HudActionKind::Minimap && a.position.x == 710 && a.position.y == 550);
+    assert(hud.handle_click(m.x + m.width, m.y, s).kind == HudActionKind::None);
+
+    // Four tabs: buildings, defenses (BuildCat=Combat), infantry, vehicles
+    // with aircraft. Empty tabs ignore clicks.
     HudState tabs;
-    tabs.choices={{"GAPOWR","POWER",800,true,0,BuildCategory::Buildings},
-                  {"E1","GI",200,true,0,BuildCategory::Infantry},
-                  {"MTNK","TANK",700,true,0,BuildCategory::Vehicles}};
-    hud.handle_click(808+2*42,44,tabs);
-    assert(hud.handle_click(r.x+1,r.y+1,tabs).type=="E1");
-    hud.handle_click(808+3*42,44,tabs);
-    assert(hud.handle_click(r.x+1,r.y+1,tabs).type=="MTNK");
-    hud.handle_click(808,44,tabs);
-    // Enlarged tabs: the drawn tab and the hit area are the same rect.
-    // Tabs sit at y 36..58, below the power bar, above the buttons.
-    assert(hud.handle_click(808,35,tabs).kind==HudActionKind::None);
-    assert(hud.handle_click(808,58,tabs).kind==HudActionKind::None);
-    assert(hud.handle_click(808,57,tabs).kind==HudActionKind::None);
-    hud.handle_click(809,37,tabs);
-    assert(hud.handle_click(r.x+1,r.y+1,tabs).type=="GAPOWR");
-    auto tabframe=frame(); hud.draw(tabframe,tabs);
-    assert(tabframe.rgba[(36*1024+809)*4]!=17); // top border row of the first tab
-    assert(tabframe.rgba[(57*1024+809)*4]!=17); // bottom border row
-    assert(tabframe.rgba[(35*1024+809)*4]==22); // power bar row: plain sidebar dark
-    assert(tabframe.rgba[(58*1024+809)*4]==22); // gap above the buttons
-    // Sidebar QA fixes: queue count, hover cost tooltip, tab highlight,
-    // labels and the DEPLOY gate.
+    tabs.choices = {{"GAPOWR", "Power Plant", 800, true, 0, BuildCategory::Buildings},
+                    {"GAPILL", "Pillbox", 500, true, 0, BuildCategory::Defenses},
+                    {"E1", "GI", 200, true, 0, BuildCategory::Infantry},
+                    {"ORCA", "Harrier", 1200, true, 0, BuildCategory::Aircraft}};
+    BattleHud tabbed;
+    assert(tabbed.active_tab() == 0 && tabbed.handle_click(r.x + 1, r.y + 1, tabs).type == "GAPOWR");
+    const auto t2 = tabbed.tab_bounds(2);
+    assert(rect_eq(t2, {882 + 2 * 29, 197, 28, 27}));
+    tabbed.handle_click(t2.x + 1, t2.y + 1, tabs);
+    assert(tabbed.handle_click(r.x + 1, r.y + 1, tabs).type == "E1");
+    tabbed.handle_click(tabbed.tab_bounds(1).x + 1, 200, tabs);
+    assert(tabbed.handle_click(r.x + 1, r.y + 1, tabs).type == "GAPILL");
+    tabbed.handle_click(tabbed.tab_bounds(3).x + 1, 200, tabs);
+    assert(tabbed.handle_click(r.x + 1, r.y + 1, tabs).type == "ORCA");
+    HudState no_vehicles = tabs; no_vehicles.choices.pop_back();
+    tabbed.handle_click(tabbed.tab_bounds(0).x + 1, 200, no_vehicles);
+    tabbed.handle_click(tabbed.tab_bounds(3).x + 1, 200, no_vehicles); // Empty tab.
+    assert(tabbed.active_tab() == 0);
+    // An empty active tab moves to the first tab with items.
+    HudState infantry_only; infantry_only.choices = {{"E1", "GI", 200, true, 0, BuildCategory::Infantry}};
+    BattleHud fresh;
+    assert(fresh.handle_click(r.x + 1, r.y + 1, infantry_only).type == "E1" && fresh.active_tab() == 2);
+
+    // More than twenty cameos scroll by one row with the original arrows.
     {
-        auto gold_hits=[&](const render::Bitmap& img,render::Rectangle box) {
-            int hits=0;
-            for(int y=box.y;y<box.y+box.height;++y) for(int x=box.x;x<box.x+box.width;++x) {
-                auto i=(static_cast<std::size_t>(y)*img.width+x)*4;
-                if(img.rgba[i]==255&&img.rgba[i+1]==214&&img.rgba[i+2]==64) ++hits;
-            }
-            return hits;
-        };
-        auto ink_hits=[&](const render::Bitmap& img,render::Rectangle box) {
-            int hits=0;
-            for(int y=box.y;y<box.y+box.height;++y) for(int x=box.x;x<box.x+box.width;++x) {
-                auto i=(static_cast<std::size_t>(y)*img.width+x)*4;
-                if(img.rgba[i]==224&&img.rgba[i+1]==230&&img.rgba[i+2]==192) ++hits;
-            }
-            return hits;
-        };
-        // Queue count: a badge with the total shows for each pending or active product.
-        // Changing only the count must refresh the cached panel.
-        HudState q;
-        q.choices={{"E1","GI",200,true,0,BuildCategory::Infantry,2}};
-        auto one=frame(); hud.draw(one,q);
-        assert(gold_hits(one,{r.x+88,r.y+44,16,12})>0);
-        q.choices[0].queued=1;
-        auto single=frame(); hud.draw(single,q);
-        assert(gold_hits(single,{r.x+88,r.y+40,16,16})>0);
-        q.choices[0].queued=0;
-        auto none=frame(); hud.draw(none,q);
-        assert(gold_hits(none,{r.x+88,r.y+44,16,12})==0);
-        // Hover tooltip: the cost shows only when the pointer is on the cameo.
-        q.pointer_x=r.x+10; q.pointer_y=r.y+10;
-        auto hover=frame(); hud.draw(hover,q);
-        assert(gold_hits(hover,{r.x,r.y+r.height,110,14})>0);
-        q.pointer_x=q.pointer_y=-1;
-        auto idle=frame(); hud.draw(idle,q);
-        assert(gold_hits(idle,{r.x,r.y+r.height,110,14})==0);
-        // DEPLOY shows and clicks only when can_deploy is set.
-        HudState yard=q; yard.can_deploy=false;
-        auto with_yard=frame(); hud.draw(with_yard,yard);
-        auto ink_row=[&](const render::Bitmap& img,int y) {
-            for(int x=808;x<1020;++x) {
-                auto i=(static_cast<std::size_t>(y)*img.width+x)*4;
-                if(img.rgba[i]==224&&img.rgba[i+1]==230) return true;
-            }
-            return false;
-        };
-        assert(!ink_row(with_yard,560));
-        yard.can_deploy=true;
-        auto no_yard=frame(); hud.draw(no_yard,yard);
-        assert(ink_row(no_yard,560));
-        yard.can_deploy=true;
-        assert(hud.handle_click(808,560,yard).kind==HudActionKind::Deploy);
-        yard.can_deploy=false;
-        assert(hud.handle_click(808,560,yard).kind==HudActionKind::None);
-        // Labels: the power values and the selected list carry titles.
-        HudState lab; lab.choices={{"E1","GI",200,true}};
-        lab.power_output=200; lab.power_drain=60; lab.selected_labels={"GI"};
-        auto lf=frame(); hud.draw(lf,lab);
-        assert(ink_hits(lf,{808,17,212,10})>0);  // POWER OUT ... USE ...
-        int edge_hits=0;
-        for(int y=596;y<606;++y) for(int x=808;x<1020;++x) {
-            auto i=(static_cast<std::size_t>(y)*lf.width+x)*4;
-            if(lf.rgba[i]==104&&lf.rgba[i+1]==129&&lf.rgba[i+2]==126) ++edge_hits;
-        }
-        assert(edge_hits>0); // SELECTED UNITS header, dim edge color
-        // Active tab: gold frame and dim gold fill; inactive stays plain.
-        HudState t; t.choices={{"E1","GI",200,true,0,BuildCategory::Infantry}};
-        hud.handle_click(808+42,44,t); // BLD tab
-        auto tf=frame(); hud.draw(tf,t);
-        auto i=(37*1024+852)*4;
-        assert(tf.rgba[i]==255&&tf.rgba[i+1]==214&&tf.rgba[i+2]==64); // gold frame
-        auto j=(45*1024+855)*4;
-        assert(tf.rgba[j]==58&&tf.rgba[j+1]==50&&tf.rgba[j+2]==18);   // dim gold fill
-        hud.handle_click(808,44,t); // Restore All for the independent checks below.
+        BattleHud pages; HudState many;
+        for (int i = 0; i < 25; ++i)
+            many.choices.push_back({"TYPE" + std::to_string(i), "Item", 100, true, 0, BuildCategory::Buildings});
+        auto image = frame(); pages.draw(image, many);
+        assert(pages.handle_click(r.x + 1, r.y + 1, many).type == "TYPE0");
+        assert(rect_eq(pages.choice_bounds(many, "TYPE20"), {}));
+        const auto down = BattleHud::scroll_down_bounds(), up = BattleHud::scroll_up_bounds();
+        pages.handle_click(down.x + 2, down.y + 2, many);
+        assert(pages.handle_click(r.x + 1, r.y + 1, many).type == "TYPE2");
+        for (int i = 0; i < 5; ++i) pages.handle_click(down.x + 2, down.y + 2, many);
+        assert(pages.handle_click(r.x + 1, r.y + 1, many).type == "TYPE6"); // Last row is in view.
+        assert(rect_eq(pages.choice_bounds(many, "TYPE24"), BattleHud::build_button_bounds(18)));
+        pages.handle_click(up.x + 2, up.y + 2, many);
+        assert(pages.handle_click(r.x + 1, r.y + 1, many).type == "TYPE4");
+        many.choices.resize(3); pages.draw(image, many);
+        assert(pages.handle_click(r.x + 1, r.y + 1, many).type == "TYPE0");
     }
-    // Status fits on two short rows; long text wraps, short text stays
-    // on one row. Rows sit clear of the selected list and the minimap.
+
+    // Fallback drawing without the original art: only HUD regions change.
     {
-        auto ink_count=[&](const render::Bitmap& img,render::Rectangle box) {
-            int hits=0;
-            for(int y=box.y;y<box.y+box.height;++y) for(int x=box.x;x<box.x+box.width;++x) {
-                auto i=(static_cast<std::size_t>(y)*img.width+x)*4;
-                if(img.rgba[i]==224&&img.rgba[i+1]==230&&img.rgba[i+2]==192) ++hits;
-            }
-            return hits;
-        };
-        HudState st; st.choices={{"E1","GI",200,true}};
-        st.status="BUILDING ORE REFINERY. WAIT FOR THE DELIVERY TRUCK";
-        auto two=frame(); hud.draw(two,st);
-        assert(ink_count(two,{808,649,212,11})>0); // row 1
-        assert(ink_count(two,{808,661,212,11})>0); // row 2
-        st.status="OK";
-        auto short_row=frame(); hud.draw(short_row,st);
-        assert(ink_count(short_row,{808,649,212,11})>0);
-        assert(ink_count(short_row,{808,661,212,11})==0);
-        st.status="CAN T BUILD HERE.";
-        auto without_apostrophe=frame();hud.draw(without_apostrophe,st);
-        st.status="CAN'T BUILD HERE.";
-        auto with_apostrophe=frame();hud.draw(with_apostrophe,st);
-        assert(ink_count(without_apostrophe,{832,650,6,10})==0);
-        assert(ink_count(with_apostrophe,{832,650,6,10})>0);
+        BattleHud plain; HudState st = s;
+        auto blank = frame(), b = blank; plain.draw(b, st);
+        assert(same(blank, b, {0, 0, 856, 736}));
+        assert(!same(blank, b, {856, 0, 168, 768}) && !same(blank, b, {0, 736, 856, 32}));
+        auto again = frame(); plain.draw(again, st);
+        assert(again.rgba == b.rgba); // Cached panel fully covers a fresh frame.
+        st.cash = 12345; auto changed = frame(); plain.draw(changed, st);
+        assert(!same(b, changed, {856, 0, 168, 16}));
+        auto small = frame(810, 50); plain.draw(small, st);
+        assert(small.rgba.size() == 810u * 50 * 4);
+        render::Bitmap malformed{1024, 768, {1, 2, 3}}; plain.draw(malformed, st);
+        assert(malformed.rgba.size() == 3);
+        st.result = "VICTORY"; auto banner = frame(); plain.draw(banner, st);
+        assert(!same(blank, banner, {100, 330, 604, 60}));
+        st.result.clear(); st.status = "LOW POWER"; auto msg = frame(); plain.draw(msg, st);
+        assert(!same(blank, msg, {8, 8, 200, 12}));
     }
+
     if (argc > 1) {
         fs::MixFileSystem files(argv[1]);
         files.mount_language(fs::GameVariant::RedAlert2);
         files.bootstrap(fs::GameVariant::RedAlert2);
         files.mount_overlays(); files.mount_resources();
-        auto read_ini=[&](const char* name) {
-            auto bytes=files.read_file(name); assert(bytes);
+        auto read_ini = [&](const char* name) {
+            auto bytes = files.read_file(name); assert(bytes);
             rules::IniFile ini;
-            ini.parse(std::string_view(reinterpret_cast<const char*>(bytes->data()),bytes->size()));
+            ini.parse(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()));
             return ini;
         };
-        auto rules=read_ini("rules.ini"), art=read_ini("art.ini");
-        auto palette_bytes=files.read_file("cameo.pal"); assert(palette_bytes);
-        auto palette=gfx::Palette::from_bytes(*palette_bytes);
-        HudState originals;
-        originals.choices={{"GAPOWR","",800,true,0},{"GAPILE","",500,true,0},
-                           {"MTNK","",700,true,0}};
-        hud.load_assets(files,rules,art,originals.choices);
-        auto screen=frame(); hud.draw(screen,originals);
-        auto unavailable=originals;unavailable.choices[0].enabled=false;
-        auto dimmed=frame();hud.draw(dimmed,unavailable);
-        const auto fixed_slot=BattleHud::build_button_bounds(0);
-        bool darker=false;
-        for(int y=1;y<fixed_slot.height-1;++y)for(int x=1;x<fixed_slot.width-1;++x) {
-            const auto pixel=(std::size_t(fixed_slot.y+y)*screen.width+fixed_slot.x+x)*4;
-            for(int c=0;c<3;++c) {
-                assert(dimmed.rgba[pixel+c]<=screen.rgba[pixel+c]);
-                darker|=dimmed.rgba[pixel+c]<screen.rgba[pixel+c];
+        auto rules = read_ini("rules.ini"), art = read_ini("art.ini");
+        HudState o;
+        o.cash = 6700; o.power_output = 200; o.power_drain = 60;
+        // Buildings tab: the root sends Pillbox as a building; rules move it to defenses.
+        o.choices = {{"GAPOWR", "Power Plant", 800, true, 0, BuildCategory::Buildings},
+                     {"GAPILE", "Barracks", 500, true, 0, BuildCategory::Buildings},
+                     {"GAPILL", "Pillbox", 500, true, 0, BuildCategory::Buildings},
+                     {"MTNK", "Grizzly Tank", 700, true, 0, BuildCategory::Vehicles}};
+        BattleHud allied;
+        allied.load_assets(files, rules, art, o.choices);
+        assert(allied.original_art());
+        assert(allied.tab_of(o.choices[2]) == 1);
+        auto screen = frame(); allied.draw(screen, o);
+        // The metal frame, radar eagle, tabs, strips and command bar are the
+        // installed original art, pixel for pixel, at the original places.
+        const char* mix = "sidec01.mix";
+        assert(exact(screen, side_frame(files, mix, "radar.shp", 0), 856, 48) == 18480); // Eagle logo.
+        assert(exact(screen, side_frame(files, mix, "top.shp", 0), 856, 16) > 1000);
+        assert(exact(screen, side_frame(files, mix, "repair.shp", 0), 876, 166) == 1984);
+        assert(exact(screen, side_frame(files, mix, "sell.shp", 0), 940, 166) == 1984);
+        assert(exact(screen, side_frame(files, mix, "tab00.shp", 1), 882, 197) == 756);  // Active.
+        assert(exact(screen, side_frame(files, mix, "tab01.shp", 0), 911, 197) == 756);  // Has items.
+        assert(exact(screen, side_frame(files, mix, "tab02.shp", 2), 940, 197) == 756);  // Empty.
+        assert(exact(screen, side_frame(files, mix, "tab03.shp", 0), 969, 197) == 756);
+        assert(exact(screen, side_frame(files, mix, "side3.shp", 0), 856, 727) > 1000);
+        assert(exact(screen, side_frame(files, mix, "addon.shp", 0), 856, 753) > 500);
+        assert(exact(screen, side_frame(files, mix, "lendcap.shp", 0), 20, 736) == 896);
+        assert(exact(screen, side_frame(files, mix, "button04.shp", 0), d.x, d.y) == 1664); // Deploy.
+        assert(exact(screen, side_frame(files, mix, "bttnbkgd.shp", 0), 360, 736) == 1664);
+        assert(exact(screen, side_frame(files, mix, "rendcap.shp", 0), 828, 736) == 896);
+        // Empty cameo slots are the black SIDE2.SHP strips (rows 1..9 here).
+        const auto strip = side_frame(files, mix, "side2.shp", 0);
+        for (int row = 1; row < 10; ++row) {
+            const int y = 227 + 50 * row;
+            for (int yy = 0; yy < strip.height; ++yy) for (int xx = 0; xx < strip.width; ++xx) {
+                if (xx < 17 || !strip.pixels[(std::size_t(yy) * strip.width + xx) * 4 + 3]) continue; // Power bar column.
+                const auto* p = &strip.pixels[(std::size_t(yy) * strip.width + xx) * 4];
+                const auto* q = &screen.rgba[(std::size_t(y + yy) * 1024 + 856 + xx) * 4];
+                assert(p[0] == q[0] && p[1] == q[1] && p[2] == q[2]);
             }
         }
-        assert(darker && hud.handle_click(fixed_slot.x+2,fixed_slot.y+2,unavailable).kind==HudActionKind::None);
-        hud.draw(screen,originals);
+        // Credits in the original GAME.FNT blue, centred in the credits box.
+        assert(count_rgb(screen, {856, 0, 168, 16}, 165, 211, 255) > 40);
+        assert(count_rgb(screen, {856, 0, 84 - 12, 16}, 165, 211, 255) == 0);
+        // Power bar segments: lit with output, unlit above.
+        const auto lit = side_frame(files, mix, "powerp.shp", 1), dark_seg = side_frame(files, mix, "powerp.shp", 0);
+        assert(exact(screen, dark_seg, 861, 725 - 3 * 166) > 0);
+        assert(count_rgb(screen, {861, 400, 12, 326}, lit.pixels[0], lit.pixels[1], lit.pixels[2]) > 0);
+        // Battlefield stays untouched.
+        assert(same(frame(), screen, {0, 0, 856, 736}));
 
-        auto running=originals;running.choices[0].progress=250;
-        auto before_hold=frame();hud.draw(before_hold,running);
-        running.choices[0].held=true;
-        auto on_hold=frame();hud.draw(on_hold,running);
-        assert(!same(before_hold,on_hold,{fixed_slot.x+1,fixed_slot.y+20,fixed_slot.width-2,15}));
-        auto repeated_hold=frame();hud.draw(repeated_hold,running);
-        assert(on_hold.rgba==repeated_hold.rgba);
-        hud.draw(screen,originals);
+        // Original cameo art in slot 0, untouched at progress 0.
+        const auto palette = gfx::Palette::from_bytes(*files.read_file("cameo.pal"));
+        const auto icon = gfx::ShpImage::parse(*files.read_file("POWRICON.SHP")).decode_frame(0, palette);
+        assert(exact(screen, icon, 878, 228) > 2800);
+        // Disabled cameos are darker and refuse clicks.
+        auto off = o; off.choices[0].enabled = false;
+        auto dimmed = frame(); allied.draw(dimmed, off);
+        int darker = 0;
+        for (int y = 0; y < 48; ++y) for (int x = 0; x < 60; ++x) {
+            const auto i = (std::size_t(228 + y) * 1024 + 878 + x) * 4;
+            for (int c = 0; c < 3; ++c) { assert(dimmed.rgba[i + c] <= screen.rgba[i + c]); darker += dimmed.rgba[i + c] < screen.rgba[i + c]; }
+        }
+        assert(darker > 1000 && allied.handle_click(880, 230, off).kind == HudActionKind::None);
+        // Build clock: GCLOCK2.SHP frame 28 at half progress, a 50/50 mix.
+        auto half = o; half.choices[0].progress = 500;
+        auto clocked = frame(); allied.draw(clocked, half);
+        const auto clock = side_frame(files, mix, "gclock2.shp", 28);
+        int mixed = 0, clean = 0;
+        for (int y = 0; y < 48; ++y) for (int x = 0; x < 60; ++x) {
+            const auto* c = &clock.pixels[(std::size_t(y) * 60 + x) * 4];
+            const auto* ic = &icon.pixels[(std::size_t(y) * 60 + x) * 4];
+            const auto* q = &clocked.rgba[(std::size_t(228 + y) * 1024 + 878 + x) * 4];
+            if (!ic[3]) continue;
+            if (c[3]) { assert(q[0] == (ic[0] + c[0]) / 2 && q[2] == (ic[2] + c[2]) / 2); ++mixed; }
+            else { assert(q[0] == ic[0] && q[1] == ic[1] && q[2] == ic[2]); ++clean; }
+        }
+        assert(mixed > 500 && clean > 500);
+        // Ready and On Hold labels in the sidebar blue.
+        auto ready = o; ready.choices[0].progress = 1000;
+        auto rf = frame(); allied.draw(rf, ready);
+        assert(count_rgb(rf, {878, 228, 60, 16}, 165, 211, 255) > 20);
+        auto held = o; held.choices[0].progress = 300; held.choices[0].held = true;
+        auto hf = frame(); allied.draw(hf, held);
+        assert(!same(rf, hf, {878, 228, 60, 16}) && count_rgb(hf, {878, 228, 60, 16}, 165, 211, 255) > 20);
+        // Hover: blue frame on the cameo and a tooltip left of the sidebar.
+        auto hover = o; hover.pointer_x = 890; hover.pointer_y = 240;
+        auto hv = frame(); allied.draw(hv, hover);
+        assert(count_rgb(hv, {878, 228, 60, 1}, 165, 211, 255) == 60);
+        assert(count_rgb(hv, {600, 228, 256, 40}, 165, 211, 255) > 50);
+        // Radar: the eagle until the radar image arrives, then 32 opening
+        // frames, then the radar image inside the frame.
+        auto radar = o; radar.minimap = {2, 1, {10, 20, 30, 255, 40, 50, 60, 255}};
+        radar.map_width = 1420; radar.map_height = 1100; radar.camera = {0, 0, 856, 736};
+        auto opening = frame(); allied.draw(opening, radar);
+        assert(exact(opening, side_frame(files, mix, "radar.shp", 1), 856, 48) > 1000);
+        for (int i = 0; i < 31; ++i) allied.draw(opening, radar);
+        assert(count_rgb(opening, {880, 100, 40, 20}, 10, 20, 30) == 800);
+        assert(count_rgb(opening, {960, 100, 40, 20}, 40, 50, 60) == 800);
+        // End banner: original "You Are Victorious!" and "Game Over" art.
+        auto won = o; won.result = "VICTORY";
+        auto wf = frame(); allied.draw(wf, won);
+        const auto victory = gfx::ShpImage::parse(*files.read_file("grfxtxt.shp"))
+            .decode_frame(2, gfx::Palette::from_bytes(*files.read_file("grfxtxt.pal")));
+        assert(exact(wf, victory, (856 - 436) / 2, (736 - 112) / 2) > 20000);
+        auto lost = o; lost.result = "DEFEAT";
+        auto lf = frame(); allied.draw(lf, lost);
+        assert(!same(wf, lf, {210, 312, 436, 112}));
+        // Status message in GAME.FNT at the top left of the battlefield.
+        auto told = o; told.status = "Building Power Plant.";
+        auto tf = frame(); allied.draw(tf, told);
+        assert(count_rgb(tf, {8, 8, 200, 16}, 255, 255, 255) > 50);
 
-        int i=0;
-        for (const char* name : {"POWRICON.SHP","BRRKICON.SHP","GTNKICON.SHP"}) {
-            auto bytes=files.read_file(name); assert(bytes);
-            auto image=gfx::ShpImage::parse(*bytes).decode_frame(0,palette);
-            auto box=BattleHud::build_button_bounds(i++);
-            int matches=0;
-            // This strip is clear of the text and progress indicators.
-            for (int y=42;y<46;++y) for (int x=1;x<box.width-1;++x) {
-                auto source=(static_cast<std::size_t>(y-1)*image.height/(box.height-2)*image.width+
-                             (x-1)*image.width/(box.width-2))*4;
-                auto dest=(static_cast<std::size_t>(box.y+y)*screen.width+box.x+x)*4;
-                if (image.pixels[source+3] &&
-                    std::equal(image.pixels.begin()+source,image.pixels.begin()+source+4,
-                               screen.rgba.begin()+dest)) ++matches;
-            }
-            assert(matches>100);
-            // Loaded cameo art carries no idle text: the whole opaque
-            // interior matches the source art exactly at progress 0.
-            int exact=0, total=0;
-            for (int y=1;y<box.height-1;++y) for (int x=1;x<box.width-1;++x) {
-                auto source=(static_cast<std::size_t>(y-1)*image.height/(box.height-2)*image.width+
-                             (x-1)*image.width/(box.width-2))*4;
-                if (!image.pixels[source+3]) continue;
-                auto dest=(static_cast<std::size_t>(box.y+y)*screen.width+box.x+x)*4;
-                ++total;
-                if (std::equal(image.pixels.begin()+source,image.pixels.begin()+source+4,
-                               screen.rgba.begin()+dest)) ++exact;
-            }
-            assert(total>1000 && exact==total);
-        // Clock checks compare button 0 art with this icon, so run them
-        // only for the first icon (POWRICON, i is already incremented).
-        if (i!=1) continue;
-        // READY shows clearly in gold over loaded art.
-        originals.choices[0].progress=1000;
-        hud.draw(screen,originals);
-        auto ready_box=BattleHud::build_button_bounds(0);
-        int gold_hits=0;
-        for (int y=ready_box.y;y<ready_box.y+ready_box.height;++y)
-            for (int x=ready_box.x;x<ready_box.x+ready_box.width;++x) {
-                auto i=(static_cast<std::size_t>(y)*screen.width+x)*4;
-                if (screen.rgba[i]==255&&screen.rgba[i+1]==214&&screen.rgba[i+2]==64) ++gold_hits;
-            }
-        assert(gold_hits>50);
-        // Clock shading: progress 250 darkens a wedge clockwise from the
-        // top. Top-right is inside the wedge, top-left is not.
-        originals.choices[0].progress=250;
-        hud.draw(screen,originals);
-        auto clock_box=BattleHud::build_button_bounds(0);
-        // The clock wedge only covers a circle around the button center.
-        const double clock_rad=std::min(clock_box.width,clock_box.height)/2.0-2;
-        auto in_circle=[&](int x,int y) {
-            double dx=x+0.5-clock_box.width/2.0, dy=y+0.5-clock_box.height/2.0;
-            return dx*dx+dy*dy<=clock_rad*clock_rad;
-        };
-        auto art_pixel=[&](int bx,int by) {
-            auto source=(static_cast<std::size_t>(by-1)*image.height/(clock_box.height-2)*image.width+
-                         (bx-1)*image.width/(clock_box.width-2))*4;
-            return source;
-        };
-        int in_wedge=0, out_wedge=0;
-        for (int y=2;y<clock_box.height/2;++y) for (int x=clock_box.width/2;x<clock_box.width-2;++x) {
-            auto source=art_pixel(x,y);
-            if (!image.pixels[source+3] || !in_circle(x,y)) continue;
-            auto dest=(static_cast<std::size_t>(clock_box.y+y)*screen.width+clock_box.x+x)*4;
-            // Shaded pixels keep 40 percent of the art color; skip very
-            // dark art where shaded and full are too close to tell apart.
-            if (image.pixels[source]>80 && screen.rgba[dest]==image.pixels[source]*2/5) ++in_wedge;
-        }
-        for (int y=2;y<clock_box.height/2;++y) for (int x=2;x<clock_box.width/2;++x) {
-            auto source=art_pixel(x,y);
-            if (!image.pixels[source+3] || !in_circle(x,y)) continue;
-            auto dest=(static_cast<std::size_t>(clock_box.y+y)*screen.width+clock_box.x+x)*4;
-            if (std::equal(image.pixels.begin()+source,image.pixels.begin()+source+4,
-                           screen.rgba.begin()+dest)) ++out_wedge;
-        }
-        assert(in_wedge>50 && in_wedge+out_wedge>200);
-        // Progress 750: the wedge covers 270 degrees. Top-left is the only
-        // clean quadrant; top-right and bottom-left are darkened.
-        originals.choices[0].progress=750;
-        hud.draw(screen,originals);
-        int dark_tl=0, opaque_tl=0, dark_mid=0, opaque_mid=0;
-        // Top-left quarter-disc slice, clear of the 270 degree boundary.
-        for (int y=8;y<24;++y) for (int x=32;x<48;++x) {
-            auto source=art_pixel(x,y);
-            if (!image.pixels[source+3] || !in_circle(x,y)) continue;
-            auto dest=(static_cast<std::size_t>(clock_box.y+y)*screen.width+clock_box.x+x)*4;
-            ++opaque_tl;
-            if (image.pixels[source]>80 && screen.rgba[dest]==image.pixels[source]*2/5) ++dark_tl;
-        }
-        for (int y=32;y<48;++y) for (int x=32;x<48;++x) {
-            auto source=art_pixel(x,y);
-            if (!image.pixels[source+3] || !in_circle(x,y)) continue;
-            auto dest=(static_cast<std::size_t>(clock_box.y+y)*screen.width+clock_box.x+x)*4;
-            ++opaque_mid;
-            if (image.pixels[source]>80 && screen.rgba[dest]==image.pixels[source]*2/5) ++dark_mid;
-        }
-        assert(dark_tl==0 && opaque_tl>10);
-        assert(dark_mid>50 && dark_mid<=opaque_mid);
-        originals.choices[0].progress=0;
-        }
+        // Soviet sidebar: SIDEC02 art with its own tab and button places.
+        BattleHud soviet;
+        soviet.load_assets(files, rules, art, o.choices, true);
+        assert(soviet.original_art() && rect_eq(soviet.tab_bounds(1), {908, 197, 32, 28}));
+        auto sv = frame(); soviet.draw(sv, o);
+        assert(exact(sv, side_frame(files, "sidec02.mix", "radar.shp", 0), 856, 48) > 18000);
+        assert(exact(sv, side_frame(files, "sidec02.mix", "repair.shp", 0), 889, 165) > 1600);
+        assert(exact(sv, side_frame(files, "sidec02.mix", "tab00.shp", 1), 876, 197) > 800);
+        assert(soviet.handle_click(910, 200, o).kind == HudActionKind::None && soviet.active_tab() == 1);
     }
-    // Every eligible type remains reachable beyond the first sixteen cameos.
-    {
-        BattleHud pages;
-        HudState many;
-        for(int i=0;i<19;++i)many.choices.push_back({"TYPE"+std::to_string(i),"ITEM",100,true,0,BuildCategory::Buildings});
-        auto image=frame();pages.draw(image,many);
-        assert(pages.handle_click(809,61,many).type=="TYPE0");
-        pages.handle_click(1000,554,many);
-        pages.draw(image,many);
-        assert(pages.handle_click(809,61,many).type=="TYPE16");
-        pages.handle_click(809,554,many);
-        assert(pages.handle_click(809,61,many).type=="TYPE0");
-        pages.handle_click(1000,554,many);
-        many.choices.resize(1);pages.draw(image,many);
-        assert(pages.handle_click(809,61,many).type=="TYPE0");
-    }
-    std::cout<<"battle HUD tests passed\n";
+    std::cout << "battle HUD tests passed\n";
 }

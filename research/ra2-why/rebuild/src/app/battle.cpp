@@ -278,7 +278,7 @@ public:
         std::vector<BuildChoice> icons;
         for(const auto& list:{&catalog_.buildings,&catalog_.units,&catalog_.infantry,&catalog_.aircraft})
             for(const auto& type:*list)icons.push_back({type.id,type.id,type.cost,true,0});
-        hud_.load_assets(files,rules_,assets.art_ini(),icons);
+        hud_.load_assets(files,rules_,assets.art_ini(),icons,house(world_,player_).side_index.value_or(0)!=0);
         // Compose the initial view while loading. The first event pump can
         // change the camera, selection or help; overlays stay live below.
         initial_camera_x_=camera_x_;initial_camera_y_=camera_y_;
@@ -293,7 +293,7 @@ public:
     }
     void pan(int dx,int dy) {
         camera_x_=std::clamp(camera_x_+dx,0,std::max(0,terrain_.width-BattleHud::sidebar_x));
-        camera_y_=std::clamp(camera_y_+dy,0,std::max(0,terrain_.height-BattleHud::view_height));
+        camera_y_=std::clamp(camera_y_+dy,0,std::max(0,terrain_.height-BattleHud::command_bar_y));
     }
     std::optional<BattlePoint> anchor(const w::Entity& e) const {
         if (!live(e)) return {};
@@ -318,10 +318,10 @@ public:
     }
     void center(const w::Entity& e) {
         const auto point=anchor(e);
-        if (point) pan(point->x-BattleHud::sidebar_x/2,point->y-BattleHud::view_height/2);
+        if (point) pan(point->x-BattleHud::sidebar_x/2,point->y-BattleHud::command_bar_y/2);
     }
     std::optional<ra2map::Cell> cell_at(BattlePoint point) const {
-        if (point.x<0 || point.y<0 || point.x>=BattleHud::sidebar_x || point.y>=BattleHud::view_height) return {};
+        if (point.x<0 || point.y<0 || point.x>=BattleHud::sidebar_x || point.y>=BattleHud::command_bar_y) return {};
         // TODO-ORIGINAL: Pick the nearest projected floor diamond. Original
         // depth-buffer picking and bridge levels must replace this adapter.
         // Same nearest-anchor rule as a scan of every floor Cell; floor
@@ -329,7 +329,7 @@ public:
         return scene_.pick_cell(std::int64_t(camera_x_)+point.x,std::int64_t(camera_y_)+point.y);
     }
     BattleView view() const {
-        return {{0,0,BattleHud::sidebar_x,BattleHud::view_height},
+        return {{0,0,BattleHud::sidebar_x,BattleHud::command_bar_y},
             [this](const w::Entity& e){return anchor(e);},[this](BattlePoint p){return cell_at(p);}};
     }
     bool miner(const w::Entity& e) const {return rules_.read_bool(e.type,"Harvester");}
@@ -451,7 +451,7 @@ public:
             if(input.kind==InputKind::Button && input.pressed)show_score_=false;
             return;
         }
-        if (input.kind==InputKind::Button && input.x>=BattleHud::sidebar_x) {
+        if (input.kind==InputKind::Button && (input.x>=BattleHud::sidebar_x || input.y>=BattleHud::command_bar_y)) {
             if (input.pressed && (input.key==SDL_BUTTON_LEFT || input.key==SDL_BUTTON_RIGHT)) {
                 refresh_hud();
                 const auto action=hud_.handle_click(input.x,input.y,hud_state_);
@@ -501,7 +501,7 @@ public:
                 else if(action.kind==HudActionKind::Deploy && !victory_.settled())deploy_selected();
                 else if (action.kind==HudActionKind::Minimap) {
                     pan(action.position.x-camera_x_-BattleHud::sidebar_x/2,
-                        action.position.y-camera_y_-BattleHud::view_height/2);
+                        action.position.y-camera_y_-BattleHud::command_bar_y/2);
                 }
             }
             return;
@@ -568,7 +568,10 @@ public:
             refresh_hud();
             const auto it=std::find_if(hud_state_.choices.begin(),hud_state_.choices.end(),[&](const auto& c){return c.type==type;});
             require(it!=hud_state_.choices.end(),"Human input: power plant cameo is missing");
-            const auto r=BattleHud::build_button_bounds(int(it-hud_state_.choices.begin()));
+            const auto tab=hud_.tab_bounds(hud_.tab_of(*it));
+            if(hud_.active_tab()!=hud_.tab_of(*it))hud_.handle_click(tab.x+4,tab.y+4,hud_state_); // Tabs change only the HUD.
+            const auto r=hud_.choice_bounds(hud_state_,type);
+            require(r.width>0,"Human input: cameo is not in view");
             test_click(r.x+8,r.y+8,button);
         };
         const bool allied=house(world_,player_).side_index.value_or(0)==0;
@@ -660,7 +663,7 @@ public:
                 const auto found=world_.cells.find(std::uint32_t(mouse_y)*512+mouse_x);
                 if(found==world_.cells.end() || !found->second.terrain)continue;
                 mark.position=sim::Coord{mouse_x*256+128,mouse_y*256+128,found->second.terrain->floor_world_height.value_or(0)};
-                const auto at=anchor(mark);if(!at||at->x<0||at->x>=804||at->y<0||at->y>=768)continue;
+                const auto at=anchor(mark);if(!at||at->x<0||at->x>=BattleHud::sidebar_x||at->y<0||at->y>=BattleHud::command_bar_y)continue;
                 test_click(at->x,at->y);human_stage_=6;return;
             }
             throw std::runtime_error("Human input: no visible legal power placement");
@@ -668,7 +671,7 @@ public:
         case 6: {
             require(own_type(power),"Human input: map click did not place power plant");
             checkpoint(state,"04-placed");
-            int left=804,top=768,right=0,bottom=0;
+            int left=BattleHud::sidebar_x,top=BattleHud::command_bar_y,right=0,bottom=0;
             for(const auto& e:world_.entities)if(e.house_id==player_&&fighter(e))if(const auto at=anchor(e)) {
                 left=std::min(left,at->x-12);top=std::min(top,at->y-12);
                 right=std::max(right,at->x+12);bottom=std::max(bottom,at->y+12);
@@ -906,7 +909,7 @@ public:
                         destination.cell=ra2map::Cell{std::uint16_t(int(e.cell->x)+delta),e.cell->y};
                         destination.position=sim::Coord{int(destination.cell->x)*256+128,e.position->y,e.position->z};
                         const auto b=anchor(destination);
-                        if(b && b->x>=0&&b->x<BattleHud::sidebar_x&&b->y>=0&&b->y<768) {
+                        if(b && b->x>=0&&b->x<BattleHud::sidebar_x&&b->y>=0&&b->y<BattleHud::command_bar_y) {
                             input({InputKind::Button,b->x,b->y,SDL_BUTTON_LEFT,true});
                             input({InputKind::Button,b->x,b->y,SDL_BUTTON_LEFT,false});break;
                         }
@@ -1123,7 +1126,7 @@ public:
             hud_state_.choices.push_back(std::move(choice));
         }
         hud_state_.choices=sidebar_choices_.update(hud_state_.choices);
-        hud_state_.camera={camera_x_,camera_y_,BattleHud::sidebar_x,BattleHud::view_height};
+        hud_state_.camera={camera_x_,camera_y_,BattleHud::sidebar_x,BattleHud::command_bar_y};
         hud_state_.map_width=terrain_.width;hud_state_.map_height=terrain_.height;
         // Base radar requires a live radar building and enough power.
         // TODO-ORIGINAL: Original shroud and house palettes remain separate.
@@ -1132,7 +1135,7 @@ public:
         if(sim::tech::radar_online(rules_,world_,player_)) {
             render::RadarView radar_view{geometry_,bounds.width,bounds.height,
                 {camera_x_/60+geometry_.local.x,camera_y_/30+geometry_.local.y,
-                 (BattleHud::sidebar_x+59)/60,(BattleHud::view_height+29)/30}};
+                 (BattleHud::sidebar_x+59)/60,(BattleHud::command_bar_y+29)/30}};
             radar=render::draw_battle_radar(world_,assets_.theater(),radar_view,radar_style_,true);
             return;
         }
@@ -1156,7 +1159,7 @@ public:
         frame_=std::move(scene.image);
         const w::Entity* hovered=nullptr;int nearest=24*24;
         if(!help_visible_&&!options_.visible()&&!show_score_&&pointer_x_>=0&&pointer_x_<BattleHud::sidebar_x&&
-            pointer_y_>=0&&pointer_y_<BattleHud::view_height)
+            pointer_y_>=0&&pointer_y_<BattleHud::command_bar_y)
             for(const auto& e:world_.entities)if(const auto at=anchor(e)) {
                 const int dx=at->x-pointer_x_,dy=at->y-pointer_y_,d=dx*dx+dy*dy;
                 if(d<nearest){nearest=d;hovered=&e;}
@@ -1215,7 +1218,8 @@ public:
             else help_.draw_pause(frame_,options_.page()==OptionsPage::ConfirmAbort);
         }
         CursorKind kind=CursorKind::Normal;
-        if(!help_visible_&&!options_.visible()&&!show_score_&&pointer_x_>=0&&pointer_x_<BattleHud::sidebar_x) {
+        if(!help_visible_&&!options_.visible()&&!show_score_&&pointer_x_>=0&&pointer_x_<BattleHud::sidebar_x&&
+           pointer_y_>=0&&pointer_y_<BattleHud::command_bar_y) {
             const auto cell=cell_at({pointer_x_,pointer_y_});
             bool passable=false;
             if(cell) {
