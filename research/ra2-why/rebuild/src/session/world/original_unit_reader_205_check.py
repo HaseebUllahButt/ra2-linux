@@ -17,6 +17,7 @@ The connected-real-placement mode runs the original MovementRestrictedTo reader.
 The connected-restricted-water mode supplies a synthetic Water override.
 The connected-real-armor mode also runs the original Armor reader.
 The VHPScan modes run its original reader with a supplied single-token service.
+The connected-real-compare modes also run the original string comparison.
 Other INI, formatting, enumeration, allocation, and asset services are supplied.
 Mode rules and later loading remain omitted.
 """
@@ -29,12 +30,13 @@ from itertools import product
 from unicorn import UC_HOOK_CODE,UC_HOOK_MEM_READ,UC_HOOK_MEM_WRITE
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EIP,UC_X86_REG_ESP
 
-if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--connected','--connected-real-bool','--connected-real-art','--connected-real-integer','--connected-real-float','--connected-real-speed','--connected-speed-wheel','--connected-zone-subterranean','--connected-real-placement','--connected-restricted-water','--connected-real-armor','--connected-real-vhpscan','--connected-vhpscan-strong')):
+if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--connected','--connected-real-bool','--connected-real-art','--connected-real-integer','--connected-real-float','--connected-real-speed','--connected-speed-wheel','--connected-zone-subterranean','--connected-real-placement','--connected-restricted-water','--connected-real-armor','--connected-real-vhpscan','--connected-vhpscan-strong','--connected-real-compare','--connected-compare-strong')):
     raise SystemExit('usage: original_unit_reader_205_check.py game.exe unit_flags_case real_map_case game_dir [mode]')
 executable,native,fixture,game=sys.argv[1:5]
 connected=len(sys.argv)==6
-real_vhpscan=connected and sys.argv[5] in ('--connected-real-vhpscan','--connected-vhpscan-strong')
-vhpscan_override=connected and sys.argv[5]=='--connected-vhpscan-strong'
+real_compare=connected and sys.argv[5] in ('--connected-real-compare','--connected-compare-strong')
+real_vhpscan=connected and (real_compare or sys.argv[5] in ('--connected-real-vhpscan','--connected-vhpscan-strong'))
+vhpscan_override=connected and sys.argv[5] in ('--connected-vhpscan-strong','--connected-compare-strong')
 real_armor=connected and (real_vhpscan or sys.argv[5]=='--connected-real-armor')
 real_restricted=connected and (real_armor or sys.argv[5] in ('--connected-real-placement','--connected-restricted-water'))
 real_bool=connected and (real_restricted or sys.argv[5] in ('--connected-real-bool','--connected-real-art','--connected-real-integer','--connected-real-float','--connected-real-speed','--connected-speed-wheel','--connected-zone-subterranean'))
@@ -105,6 +107,9 @@ vhpscan_tokens=[]
 vhpscan_value_range=[]
 vhpscan_copies=[]
 vhpscan_in_reader=[False]
+compare_entries=[]
+compare_pending={}
+compare_results=[]
 
 def trace_write(cpu,access,address,size,value,user):
     if active[0] and address<=m.TYPE+0x205<address+size:
@@ -165,12 +170,25 @@ def parent_reader():
 
 def trace_code(cpu,address,size,user):
     if active[0] and connected:
+        if real_compare and mode==3 and address in compare_pending:
+            left,right=compare_pending.pop(address)
+            equal=cpu.reg_read(UC_X86_REG_EAX)==0
+            assert equal==(left==right), (left,right)
+            compare_results.append((left,right,equal))
         if real_integer and mode==3 and address in integer_pending:
             key,expected=integer_pending.pop(address)
             assert cpu.reg_read(UC_X86_REG_EAX)==expected, key
             integer_checked.add(key)
         if address in (0x70ab40,0x6daf60,0x5d7810,0x4107e0): chain_calls.append(address)
         if address==0x6daf60: calls['parent']+=1
+        if real_compare and mode==3 and address==0x781f20:
+            left=bytes(cpu.mem_read(m.argument(0),64)).split(b'\0',1)[0].decode('ascii')
+            right=bytes(cpu.mem_read(m.argument(1),64)).split(b'\0',1)[0].decode('ascii')
+            compare_entries.append((left.lower(),right.lower()))
+            ret=struct.unpack('<I',bytes(cpu.mem_read(cpu.reg_read(UC_X86_REG_ESP),4)))[0]
+            assert ret not in compare_pending
+            compare_pending[ret]=(left.lower(),right.lower())
+            calls['compare']+=1
         if real_speed and mode==3 and address==0x46c400:
             section=bytes(cpu.mem_read(m.argument(0),64)).split(b'\0',1)[0].decode('ascii')
             key=bytes(cpu.mem_read(m.argument(1),64)).split(b'\0',1)[0].decode('ascii')
@@ -346,6 +364,7 @@ if real_bool:
         restricted_prologue=bytes(hash_cpu.mem_read(0x46a970,3))
         armor_prologue=bytes(hash_cpu.mem_read(0x46a8b0,3))
         vhpscan_prologue=bytes(hash_cpu.mem_read(0x46c9d0,3))
+        compare_prologue=bytes(hash_cpu.mem_read(0x781f20,3))
 for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
     m.cpu.mem_write(m.TYPE,constructor)
     m.cpu.mem_write(m.TYPE+0x205,bytes([initial]))
@@ -379,6 +398,9 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
             if real_vhpscan:
                 m.cpu.mem_write(0x46c9d0,vhpscan_prologue); m.callbacks.pop(0x46c9d0,None)
                 m.cpu.ctl_remove_cache(0x46c9d0,0x46c9d3)
+            if real_compare:
+                m.cpu.mem_write(0x781f20,compare_prologue); m.callbacks.pop(0x781f20,None)
+                m.cpu.ctl_remove_cache(0x781f20,0x781f23)
         else:
             m.word(0x100b000+0x24,0)
             m.bind(0x50f410,12,base['boolean'])
@@ -398,6 +420,8 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
                 m.bind(0x46a8b0,12,base['integer']); m.cpu.ctl_remove_cache(0x46a8b0,0x46a8b3)
             if real_vhpscan:
                 m.bind(0x46c9d0,12,base['integer']); m.cpu.ctl_remove_cache(0x46c9d0,0x46c9d3)
+            if real_compare:
+                m.bind(0x781f20,0,compare_names); m.cpu.ctl_remove_cache(0x781f20,0x781f23)
         m.cpu.ctl_remove_cache(0x50f410,0x50f413)
     calls.update(parent=0,pair=0,format=0,compare=0)
     chain_calls.clear()
@@ -423,6 +447,9 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
     vhpscan_tokens.clear()
     vhpscan_copies.clear()
     vhpscan_in_reader[0]=False
+    compare_entries.clear()
+    compare_pending.clear()
+    compare_results.clear()
     m.cpu.reg_write(UC_X86_REG_ECX,m.TYPE); m.cpu.reg_write(UC_X86_REG_ESP,0x103f000)
     m.cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,0x100b000))
     writes.clear(); active[0]=True
@@ -471,6 +498,10 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
             assert len(vhpscan_copies)==int(vhpscan_override)
             assert vhpscan_returns==[2 if vhpscan_override else 0]
             assert m.signed(m.TYPE+0x364)==(2 if vhpscan_override else 0)
+        if real_compare:
+            assert ('heavy','heavy') in compare_entries
+            assert (('strong','strong') if vhpscan_override else ('none','none')) in compare_entries
+            assert not compare_pending and len(compare_results)==len(compare_entries)
     assert calls['parent']==1 and calls['pair']>=1 and calls['format']>=6 and calls['compare']>=1
     if connected: assert chain_calls==[0x70ab40,0x6daf60,0x5d7810,0x4107e0]
 parent_ok[0]=False
@@ -489,4 +520,4 @@ assert not writes and m.cpu.mem_read(m.TYPE+0x205,1)==b'\x01'
 assert calls=={'parent':1,'pair':0,'format':0,'compare':0}
 if connected: assert chain_calls==[0x70ab40,0x6daf60,0x5d7810,0x4107e0]
 print('base x86 %sreader chain preserves supplied Type +205 in %d checked cases'%
-      ('connected synthetic-VHPScan ' if vhpscan_override else 'connected real-VHPScan ' if real_vhpscan else 'connected real-armor ' if real_armor else 'connected synthetic-Water ' if restricted_override else 'connected real-placement ' if real_restricted else 'connected synthetic-zone ' if zone_override else 'connected synthetic-Wheel ' if speed_override else 'connected real-speed ' if real_speed else 'connected real-float ' if real_float else 'connected real-integer ' if real_integer else 'connected real-art ' if real_art else 'connected real-boolean ' if real_bool else 'connected ' if connected else 'UnitType ',9 if connected else 7))
+      ('connected compare-Strong ' if real_compare and vhpscan_override else 'connected real-compare ' if real_compare else 'connected synthetic-VHPScan ' if vhpscan_override else 'connected real-VHPScan ' if real_vhpscan else 'connected real-armor ' if real_armor else 'connected synthetic-Water ' if restricted_override else 'connected real-placement ' if real_restricted else 'connected synthetic-zone ' if zone_override else 'connected synthetic-Wheel ' if speed_override else 'connected real-speed ' if real_speed else 'connected real-float ' if real_float else 'connected real-integer ' if real_integer else 'connected real-art ' if real_art else 'connected real-boolean ' if real_bool else 'connected ' if connected else 'UnitType ',9 if connected else 7))
