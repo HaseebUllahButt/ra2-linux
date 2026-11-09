@@ -26,12 +26,15 @@ Stage::Stage(Snapshot snapshot) {
         throw std::invalid_argument("invalid base staged world");
     snapshot_=std::move(snapshot);
 }
-std::optional<std::uint32_t> Stage::next_id() const {
+namespace {
+std::optional<std::uint32_t> next_snapshot_id(const Snapshot& snapshot) {
     std::uint32_t largest=0;
-    for (const auto& item:snapshot_.creation_order) if (item.id>largest) largest=item.id;
+    for (const auto& item:snapshot.creation_order) if (item.id>largest) largest=item.id;
     if (largest==std::numeric_limits<std::uint32_t>::max()) return {};
     return largest+1;
 }
+}
+std::optional<std::uint32_t> Stage::next_id() const { return next_snapshot_id(snapshot_); }
 std::optional<std::uint32_t> Stage::create_player_house(std::string name, std::string country,
     std::int32_t credits, std::int32_t selected_color, std::int32_t unit_registry_size,
     std::optional<std::int32_t> original_index) {
@@ -97,16 +100,22 @@ std::optional<std::uint32_t> Stage::create_auxiliary_house(HouseRole role,
 std::optional<std::uint32_t> Stage::create_unit(std::uint32_t house_id, std::string type,
     std::optional<std::int32_t> resolved_hp, std::int32_t original_type_index,
     bool excluded_from_house_tracking) {
-    auto found=snapshot_.houses.end();
-    for (auto it=snapshot_.houses.begin();it!=snapshot_.houses.end();++it)
+    return create_staged_unit(snapshot_,house_id,std::move(type),resolved_hp,original_type_index,
+        excluded_from_house_tracking);
+}
+std::optional<std::uint32_t> create_staged_unit(Snapshot& snapshot, std::uint32_t house_id, std::string type,
+    std::optional<std::int32_t> resolved_hp, std::int32_t original_type_index,
+    bool excluded_from_house_tracking) {
+    auto found=snapshot.houses.end();
+    for (auto it=snapshot.houses.begin();it!=snapshot.houses.end();++it)
         if (it->id==house_id) { found=it; break; }
-    if (snapshot_.pending_cell_setup || found==snapshot_.houses.end() || type.empty() || (resolved_hp && *resolved_hp<=0) ||
+    if (snapshot.pending_cell_setup || found==snapshot.houses.end() || type.empty() || (resolved_hp && *resolved_hp<=0) ||
         original_type_index<0 || original_type_index>=512 || !found->unit_registry_size ||
         original_type_index>=*found->unit_registry_size) return {};
-    const auto id=next_id(); if (!id) return {};
+    const auto id=next_snapshot_id(snapshot); if (!id) return {};
     // Unit 006FA400 calls its Techno parent. At 006C12AA the parent consumes
     // one shared RNG word and stores its low 16 bits at Unit +320.
-    auto random=sim::Random(snapshot_.random);
+    auto random=sim::Random(snapshot.random);
     const auto constructor_random=static_cast<std::uint16_t>(random.next());
     Entity unit;
     unit.id=*id; unit.house_id=house_id; unit.type=std::move(type);
@@ -133,12 +142,12 @@ std::optional<std::uint32_t> Stage::create_unit(std::uint32_t house_id, std::str
         if (dynamic==std::numeric_limits<std::int32_t>::max() || fixed==std::numeric_limits<std::int32_t>::max()) return {};
         ++*updated_house.unit_count; ++dynamic; ++fixed;
     }
-    snapshot_.entities.reserve(snapshot_.entities.size()+1);
-    snapshot_.creation_order.reserve(snapshot_.creation_order.size()+1);
-    snapshot_.entities.push_back(std::move(unit));
-    snapshot_.creation_order.push_back({CreatedKind::Entity,*id});
+    snapshot.entities.reserve(snapshot.entities.size()+1);
+    snapshot.creation_order.reserve(snapshot.creation_order.size()+1);
+    snapshot.entities.push_back(std::move(unit));
+    snapshot.creation_order.push_back({CreatedKind::Entity,*id});
     *found=std::move(updated_house);
-    snapshot_.random=random.state();
+    snapshot.random=random.state();
     return id;
 }
 bool Stage::install_base_cells(PlacementGeometry geometry, std::map<std::uint32_t,CellState> cells,

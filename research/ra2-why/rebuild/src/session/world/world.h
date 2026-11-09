@@ -196,6 +196,12 @@ std::optional<sim::CoarseCategoryInputs> coarse_inputs(const Snapshot&, std::uin
 // local map boundary, including cell height and ramp, even on a failed call.
 std::optional<bool> base_unit_on_map(const PlacementTerrain&, StartPoint);
 
+// Stage::create_unit on a Snapshot edited in place. The caller checks first
+// what the Stage constructor checks: a valid base Snapshot.
+std::optional<std::uint32_t> create_staged_unit(Snapshot&, std::uint32_t house_id, std::string type,
+    std::optional<std::int32_t> resolved_hp, std::int32_t original_type_index,
+    bool excluded_from_house_tracking);
+
 // Owns staged objects and the shared random state. House and Unit records hold
 // only recovered fields; unresolved constructor fields remain optional.
 class Stage {
