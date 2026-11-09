@@ -17,7 +17,9 @@ private:
     struct Cargo { int bails=0, credits=0; std::uint32_t next=0; bool returning=false; };
     struct Resource { std::string section; int first_overlay=-1; int growth=1, interval=1; };
     std::vector<Resource> resources_;
-    std::map<int,int> overlay_resources_;
+    // Live OverlayType index to resource index, or -1. The first resource
+    // that names an overlay keeps it.
+    std::vector<int> overlay_resources_;
     rules::IniFile rules_;
     PrototypeMovement movement_;
     std::map<std::uint32_t,Cargo> cargo_;

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <set>
+#include <utility>
 namespace ra2::sim {
 namespace {
 namespace sw=session::world;
@@ -36,7 +37,8 @@ PrototypeEconomy::PrototypeEconomy(const rules::IniFile& r):rules_(r) {
                name[stem.size()]<'0' || name[stem.size()]>'9' || name.back()<'0' || name.back()>'9' ||
                !r.read_bool(name,"Tiberium",false)) continue;
             if(resource.first_overlay<0) resource.first_overlay=int(i);
-            overlay_resources_.emplace(int(i),resource_index);
+            if(overlay_resources_.size()<=i) overlay_resources_.resize(i+1,-1);
+            if(overlay_resources_[i]<0) overlay_resources_[i]=resource_index;
         }
         resource.growth=std::max(1,r.read_integer(resource.section,"Growth",2200));
         resource.interval=std::max(1,r.read_integer(resource.section,"Spread",2200));
@@ -49,8 +51,7 @@ int PrototypeEconomy::load(std::uint32_t id) const { auto i=cargo_.find(id);retu
 int PrototypeEconomy::resource(const sw::CellState& c) const {
     if (!c.terrain || !c.overlay_data_11e) return -1;
     int index=c.terrain->overlay_type_index.value_or(-1);
-    auto found=overlay_resources_.find(index);
-    return found==overlay_resources_.end()?-1:found->second;
+    return index<0 || std::size_t(index)>=overlay_resources_.size()?-1:overlay_resources_[std::size_t(index)];
 }
 void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
     loop::profile::Scope probe(loop::profile::Phase::Economy);
@@ -64,11 +65,14 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
     bool active=false;
     if(frame) for(const auto& item:resources_)
         if((grows_ && frame%item.growth==0) || (spreads_ && frame%item.interval==0)) active=true;
-    if(active) for(auto& [k,c]:w.cells) {
-        int r=resource(c);if(r<0) continue;
+    // Full Cell passes walk the map with prefetch; see session::world::walk_cells.
+    thread_local std::vector<std::uintptr_t> grow_ahead,field_ahead;
+    if(active) sw::walk_cells(w.cells,grow_ahead,[&](auto& item) {
+        const auto k=item.first;auto& c=item.second;
+        int r=resource(c);if(r<0) return true;
         const int growth=resources_[r].growth,interval=resources_[r].interval;
         if(frame && frame%growth==0 && grows_ && *c.overlay_data_11e<11) ++*c.overlay_data_11e;
-        if(!frame || frame%interval || !spreads_ || *c.overlay_data_11e<11) continue;
+        if(!frame || frame%interval || !spreads_ || *c.overlay_data_11e<11) return true;
         auto p=coord(k);
         for(auto [dx,dy]:{std::pair<int,int>{0,-1},{1,0},{0,1},{-1,0}}) {
             int x=p.x+dx,y=p.y+dy;if(x<0 || y<0 || x>=512 || y>=512) continue;
@@ -77,7 +81,8 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
                 spread.push_back({i->first,r});break;
             }
         }
-    }
+        return true;
+    });
     for(auto [k,r]:spread) {auto& c=w.cells.at(k);if(c.terrain->overlay_type_index!=-1) continue;c.terrain->overlay_type_index=resources_[r].first_overlay;c.overlay_data_11e=0;c.terrain->land_type=5;}
     std::set<std::uint32_t> live;
     std::vector<sw::Entity*> miners;
@@ -128,7 +133,10 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
             continue;
         }
         std::vector<std::uint32_t> fields;
-        for(const auto& [k,c]:w.cells) if(resource(c)>=0 && open(c)) fields.push_back(k);
+        sw::walk_cells(std::as_const(w.cells),field_ahead,[&](const auto& item) {
+            if(resource(item.second)>=0 && open(item.second)) fields.push_back(item.first);
+            return true;
+        });
         std::sort(fields.begin(),fields.end(),[&](auto a,auto b){int da=distance(*e.cell,coord(a)),db=distance(*e.cell,coord(b));return da!=db?da<db:a<b;});
         bool found=false;
         for(auto k:fields) if(movement_.issue(w,e.id,coord(k),std::max(1,rules_.read_integer(e.type,"Speed",4))*4).status==PrototypeMoveStatus::Complete) {found=true;break;}

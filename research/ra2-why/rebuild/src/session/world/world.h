@@ -187,6 +187,32 @@ private:
     Undo* outer_;
     bool committed_=false;
 };
+// Visit every Cell of a Cell map in key order, like a range-for over it.
+// visit returns false to stop. A map walk waits for each node in turn when
+// the map is not in the CPU cache, so the walk asks the CPU to load nodes
+// ahead from the node addresses that the previous walk with the same
+// `ahead` list saved. The addresses stay plain integers and are only a
+// prefetch hint: a stale one wastes a load, and the walk itself always
+// follows the map. Returns false when visit stopped the walk.
+template<class Cells,class Visit>
+bool walk_cells(Cells& cells,std::vector<std::uintptr_t>& ahead,Visit&& visit) {
+    constexpr std::size_t distance=48;
+    std::size_t index=0;
+    for (auto it=cells.begin();it!=cells.end();++it,++index) {
+        if (index+distance<ahead.size()) {
+            // The read fields of a Cell sit in the first 160 bytes of its
+            // map node, which starts 32 bytes before the value.
+            const auto node=ahead[index+distance];
+            for (const std::uintptr_t offset:{std::uintptr_t(0),std::uintptr_t(64),std::uintptr_t(128)})
+                __builtin_prefetch(reinterpret_cast<const void*>(node-32+offset));
+        }
+        const auto here=reinterpret_cast<std::uintptr_t>(&*it);
+        if (index<ahead.size()) ahead[index]=here; else ahead.push_back(here);
+        if (!visit(*it)) return false;
+    }
+    ahead.resize(index);
+    return true;
+}
 enum class PlacementResult { Placed, Blocked, Unresolved };
 // Checks every head and shared next chain. Invalid and cyclic snapshots fail.
 bool validate(const Snapshot& snapshot);

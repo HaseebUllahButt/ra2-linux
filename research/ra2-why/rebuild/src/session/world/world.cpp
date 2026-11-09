@@ -557,28 +557,10 @@ bool validate(const Snapshot& snapshot) {
                 }
         return true;
     };
-    // The Cell map nodes are usually not in the CPU cache, and a map walk
-    // waits for each node in turn. Ask the CPU to load nodes ahead, from the
-    // node addresses of the previous walk. This hint does not change what
-    // is read: the walk below still follows the map itself. A stale address
-    // only wastes a load; a prefetch never faults.
-    // Addresses stay plain integers; only the prefetch sees a pointer.
+    // The Cell map nodes are usually not in the CPU cache; walk_cells()
+    // asks the CPU to load them ahead without changing what is read.
     thread_local std::vector<std::uintptr_t> ahead;
-    constexpr std::size_t distance=48;
-    std::size_t index=0;
-    for (auto it=snapshot.cells.begin();it!=snapshot.cells.end();++it,++index) {
-        if (index+distance<ahead.size()) {
-            const auto node=ahead[index+distance];
-            // The map node header sits before the value; the read fields
-            // sit in its first 160 bytes.
-            for (const std::uintptr_t offset:{std::uintptr_t(0),std::uintptr_t(64),std::uintptr_t(128)})
-                __builtin_prefetch(reinterpret_cast<const void*>(node-32+offset));
-        }
-        const auto here=reinterpret_cast<std::uintptr_t>(&*it);
-        if (index<ahead.size()) ahead[index]=here; else ahead.push_back(here);
-        if (!check_cell(*it)) return false;
-    }
-    ahead.resize(index);
+    if (!walk_cells(snapshot.cells,ahead,check_cell)) return false;
     // A listed key at or above 512*512 cannot be an allocated Cell here: the
     // Cell loop above already rejects such a key in the Cell map.
     if (snapshot.cell_order)

@@ -396,14 +396,16 @@ Outcome initialize(w::Snapshot& world,FactorySet& factories,const Catalog& catal
         if (!owner || owner->role!=w::HouseRole::Player || !catalog.find(item.type)) continue;
         next.buildings.try_emplace(item.id,BuildingState{});
     }
-    if (!w::validate(candidate)) return fail(Status::NeedsInput,"prototype links are invalid");
     {
         // Rebuild the Cell map in key order. The content is the same; the
         // nodes now sit in memory in the order that full Cell walks read them.
+        // Check after the rebuild, so the check's saved node addresses point
+        // at the final map for the first match frame.
         std::map<std::uint32_t,w::CellState> cells;
         for (auto& item:candidate.cells) cells.emplace_hint(cells.end(),item.first,std::move(item.second));
         candidate.cells=std::move(cells);
     }
+    if (!w::validate(candidate)) return fail(Status::NeedsInput,"prototype links are invalid");
     world=std::move(candidate);
     factories=std::move(next);
     return {Status::Done,{},{},{}};
@@ -480,10 +482,11 @@ Outcome place(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,st
         if (!*proximity) return fail(Status::Rejected,"building is too far from the base");
         if (auto failure=ra2::sim::production::place_failure(world,factories,catalog,house_id,type,cell)) return *failure;
     }
+    // The transaction runs only for a ready world, so the check above has
+    // passed proximity on the same world and factories; nothing changes
+    // them before the callback except the Undo copy and the Complete marker
+    // that the check also used.
     return transaction(world,factories,[&](w::Snapshot& candidate,FactorySet& next) {
-        const auto proximity=ra2::sim::production::passes_proximity(candidate,next,catalog,house_id,type,cell);
-        if (!proximity) return fail(Status::NeedsInput,"building proximity is unknown");
-        if (!*proximity) return fail(Status::Rejected,"building is too far from the base");
         auto result=ra2::sim::production::place(candidate,next,catalog,house_id,type,cell,frame);
         if (result.status==Status::Done && result.entity) {
             auto* building=entity(candidate,*result.entity);
