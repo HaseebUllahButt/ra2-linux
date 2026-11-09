@@ -124,7 +124,7 @@ void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
         border(b,tab,static_cast<int>(active_category_)==i?gold:edge);
         text(b,tab.x+3,tab.y+4,tabs[i],ink,34,1);
     }
-    if (s.choices.empty()) {
+    if (s.choices.empty() && s.result.empty()) {
         text(b,816,90,"DEPLOY YOUR",gold,200);
         text(b,816,106,"MCV FIRST",gold,200);
     }

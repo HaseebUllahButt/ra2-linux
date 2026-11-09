@@ -191,15 +191,10 @@ std::vector<sim::skirmish::Order> BattleOrders::handle(const Input& input,
     if (input.kind!=InputKind::Button) return {};
     if (input.key==right_button) {
         if (!input.pressed) return {};
+        if (!contains(view.battlefield,point)) return {};
         cancel_pointer();
         last_click_.reset();
-        if (!contains(view.battlefield,point) || selected_.empty()) return {};
-        const auto* target=pick(world,view,point,true);
-        if (target) return orders(world,OrderKind::Attack,target->id);
-        if (view.screen_to_cell) {
-            const auto cell=view.screen_to_cell(point);
-            if (cell) return orders(world,OrderKind::Move,0,*cell);
-        }
+        selected_.clear();
         return {};
     }
     if (input.key!=left_button) return {};
@@ -235,11 +230,17 @@ std::vector<sim::skirmish::Order> BattleOrders::handle(const Input& input,
         return {};
     }
     const auto* entity=pick(world,view,point,false);
-    selected_.clear();
     if (!entity) {
         last_click_.reset();
+        if (!selected_.empty()) {
+            if (const auto* target=pick(world,view,point,true))
+                return orders(world,OrderKind::Attack,target->id);
+            if (view.screen_to_cell) if (const auto cell=view.screen_to_cell(point))
+                return orders(world,OrderKind::Move,0,*cell);
+        }
         return {};
     }
+    selected_.clear();
     selected_.push_back(entity->id);
     if (mcv(*entity) && last_click_ && last_click_->id==entity->id &&
         now_ms>=last_click_->time_ms && now_ms-last_click_->time_ms<=double_click_ms &&

@@ -9,6 +9,7 @@
 #include <SDL.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <set>
@@ -19,7 +20,7 @@ struct Options {
     std::filesystem::path game, map;
     std::size_t frames = 0;
     bool headless = false;
-    bool skirmish = false, autoplay = false;
+    bool skirmish = false, autoplay = false,human_input_check=false;
     ra2::fs::GameVariant variant = ra2::fs::GameVariant::RedAlert2;
 };
 Options options(int argc, char** argv) {
@@ -29,6 +30,7 @@ Options options(int argc, char** argv) {
         if (arg == "--headless") result.headless = true;
         else if (arg == "--skirmish") result.skirmish = true;
         else if (arg == "--autoplay") result.autoplay = true;
+        else if (arg == "--human-input-check") result.human_input_check = true;
         else if (arg == "--yuri") result.variant = ra2::fs::GameVariant::YurisRevenge;
         else if (arg == "--game-dir" || arg == "--map" || arg == "--frames") {
             if (++i == argc) throw std::runtime_error("Missing value for " + arg);
@@ -52,6 +54,10 @@ Options options(int argc, char** argv) {
         throw std::runtime_error("Playable prototype supports base RA2 only");
     if (result.autoplay && !result.skirmish)
         throw std::runtime_error("Autoplay needs --skirmish");
+    if(result.human_input_check&&!result.skirmish)
+        throw std::runtime_error("Human input check needs --skirmish");
+    if(result.human_input_check&&result.autoplay)
+        throw std::runtime_error("Human input check cannot use autoplay");
     return result;
 }
 
@@ -176,6 +182,9 @@ public:
         if (width != frame_.width || height != frame_.height || actual != frame_.pixels)
             throw std::runtime_error("Native output differs from the original menu composition");
     }
+    void capture_menu(const std::filesystem::path& path) const {
+        ra2::render::write_ppm({frame_.width,frame_.height,frame_.pixels},path);
+    }
 };
 
 int run_menu(const Options& args, ra2::fs::MixFileSystem& files) {
@@ -189,6 +198,7 @@ int run_menu(const Options& args, ra2::fs::MixFileSystem& files) {
     strings.parse(csf->data(), csf->size());
     auto menu = ra2::ui::Menu::load(files, *exe, strings);
     menu.enable_prototype_start(!expansion);
+    if(!expansion)menu.select_opponent(1,ra2::ui::Opponent::Easy);
     files.mount_resources();
     menu.configure_maps(ra2::ui::load_skirmish_maps(files, strings),
                         ra2::ui::load_skirmish_modes(files, strings));
@@ -201,6 +211,10 @@ int run_menu(const Options& args, ra2::fs::MixFileSystem& files) {
         if (args.frames) loop.run(args.frames);
         else while (loop.state().running) loop.step();
         if (args.headless) presenter.verify();
+        if(args.human_input_check)if(const auto* capture=std::getenv("RA2_MATCH_CAPTURE")) {
+            auto prefix=std::filesystem::path(capture);prefix.replace_extension();
+            presenter.capture_menu(prefix.string()+"-10-menu.ppm");
+        }
         if (!pump.start_match) break;
         ra2::app::BattleOptions battle;
         battle.game_directory = args.game;
@@ -233,13 +247,19 @@ int main(int argc, char** argv) {
             battle.frames = args.frames;
             battle.headless = args.headless;
             battle.autoplay = args.autoplay;
-            return ra2::app::run_prototype_battle(battle);
+            battle.human_input_check=args.human_input_check;
+            const auto status=ra2::app::run_prototype_battle(battle);
+            if((args.headless||args.frames)&&!args.human_input_check)return status;
         }
         ra2::fs::MixFileSystem files(args.game);
         files.mount_language(args.variant);
         files.bootstrap(args.variant);
         files.mount_overlays();
-        if (args.map.empty()) return run_menu(args, files);
+        if (args.map.empty()||args.skirmish) {
+            auto menu_args=args;
+            if(args.human_input_check)menu_args.frames=3;
+            return run_menu(menu_args, files);
+        }
         files.mount_resources();
         ra2::rules::IniFile ini;
         if (std::filesystem::is_regular_file(args.map))

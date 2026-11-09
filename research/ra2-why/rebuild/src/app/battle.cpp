@@ -1,5 +1,7 @@
 #include "battle.h"
 #include "battle_hud.h"
+#include "battle_help.h"
+#include "battle_cursor.h"
 #include "battle_orders.h"
 #include "battle_scene.h"
 #include "scene.h"
@@ -14,6 +16,7 @@
 #include "../render/battle_radar.h"
 #include "../sim/damage_runtime.h"
 #include "../loop/game_loop.h"
+#include "../ui/score_screen.h"
 #include <SDL.h>
 #include <algorithm>
 #include <cmath>
@@ -62,6 +65,11 @@ std::string result_name(sim::Victory result) {
     default:return {};
     }
 }
+struct CursorScope {
+    int previous=SDL_ShowCursor(SDL_QUERY);
+    CursorScope(){SDL_ShowCursor(SDL_DISABLE);}
+    ~CursorScope(){SDL_ShowCursor(previous);}
+};
 
 // TODO-ORIGINAL: Native match orchestration. See RA1 CONQUER.CPP Main_Loop
 // and LOGIC.CPP for the input, object, factory and house boundaries. Original
@@ -87,34 +95,62 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     std::uint32_t player_,enemy_;
     BattleOrders orders_;
     BattleHud hud_;
+    BattleCursor cursor_;
+    CursorScope cursor_scope_;
+    BattleHelp help_;
+    ui::ScoreAssets score_assets_;
+    std::optional<gfx::RgbaImage> score_image_;
     HudState hud_state_;
     render::Bitmap frame_;
     std::map<std::uint32_t,std::uint32_t> attacks_;
+    std::map<std::uint32_t,ra2map::Cell> manual_moves_;
+    std::set<std::uint32_t> move_destinations_;
     std::vector<Order> pending_;
     std::set<std::int32_t> keys_;
     std::set<std::string> gaps_;
     int camera_x_=0,camera_y_=0,pointer_x_=-1,pointer_y_=-1;
     std::string placement_,status_="Select MCV. D deploys.";
     bool quit_=false,autoplay_moved_=false,autoplay_deployed_=false;
+    bool help_visible_=true,show_score_=false;
+    bool force_draw_=false;
+    int human_stage_=0;
+    std::uint32_t human_target_=0,human_wait_frame_=0;
+    std::map<std::uint32_t,sim::Coord> human_positions_;
+    int human_camera_=0;
+    std::uint32_t ai_opening_=3500;
+    ui::Opponent difficulty_=ui::Opponent::Easy;
     std::uint32_t autoplay_unit_=0;
     std::optional<sim::Coord> autoplay_start_;
 public:
     std::size_t presented=0,moved=0,fired=0,impacts=0,built=0,deployed=0,ai_orders=0,infantry=0;
     Battle(const BattleOptions& args,w::BaseBattleAssets& assets,w::Snapshot world,Window& window,
-           Scene& scene,const render::Bitmap& terrain,loop::Clock& clock)
+           Scene& scene,const render::Bitmap& terrain,loop::Clock& clock,const fs::MixFileSystem& files)
         :args_(args),assets_(assets),world_(std::move(world)),
          rules_(overlay_rules(overlay_rules(assets.rules(),assets.battle_rules()),assets.map_ini())),
          catalog_(p::Catalog::from(rules_,assets.art_ini(),assets.map_ini())),
          combat_(assets.rules(),assets.battle_rules(),assets.map_ini(),assets.art_ini(),
                  (args.game_directory/"game.exe").string()),economy_(rules_),ai_(rules_),
          window_(window),scene_(scene),terrain_(terrain),geometry_(render::MapGeometry::from_ini(assets.map_ini())),
-         clock_(clock),player_(world_.houses.at(0).id),enemy_(world_.houses.at(1).id),orders_(player_) {
+         clock_(clock),player_(world_.houses.at(0).id),enemy_(world_.houses.at(1).id),orders_(player_),cursor_(files) {
         if(const auto labels=assets_.read_asset("RA2.CSF"))labels_.parse(labels->data(),labels->size());
+        score_assets_=ui::ScoreAssets::load(files,labels_);
+        help_visible_=!args_.autoplay;
+        for(const auto& slot:args_.setup.opponents)if(slot.opponent && *slot.opponent!=ui::Opponent::Closed) {
+            difficulty_=*slot.opponent;break;
+        }
+        const auto delays=rules_.read_list("General","TeamDelays");
+        const auto index=difficulty_==ui::Opponent::Hard?0u:difficulty_==ui::Opponent::Medium?1u:2u;
+        if(delays.size()>index)ai_opening_=std::uint32_t(std::max(0,rules::IniFile::integer_value(delays[index]).value_or(3500)));
+        ai_opening_=std::max(ai_opening_,std::uint32_t(std::max(0.0,rules_.read_double("General","AttackDelay",.5))*900));
         const auto initialized=proto::initialize(world_,factories_,catalog_,player_);
         if (initialized.status!=p::Status::Done) throw std::runtime_error(initialized.detail);
         const auto start=std::find_if(world_.entities.begin(),world_.entities.end(),[&](const auto& e){return live(e)&&e.house_id==player_;});
         if (start!=world_.entities.end()) center(*start);
         refresh_hud();
+        std::vector<BuildChoice> icons;
+        for(const auto& list:{&catalog_.buildings,&catalog_.units,&catalog_.infantry})
+            for(const auto& type:*list)icons.push_back({type.id,type.id,type.cost,true,0});
+        hud_.load_assets(files,rules_,assets.art_ini(),icons);
     }
     const w::Snapshot& world() const {return world_;}
     sim::Victory result() const {return victory_.result;}
@@ -173,30 +209,59 @@ public:
     void deploy_selected() {
         for (const auto id:orders_.selected_ids()) queue({OrderKind::Deploy,player_,id,0,{},{}});
     }
+    ra2map::Cell formation_cell(ra2map::Cell goal) {
+        // TODO-ORIGINAL: reserve separate group destinations, then retry
+        // temporary obstructions. Original formation planning remains separate.
+        for(int r=0;r<=8;++r)for(int dy=-r;dy<=r;++dy)for(int dx=-r;dx<=r;++dx) {
+            if(std::max(std::abs(dx),std::abs(dy))!=r)continue;
+            const int x=int(goal.x)+dx,y=int(goal.y)+dy;
+            if(x<0||y<0||x>=512||y>=512)continue;
+            const auto key=std::uint32_t(y)*512+x;
+            const auto at=world_.cells.find(key);
+            if(at==world_.cells.end()||move_destinations_.count(key))continue;
+            const auto& c=at->second;
+            if(!c.heads||c.heads->ground_head||c.ground_occupancy_124!=0||c.unit_land_speed.value_or(0)<=0)continue;
+            move_destinations_.insert(key);
+            return {std::uint16_t(x),std::uint16_t(y)};
+        }
+        return goal;
+    }
     void input(const Input& input) {
         if (input.kind==InputKind::Quit) {quit_=true;return;}
-        if (input.kind==InputKind::Focus && !input.pressed) keys_.clear();
+        if (input.kind==InputKind::Focus && !input.pressed) {
+            keys_.clear();pointer_x_=pointer_y_=-1;
+        }
         if (input.kind==InputKind::Motion || input.kind==InputKind::Button) {
             pointer_x_=input.x;pointer_y_=input.y;
         }
         if (input.kind==InputKind::Key) {
             if (input.pressed) keys_.insert(input.key);else keys_.erase(input.key);
             if (input.pressed && input.key==SDLK_ESCAPE) {
-                if (!placement_.empty()) {placement_.clear();orders_.set_placement_active(false);}
+                if (!placement_.empty()&&!help_visible_) {placement_.clear();orders_.set_placement_active(false);}
                 else quit_=true;
                 return;
             }
+            if(input.pressed && input.key==SDLK_F1) {help_visible_=!help_visible_;return;}
+            if(input.pressed && input.key==SDLK_TAB && victory_.settled()) {show_score_=!show_score_;return;}
             if (input.pressed && input.key==SDLK_h) {
                 for (const auto& e:world_.entities) if (live(e)&&e.house_id==player_) {center(e);break;}
             }
         }
-        if (victory_.settled()) return;
+        if(help_visible_) {
+            if(input.kind==InputKind::Button && input.pressed)help_visible_=false;
+            return;
+        }
+        if(show_score_) {
+            if(input.kind==InputKind::Button && input.pressed)show_score_=false;
+            return;
+        }
         if (input.kind==InputKind::Button && input.x>=BattleHud::sidebar_x) {
             if (input.pressed && input.key==SDL_BUTTON_LEFT) {
                 refresh_hud();
                 const auto action=hud_.handle_click(input.x,input.y,hud_state_);
-                if (action.kind==HudActionKind::Deploy) deploy_selected();
+                if (action.kind==HudActionKind::Deploy && !victory_.settled()) deploy_selected();
                 else if (action.kind==HudActionKind::Build) {
+                    if(victory_.settled())return;
                     bool ready=false;
                     for (const auto& f:factories_.factories) if (f.house_id==player_ && f.object &&
                         f.object_type==action.type && f.progress==54) ready=true;
@@ -219,14 +284,173 @@ public:
             return;
         }
         auto commands=orders_.handle(input,world_,view(),clock_.now_ms());
-        pending_.insert(pending_.end(),commands.begin(),commands.end());
+        if(!victory_.settled())pending_.insert(pending_.end(),commands.begin(),commands.end());
     }
     void pump(loop::State& state) override {
+        if(args_.human_input_check)human_input(state);
         for (const auto& event:window_.poll()) {
             if (!args_.headless && event.kind==InputKind::Focus) state.window_active=event.pressed;
             input(event);
         }
+        state.paused=help_visible_;
         if (quit_) state.running=false;
+    }
+    void test_click(int x,int y) {
+        window_.inject_for_test({InputKind::Motion,x,y});
+        window_.inject_for_test({InputKind::Button,x,y,SDL_BUTTON_LEFT,true});
+        window_.inject_for_test({InputKind::Button,x,y,SDL_BUTTON_LEFT,false});
+    }
+    void test_key(int key) {
+        window_.inject_for_test({InputKind::Key,0,0,key,true});
+        window_.inject_for_test({InputKind::Key,0,0,key,false});
+    }
+    void checkpoint(const loop::State& state,const std::string& label) {
+        force_draw_=true;present(state);force_draw_=false;
+        int width=0,height=0;const auto pixels=window_.capture(width,height);
+        if(width!=frame_.width||height!=frame_.height||pixels!=frame_.rgba)
+            throw std::runtime_error("Human input capture differs: "+label);
+        if(const auto* path=std::getenv("RA2_MATCH_CAPTURE")) {
+            auto prefix=std::filesystem::path(path);prefix.replace_extension();
+            render::write_ppm(frame_,prefix.string()+"-"+label+".ppm");
+        }
+        std::cerr<<"Human input checkpoint: "<<label<<" frame="<<state.frame_counter<<'\n';
+    }
+    void human_input(const loop::State& state) {
+        const auto require=[](bool ok,const char* message){if(!ok)throw std::runtime_error(message);};
+        const auto own_type=[&](const std::string& type)->const w::Entity* {
+            for(const auto& e:world_.entities)if(live(e)&&e.house_id==player_&&e.type==type)return &e;
+            return nullptr;
+        };
+        const auto palette_click=[&](const std::string& type) {
+            refresh_hud();
+            const auto it=std::find_if(hud_state_.choices.begin(),hud_state_.choices.end(),[&](const auto& c){return c.type==type;});
+            require(it!=hud_state_.choices.end(),"Human input: power plant cameo is missing");
+            const auto r=BattleHud::build_button_bounds(int(it-hud_state_.choices.begin()));
+            test_click(r.x+8,r.y+8);
+        };
+        const bool allied=house(world_,player_).side_index.value_or(0)==0;
+        const std::string power=allied?"GAPOWR":"NAPOWR";
+        switch(human_stage_) {
+        case 0:
+            require(help_visible_,"Human input: start help was not shown");
+            checkpoint(state,"00-help");
+            window_.inject_for_test({InputKind::Focus,0,0,0,true});
+            test_click(500,500);human_stage_=1;break;
+        case 1:
+            for(const auto& e:world_.entities)if(live(e)&&e.house_id==player_&&!rules_.read_string(e.type,"DeploysInto").empty()) {
+                const auto at=anchor(e);require(at.has_value(),"Human input: MCV has no screen anchor");
+                test_click(at->x,at->y);test_click(at->x,at->y);human_stage_=2;return;
+            }
+            throw std::runtime_error("Human input: MCV is missing");
+        case 2:
+            require(own_type(allied?"GACNST":"NACNST"),"Human input: MCV double click did not deploy");
+            checkpoint(state,"01-deployed");palette_click(power);human_stage_=3;break;
+        case 3: {
+            const p::FactoryState* product=nullptr;
+            for(const auto& f:factories_.factories)if(f.house_id==player_&&f.object&&f.object_type==power)product=&f;
+            require(product,"Human input: sidebar click did not begin power production");
+            checkpoint(state,"02-production");human_stage_=4;break;
+        }
+        case 4:
+            for(const auto& f:factories_.factories)if(f.house_id==player_&&f.object_type==power&&f.progress==54) {
+                checkpoint(state,"03-ready");palette_click(power);human_stage_=5;break;
+            }
+            break;
+        case 5: {
+            require(orders_.placement_active(),"Human input: READY did not start placement");
+            const auto* base=own_type(allied?"GACNST":"NACNST");require(base,"Human input: yard vanished");
+            for(int r=2;r<=12;++r)for(int dy=-r;dy<=r;++dy)for(int dx=-r;dx<=r;++dx) {
+                if(std::max(std::abs(dx),std::abs(dy))!=r)continue;
+                const p::CellXY cell{std::int16_t(int(base->cell->x)+dx),std::int16_t(int(base->cell->y)+dy)};
+                // A private candidate only chooses a legal click position.
+                // The real world changes solely through queued window events.
+                auto candidate=world_;auto factories=factories_;
+                if(proto::place(candidate,factories,catalog_,player_,power,cell,state.frame_counter).status!=p::Status::Done)continue;
+                w::Entity mark;mark.lifetime=w::Lifetime::Placed;mark.resolved_hp=1;
+                mark.cell=ra2map::Cell{std::uint16_t(cell.x),std::uint16_t(cell.y)};
+                const auto& c=world_.cells.at(std::uint32_t(cell.y)*512+cell.x);
+                mark.position=sim::Coord{cell.x*256+128,cell.y*256+128,c.terrain->floor_world_height.value_or(0)};
+                const auto at=anchor(mark);if(!at||at->x<0||at->x>=804||at->y<0||at->y>=768)continue;
+                test_click(at->x,at->y);human_stage_=6;return;
+            }
+            throw std::runtime_error("Human input: no visible legal power placement");
+        }
+        case 6: {
+            require(own_type(power),"Human input: map click did not place power plant");
+            checkpoint(state,"04-placed");
+            int left=804,top=768,right=0,bottom=0;
+            for(const auto& e:world_.entities)if(e.house_id==player_&&fighter(e))if(const auto at=anchor(e)) {
+                left=std::min(left,at->x-12);top=std::min(top,at->y-12);
+                right=std::max(right,at->x+12);bottom=std::max(bottom,at->y+12);
+                human_positions_[e.id]=*e.position;
+            }
+            require(human_positions_.size()>=2,"Human input: two starting tanks are missing");
+            window_.inject_for_test({InputKind::Button,left,top,SDL_BUTTON_LEFT,true});
+            window_.inject_for_test({InputKind::Motion,right,bottom});
+            window_.inject_for_test({InputKind::Button,right,bottom,SDL_BUTTON_LEFT,false});human_stage_=7;break;
+        }
+        case 7: {
+            require(orders_.selected_ids().size()>=2,"Human input: tank box selection failed");
+            checkpoint(state,"05-selected");
+            const auto* e=find(world_,human_positions_.begin()->first);require(e,"Human input: tank vanished");
+            for(int dy=-6;dy<=6;++dy)for(int dx=3;dx<=7;++dx) {
+                auto mark=*e;mark.cell=ra2map::Cell{std::uint16_t(int(e->cell->x)+dx),std::uint16_t(int(e->cell->y)+dy)};
+                const auto cell=world_.cells.find(std::uint32_t(mark.cell->y)*512+mark.cell->x);
+                if(cell==world_.cells.end()||!cell->second.heads||cell->second.heads->ground_head||cell->second.unit_land_speed.value_or(0)<=0)continue;
+                mark.position=sim::Coord{int(mark.cell->x)*256+128,int(mark.cell->y)*256+128,cell->second.terrain->floor_world_height.value_or(0)};
+                const auto at=anchor(mark);if(!at||at->x<20||at->x>=780||at->y<20||at->y>=740)continue;
+                test_click(at->x,at->y);human_wait_frame_=state.frame_counter;human_stage_=8;return;
+            }
+            throw std::runtime_error("Human input: no visible move destination");
+        }
+        case 8: {
+            bool moved_all=true;
+            for(const auto& [id,before]:human_positions_) {
+                const auto* e=find(world_,id);
+                moved_all &= e&&e->position&&(e->position->x!=before.x||e->position->y!=before.y);
+            }
+            require(state.frame_counter-human_wait_frame_<300,"Human input: selected tanks did not move");
+            if(!moved_all)break;
+            checkpoint(state,"06-moved");
+            for(const auto& e:world_.entities)if(live(e)&&e.house_id==enemy_&&fighter(e)) {
+                human_target_=e.id;
+                const auto at=anchor(e);require(at.has_value(),"Human input: enemy has no anchor");
+                const auto radar=BattleHud::minimap_bounds();
+                test_click(radar.x+(at->x+camera_x_)*radar.width/terrain_.width,
+                    radar.y+(at->y+camera_y_)*radar.height/terrain_.height);
+                human_stage_=9;return;
+            }
+            throw std::runtime_error("Human input: enemy tank is missing");
+        }
+        case 9: {
+            const auto* e=find(world_,human_target_);require(e,"Human input: target vanished");
+            const auto at=anchor(*e);require(at&&at->x>=0&&at->x<804&&at->y>=0&&at->y<768,"Human input: minimap did not show enemy");
+            test_click(at->x,at->y);human_stage_=10;break;
+        }
+        case 10:
+            if(fired) {checkpoint(state,"07-attack");human_stage_=11;}
+            break;
+        case 11:
+            if(victory_.settled()) {
+                require(show_score_&&score_image_,"Human input: result screen is missing");
+                checkpoint(state,"08-result");test_key(SDLK_TAB);human_camera_=camera_x_;
+                window_.inject_for_test({InputKind::Key,0,0,camera_x_>0?SDLK_LEFT:SDLK_RIGHT,true});
+                human_stage_=12;
+            } else if(state.frame_counter%90==0&&!orders_.selected_ids().empty()) {
+                const auto* target=find(world_,human_target_);
+                if(!target||!live(*target))for(const auto& e:world_.entities)if(live(e)&&e.house_id==enemy_) {
+                    const auto at=anchor(e);if(!at||at->x<0||at->x>=804||at->y<0||at->y>=768)continue;
+                    human_target_=e.id;test_click(at->x,at->y);break;
+                }
+            }
+            break;
+        case 12:
+            require(camera_x_!=human_camera_,"Human input: camera stopped after game over");
+            window_.inject_for_test({InputKind::Key,0,0,SDLK_LEFT,false});
+            window_.inject_for_test({InputKind::Key,0,0,SDLK_RIGHT,false});
+            checkpoint(state,"09-camera-after-result");test_key(SDLK_ESCAPE);human_stage_=13;break;
+        default:break;
+        }
     }
     void note(const p::Outcome& outcome,const std::string& success) {
         status_=outcome.status==p::Status::Done?success:outcome.detail;
@@ -243,12 +467,15 @@ public:
             if (miner(*e)) {status_="Miners harvest automatically.";break;}
             combat_.stop(world_,order.entity);attacks_.erase(order.entity);
             {
-                const auto move=movement_.issue(world_,order.entity,order.cell,
+                const auto goal=formation_cell(order.cell);
+                const auto move=movement_.issue(world_,order.entity,goal,
                     sim::original_rule_speed(rules_.read_integer(e->type,"Speed",4)));
+                if(move.status==sim::PrototypeMoveStatus::Complete)manual_moves_[order.entity]=goal;
                 if (order.house==player_) status_=move.status==sim::PrototypeMoveStatus::Complete?"Moving.":move.detail;
             }
             break;
         case OrderKind::Attack:
+            manual_moves_.erase(order.entity);
             if (combat_.attack(world_,order.entity,order.target)) {
                 const auto prior=attacks_.find(order.entity);
                 if(prior==attacks_.end()||prior->second!=order.target)movement_.cancel(world_,order.entity);
@@ -256,8 +483,10 @@ public:
             }
             break;
         case OrderKind::Stop:
+            manual_moves_.erase(order.entity);
             movement_.cancel(world_,order.entity);combat_.stop(world_,order.entity);attacks_.erase(order.entity);break;
         case OrderKind::Deploy: {
+            manual_moves_.erase(order.entity);
             movement_.cancel(world_,order.entity);combat_.stop(world_,order.entity);attacks_.erase(order.entity);
             const auto outcome=proto::deploy(world_,factories_,catalog_,order.entity,true);
             if (outcome.status==p::Status::Done) ++deployed;
@@ -345,7 +574,8 @@ public:
                         destination.position=sim::Coord{int(destination.cell->x)*256+128,e.position->y,e.position->z};
                         const auto b=anchor(destination);
                         if(b && b->x>=0&&b->x<BattleHud::sidebar_x&&b->y>=0&&b->y<768) {
-                            input({InputKind::Button,b->x,b->y,SDL_BUTTON_RIGHT,true});break;
+                            input({InputKind::Button,b->x,b->y,SDL_BUTTON_LEFT,true});
+                            input({InputKind::Button,b->x,b->y,SDL_BUTTON_LEFT,false});break;
                         }
                     }
                 }
@@ -387,20 +617,37 @@ public:
     }
     void update(loop::State& state) {
         const auto frame=state.frame_counter; // All match subsystems use this frame.
+        const bool edge=pointer_x_>=0 && pointer_x_<1024 && pointer_y_>=0 && pointer_y_<768;
+        pan(24*(int(keys_.count(SDLK_RIGHT))-int(keys_.count(SDLK_LEFT))+
+                int(edge&&pointer_x_>=1016)-int(edge&&pointer_x_<8)),
+            16*(int(keys_.count(SDLK_DOWN))-int(keys_.count(SDLK_UP))+
+                int(edge&&pointer_y_>=760)-int(edge&&pointer_y_<8)));
         if(victory_.settled())return;
-        pan(24*(int(keys_.count(SDLK_RIGHT))-int(keys_.count(SDLK_LEFT))),
-            16*(int(keys_.count(SDLK_DOWN))-int(keys_.count(SDLK_UP))));
         if(args_.autoplay)autoplay(frame);
         auto enemy_commands=ai_.tick(world_,enemy_,player_,std::int32_t(frame));
+        // TODO-ORIGINAL: TeamDelays uses Hard/Normal/Easy registry order.
+        // The small prototype policy waits for that opening before attacking.
+        enemy_commands.erase(std::remove_if(enemy_commands.begin(),enemy_commands.end(),[&](const auto& order) {
+            return order.kind==OrderKind::Attack && frame<ai_opening_;
+        }),enemy_commands.end());
         ai_orders+=enemy_commands.size();
         pending_.insert(pending_.end(),enemy_commands.begin(),enemy_commands.end());
         auto commands=std::move(pending_);pending_.clear();
+        move_destinations_.clear();
         for(const auto& order:commands)execute(order,frame);
         if(frame%15==0){auto_place(enemy_,frame);if(args_.autoplay)auto_place(player_,frame);}
         economy_.tick(world_,frame);
         const auto motion=movement_.tick(world_,frame);
         moved+=motion.moved.size();
         for(const auto id:motion.blocked)movement_.cancel(world_,id);
+        for(const auto id:motion.arrived)manual_moves_.erase(id);
+        for(auto it=manual_moves_.begin();it!=manual_moves_.end();) {
+            const auto* e=find(world_,it->first);
+            if(!e||!live(*e)){it=manual_moves_.erase(it);continue;}
+            if(frame%15==0&&!movement_.moving(e->id))
+                movement_.issue(world_,e->id,it->second,sim::original_rule_speed(rules_.read_integer(e->type,"Speed",4)));
+            ++it;
+        }
         if(motion.status!=sim::PrototypeMoveStatus::Complete)gaps_.insert(motion.detail);
         // TODO-ORIGINAL: Stationary troops acquire a nearby enemy. This is
         // native guard behavior, not original Mission_Guard or threat selection.
@@ -459,6 +706,25 @@ public:
         }
         if(victory_.settled()) {
             status_=result_name(victory_.result)+". Press Esc to return.";
+            show_score_=true;
+            ui::ScoreScreen score;score.player_won=victory_.result==sim::Victory::PlayerWon;
+            score.seconds=frame/30;
+            // TODO-ORIGINAL: infer prototype totals from retained objects.
+            // Original kill attribution and harvested-credit totals remain separate.
+            for(const auto id:{player_,enemy_}) {
+                ui::ScoreHouse row;row.name=house(world_,id).name;
+                row.kills_of.assign(2,0);row.losses_to.assign(2,0);
+                for(const auto& e:world_.entities)if(e.house_id==id) {
+                    if(e.kind==w::Kind::Structure)++row.buildings_built;else if(e.kind!=w::Kind::Terrain)++row.units_built;
+                    if(e.lifetime==w::Lifetime::Destroyed && rules_.read_string(e.type,"DeploysInto").empty())
+                        ++row.losses_to[id==player_?1:0];
+                }
+                score.houses.push_back(std::move(row));
+            }
+            score.houses[0].kills_of[1]=score.houses[1].losses_to[0];
+            score.houses[1].kills_of[0]=score.houses[0].losses_to[1];
+            score_assets_.continue_text="Esc: Main Menu / Click: View Battlefield / Tab: Score";
+            score_image_=ui::draw_score_screen(score_assets_,score);
             window_.title("Red Alert 2 native prototype: "+status_);
             if(args_.autoplay)state.running=false;
         }
@@ -489,6 +755,8 @@ public:
                 if(std::find(list->begin(),list->end(),type)!=list->end())allowed=true;
             if((!allowed || gate==eligible.end()||gate->second!=p::CanBuild::Can)&&!factory)continue;
             BuildChoice choice;choice.type=type;choice.name=name(type);choice.cost=facts->cost;choice.enabled=true;
+            choice.category=facts->rtti==p::Rtti::BuildingType?BuildCategory::Buildings:
+                facts->rtti==p::Rtti::InfantryType?BuildCategory::Infantry:BuildCategory::Vehicles;
             if(factory)choice.progress=factory->progress*1000/54;
             hud_state_.choices.push_back(std::move(choice));
         }
@@ -523,7 +791,7 @@ public:
     }
     void present(const loop::State& state) override {
         // Headless checks compose at fixed intervals and at the final frame.
-        if(args_.headless && presented && state.frame_counter%60 && !victory_.settled())return;
+        if(args_.headless && presented && state.frame_counter%60 && !victory_.settled()&&!help_visible_&&!force_draw_)return;
         const auto drawing=battle_scene_state(world_,state.frame_counter);
         auto scene=scene_.render(terrain_,drawing,{camera_x_,camera_y_,1024,768});
         for(const auto& detail:scene.gaps)gaps_.insert(detail);
@@ -555,6 +823,41 @@ public:
             if(const auto at=anchor(marker))rectangle(frame_,at->x-30,at->y-15,60,30,{255,230,80});
         }
         refresh_hud();hud_.draw(frame_,hud_state_);
+        if(show_score_ && score_image_) {
+            const auto& score=*score_image_;
+            for(int y=0;y<frame_.height;++y)for(int x=0;x<frame_.width;++x) {
+                const auto source=(std::size_t(y*score.height/frame_.height)*score.width+x*score.width/frame_.width)*4;
+                const auto target=(std::size_t(y)*frame_.width+x)*4;
+                std::copy_n(score.pixels.begin()+source,4,frame_.rgba.begin()+target);
+            }
+        }
+        if(help_visible_)help_.draw(frame_);
+        CursorKind kind=CursorKind::Normal;
+        if(!help_visible_&&!show_score_&&pointer_x_>=0&&pointer_x_<BattleHud::sidebar_x) {
+            const auto cell=cell_at({pointer_x_,pointer_y_});
+            bool passable=false;
+            if(cell) {
+                const auto at=world_.cells.find(std::uint32_t(cell->y)*512+cell->x);
+                passable=at!=world_.cells.end()&&at->second.unit_land_speed.value_or(0)>0&&
+                    at->second.cell_flag_100!=true;
+            }
+            const w::Entity* hovered=nullptr;int nearest=24*24;
+            for(const auto& e:world_.entities)if(const auto at=anchor(e)) {
+                const int dx=at->x-pointer_x_,dy=at->y-pointer_y_,d=dx*dx+dy*dy;
+                if(d<nearest){nearest=d;hovered=&e;}
+            }
+            if(!placement_.empty())kind=passable&&!hovered?CursorKind::Deploy:CursorKind::NoGo;
+            else if(hovered && hovered->house_id==player_)kind=
+                rules_.read_string(hovered->type,"DeploysInto").empty()?CursorKind::Select:CursorKind::Deploy;
+            else if(!orders_.selected_ids().empty()) {
+                if(hovered && hovered->house_id==enemy_) {
+                    bool can=false;
+                    for(const auto id:orders_.selected_ids())can|=combat_.can_attack(world_,id,hovered->id);
+                    kind=can?CursorKind::Attack:CursorKind::NoGo;
+                } else kind=passable?CursorKind::Move:CursorKind::NoGo;
+            }
+        }
+        if(pointer_x_>=0&&pointer_y_>=0)cursor_.draw(frame_,kind,pointer_x_,pointer_y_,state.frame_counter);
         window_.present(frame_.rgba.data(),frame_.width,frame_.height,frame_.rgba.size());++presented;
     }
     void verify(const loop::State& state) {
@@ -572,6 +875,8 @@ public:
             <<" ai_orders="<<ai_orders<<" result="<<(victory_.settled()?result_name(victory_.result):"IN_PROGRESS")
             <<" world=PrototypeComplete\n";
         for(const auto& gap:gaps_)std::cout<<"TODO-ORIGINAL: "<<gap<<'\n';
+        if(args_.human_input_check && human_stage_<13)
+            throw std::runtime_error("Human input check did not reach result and menu; stage="+std::to_string(human_stage_));
         if(args_.autoplay && !victory_.settled())for(const auto& e:world_.entities)
             if(live(e)&&(e.house_id==player_||e.house_id==enemy_))
                 std::cout<<"Survivor house="<<e.house_id<<" id="<<e.id<<" type="<<e.type<<" hp="
@@ -626,7 +931,7 @@ int run_prototype_battle(const BattleOptions& args) {
     Window window("Red Alert 2 native prototype: skirmish",1024,768,!args.headless);
     loop::SteadyClock real_clock;loop::SimulatedClock fast_clock;
     loop::Clock& clock=args.headless?static_cast<loop::Clock&>(fast_clock):static_cast<loop::Clock&>(real_clock);
-    Battle match(args,assets,std::move(battle->snapshot),window,scene,terrain_image,clock);
+    Battle match(args,assets,std::move(battle->snapshot),window,scene,terrain_image,clock,files);
     loop::Hooks hooks;hooks.update=[&](loop::State& state){match.update(state);};
     loop::GameLoop loop(match,match,clock,{},hooks);
     if(args.frames)loop.run(args.frames);else while(loop.state().running)loop.step();

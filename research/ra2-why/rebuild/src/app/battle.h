@@ -9,7 +9,7 @@ struct BattleOptions {
     std::string map="MP02T2.MAP";
     ui::SkirmishSetup setup;
     std::size_t frames=0;
-    bool headless=false, autoplay=false;
+    bool headless=false, autoplay=false,human_input_check=false;
 };
 int run_prototype_battle(const BattleOptions&);
 }

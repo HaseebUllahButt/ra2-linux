@@ -23,6 +23,8 @@ public:
     Window(const Window&) = delete;
     Window& operator=(const Window&) = delete;
     std::vector<Input> poll();
+    // App checks use the same SDL event queue as physical mouse and key input.
+    void inject_for_test(const Input& input);
     void present(const std::uint8_t* rgba, int width, int height, std::size_t size);
     void title(const std::string& text);
     // Read the actual native render target for automated graphics checks.

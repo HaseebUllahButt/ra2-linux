@@ -48,6 +48,27 @@ Window::Window(const std::string& title, int width, int height, bool visible)
 }
 Window::~Window() = default;
 
+void Window::inject_for_test(const Input& input) {
+    SDL_Event event{};
+    const auto id=SDL_GetWindowID(impl_->window);
+    if(input.kind==InputKind::Button) {
+        event.type=input.pressed?SDL_MOUSEBUTTONDOWN:SDL_MOUSEBUTTONUP;
+        event.button.windowID=id;event.button.button=static_cast<Uint8>(input.key);
+        event.button.state=input.pressed?SDL_PRESSED:SDL_RELEASED;
+        event.button.x=input.x;event.button.y=input.y;
+    } else if(input.kind==InputKind::Motion) {
+        event.type=SDL_MOUSEMOTION;event.motion.windowID=id;event.motion.x=input.x;event.motion.y=input.y;
+    } else if(input.kind==InputKind::Key) {
+        event.type=input.pressed?SDL_KEYDOWN:SDL_KEYUP;
+        event.key.windowID=id;event.key.state=input.pressed?SDL_PRESSED:SDL_RELEASED;
+        event.key.keysym.sym=input.key;
+    } else if(input.kind==InputKind::Focus) {
+        event.type=SDL_WINDOWEVENT;event.window.windowID=id;
+        event.window.event=input.pressed?SDL_WINDOWEVENT_FOCUS_GAINED:SDL_WINDOWEVENT_FOCUS_LOST;
+    } else throw std::invalid_argument("Unsupported injected input");
+    if(SDL_PushEvent(&event)<0)error("Queue native test input");
+}
+
 std::vector<Input> Window::poll() {
     std::vector<Input> inputs;
     SDL_Event event;

@@ -24,12 +24,13 @@ struct BattleView {
 // Native skirmish input only. This class never executes orders or changes the world.
 // TODO-ORIGINAL: Recover hit shapes, drag and double-click limits, overlap priority,
 // selection modifiers, groups, and original deploy input rules.
-// Current clicks replace selection. Boxes include owned Unit and Infantry anchors.
+// Left clicks select or order. Right clicks cancel selection.
+// Boxes include owned Unit and Infantry anchors.
 class BattleOrders {
 public:
     explicit BattleOrders(std::uint32_t house);
     // Feed each event once, in poll order. now_ms is a monotonic millisecond clock.
-    // Left selection commits on release. Right orders issue on press.
+    // Left selection and orders commit on release. Right press cancels.
     std::vector<sim::skirmish::Order> handle(const Input&,
         const session::world::Snapshot&, const BattleView&, std::uint64_t now_ms);
     // Call once per frame too, including frames without input. Drop stale selected IDs.

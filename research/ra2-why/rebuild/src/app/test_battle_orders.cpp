@@ -118,6 +118,7 @@ void selection() {
     f.click(80,100);
     f.selected({10});
     for (const auto point : {BattlePoint{220,60},{220,95},{115,130},{100,50},{195,60},{30,180}}) {
+        f.controller.clear();
         require(f.click(point.x,point.y).empty(),"Unowned or empty click issued an order");
         f.selected({});
     }
@@ -164,7 +165,7 @@ void battlefield_bounds() {
     f.selected({10,20,30,40,50});
     // An anchor outside the battlefield cannot be hit from its edge.
     f.click(259,80);
-    f.selected({});
+    f.selected({10,20,30,40,50});
     f.world.entities.push_back(entity(91,1,Kind::Unit,"HTNK",20,30));
     f.click(20,30);
     f.selected({91});
@@ -179,17 +180,17 @@ void move_attack_stop() {
     const auto start=f.world.entities;
     for (const auto point : {BattlePoint{220,60},{220,95},{220,130},{240,165}}) {
         const auto target=point.y==60 ? 200u : point.y==95 ? 210u : point.y==130 ? 220u : 230u;
-        expect_orders(f.send(button(3,true,point.x,point.y)),OrderKind::Attack,
+        expect_orders(f.click(point.x,point.y),OrderKind::Attack,
                       {10,20,30,40,50},target);
         require(f.send(button(3,false,point.x,point.y)).empty(),"Right release duplicated orders");
     }
     require(!f.cell_queries,"Attack queried a ground Cell");
-    expect_orders(f.send(button(3,true,30,180)),OrderKind::Move,
+    expect_orders(f.click(30,180),OrderKind::Move,
                   {10,20,30,40,50},0,{103,218});
     // Known neutral and special houses do not become enemy targets.
-    expect_orders(f.send(button(3,true,50,160)),OrderKind::Move,
+    expect_orders(f.click(50,160),OrderKind::Move,
                   {10,20,30,40,50},0,{105,216});
-    expect_orders(f.send(button(3,true,90,160)),OrderKind::Move,
+    expect_orders(f.click(90,160),OrderKind::Move,
                   {10,20,30,40,50},0,{109,216});
     expect_orders(f.send(key('s')),OrderKind::Stop,{10,20,30,40,50});
     expect_orders(f.send(key('S')),OrderKind::Stop,{10,20,30,40,50});
@@ -203,9 +204,11 @@ void move_attack_stop() {
                 before.cell->x==after.cell->x && before.cell->y==after.cell->y,
                 "Input changed a world entity");
     }
+    require(f.send(button(3,true,30,180)).empty(),"Right click issued an order");
+    f.selected({});
     f.controller.clear();
     const auto queries=f.cell_queries;
-    require(f.send(button(3,true,30,180)).empty() && f.cell_queries==queries,
+    require(f.click(30,180).empty() && f.cell_queries==queries,
             "Empty selection queried a destination");
     require(f.send(key('s')).empty() && f.send(key('d')).empty(),"Empty selection issued key orders");
 }
@@ -269,10 +272,10 @@ void escape_placement_and_cancel() {
     f.click(50,60);
     f.send(button(1,true,30,40));
     f.send({InputKind::Motion,200,150});
-    expect_orders(f.send(button(3,true,220,60)),OrderKind::Attack,{30},200);
+    require(f.send(button(3,true,220,60)).empty(),"Cancel click attacked");
     require(!f.controller.selection_rectangle(),"Right order retained a drag");
     f.send(button(1,false,200,150));
-    f.selected({30});
+    f.selected({});
 }
 void focus_and_stale_selection() {
     Fixture f;
@@ -321,10 +324,11 @@ void callbacks_and_ordering() {
     f.box(30,40,205,158);
     f.selected({20,30,40,50});
     f.view.screen_to_cell={};
-    require(f.send(button(3,true,30,180)).empty(),"Missing Cell callback issued Move");
-    expect_orders(f.send(button(3,true,225,68)),OrderKind::Attack,{20,30,40,50},200);
+    require(f.click(30,180).empty(),"Missing Cell callback issued Move");
+    expect_orders(f.click(225,68),OrderKind::Attack,{20,30,40,50},200);
     f.view.screen_to_cell=[](BattlePoint) -> std::optional<ra2map::Cell> { return {}; };
-    require(f.send(button(3,true,30,180)).empty(),"Invalid Cell callback issued Move");
+    require(f.click(30,180).empty(),"Invalid Cell callback issued Move");
+    f.send(button(3,true,30,180));
     f.view.project={};
     f.click(55,68);
     f.selected({});
