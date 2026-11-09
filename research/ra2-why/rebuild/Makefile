@@ -4,6 +4,8 @@
 
 CXX ?= g++
 .DEFAULT_GOAL := all
+FEATURE_GAME_DIR ?= $(abspath ../game)
+FEATURE_YURI_RULES ?= $(abspath ../analysis/extracted/config/rulesmd.ini)
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O2
 SDL_FLAGS = $(shell pkg-config --cflags --libs sdl2)
 NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cpp src/app/scene.cpp src/app/vehicle_art.cpp \
@@ -32,6 +34,47 @@ build/native/%.o: %.cpp
 .PHONY: all test clean fs rules text map pack loop gfx hook run-fs run-rules run-text run-map run-pack run-loop run-gfx run-hook
 
 all: test
+
+# Later prototype modules have their own checks. They are not active in the
+# playable match until their world and order adapters are connected.
+FEATURE_CHECKS = feature-net feature-save feature-movies feature-shroud feature-turret \
+    feature-repair feature-aircraft feature-naval feature-triggers feature-special \
+    feature-superweapon feature-yuri feature-campaign feature-score feature-audio
+.PHONY: feature-check $(FEATURE_CHECKS) feature-headless
+feature-check: $(FEATURE_CHECKS)
+
+feature-net:
+	bash src/net/test_lockstep.sh
+feature-save:
+	bash src/session/test_save_game.sh "$(FEATURE_GAME_DIR)"
+feature-movies:
+	bash src/video/test_bink_player.sh "$(FEATURE_GAME_DIR)"
+feature-shroud:
+	bash src/sim/test_prototype_shroud.sh "$(FEATURE_GAME_DIR)"
+feature-turret:
+	bash src/sim/test_prototype_turret.sh
+feature-repair:
+	bash src/sim/test_prototype_repair_sell.sh "$(FEATURE_GAME_DIR)"
+feature-aircraft:
+	bash src/sim/test_prototype_aircraft.sh "$(FEATURE_GAME_DIR)"
+feature-naval:
+	bash src/sim/test_prototype_naval.sh "$(FEATURE_GAME_DIR)"
+feature-triggers:
+	bash src/sim/test_prototype_triggers.sh "$(FEATURE_GAME_DIR)"
+feature-special:
+	bash src/sim/test_prototype_special.sh "$(FEATURE_GAME_DIR)"
+feature-superweapon:
+	bash src/sim/test_prototype_superweapon.sh "$(FEATURE_GAME_DIR)"
+feature-yuri:
+	bash src/sim/test_prototype_yuri.sh "$(FEATURE_YURI_RULES)"
+feature-campaign:
+	bash src/ui/test_campaign_flow.sh "$(FEATURE_GAME_DIR)"
+feature-score:
+	bash src/ui/test_score_screen.sh "$(FEATURE_GAME_DIR)"
+feature-audio:
+	bash src/audio/test_game_audio.sh "$(FEATURE_GAME_DIR)"
+feature-headless:
+	bash tools/test_headless_match.sh "$(FEATURE_GAME_DIR)" 1000
 
 .PHONY: native native-check platform run-platform catalog terrain-inputs scene actors ui audio voxel sim sim-move sim-replacement
 

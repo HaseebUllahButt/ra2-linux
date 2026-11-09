@@ -172,14 +172,24 @@ int main(int argc, char** argv) try {
             std::string text(bytes.begin(), bytes.end());
             if (text.find("[Basic]") == std::string::npos || text.find("[Map]") == std::string::npos) continue;
             IniFile ini; ini.parse(std::string_view(text));
+            // Comment text in AI files can mention both map section names.
+            if (!ini.find_section("Basic") || !ini.find_section("Map")) continue;
             ++maps;
             auto logic = tr::MapLogic::parse(ini);
             if (logic.triggers.empty()) continue;
             ++with_triggers; triggers += (int)logic.triggers.size();
             for (auto& [k, v] : tr::count_event_types(logic)) events[k] += v;
             for (auto& [k, v] : tr::count_action_types(logic)) actions[k] += v;
-            for (auto& tag : logic.tags) if (!logic.trigger(tag.trigger)) ++bad_refs;
-            for (auto& tt : logic.team_types) if (!logic.script(tt.script) || !logic.task_force(tt.task_force)) ++bad_refs;
+            for (auto& tag : logic.tags) if (!logic.trigger(tag.trigger)) {
+                ++bad_refs;
+                std::cerr << a->name() << " entry=" << entry.id << " " << ini.read_string("Basic", "Name") << ": tag " << tag.id
+                          << " has missing trigger " << tag.trigger << '\n';
+            }
+            for (auto& tt : logic.team_types) if (!logic.script(tt.script) || !logic.task_force(tt.task_force)) {
+                ++bad_refs;
+                std::cerr << a->name() << " entry=" << entry.id << " " << ini.read_string("Basic", "Name") << ": team " << tt.id
+                          << " script=" << tt.script << " taskforce=" << tt.task_force << '\n';
+            }
             // Every parsed trigger must run a few frames without trouble.
             tr::PrototypeTriggers run(ini, rules, 1);
             sw::Snapshot w;

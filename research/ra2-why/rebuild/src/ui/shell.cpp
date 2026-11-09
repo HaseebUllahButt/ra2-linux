@@ -486,12 +486,15 @@ Action Menu::pointer_up(int x, int y) {
         credit_changed_=false;
         return changed ? Action::SetupChanged : Action::None;
     }
-    const auto activated = held_ && hovered_ && *held_ == *hovered_ ? held_ : std::nullopt;
+    if (!held_ || !hovered_ || *held_ != *hovered_) {
+        held_.reset();
+        return Action::None;
+    }
+    const auto activated = *held_;
     held_.reset();
-    if (!activated) return Action::None;
     if (choosing_map_) {
-        if (*activated==1472) {choosing_map_=false;hovered_.reset();return Action::None;}
-        if (*activated==1733 && pending_mode_ && pending_map_) {
+        if (activated==1472) {choosing_map_=false;hovered_.reset();return Action::None;}
+        if (activated==1733 && pending_mode_ && pending_map_) {
             const auto mode=select_mode(*pending_mode_);
             const auto map=select_map(*pending_map_);
             choosing_map_=false;hovered_.reset();
@@ -499,7 +502,7 @@ Action Menu::pointer_up(int x, int y) {
         }
         return Action::None;
     }
-    if (!confirming_exit_ && page()==Page::Skirmish && *activated==1450) {
+    if (!confirming_exit_ && page()==Page::Skirmish && activated==1450) {
         choosing_map_=true;
         pending_mode_.reset(); pending_map_.reset(); mode_scroll_=0;map_scroll_=0;
         const auto saved=std::find_if(modes_.begin(),modes_.end(),[&](const auto& mode){return setup_.game_mode==mode.id;});
@@ -513,7 +516,7 @@ Action Menu::pointer_up(int x, int y) {
         hovered_.reset();return Action::None;
     }
     if (!confirming_exit_ && !choosing_map_ && page()==Page::Skirmish) {
-        auto* value=option(setup_,*activated);
+        auto* value=option(setup_,activated);
         if (value && value->has_value()) {
             *value = !**value;
             return Action::SetupChanged;
@@ -522,17 +525,17 @@ Action Menu::pointer_up(int x, int y) {
     if (confirming_exit_) {
         confirming_exit_ = false;
         hovered_.reset();
-        return *activated == 1454 ? Action::Quit : Action::None;
+        return activated == 1454 ? Action::Quit : Action::None;
     }
     // 0x00532037 requests exit. 0x0052DDBA opens confirmation resource 288.
-    if (page() == Page::Main && *activated == 1006) {
+    if (page() == Page::Main && activated == 1006) {
         confirming_exit_ = true;
         hovered_.reset();
         return Action::None;
     }
-    if (prototype_start_ && page()==Page::Skirmish && *activated==SkirmishControls::start)
+    if (prototype_start_ && page()==Page::Skirmish && activated==SkirmishControls::start)
         return Action::StartMatch;
-    auto result = navigation_.activate(*activated);
+    auto result = navigation_.activate(activated);
     if (result == Action::PageChanged) hovered_.reset();
     return result;
 }

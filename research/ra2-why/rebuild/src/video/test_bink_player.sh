@@ -20,6 +20,7 @@ if [[ -z "$flags" ]]; then
         inc=$(dirname "$inc")
         libdir=$(dirname "$(find "$prefix" -name 'libavformat.so*' 2>/dev/null | head -1)")
         flags="-I $inc -L $libdir -Wl,-rpath,$libdir -lavformat -lavcodec -lswscale -lswresample -lavutil"
+        export LD_LIBRARY_PATH="$libdir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     else
         echo "FFmpeg dev libraries not found." >&2
         echo "Install them (sudo apt install libavformat-dev libavcodec-dev libswscale-dev libswresample-dev libavutil-dev)" >&2
