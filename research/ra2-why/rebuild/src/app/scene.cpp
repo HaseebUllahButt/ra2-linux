@@ -149,6 +149,10 @@ actors::WorldPosition Scene::position(const sim::Entity& entity) const {
     }
     if (entity.kind != sim::Kind::Infantry)
         throw std::runtime_error("Vehicle and aircraft scene drawing is unresolved");
+    // The playable world already owns each soldier's exact walking position.
+    // Rebuilding it from subcell 0 stacks soldiers at the cell centre.
+    if (prototype_ && entity.position)
+        return {entity.position->x, entity.position->y, entity.position->z};
     if (entity.subcell < 0 || entity.subcell >= 5)
         throw std::runtime_error("Infantry subcell is outside original bounds");
     auto result = actors::infantry_position(entity.cell, unsigned(entity.subcell), 0);

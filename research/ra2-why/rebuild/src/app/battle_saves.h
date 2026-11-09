@@ -4,9 +4,13 @@
 // The content is native, not the original .SAV layout: a small header with
 // the player's description, then the caller's payload, for example
 // session::save::encode(game). TODO-ORIGINAL: original .SAV container.
-// Limit: session::save stores the world, factories and pending moves only.
-// It omits AI teams and timers, order queues and other battle state, so
-// keep Load and Save disabled in the options menu until it stores them.
+// Limit: session::save stores the world, factories and legacy route records.
+// It cannot restore fresh match controllers. Missing state includes AI teams,
+// weights and clocks; movement steps and soldier spots; combat orders,
+// projectiles and turret clocks; miner cargo and dock clocks; explored terrain;
+// repair flags; queues; victory and score history; and map/setup identity.
+// The save test keeps its movement controllers alive across the world reload.
+// Keep Load and Save disabled until a fresh-controller replay test passes.
 #include <cstdint>
 #include <filesystem>
 #include <optional>
