@@ -63,6 +63,10 @@ bool activate(w::Snapshot& world,w::Entity& item) {
     item.weapon_timer_start_frame=-1; item.weapon_timer_duration=0;
     item.firepower_multiplier=1.0; item.armor_multiplier=1.0; item.house_armor_multiplier=1.0;
     item.veterancy=0.0; item.techno_field_1b8=0; item.techno_field_329=0;
+    // Building construction completion queues Guard: game.exe 00449290,
+    // terminal branch 004498FD calls QueueMission(5). The adapter completes
+    // activation here; its construction animation timing is still unresolved.
+    if (item.kind==w::Kind::Structure && item.mission==18) item.mission=5;
     if (item.kind==w::Kind::Unit || item.kind==w::Kind::Infantry) {
         item.locomotor_moving=false; item.occupancy_tracking=true; item.object_field_75=1;
         item.techno_field_370=0; item.unit_field_7d=1; item.foot_field_5a1=0;
