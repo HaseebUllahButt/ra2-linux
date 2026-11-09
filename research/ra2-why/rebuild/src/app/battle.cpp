@@ -19,6 +19,7 @@
 #include "../ui/score_screen.h"
 #include <SDL.h>
 #include <algorithm>
+#include <future>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
@@ -951,7 +952,11 @@ int run_prototype_battle(const BattleOptions& args) {
         tile.index=cell.resolved_tile_index.value_or(0xffff);
         tile.subtile=cell.subtile;tile.height=std::uint8_t(cell.height_level.value_or(0));
     }
-    auto terrain_image=render::render_minimap(initialized,geometry,assets.theater(),render::TileIndexSpace::LiveCell);
+    // Build the terrain image while the second file system, rules and scene
+    // load. Nothing else uses the battle theater art until the match starts.
+    auto terrain_job=std::async(std::launch::async,[&]{
+        return render::render_minimap(initialized,geometry,assets.theater(),render::TileIndexSpace::LiveCell);
+    });
     fs::MixFileSystem files(args.game_directory);files.mount_language(fs::GameVariant::RedAlert2);
     files.bootstrap(fs::GameVariant::RedAlert2);files.mount_overlays();files.mount_resources();
     auto scene_art=render::TheaterArt::load(files,assets.map_ini().read_string("Map","Theater"));
@@ -962,6 +967,7 @@ int run_prototype_battle(const BattleOptions& args) {
     Window window("Red Alert 2 native prototype: skirmish",1024,768,!args.headless);
     loop::SteadyClock real_clock;loop::SimulatedClock fast_clock;
     loop::Clock& clock=args.headless?static_cast<loop::Clock&>(fast_clock):static_cast<loop::Clock&>(real_clock);
+    const auto terrain_image=terrain_job.get();
     Battle match(args,assets,std::move(battle->snapshot),window,scene,terrain_image,clock,files);
     loop::Hooks hooks;hooks.update=[&](loop::State& state){match.update(state);};
     loop::GameLoop loop(match,match,clock,{},hooks);
