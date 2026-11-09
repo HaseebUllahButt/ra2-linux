@@ -4,6 +4,8 @@
 #include "../render/minimap.h"
 #include "../sim/sim.h"
 #include "vehicle_art.h"
+#include "resource_render.h"
+#include <memory>
 #include <map>
 #include <optional>
 #include <string>
@@ -30,7 +32,7 @@ public:
           std::string_view theater, std::vector<ra2map::TerrainObject> objects = {},
           bool prototype = false);
     SceneFrame render(const render::Bitmap& terrain, const sim::Snapshot& state,
-                      render::Rectangle viewport);
+                      render::Rectangle viewport, const session::world::Snapshot* world = nullptr);
     // Resolve initial art and fixed floor lookups before the first frame.
     void prepare(const sim::Snapshot& state,const std::vector<std::string>& products={});
     void set_house_color(const std::string& house,int selected);
@@ -92,5 +94,6 @@ private:
     std::vector<TerrainDraw> terrain_draws_;   // Stable-sorted by key.
     std::vector<std::string> terrain_gaps_;    // Position errors, in object order.
     bool prototype_ = false;
+    std::unique_ptr<ResourceRender> resources_;
 };
 } // namespace ra2::app
