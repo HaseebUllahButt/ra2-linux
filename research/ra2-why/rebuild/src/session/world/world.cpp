@@ -244,11 +244,80 @@ PlacementResult Stage::place_base_unit(std::uint32_t unit_id, StartPoint point,
     // supplies that body, so its resulting category and side effects remain
     // unknown. Require a resolved snapshot before another placement.
     cell->second.coarse_category.reset();
+    cell->second.coarse_category_writes.reset();
+    cell->second.coarse_cache_height.reset();
+    cell->second.hierarchy_cache_height.reset();
     candidate.pending_cell_setup=true;
     candidate.pending_setup_cell=key;
     if (!validate(candidate)) return PlacementResult::Unresolved;
     snapshot_=std::move(candidate);
     return PlacementResult::Placed;
+}
+sim::CellSetupResult Stage::complete_pending_cell_setup(const sim::CellSetupStatic& guard,
+    const sim::TheaterInputs& theater, std::uint8_t cliff,
+    const std::map<std::int32_t,float>& land_tracks) {
+    sim::CellSetupResult unresolved;
+    unresolved.detail="pending allocated Cell setup is unresolved";
+    if (!snapshot_.pending_cell_setup || !snapshot_.pending_setup_cell) return unresolved;
+    const auto key=*snapshot_.pending_setup_cell;
+    const auto found=snapshot_.cells.find(key);
+    if (found==snapshot_.cells.end() || !found->second.terrain) return unresolved;
+
+    // Allocation is supplied independently from terrain and map membership.
+    sim::CellSetupState input;
+    input.allocated=found->second.allocated;
+    input.terrain=*found->second.terrain;
+    input.field_11d=found->second.cell_field_11d;
+    input.animated_20000=found->second.cell_flag_20000;
+    auto candidate=snapshot_;
+    candidate.pending_cell_setup=false;
+    candidate.pending_setup_cell.reset();
+    sim::CellSetupCallbacks callbacks;
+    callbacks.neighbor=[&](ra2map::Cell coord)->std::optional<sim::CellSetupNeighbor> {
+        const auto index=std::uint32_t(coord.y)*512+coord.x;
+        const auto neighbor=candidate.cells.find(index);
+        if (neighbor==candidate.cells.end() || !neighbor->second.allocated) return {};
+        if (!*neighbor->second.allocated) return sim::CellSetupNeighbor{};
+        if (!neighbor->second.terrain) return {};
+        return sim::CellSetupNeighbor{true,*neighbor->second.terrain};
+    };
+    callbacks.category=[&](const sim::TerrainCell& terrain)->std::optional<sim::CoarseCategoryInputs> {
+        auto profile=coarse_inputs(candidate,key);
+        if (!profile) return {};
+        profile->overlay_index=terrain.overlay_type_index;
+        profile->land_type=terrain.land_type;
+        profile->land_track.reset();
+        if (terrain.land_type) {
+            const auto track=land_tracks.find(*terrain.land_type);
+            if (track!=land_tracks.end()) profile->land_track=track->second;
+        }
+        return profile;
+    };
+    auto result=sim::original_overlay_free_cell_setup(input,guard,theater,cliff,callbacks);
+    if (result.status!=sim::CellSetupStatus::Complete) return result;
+    if (!result.category || !result.cache_height) {
+        unresolved.detail="complete Cell setup omitted category or cache height";
+        return unresolved;
+    }
+    auto& cell=candidate.cells.at(key);
+    cell.terrain=result.state.terrain;
+    cell.cell_field_11d=result.state.field_11d;
+    cell.cell_flag_20000=result.state.animated_20000;
+    cell.coarse_category=result.category->category;
+    cell.coarse_category_writes=result.category->writes;
+    cell.coarse_cache_height=*result.cache_height;
+    cell.hierarchy_cache_height=*result.cache_height;
+    cell.land_track.reset();
+    if (cell.terrain->land_type) {
+        const auto track=land_tracks.find(*cell.terrain->land_type);
+        if (track!=land_tracks.end()) cell.land_track=track->second;
+    }
+    if (!validate(candidate)) {
+        unresolved.detail="Cell setup produced an invalid snapshot";
+        return unresolved;
+    }
+    snapshot_=std::move(candidate);
+    return result;
 }
 bool validate(const Snapshot& snapshot) {
     if (snapshot.edition!=Edition::Base && snapshot.edition!=Edition::Yuri) return false;

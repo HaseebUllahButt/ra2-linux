@@ -7,8 +7,9 @@ game=${1:-${RA2_GAME_DIR:-$shared/../../game}}
 build=$(mktemp -d /tmp/ra2-session-world.XXXXXX)
 trap 'rm -rf "$build"' EXIT
 common=(world.cpp ../session.cpp ../map_geometry.cpp ../placement_terrain.cpp
-    "$shared"/sim/{random,distance,coarse_category}.cpp "$shared/weapons/occupant_order.cpp")
-for test in test_snapshot house_case constructor_case placement_case; do
+    "$shared"/sim/{random,distance,coarse_category,cell_setup,replacement,world,floor}.cpp
+    "$shared/rules/ini_file.cpp" "$shared/weapons/occupant_order.cpp")
+for test in test_snapshot house_case constructor_case placement_case cell_setup_case; do
     ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} -I "$shared" -I "$shared/app" \
         "${common[@]}" "$test.cpp" -o "$build/$test"
 done
@@ -27,6 +28,7 @@ ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -
     "$shared/rules/ini_file.cpp" "$shared/map/map_file.cpp" "$shared/pack/map_pack.cpp" \
     -ldl -o "$build/real_map_case"
 "$build/test_snapshot"
+"$build/cell_setup_case"
 "$build/cell_occupancy_case" > /dev/null
 "$build/bridge_footprint_case" > /dev/null
 "$build/real_map_case" "$game"
@@ -48,4 +50,7 @@ if [ "${2:-}" = "--original" ]; then
     ${PYTHON:-python3} original_overlay_map_check.py "$game/game.exe" "$build/real_map_case" "$game"
     ${PYTHON:-python3} original_tile_type_check.py "$game/game.exe"
     ${PYTHON:-python3} original_target_bounds_check.py "$game/game.exe" "$build/target_tile_case" "$game"
+    ${PYTHON:-python3} "$shared/sim/original_cell_setup_check.py" "$game/game.exe" --base --vectors > "$build/original-setup-vectors"
+    "$build/cell_setup_case" --vectors > "$build/staged-setup-vectors"
+    cmp "$build/original-setup-vectors" "$build/staged-setup-vectors"
 fi

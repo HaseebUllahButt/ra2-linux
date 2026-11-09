@@ -105,12 +105,19 @@ int main() {
     assert(battle.snapshot().random.table==battle_random.table() && validate(battle.snapshot()));
     std::map<std::uint32_t,CellState> cells;
     for (int y=68;y<=70;++y) for (int x=53;x<=55;++x)
-        cells[y*512+x].neighbor_count=0;
+    {
+        auto& cell=cells[y*512+x]; cell.allocated=true; cell.neighbor_count=0;
+        cell.terrain.emplace();
+        cell.terrain->cell={static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)};
+        cell.terrain->tile_index=32; cell.terrain->resolved_tile_index=32;
+        cell.terrain->ramp_index=0; cell.terrain->height_level=0;
+    }
     auto make_target=[&](int x,int y,int land,float speed,int category) {
         auto& cell=cells[y*512+x];
         cell.heads=weapons::CellContentHeads{};
         cell.terrain=sim::TerrainCell{};
         cell.terrain->cell={static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)};
+        cell.terrain->tile_index=32; cell.terrain->resolved_tile_index=32;
         cell.terrain->height_level=0; cell.terrain->ramp_index=0;
         cell.terrain->bridge=false; cell.terrain->overlay_type_index=-1;
         cell.terrain->land_type=land; cell.terrain->floor_world_height=0;
@@ -162,6 +169,30 @@ int main() {
     for (const auto& direction:std::vector<std::pair<int,int>>{{0,-1},{1,-1},{1,0},{1,1},{0,1},{-1,1},{-1,0},{-1,-1}})
         assert(battle.snapshot().cells.at((69+direction.second)*512+54+direction.first).neighbor_count==1);
     assert(battle.snapshot().random.table==battle_random.table() && validate(battle.snapshot()));
+    sim::TheaterInputs theater; theater.theater_name="TEMPERATE";
+    theater.tile_sets={{0,33}}; theater.settings.parse("[General]\n");
+    theater.resolved_metadata=[](std::uint32_t index,std::uint8_t subtile)->std::optional<sim::TileMetadata> {
+        if (index!=32 || subtile!=0) return {};
+        return sim::TileMetadata{0,0,true};
+    };
+    sim::CellSetupStatic guard;
+    guard.receiver_tile_index=32; guard.animation_index=-1;
+    guard.shadow_enabled=false; guard.bounds_height=30;
+    const auto before_setup=battle.snapshot();
+    auto missing_bounds=guard; missing_bounds.bounds_height.reset();
+    const auto incomplete_setup=battle.complete_pending_cell_setup(missing_bounds,theater,0,{{0,1.0f}});
+    assert(incomplete_setup.status==sim::CellSetupStatus::NeedsInput);
+    assert(battle.snapshot().pending_cell_setup && battle.snapshot().random.table==before_setup.random.table &&
+           battle.snapshot().entities.size()==before_setup.entities.size());
+    const auto completed=battle.complete_pending_cell_setup(guard,theater,0,{{0,1.0f}});
+    assert(completed.status==sim::CellSetupStatus::Complete);
+    const auto& after=battle.snapshot();
+    const auto& done=after.cells.at(69*512+54);
+    assert(!after.pending_cell_setup && !after.pending_setup_cell && done.cell_field_11d==0 &&
+           done.coarse_category==0 && done.coarse_cache_height==0 && done.hierarchy_cache_height==0);
+    assert(done.heads->ground_head==*battle_unit && done.ground_occupancy_124==0x20 &&
+           after.entities[0].lifetime==Lifetime::Placed && after.random.table==before_setup.random.table &&
+           after.random.first==before_setup.random.first && after.random.second==before_setup.random.second);
     assert(!staged.create_unit(99,"AMCV",1000,0,false));
     assert(!staged.create_unit(*house,"AMCV",1000,512,false));
     assert(!staged.create_player_house("Bad","Americans",5000,8,512));
