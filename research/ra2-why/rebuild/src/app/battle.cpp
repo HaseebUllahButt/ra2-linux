@@ -857,6 +857,9 @@ public:
         }
         }
     }
+    struct AutoPlaceWait { std::size_t buildings=0; std::uint32_t retry_frame=0; };
+    std::map<std::pair<std::uint32_t,std::string>,AutoPlaceWait> auto_place_wait_;
+    static constexpr std::uint32_t auto_place_retry_frames=150;
     void auto_place(std::uint32_t owner,std::uint32_t frame) {
         loop::profile::Timer probe(loop::profile::Phase::AutoPlace);
         std::vector<std::string> ready;
@@ -867,17 +870,28 @@ public:
         for (const auto& type:ready) {
             std::vector<ra2map::Cell> bases;
             for (const auto& e:world_.entities) if (live(e)&&e.house_id==owner&&e.kind==w::Kind::Structure) bases.push_back(*e.cell);
+            // A full search that found no place is costly (it stalled frames
+            // for 0.27 s on MP10S4). Wait before the same search runs again,
+            // unless the house has a different number of buildings.
+            auto& wait=auto_place_wait_[{owner,type}];
+            if(wait.buildings==bases.size() && frame<wait.retry_frame)continue;
             bool placed=false;
+            // The rings of near buildings overlap. A cell that failed once in
+            // this search fails again, so each cell is tried once.
+            std::set<std::pair<int,int>> tried;
             for (const auto base:bases) {
                 for (int radius=2;radius<=12 && !placed;++radius) for (int dy=-radius;dy<=radius && !placed;++dy)
                     for (int dx=-radius;dx<=radius && !placed;++dx) {
                         if (std::max(std::abs(dx),std::abs(dy))!=radius) continue;
+                        if (!tried.insert({int(base.x)+dx,int(base.y)+dy}).second) continue;
                         const p::CellXY cell{std::int16_t(int(base.x)+dx),std::int16_t(int(base.y)+dy)};
                         // place() checks proximity before its first write.
                         placed=proto::place(world_,factories_,catalog_,owner,type,cell,frame).status==p::Status::Done;
                     }
                 if(placed)break;
             }
+            if(placed)auto_place_wait_.erase({owner,type});
+            else wait={bases.size(),frame+auto_place_retry_frames};
         }
     }
     void autoplay(std::uint32_t frame) {
