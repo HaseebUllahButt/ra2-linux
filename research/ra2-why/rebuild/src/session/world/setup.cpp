@@ -35,6 +35,7 @@ struct BaseBattleAssets::Data {
     std::unique_ptr<render::TheaterArt> theater;
     PlacementGeometry geometry;
     std::vector<BaseMapCellInput> cells;
+    std::vector<BaseOverlayInput> overlays;
 };
 BaseBattleAssets::BaseBattleAssets(std::unique_ptr<Data> data):data_(std::move(data)) {}
 BaseBattleAssets::~BaseBattleAssets()=default;
@@ -62,6 +63,10 @@ BaseBattleAssets BaseBattleAssets::load(const std::filesystem::path& game,const 
     if ((!packed.overlay.empty() && packed.overlay.size()!=grid) ||
         (!packed.overlay_data.empty() && packed.overlay_data.size()!=grid))
         throw std::runtime_error("Invalid packed overlay grid");
+    for (std::size_t i=0;i<packed.overlay.size();++i) if (packed.overlay[i]!=255) {
+        data->overlays.push_back({{static_cast<std::uint16_t>(i%512),static_cast<std::uint16_t>(i/512)},
+                                  packed.overlay[i]});
+    }
     std::map<std::pair<std::uint16_t,std::uint16_t>,const pack::Tile*> records;
     for (const auto& tile:packed.tiles) records[{tile.x,tile.y}]=&tile;
     const auto order=sim::original_map_cell_order(geometry->width,geometry->height);
@@ -87,6 +92,7 @@ const ra2map::MapFile& BaseBattleAssets::map() const { return data_->map; }
 render::TheaterArt& BaseBattleAssets::theater() { return *data_->theater; }
 const PlacementGeometry& BaseBattleAssets::geometry() const { return data_->geometry; }
 const std::vector<BaseMapCellInput>& BaseBattleAssets::cells_in_original_order() const { return data_->cells; }
+const std::vector<BaseOverlayInput>& BaseBattleAssets::overlays_in_scan_order() const { return data_->overlays; }
 
 
 std::optional<PackedMapState> read_base_packed_map(const BaseBattleAssets& assets,

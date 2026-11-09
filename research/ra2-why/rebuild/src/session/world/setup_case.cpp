@@ -7,7 +7,8 @@ using namespace ra2;
 using namespace ra2::session::world;
 int main(int argc,char** argv) {
     if (argc!=2 && !(argc==3 && (std::string(argv[2])=="--cells" || std::string(argv[2])=="--starts" ||
-                                 std::string(argv[2])=="--overlay-data" || std::string(argv[2])=="--overlay-data-cells"))) return 2;
+                                 std::string(argv[2])=="--overlay-data" || std::string(argv[2])=="--overlay-data-cells" ||
+                                 std::string(argv[2])=="--overlay-scan"))) return 2;
     if (argc==3 && std::string(argv[2])=="--starts") {
         int x,y;
         while (std::cin>>x>>y) {
@@ -23,6 +24,12 @@ int main(int argc,char** argv) {
     assert(assets.rules().key_count("VehicleTypes")==55);
     assert(assets.art_ini().key_count("MCV")>0);
     assert(assets.geometry().width==100 && assets.geometry().height==100);
+    assert(assets.overlays_in_scan_order().size()==407);
+    if (argc==3 && std::string(argv[2])=="--overlay-scan") {
+        for (const auto& input:assets.overlays_in_scan_order())
+            std::cout<<input.cell.x<<' '<<input.cell.y<<' '<<int(input.type_index)<<'\n';
+        return 0;
+    }
     if (argc==3 && std::string(argv[2])=="--overlay-data") {
         const auto& bytes=assets.map().packed_terrain().overlay_data;
         std::cout.write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));

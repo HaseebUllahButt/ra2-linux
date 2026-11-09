@@ -8,9 +8,10 @@ nonempty byte is admitted, so this is a scan check, not live overlay state.
 import subprocess
 import sys
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_EBP,UC_X86_REG_ESP,UC_X86_REG_EIP
-if len(sys.argv)!=4:
+if len(sys.argv) not in (4,5):
     raise SystemExit('usage: original_overlay_map_check.py game.exe real_map_case game_dir')
-exe,emitter,game=sys.argv[1:]
+exe,emitter,game=sys.argv[1:4]
+native=sys.argv[4] if len(sys.argv)==5 else None
 data=subprocess.check_output([emitter,game,'--overlay-bytes'])
 assert len(data)==512*512
 sys.argv=[sys.argv[0],exe,'--base']
@@ -49,5 +50,9 @@ m.cpu.emu_start(0x5db780,0x5db8ae,count=50000000)
 assert m.cpu.reg_read(UC_X86_REG_EIP)==0x5db8ae and cursor[0]==len(data)
 expected=[(index%512,index//512,value) for index,value in enumerate(data) if value!=255]
 assert len(expected)==407 and records==expected
+if native:
+    actual=[tuple(map(int,line.split())) for line in
+            subprocess.check_output([native,game,'--overlay-scan'],text=True).splitlines()]
+    assert actual==records
 assert all(abs(x-135)>8 or abs(y-80)>8 for x,y,value in records)
 print(f'base x86 scans all {len(data)} MP02T2 overlay bytes and admits {len(records)} fixture objects')

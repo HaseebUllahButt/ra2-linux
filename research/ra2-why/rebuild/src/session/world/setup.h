@@ -16,6 +16,11 @@ struct BaseMapCellInput {
     std::optional<std::uint8_t> packed_overlay, packed_overlay_data;
 };
 
+struct BaseOverlayInput {
+    ra2map::Cell cell;
+    std::uint8_t type_index;
+};
+
 // Owns the filesystem and theater used by the static asset readers. None of
 // these authored inputs is a finished runtime world or an RNG phase boundary.
 class BaseBattleAssets {
@@ -34,6 +39,9 @@ public:
     render::TheaterArt& theater();
     const PlacementGeometry& geometry() const;
     const std::vector<BaseMapCellInput>& cells_in_original_order() const;
+    // Every nonempty packed byte, in the original 512-by-512 scan order.
+    // Type eligibility and object construction have not yet run.
+    const std::vector<BaseOverlayInput>& overlays_in_scan_order() const;
 private:
     struct Data;
     explicit BaseBattleAssets(std::unique_ptr<Data>);

@@ -36,7 +36,10 @@ if len(sys.argv)==5:
     original_fields=[line for line in lines if line.startswith('RUNTIME_FIELDS ')]
     native_fields=[line for line in native_lines if line.startswith('RUNTIME_FIELDS ')]
     assert original_fields==native_fields==['RUNTIME_FIELDS 0 0 1 0 1 0 1 0','RUNTIME_FIELDS 1 1 0 0 1 0 1 0']
-    native_zero=[line for line in native_lines if not line.startswith('RUNTIME_FIELDS ')]
+    original_factors=[tuple(map(float,line.split()[1:])) for line in lines if line.startswith('RUNTIME_FACTORS ')]
+    native_factors=[tuple(map(float,line.split()[1:])) for line in native_lines if line.startswith('RUNTIME_FACTORS ')]
+    assert original_factors==native_factors==[(0.0,1.0),(0.0,1.0)]
+    native_zero=[line for line in native_lines if not line.startswith(('RUNTIME_FIELDS ','RUNTIME_FACTORS '))]
     assert len(original_zero)==2 and original_zero==native_zero
     assert original_zero[1].split()[7:11]==['0','0','0','0']
     print('MP02T2 supplied runtime fixture preserves Battle start Z zero during original placement')

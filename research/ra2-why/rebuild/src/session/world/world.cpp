@@ -110,6 +110,7 @@ std::optional<std::uint32_t> Stage::create_unit(std::uint32_t house_id, std::str
     // Fresh Unit constructor values checked against the base executable.
     unit.object_field_74=0; unit.object_field_75=0; unit.object_field_76=1;
     unit.techno_field_370=0; unit.unit_field_7d=1; unit.techno_field_1b8=0; unit.foot_field_5a1=0;
+    unit.veterancy=0.0; unit.firepower_multiplier=1.0;
     unit.occupancy_tracking=true; // Foot constructor 004C2B6E.
     unit.category.emplace();
     unit.category->runtime_type=1; // Unit virtual +2C, base 0070A2D0.
