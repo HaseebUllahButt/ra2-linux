@@ -5,6 +5,10 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "../rules/ini_file.h"
+#include "sim.h"
+
+namespace ra2::session::world { struct Snapshot; }
 
 // Original base RA2 (game.exe) production and building placement decisions.
 // Every input is a resolved original value. An empty optional is unknown and
@@ -133,4 +137,111 @@ Placement original_legal_placement(const PlacementMap&, CellXY origin, const Pla
 // 0045EC50/0045EC90 deploy helpers: true when the cell is not offset by 00851A8C.
 bool original_deploy_without_offset(bool sensor_array, bool tick_tank, bool icbm, bool artillery);
 std::uint8_t original_deploy_facing(bool sensor_array, bool tick_tank, bool icbm, bool artillery);
+
+// ---------------------------------------------------------------------------
+// Resolved rules. Each field starts from the executed original constructor
+// value (BuildingType 00457AC0 with TechnoType 006D9B40), then applies the
+// original reader order: rules [ID], art [Image] then art [ID] for Foundation.
+struct TypeFacts {
+    std::string id;
+    Rtti rtti=Rtti::BuildingType;
+    std::int32_t heap_index=0;
+    CanBuildType can;
+    std::uint32_t owner=0;               // +5E8 (00482DE0 bits by [Countries] index).
+    bool double_owned=false;             // +AA5.
+    std::int32_t cost=0;                 // +550.
+    std::int32_t strength=0;             // ObjectType +A0.
+    std::string deploys_into;            // UnitType +3C8 name.
+    // BuildingType.
+    PlacementBuilding placement;
+    std::int32_t adjacent=3;             // +C40.
+    bool base_normal=true;               // +1203.
+    bool eligible_ally=false;            // +1204.
+    std::optional<Rtti> factory;         // +C44.
+    bool construction_yard=false;        // +1353.
+    bool powers_up=false;                // +C20 nonempty.
+    std::string free_unit;               // +C38.
+    std::int32_t build_cat=0;            // +BA0.
+    std::int32_t power_output=0, power_drain=0; // +C68/+C6C from Power.
+    std::int32_t extra_output=0, extra_drain=0; // +C70/+C74 from ExtraPower.
+    bool sensor_array=false, tick_tank=false, icbm=false, artillery=false; // +1362 +135E +1363 +1364.
+    bool wall=false;                     // +1215.
+};
+
+struct Catalog {
+    std::vector<std::string> countries;  // HouseType registry, [Countries] order.
+    std::vector<TypeFacts> buildings, units, infantry, aircraft; // Heap order.
+    std::array<std::vector<std::int32_t>,6> generic_prerequisites; // Rules +2B8.. lists.
+    std::optional<std::array<bool,12>> buildable;                  // LandType Buildable.
+    double build_speed=0;                 // Rules +13B0.
+    float minimum_low_power=0, maximum_low_power=0, low_power_penalty=0, multiple_factory=0;
+    double wall_coefficient=0;
+    std::vector<std::string> pad_aircraft; bool separate_aircraft=false;
+    std::vector<std::string> gaps;        // Inputs the reader could not resolve.
+    static Catalog from(const rules::IniFile& rules,const rules::IniFile& art,const rules::IniFile& map);
+    const TypeFacts* find(const std::string& id) const;
+    const TypeFacts* building(std::int32_t heap) const;
+};
+
+// Original 54-stage factory (FactoryClass, 0x70 bytes, global order 00A35E94).
+struct FactoryState {
+    std::uint32_t house_id=0;
+    std::int32_t slot=0;                 // House +52D8 aircraft, +52DC infantry, +52E0 unit, +52E4 naval, +52E8 building, +52F8 defense.
+    std::uint32_t object=0;              // +54 entity id; zero is null.
+    std::string object_type;
+    std::int32_t progress=0;             // +24.
+    std::int32_t balance=0;              // +5C.
+    std::int32_t interval=0;             // +34.
+    std::uint64_t timer_start=0;         // +28.
+    bool suspended=true;                 // +6C.
+};
+struct SessionFlags {
+    std::optional<std::int32_t> session_type;  // 00A3D298.
+    std::optional<bool> super_weapons;         // 00A3D2C3.
+    std::optional<bool> build_off_ally;        // 00A3D2C4.
+    std::optional<std::uint32_t> player_house; // 00A35DB4.
+};
+// Building fields the shared Entity does not hold yet.
+struct BuildingState {
+    bool on_530=true;            // Building +530, set by constructor 00438E1C.
+    bool primary=false;          // Building +32B, cleared by Unlimbo 0043E03C.
+    std::int32_t mission_a0=-1;  // Object +A0, reset by Set_Mission 00594710.
+};
+struct FactorySet {
+    SessionFlags flags;
+    std::map<std::uint32_t,BuildingState> buildings;
+    std::vector<FactoryState> factories;                 // Original global order.
+    std::map<std::uint32_t,std::array<std::int32_t,6>> house_factory_counts; // +52B8..+52C8 by slot kind.
+    std::map<std::uint32_t,bool> power_dirty;            // House +5668.
+    // House +1EC/+1F4 power blackout timer: true when the timer is idle and zero.
+    std::map<std::uint32_t,bool> power_blackout_idle;
+};
+
+enum class Status { Done, Waiting, NeedsTurn, Rejected, NeedsInput, Unsupported };
+struct Outcome {
+    Status status=Status::NeedsInput;
+    std::string detail;
+    std::optional<std::uint32_t> entity;
+    std::optional<std::int32_t> value;
+};
+
+// Every command copies Snapshot and FactorySet, then publishes both only on Done.
+// UnitClass::Try_To_Deploy 006FDFC0 for a resolved, stationary Unit.
+// can_deploy is the resolved result of the Unit's virtual +2E8 (006CD340),
+// whose tube-cell and locomotor branches are not recovered here.
+Outcome deploy(session::world::Snapshot&,FactorySet&,const Catalog&,std::uint32_t unit_id,std::optional<bool> can_deploy);
+// Sidebar eligibility, House::Can_Build(type,false,true) for every type.
+std::vector<std::pair<std::string,CanBuild>> options(const session::world::Snapshot&,const FactorySet&,
+    const Catalog&,std::uint32_t house_id);
+// Event PRODUCE: House::Begin_Production 004E5E30.
+Outcome begin_production(session::world::Snapshot&,FactorySet&,const Catalog&,std::uint32_t house_id,
+    const std::string& type,std::uint64_t frame);
+// DisplayClass::Passes_Proximity_Check 004991D0; the UI calls it before PLACE.
+std::optional<bool> passes_proximity(const session::world::Snapshot&,const FactorySet&,const Catalog&,
+    std::uint32_t house_id,const std::string& type,CellXY);
+// Event PLACE with a cell: House::Place_Object 004E6950 building path.
+Outcome place(session::world::Snapshot&,FactorySet&,const Catalog&,std::uint32_t house_id,
+    const std::string& type,CellXY,std::uint64_t frame);
+// Logic before events: House::AI power recalculation 004F2CC0, then FactoryClass::AI 004B9300.
+Outcome tick(session::world::Snapshot&,FactorySet&,const Catalog&,std::uint64_t frame);
 }

@@ -3,7 +3,9 @@
 
 Runs House::Can_Build 004E3660 and BuildingType::Legal_Placement 0045D880
 (006DE0E0, 004718B0, 0055A740) in Unicorn with random resolved inputs.
-Only CRT malloc/free are replaced by a bump allocator. No game process runs.
+CRT malloc/free use a bump allocator. Supplied stub getters replace the
+virtual RTTI (+2C), type index (+40), mission (+16C), type (+80) and
+center coordinate (+48) calls. No game process runs.
 Usage: original_production_runtime_check.py GAME_EXE NATIVE_TEST
 """
 import random
@@ -175,9 +177,11 @@ def placement_case():
     foundation = rng.randrange(22)
     ox, oy = rng.randrange(0, 90), rng.randrange(0, 90)
     if r() < 0.02: ox, oy = 0, 0
+    if r() < 0.1: ox = rng.randrange(506, 512)   # Footprints that cross the 512 row width alias.
     cells = []
     for dx, dy in [(x, y) for y in range(7) for x in range(7)]:
         x, y = ox+dx, oy+dy
+        x, y = x % 512, y + x // 512             # Allocated cells use canonical receiver coordinates.
         if r() < 0.03: continue        # Unallocated cell: fallback.
         occ = []
         if r() < 0.06: occ.append((rng.choice((1, 6, 0xf)), 1))
