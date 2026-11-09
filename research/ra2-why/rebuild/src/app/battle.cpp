@@ -721,9 +721,9 @@ public:
     void update(loop::State& state) {
         const auto frame=state.frame_counter; // All match subsystems use this frame.
         const bool edge=pointer_x_>=0 && pointer_x_<1024 && pointer_y_>=0 && pointer_y_<768;
-        pan(24*(int(keys_.count(SDLK_RIGHT))-int(keys_.count(SDLK_LEFT))+
+        pan(12*(int(keys_.count(SDLK_RIGHT))-int(keys_.count(SDLK_LEFT))+
                 int(edge&&pointer_x_>=1016)-int(edge&&pointer_x_<8)),
-            16*(int(keys_.count(SDLK_DOWN))-int(keys_.count(SDLK_UP))+
+            8*(int(keys_.count(SDLK_DOWN))-int(keys_.count(SDLK_UP))+
                 int(edge&&pointer_y_>=760)-int(edge&&pointer_y_<8)));
         if(victory_.settled())return;
         run_build_queue(frame);
@@ -905,6 +905,13 @@ public:
         initial_scene_.reset();
         for(const auto& detail:scene.gaps)gaps_.insert(detail);
         frame_=std::move(scene.image);
+        const w::Entity* hovered=nullptr;int nearest=24*24;
+        if(!help_visible_&&!show_score_&&pointer_x_>=0&&pointer_x_<BattleHud::sidebar_x&&
+            pointer_y_>=0&&pointer_y_<BattleHud::view_height)
+            for(const auto& e:world_.entities)if(const auto at=anchor(e)) {
+                const int dx=at->x-pointer_x_,dy=at->y-pointer_y_,d=dx*dx+dy*dy;
+                if(d<nearest){nearest=d;hovered=&e;}
+            }
         for(const auto& e:world_.entities)if(live(e)&&(e.house_id==player_||e.house_id==enemy_)) {
             const auto point=anchor(e);if(!point||point->x<0||point->x>=BattleHud::sidebar_x)continue;
             const auto color=e.house_id==player_?std::array<std::uint8_t,3>{70,255,90}:std::array<std::uint8_t,3>{255,65,50};
@@ -912,7 +919,7 @@ public:
             rectangle(frame_,point->x-5,point->y+9,10,3,color);
             const bool selected=std::find(orders_.selected_ids().begin(),orders_.selected_ids().end(),e.id)!=orders_.selected_ids().end();
             if(selected)rectangle(frame_,point->x-17,point->y-25,34,32,color);
-            if(selected || e.house_id==enemy_) {
+            if(selected || hovered==&e) {
                 const int health=std::clamp(e.resolved_hp.value_or(0)*30/std::max(1,e.maximum_hp.value_or(1)),0,30);
                 for(int x=0;x<health;++x)for(int y=0;y<3;++y)pixel(frame_,point->x-15+x,point->y-30+y,color);
             }
@@ -960,11 +967,6 @@ public:
                 const auto at=world_.cells.find(std::uint32_t(cell->y)*512+cell->x);
                 passable=at!=world_.cells.end()&&at->second.unit_land_speed.value_or(0)>0&&
                     at->second.cell_flag_100!=true;
-            }
-            const w::Entity* hovered=nullptr;int nearest=24*24;
-            for(const auto& e:world_.entities)if(const auto at=anchor(e)) {
-                const int dx=at->x-pointer_x_,dy=at->y-pointer_y_,d=dx*dx+dy*dy;
-                if(d<nearest){nearest=d;hovered=&e;}
             }
             if(!placement_.empty())kind=passable&&!hovered?CursorKind::Deploy:CursorKind::NoGo;
             else if(hovered && hovered->house_id==player_)kind=
