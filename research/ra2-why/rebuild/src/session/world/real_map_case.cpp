@@ -17,6 +17,17 @@ int main(int argc, char** argv) {
     map.parse(original_test_ini(argv[1],"MP02T2.MAP",true));
     if (argc==3) {
         const std::string request=argv[2];
+        if (request=="--amcv-object-bools") {
+            rules.parse(original_test_ini(argv[1],"RULES.INI",true));
+            assert(map.key_count("AMCV")==0);
+            for (const char* key:{"Crushable","Bombable","NoSpawnAlt","AlternateArcticArt",
+                 "RadarInvisible","Selectable","LegalTarget","Immune","Insignificant",
+                 "HasRadialIndicator","IgnoresFirestorm","UseLineTrail","Theater","NewTheater","Voxel"}) {
+                const auto* value=rules.find("AMCV",key);
+                std::cout<<key<<'\t'<<(value?value->value:"<absent>")<<'\n';
+            }
+            return std::cout?0:1;
+        }
         if (request=="--amcv-placement-info") {
             rules.parse(original_test_ini(argv[1],"RULES.INI",true));
             assert(map.key_count("AMCV")==0);
