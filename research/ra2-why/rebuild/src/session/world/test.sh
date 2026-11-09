@@ -16,8 +16,9 @@ done
 ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ../map_geometry.cpp ../geometry_cases.cpp -o "$build/geometry_cases"
 ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} cell_occupancy.cpp cell_occupancy_case.cpp -o "$build/cell_occupancy_case"
 ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} bridge_footprint.cpp bridge_footprint_case.cpp -o "$build/bridge_footprint_case"
+${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} speed_type.cpp speed_type_case.cpp -o "$build/speed_type_case"
 ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -I "$shared/render" \
-    world.cpp ../session.cpp ../map_geometry.cpp ../placement_terrain.cpp target_tile_case.cpp \
+    world.cpp speed_type.cpp ../session.cpp ../map_geometry.cpp ../placement_terrain.cpp target_tile_case.cpp \
     "$shared"/sim/{test_inputs,world,world_init,cell_setup,coarse_category,replacement,floor,random,distance}.cpp \
     "$shared/weapons/occupant_order.cpp" \
     "$shared"/render/{minimap,tmp_decode}.cpp "$shared/gfx/palette.cpp" \
@@ -32,6 +33,7 @@ ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -
 "$build/cell_setup_case"
 "$build/cell_occupancy_case" > /dev/null
 "$build/bridge_footprint_case" > /dev/null
+"$build/speed_type_case"
 "$build/real_map_case" "$game"
 "$build/target_tile_case" "$game"
 "$build/target_tile_case" "$game" --stage
@@ -53,7 +55,7 @@ if [ "${2:-}" = "--original" ]; then
     ${PYTHON:-python3} original_tile_type_check.py "$game/game.exe"
     ${PYTHON:-python3} original_target_bounds_check.py "$game/game.exe" "$build/target_tile_case" "$game"
     ${PYTHON:-python3} original_land_table_check.py "$game/game.exe" "$build/real_map_case" "$game"
-    ${PYTHON:-python3} original_speed_type_check.py "$game/game.exe" "$build/real_map_case" "$game"
+    ${PYTHON:-python3} original_speed_type_check.py "$game/game.exe" "$build/real_map_case" "$game" "$build/speed_type_case"
     ${PYTHON:-python3} "$shared/sim/original_cell_setup_check.py" "$game/game.exe" --base --vectors > "$build/original-setup-vectors"
     "$build/cell_setup_case" --vectors > "$build/staged-setup-vectors"
     cmp "$build/original-setup-vectors" "$build/staged-setup-vectors"

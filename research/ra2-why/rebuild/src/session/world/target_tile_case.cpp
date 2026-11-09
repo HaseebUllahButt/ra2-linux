@@ -3,6 +3,7 @@
 #include "sim/world_init.h"
 #include "render/minimap.h"
 #include "world.h"
+#include "speed_type.h"
 #include <cassert>
 #include <cstdint>
 #include <iostream>
@@ -89,13 +90,21 @@ int main(int argc,char** argv) {
         // These runtime values are test inputs, not conclusions about the map.
         // Overlay effects, object loading, bridge setup, Tube and animation
         // creation, and shadow writes were not executed by the two passes.
-        assert(map.key_count("Clear")==0 && map.key_count("Tiberium")==0);
+        assert(map.key_count("Clear")==0 && map.key_count("Tiberium")==0 && map.key_count("AMCV")==0);
         const auto clear_wheel=rules::IniFile::double_value(rules.read_string("Clear","Wheel"));
         const auto clear_track=rules::IniFile::double_value(rules.read_string("Clear","Track"));
         const auto tiberium_wheel=rules::IniFile::double_value(rules.read_string("Tiberium","Wheel"));
         const auto tiberium_track=rules::IniFile::double_value(rules.read_string("Tiberium","Track"));
         assert(clear_wheel && clear_track && tiberium_wheel && tiberium_track && *clear_wheel==1.0 && *clear_track==1.0 &&
                static_cast<float>(*tiberium_wheel)==0.5f && static_cast<float>(*tiberium_track)==0.7f);
+        BaseSpeedTypeInput type_input;
+        type_input.initial_type=-1; // The base UnitType constructor prefix writes -1.
+        type_input.crusher=rules::IniFile::bool_value(rules.read_string("AMCV","Crusher"));
+        const auto* speed_key=rules.find("AMCV","SpeedType");
+        type_input.key_state=speed_key?SpeedKeyState::Present:SpeedKeyState::Absent;
+        if (speed_key) type_input.key_value=speed_key->value;
+        const auto type=resolve_base_speed_type(type_input);
+        assert(type.status==SpeedTypeStatus::Complete && type.index==1);
         Snapshot category_case; category_case.random=sim::Random(1).state();
         auto& category_cell=category_case.cells[0];
         category_cell.terrain.emplace(); category_cell.terrain->overlay_type_index=-1;
@@ -128,7 +137,7 @@ int main(int argc,char** argv) {
         assert(stage.install_base_cells(*geometry,std::move(staged_cells),{},{}));
         BaseUnitProfile profile;
         profile.restricted_land=-1; profile.movement_mode=-1; profile.placement_mode=2;
-        profile.speed_type=1; profile.level_height=104; profile.type_flag_aa0=false;
+        profile.speed_type=type.index; profile.level_height=104; profile.type_flag_aa0=false;
         profile.unit_flag_32c=false; profile.linked_team=false; profile.type_flag_205=true;
         profile.unit_flag_32a=false; profile.type_flag_bb0=false; profile.type_flag_bb1=false;
         assert(stage.place_base_unit(*unit,{135,80},32,profile)==PlacementResult::Unresolved);

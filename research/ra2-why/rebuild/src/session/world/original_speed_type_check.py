@@ -13,9 +13,10 @@ import runpy
 from unicorn import UC_HOOK_CODE, UC_HOOK_MEM_READ
 from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_EBP, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDI, UC_X86_REG_EIP, UC_X86_REG_ESI, UC_X86_REG_ESP
 
-if len(sys.argv) != 4:
-    raise SystemExit('usage: original_speed_type_check.py game.exe real_map_case game_dir')
-executable, fixture, game = sys.argv[1:]
+if len(sys.argv) not in (4,5):
+    raise SystemExit('usage: original_speed_type_check.py game.exe real_map_case game_dir [speed_type_case]')
+executable, fixture, game = sys.argv[1:4]
+native_case=sys.argv[4] if len(sys.argv)==5 else None
 rules_tokens=subprocess.check_output([fixture, game, '--amcv-speed-info'], text=True).split()
 assert rules_tokens==['yes','absent']
 real_crusher=rules_tokens[0].encode('ascii')
@@ -90,6 +91,7 @@ def trace_read(cpu,access,address,size,value,user):
         reads.append((address,size))
 m.cpu.hook_add(UC_HOOK_MEM_READ, trace_read)
 
+original_indexes=[]
 for override, expected_index, crusher_value in ((None,1,real_crusher),('Wheel',2,real_crusher),(None,2,b'no')):
     selected[0]=override
     hashes.clear()
@@ -134,6 +136,7 @@ for override, expected_index, crusher_value in ((None,1,real_crusher),('Wheel',2
     assert entry_calls==expected_calls
     index=m.read(m.TYPE+0x5a4)
     assert index==expected_index
+    original_indexes.append(index)
     for land, expected in ((0,0x3f800000),(5,0x3f333333 if index==1 else 0x3f000000)):
         m.word(0x100c000+0xec,land)
         m.cpu.reg_write(UC_X86_REG_EDI,0x100c000)
@@ -144,4 +147,7 @@ for override, expected_index, crusher_value in ((None,1,real_crusher),('Wheel',2
         assert m.cpu.reg_read(UC_X86_REG_EIP)==0x471cef, 'land lookup did not reach its load boundary'
         address=0x850ea0+4*(land*9+index)
         assert reads==[(address,4)] and m.read(address)==expected
+if native_case:
+    native_indexes=list(map(int,subprocess.check_output([native_case,'--vectors'],text=True).split()))
+    assert native_indexes==original_indexes
 print('base x86 AMCV entry search and value readers match the real default and Wheel override')
