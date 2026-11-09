@@ -1,10 +1,23 @@
 #include "battle_queue.h"
+#include "cameo_click.h"
 #include <stdexcept>
 #include <iostream>
 
 int main() {
     ra2::app::BattleBuildQueue queue;
     const auto require=[](bool ok){if(!ok)throw std::runtime_error("Battle build queue failed");};
+    using ra2::app::cameo_click;
+    using Click=ra2::app::CameoClick;
+    require(cameo_click(true,true,false,false,false,false)==Click::Hold);
+    require(cameo_click(true,true,false,true,false,false)==Click::Cancel);
+    require(cameo_click(false,true,false,true,false,false)==Click::Resume);
+    require(cameo_click(true,true,true,true,false,false)==Click::Cancel);
+    require(cameo_click(false,true,true,true,false,false)==Click::Place);
+    require(cameo_click(true,true,false,false,true,true)==Click::RemoveQueued);
+    require(cameo_click(true,true,false,false,false,true)==Click::Hold);
+    require(cameo_click(true,false,false,false,false,false)==Click::None);
+    require(cameo_click(false,true,false,false,false,true)==Click::Queue);
+    require(cameo_click(false,false,false,false,false,false)==Click::Begin);
     for(int i=0;i<4;++i)require(queue.add(1,"E1",1));
     require(!queue.add(1,"E1",1)); // Active product counts toward five.
     require(queue.add(1,"ENGINEER",0));

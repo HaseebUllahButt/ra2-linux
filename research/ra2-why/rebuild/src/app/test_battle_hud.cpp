@@ -258,6 +258,15 @@ int main(int argc, char** argv) {
         assert(darker && hud.handle_click(fixed_slot.x+2,fixed_slot.y+2,unavailable).kind==HudActionKind::None);
         hud.draw(screen,originals);
 
+        auto running=originals;running.choices[0].progress=250;
+        auto before_hold=frame();hud.draw(before_hold,running);
+        running.choices[0].held=true;
+        auto on_hold=frame();hud.draw(on_hold,running);
+        assert(!same(before_hold,on_hold,{fixed_slot.x+1,fixed_slot.y+20,fixed_slot.width-2,15}));
+        auto repeated_hold=frame();hud.draw(repeated_hold,running);
+        assert(on_hold.rgba==repeated_hold.rgba);
+        hud.draw(screen,originals);
+
         int i=0;
         for (const char* name : {"POWRICON.SHP","BRRKICON.SHP","GTNKICON.SHP"}) {
             auto bytes=files.read_file(name); assert(bytes);

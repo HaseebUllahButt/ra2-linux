@@ -36,6 +36,7 @@ struct BuildChoice {
     int progress = 0;     // 0..1000 production clock, 1000 means ready.
     BuildCategory category = BuildCategory::All;
     int queued = 0;       // Queue length including the active item. 1+ shows a count badge.
+    bool held = false;    // Manual production hold. Left click resumes.
 };
 
 // Everything the sidebar needs for one draw pass.

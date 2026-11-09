@@ -143,7 +143,7 @@ bool BattleHud::same_panel(const HudState& s) const {
         old.choices.size()==s.choices.size()&&std::equal(old.choices.begin(),old.choices.end(),s.choices.begin(),
             [](const auto& a,const auto& b) {
                 return a.type==b.type&&a.name==b.name&&a.cost==b.cost&&a.enabled==b.enabled&&
-                    a.progress==b.progress&&a.category==b.category&&a.queued==b.queued;
+                    a.progress==b.progress&&a.category==b.category&&a.queued==b.queued&&a.held==b.held;
             });
 }
 void BattleHud::draw_panel(render::Bitmap& b,const HudState& s) const {
@@ -197,7 +197,9 @@ void BattleHud::draw_panel(render::Bitmap& b,const HudState& s) const {
         const bool art_loaded=image!=nullptr;
         if (art_loaded) {
             // Original cameo art: no name, cost or BUILD text on top.
-            if (c.progress>=1000) {
+            if(c.held) {
+                text(b,r.x+4,r.y+22,"ON HOLD",gold,r.width-8,2);
+            } else if (c.progress>=1000) {
                 text(b,r.x+4,r.y+22,c.category==BuildCategory::Buildings?"READY":"WAITING FOR EXIT",gold,r.width-8,1);
             } else if (c.progress>0) {
                 // Clock shading, like the original CLOCK.SHP overlay: a dark
@@ -226,7 +228,7 @@ void BattleHud::draw_panel(render::Bitmap& b,const HudState& s) const {
             // Fallback art: keep the text labels and the progress bar.
             text(b,r.x+4,r.y+6,c.name.empty()?c.type:c.name,color,r.width-8);
             text(b,r.x+4,r.y+19,"$"+std::to_string(c.cost),color,r.width-8);
-            text(b,r.x+4,r.y+31,c.progress>=1000?"READY":c.progress>0?std::to_string(c.progress/10)+"%":"BUILD",color,r.width-8);
+            text(b,r.x+4,r.y+31,c.held?"ON HOLD":c.progress>=1000?"READY":c.progress>0?std::to_string(c.progress/10)+"%":"BUILD",color,r.width-8);
             fill(b,{r.x+4,r.y+46,(r.width-8)*std::clamp(c.progress,0,1000)/1000,5},c.enabled?green:edge);
         }
         if(c.queued>0) {  // Queue count badge: total items, active one included.
