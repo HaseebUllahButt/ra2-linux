@@ -816,7 +816,13 @@ public:
         if(motion.status!=sim::PrototypeMoveStatus::Complete)gaps_.insert(motion.detail);
         // Combat owns idle guard acquisition and uses each weapon's range.
         const auto fighting=combat_.tick(world_,frame);
-        effects_.observe(world_,combat_.projectiles(),frame,effect_project());
+        effects_.observe(world_,combat_.projectiles(),frame,effect_project(),&fighting.events,&rules_);
+        for(const auto& event:fighting.events) {
+            const auto* type=catalog_.find(event.target_type);
+            const bool building=type&&type->rtti==p::Rtti::BuildingType;
+            const auto warning=attack_warning(event,player_,name(event.target_type),name(event.source_type),building);
+            if(!warning.empty())status(warning);
+        }
         audio_.observe(world_,frame);
         fired+=fighting.fired;impacts+=fighting.impacts;
         for(const auto& detail:fighting.unresolved)gaps_.insert(detail);

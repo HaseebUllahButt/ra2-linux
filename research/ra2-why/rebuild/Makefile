@@ -608,7 +608,7 @@ skirmish-tests: build/battle_status_test build/battle_formation_test build/proto
 build/battle_queue_test: build/native/src/app/test_battle_queue.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-build/battle_effects_test: build/native/src/app/test_battle_effects.o build/native/src/app/battle_effects.o $(FS_OBJECTS) $(GFX_OBJECTS)
+build/battle_effects_test: build/native/src/rules/ini_file.o build/native/src/app/test_battle_effects.o build/native/src/app/battle_effects.o $(FS_OBJECTS) $(GFX_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/battle_audio_test: build/native/src/app/test_battle_audio.o build/native/src/app/battle_audio.o build/native/src/app/platform.o build/native/src/audio/game_audio.o build/native/src/audio/audio.o build/native/src/audio/lookup.o build/native/src/rules/ini_file.o $(FS_OBJECTS)

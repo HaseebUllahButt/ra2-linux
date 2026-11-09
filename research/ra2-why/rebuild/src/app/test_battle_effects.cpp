@@ -83,5 +83,33 @@ int main(int argc,char** argv) {
     // Observation must not change health, firing timers, or projectile data.
     assert(world.entities[1].resolved_hp==0&&!world.entities[0].weapon_timer_start_frame);
     assert(shot.flight.arc.position[0]==80);
+    // Explicit events preserve firing feedback when either entity is absent.
+    rules::IniFile weapon_rules;
+    weapon_rules.parse("[LaserTest]\nIsLaser=yes\n[BoltTest]\nIsElectricBolt=yes\n[TankTest]\nProjectile=Cannon\n[Cannon]\nArcing=yes\n");
+    session::world::Snapshot absent;
+    sim::PrototypeCombatEvent event;
+    event.kind=sim::PrototypeCombatEventKind::Shot;
+    event.source_position={40,60,0};event.target_position={110,60,0};event.weapon="LaserTest";
+    std::vector<sim::PrototypeCombatEvent> events{event};
+    app::BattleEffects laser(files);
+    laser.observe(absent,{},0,project,&events,&weapon_rules);
+    assert(laser.active()==2);
+    image=blank();laser.draw(image,0,0,1);
+    const auto middle=(60*160+75)*4;
+    assert(image.rgba[middle]==255 && image.rgba[middle+1]==65 && image.rgba[middle+2]==55);
+    laser.observe(absent,{},0,project,&events,&weapon_rules);assert(laser.active()==2);
+    app::BattleEffects bolt(files);
+    events[0].weapon="BoltTest";
+    bolt.observe(absent,{},0,project,&events,&weapon_rules);
+    image=blank();bolt.draw(image,0,0,1);
+    const auto bend=(62*160+75)*4;
+    assert(image.rgba[bend]==110 && image.rgba[bend+2]==255);
+    app::BattleEffects tank(files);
+    events[0].weapon="TankTest";
+    tank.observe(absent,{},0,project,&events,&weapon_rules);
+    assert(tank.active()==1); // A simulated shell supplies the moving projectile.
+    events[0].kind=sim::PrototypeCombatEventKind::Death;
+    tank.observe(absent,{},1,project,&events,&weapon_rules);assert(tank.active()==2);
+    image=blank();tank.draw(image,0,0,1);assert(changed(image));
     std::cout<<"base combat pixels, clipping, pause, death, expiry, and shell checks passed\n";
 }

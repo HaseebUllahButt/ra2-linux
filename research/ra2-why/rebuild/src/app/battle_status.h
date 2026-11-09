@@ -1,5 +1,6 @@
 #pragma once
 #include "../sim/production_runtime.h"
+#include "../sim/damage_runtime.h"
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -18,6 +19,15 @@ private:
     std::uint64_t changed_=0;
     bool keep_=false;
 };
+inline std::string attack_warning(const sim::PrototypeCombatEvent& event,std::uint32_t player,
+                                  const std::string& target,const std::string& source,bool building) {
+    using Event=sim::PrototypeCombatEventKind;
+    if(event.target_house!=player)return {};
+    if(event.kind==Event::Death)return target+" lost to "+source+".";
+    if(event.kind!=Event::Damage || event.hp_after>=event.hp_before || event.hp_after<=0)return {};
+    if(building)return target+" under attack. H: Base.";
+    return target+" hit by "+source+".";
+}
 inline std::string production_status(sim::production::Status status,const std::string& success,
                                      const std::string& failure) {
     using Status=sim::production::Status;
