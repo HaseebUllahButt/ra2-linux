@@ -162,6 +162,10 @@ public:
     bool attack(session::world::Snapshot&,std::uint32_t source_id,std::uint32_t target_id);
     void stop(session::world::Snapshot&,std::uint32_t source_id);
     PrototypeCombatTick tick(session::world::Snapshot&,std::uint64_t frame);
+    // Base 004E7DF0: kill every remaining owned actor, with no attacker.
+    // Shares normal combat death unlinking and emits Death events for callers.
+    // Created factory products have no Cell links and are removed too.
+    PrototypeCombatTick destroy_house(session::world::Snapshot&,std::uint32_t house,std::uint64_t frame);
     const std::vector<PrototypeCombatProjectile>& projectiles() const { return projectiles_; }
 private:
     rules::IniFile base_,map_,art_;

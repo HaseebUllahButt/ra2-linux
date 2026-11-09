@@ -12,6 +12,7 @@
 #include "battle_shroud.h"
 #include "battle_queue.h"
 #include "battle_score.h"
+#include "battle_fallout.h"
 #include "battle_help.h"
 #include "battle_cursor.h"
 #include "battle_orders.h"
@@ -1138,7 +1139,7 @@ public:
         }
         if(motion.status!=sim::PrototypeMoveStatus::Complete)gaps_.insert(motion.detail);
         // Combat owns idle guard acquisition and uses each weapon's range.
-        const auto fighting=combat_.tick(world_,frame);
+        auto fighting=combat_.tick(world_,frame);
         score_->combat(fighting.events);
 
         for(const auto& event:fighting.events) {
@@ -1158,7 +1159,6 @@ public:
             const auto warning=attack_warning(event,player_,name(event.target_type),name(event.source_type),building);
             if(!warning.empty())status(warning);
         }
-        audio_.observe(world_,frame);
         fired+=fighting.fired;impacts+=fighting.impacts;
         for(const auto& detail:fighting.unresolved)gaps_.insert(detail);
         std::set<std::uint32_t> approach;
@@ -1190,12 +1190,21 @@ public:
         refresh_power_damage();
         const auto after_combat=proto::tick(world_,factories_,catalog_,frame);
         if(after_combat.status!=p::Status::Done)gaps_.insert(after_combat.detail);
+        const auto fallen=resolve_fallen_houses(world_,victory_,combat_,player_,enemies_,victory_rules_,frame);
+        score_->combat(fallen.events);
+        fighting.events.insert(fighting.events.end(),fallen.events.begin(),fallen.events.end());
+        for(const auto& detail:fallen.unresolved)gaps_.insert(detail);
+        if(fallen.destroyed) {
+            refresh_power_damage();
+            const auto cleanup=proto::tick(world_,factories_,catalog_,frame);
+            if(cleanup.status!=p::Status::Done)gaps_.insert(cleanup.detail);
+        }
+        audio_.observe(world_,frame);
         sim::tech::update(rules_,world_);
         shroud_.update(world_,rules_);
         effects_.observe(world_,combat_.projectiles(),frame,effect_project(),&fighting.events,&rules_);
         orders_.sync(world_);
         infantry=std::max(infantry,std::size_t(std::count_if(world_.entities.begin(),world_.entities.end(),[](const auto& e){return live(e)&&e.kind==w::Kind::Infantry;})));
-        victory_.update(world_,player_,enemies_,victory_rules_);
         if(args_.autoplay && frame%600==0) {
             std::size_t ours=0,theirs=0;
             for(const auto& e:world_.entities)if(live(e)) {
