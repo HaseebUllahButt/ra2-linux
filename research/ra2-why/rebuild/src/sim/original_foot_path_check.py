@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Run the ordinary successful Unit branch of the original Foot path wrapper.
+"""Run ordinary Unit branches of the original Foot path wrapper.
 
-Usage: original_foot_path_check.py executable [--base] [--trace] [--vectors]
+Usage: original_foot_path_check.py executable [--base] [--ordinary] [--trace] [--vectors]
 Queue guard, goal entry, marking, map lookup and path results are resolved adapters.
 The wrapper, stack probe, coordinate getters, square root, conversion, metadata
 no-op, queue copy, raw field writes and successful return execute unchanged.
@@ -42,13 +42,15 @@ def lookup():
     word(CELL+0x24,read(argument())); cpu.reg_write(UC_X86_REG_EAX,CELL)
 def entry():
     assert [argument(i) for i in range(1,5)]==[0xffffffff,0xffffffff,0,1]
-    events.append((1,read(argument()+0x24),0,0)); cpu.reg_write(UC_X86_REG_EAX,0)
+    events.append((1,read(argument()+0x24),0,0)); cpu.reg_write(UC_X86_REG_EAX,state['entry'])
 def mark():
     events.append((2,argument(),0,0)); cpu.reg_write(UC_X86_REG_EAX,0)
 def find():
     assert argument(2)==2000 and argument(3)==0
     assert argument(4)==state['append'] and argument(5)==state['mode']
     events.append((3,read(argument()),argument(4),argument(5)))
+    if not state['present']:
+        cpu.reg_write(UC_X86_REG_EAX,0); return
     words=state['path']
     cpu.mem_write(argument(1),struct.pack('<'+'i'*len(words),*words))
     for i,value in enumerate((0,state['cost'],len(words),argument(1),0,0,0,0)): word(PATH+i*4,value)
@@ -56,7 +58,15 @@ def find():
 bind(0x1007000,4,guard); bind(0x1007010,20,entry); bind(0x1007020,4,mark)
 bind(0x548070 if base else 0x5657a0,4,lookup)
 bind(0x4bb350 if base else 0x4cbba0,24,find)
-callbacks[0x4c3110 if base else 0x4d3a30]=lambda:distances.append(cpu.reg_read(UC_X86_REG_EAX))
+def computed_distance():
+    distance=cpu.reg_read(UC_X86_REG_EAX)
+    distances.append(distance)
+    word(RULES+(0x1380 if base else 0x1718),distance+state['close_delta'])
+callbacks[0x4c3110 if base else 0x4d3a30]=computed_distance
+def stop():
+    events.append((4,0,0,0))
+    cpu.reg_write(UC_X86_REG_EAX,0)
+bind(0x1007030,4,stop)
 def rng(): raise AssertionError('resolved ordinary Foot wrapper consumed RNG')
 callbacks[0x638840 if base else 0x65c780]=rng
 callbacks[0x6388a0 if base else 0x65c7e0]=rng
@@ -70,21 +80,31 @@ def inputs(seed):
     goal=(50+next_value()%9,65+next_value()%9)
     source=((48+next_value()%16)*256+128+next_value()%97,
             (64+next_value()%16)*256+128-next_value()%97,(seed%5)*104)
+    ordinary='--ordinary' in sys.argv
+    present=ordinary or seed%9!=0
+    if not present:
+        source=((goal[0]+seed%3-1)*256+128,(goal[1]+(seed//3)%3-1)*256+128,source[2])
     append=next_value()%25; mode=next_value()%3; guard=next_value()%5!=0
     cost=next_value()%99+1; count=next_value()%48
     if seed%11==0: cost=0
     path=[next_value()%8 for _ in range(count)]+[-1]
     old=[(seed+i)%8 for i in range(24)]
     if seed%7==0: old[0]=-1
-    return dict(goal=goal,source=source,append=append,mode=mode,guard=guard,cost=cost,path=path,old=old)
+    return dict(goal=goal,source=source,append=append,mode=mode,guard=guard,cost=cost,path=path,old=old,
+                present=present,entry=0 if ordinary else 6 if seed%4==0 else seed%6,close_delta=seed%3,
+                delay=(.01,0.,.333,1./900,1.23456789,-.01,2.)[seed%7],above_bridge=seed%2==0)
 
 def run(seed):
     global state,events,distances
     state=inputs(seed); events=[]; distances=[]
     cpu.mem_write(ACTOR,bytes(0x1000)); cpu.mem_write(TYPE,bytes(0x1000)); cpu.mem_write(VT,bytes(0x600))
     word(ACTOR,VT); word(ACTOR+(0x5ac if base else 0x6c4),TYPE)
-    for slot in (0x48,0x2c,0x80 if base else 0x84,0x84 if base else 0x88,0x1a0 if base else 0x1b8,0x4c4 if base else 0x540):
+    for slot in (0x48,0x2c,0x80 if base else 0x84,0x84 if base else 0x88,0x1a0 if base else 0x1b8,0x4c4 if base else 0x540,0x48c if base else 0x500):
         word(VT+slot,read(original_vt+slot))
+    word(ACTOR+(0x564 if base else 0x674),TYPE+0x1100)
+    word(TYPE+0x1100,VT+0x700); word(VT+0x748,0x1007030)
+    cpu.mem_write(ACTOR+(0x79 if base else 0x8c),bytes([state['above_bridge']]))
+    word(CELL+0x140,0) # Explicit resolved fixture bridge flag; no terrain inference.
     word(VT+(0x2ac if base else 0x2cc),0x1007000)
     word(VT+(0x194 if base else 0x1ac),0x1007010)
     word(VT+(0x11c if base else 0x124),0x1007020)
@@ -93,6 +113,7 @@ def run(seed):
     for i,value in enumerate((0x12345678,0x3456789a,0x56789abc)): word(ACTOR+raw+i*4,value)
     word(ACTOR+last_cell,0xabcdef01); word(clock,1000+seed)
     word(0x839848 if base else 0x8871e0,RULES); word(RULES+(0x1380 if base else 0x1718),576)
+    cpu.mem_write(RULES+(0x13c8 if base else 0x1760),struct.pack('<d',state['delay']))
     goal=state['goal'][0]|(state['goal'][1]<<16)
     cpu.mem_write(STACK,struct.pack('<4I',STOP,goal,state['append'],state['mode']))
     cpu.reg_write(UC_X86_REG_ECX,ACTOR); cpu.reg_write(UC_X86_REG_ESP,STACK)

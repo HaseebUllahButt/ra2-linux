@@ -1100,7 +1100,7 @@ The native test also checks eleven effect guards, unknown values, receiver ident
 
 ## Ordinary Unit Foot path wrapper
 
-`original_unit_basic_path` ports the ordinary branch of base 004C3000 / expansion 004D3920.
+`original_unit_basic_path` ports resolved ordinary branches of base 004C3000 / expansion 004D3920.
 It accepts a resolved queue guard, actor position, goal entry, mark calls, path query, and current-cell getter.
 It preserves the original 24-word queue, append offset, raw counters, and last-cell update.
 The original queue guard sees the goal cell center with Z zero.
@@ -1111,20 +1111,38 @@ Mark callback return values do not decide whether the wrapper continues.
 The Unit metadata virtual is a no-op at base 0041B540 / expansion 0041C140.
 The wrapper writes the frame, signed source-Y minus goal-center-Y, and zero to base +530/+534/+538.
 Their expansion fields are +640/+644/+648. The second field must not be replaced by the computed distance.
-The final current-cell getter supplies base +450 / expansion +558.
+The final current-cell getter supplies base +450 / expansion +558 for a nonnull path.
+Entry status 6 continues without retargeting when the initial distance is no greater than resolved Rules CloseEnough.
+The equality boundary follows base 004C317B..004C317F.
+
+A known null path writes a different failure timer before stopping the locomotor.
+It writes the frame, signed source-X minus goal-center-X, and truncated `PathDelay * 900`.
+Base 004C36EC / expansion 004D4016 proves those writes and the factor 900.
+The rule readers identify PathDelay at base 0064C2B0 and expansion 00672AE0.
+Floating arithmetic follows the checked original 53-bit, round-toward-zero behavior.
+The resolved stop callback represents Foot virtual +48C/+500 and its locomotor virtual +48 call.
+The native wrapper reads current actor position and bridge layer after that callback.
+A nearby failure returns false when the source and goal cells differ by at most one on each axis.
+The actor must be on the bridge layer, or the goal Cell bit 100 must be explicitly clear.
+This branch preserves the prior last-cell field. It does not turn a failed search into movement.
 
 Only Complete returns publishable queue state. Error results preserve the input state.
 Callbacks must use a private staged world because marking precedes later unresolved calls.
-Linked-object distance, train handling, goal-entry results 6 and 7, null-path fallback, and linked-Unit propagation remain unsupported.
+Linked-object distance, train handling, retargeting, distant failure missions, and linked-Unit propagation remain unsupported.
+Unknown bridge state remains unknown. Terrain and overlay absence do not supply bridge flags.
 The called guard, mark, entry, and goal-search bodies remain separate dependencies.
 This module does not enable live goal commands or create missing staged-world state.
 
 `original_foot_path_check.py executable [--base] --vectors` runs 512 full original wrapper calls per edition.
 The real stack probe, coordinate getters, square root, conversion, metadata no-op, queue copy, and counters execute.
-Adapters supply queue guards, goal entry, marking, cell lookup, and path results.
+Adapters supply queue guards, goal entry, marking, cell lookup, path results, and locomotor stop.
+The original Foot stop virtual executes before the supplied locomotor stop body.
 The fixture checks unchanged actor position and fails if the wrapper consumes shared RNG.
 Vectors include rejected guards, every append offset, truncated paths, terminators, zero cost keys, and retained tails.
 Every vector hashes queue words, raw fields, last cell, initial distance, and ordered callback arguments.
-Both editions match aggregate hash 7E173A4C.
+The cases include entry status 6 at the CloseEnough boundary, nearby null paths, explicit bridge layers, and seven PathDelay values.
+Both editions match aggregate hash DD3D1138.
 Compare both outputs with `test_foot_path.sh base_executable expansion_executable --vectors`.
-The native test also checks seventeen unresolved inputs, unsupported branches, and atomic queue results.
+The original `--ordinary` mode retains all 512 earlier nonnull vectors per edition and aggregate hash 7E173A4C.
+Compare that mode with native `--ordinary-vectors`.
+The default native test runs both sets and twenty-eight unresolved input, unsupported branch, and atomic-result checks.

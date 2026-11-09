@@ -1,5 +1,7 @@
 #include "foot_path.h"
+#include "fp.h"
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 namespace ra2::sim {
 namespace {
@@ -11,6 +13,10 @@ template<class T> T require(const std::optional<T>& value,const char* text) {
 }
 std::int32_t signed_word(std::uint32_t value) {
     return value<=0x7fffffffu?static_cast<std::int32_t>(value):-1-static_cast<std::int32_t>(0xffffffffu-value);
+}
+int signed_cell(std::int32_t value) {
+    const auto low=static_cast<std::uint32_t>(value/256)&0xffffu;
+    return low<0x8000u?static_cast<int>(low):static_cast<int>(low)-0x10000;
 }
 }
 FootPathResult original_unit_basic_path(const FootPathState& in,const FootPathInputs& input,
@@ -42,7 +48,8 @@ FootPathResult original_unit_basic_path(const FootPathState& in,const FootPathIn
         out.steps.push_back(FootPathStep::EnterGoal);
         if (!cb.enter_goal) throw Missing{"Foot goal-entry body is missing"};
         const auto entry=require(cb.enter_goal(input.goal),"Foot goal-entry result is unresolved");
-        if (entry==6 || entry==7) throw Unsupported{"Foot goal retarget decisions are not recovered"};
+        if (entry==7 || (entry==6 && *out.initial_distance>require(input.close_enough,"Foot CloseEnough is unresolved")))
+            throw Unsupported{"Foot goal retarget decisions are not recovered"};
         const auto mark=[&](bool inserted) {
             out.steps.push_back(inserted?FootPathStep::MarkIn:FootPathStep::MarkOut);
             if (!cb.mark) throw Missing{"Foot mark body is missing"};
@@ -53,8 +60,7 @@ FootPathResult original_unit_basic_path(const FootPathState& in,const FootPathIn
         out.steps.push_back(FootPathStep::Find);
         if (!cb.find) throw Missing{"Foot goal search body is missing"};
         const auto path=require(cb.find({input.goal,2000,append,mode}),"Foot goal search is unresolved");
-        if (!path.present) throw Unsupported{"Foot null-path fallback is not recovered"};
-        if (require(path.cost_key,"Foot path result cost key is unresolved")!=0) {
+        if (path.present && require(path.cost_key,"Foot path result cost key is unresolved")!=0) {
             const auto words=require(path.words,"Foot path result words are unresolved");
             if (words.size()>2000) throw Unsupported{"Foot path result exceeds its supplied direction storage"};
             const auto count=std::min<std::size_t>(24-append,words.size());
@@ -70,10 +76,36 @@ FootPathResult original_unit_basic_path(const FootPathState& in,const FootPathIn
                 throw Missing{"Foot linked-Unit propagation state is unresolved"};
             throw Unsupported{"Foot linked-Unit path propagation is not recovered"};
         }
-        out.steps.push_back(FootPathStep::CurrentCell);
-        if (!cb.current_cell) throw Missing{"Foot current-cell getter is missing"};
-        state.cell_558=require(cb.current_cell(),"Foot current cell is unresolved");
-        out.state=std::move(state); out.status=FootPathStatus::Complete; out.accepted=true;
+        if (path.present) {
+            out.steps.push_back(FootPathStep::CurrentCell);
+            if (!cb.current_cell) throw Missing{"Foot current-cell getter is missing"};
+            state.cell_558=require(cb.current_cell(),"Foot current cell is unresolved");
+            out.accepted=true;
+        } else {
+            // Base 004C36EC / expansion 004D4016 reads Rules PathDelay and multiplies by 900.
+            const auto ticks=fp::multiply(require(input.path_delay,"Foot PathDelay is unresolved"),900.0);
+            if (ticks<std::numeric_limits<std::int32_t>::min() || ticks>std::numeric_limits<std::int32_t>::max())
+                throw Unsupported{"Foot PathDelay conversion exceeds the recovered integer domain"};
+            state.field_644=signed_word(static_cast<std::uint32_t>(position.x)-static_cast<std::uint32_t>(goal.x));
+            state.field_648=static_cast<std::int32_t>(ticks);
+            out.steps.push_back(FootPathStep::StopLocomotor);
+            if (!cb.stop_locomotor) throw Missing{"Foot locomotor stop body is missing"};
+            (void)require(cb.stop_locomotor(),"Foot locomotor stop body is unresolved");
+            // The original reads actor coordinates after this virtual, not the earlier getter result.
+            out.steps.push_back(FootPathStep::FailurePosition);
+            const auto after_stop=require(cb.position(),"Foot position after locomotor stop is unresolved");
+            if (std::max(std::abs(signed_cell(after_stop.x)-input.goal.x),std::abs(signed_cell(after_stop.y)-input.goal.y))>1)
+                throw Unsupported{"Foot distant null-path mission fallback is not recovered"};
+            out.steps.push_back(FootPathStep::FailureBridgeLayer);
+            if (!cb.above_bridge) throw Missing{"Foot actor bridge layer getter is missing"};
+            if (!require(cb.above_bridge(),"Foot actor bridge layer is unresolved")) {
+                out.steps.push_back(FootPathStep::GoalBridge);
+                if (!cb.goal_bridge) throw Missing{"Foot goal bridge flag getter is missing"};
+                if (require(cb.goal_bridge(input.goal),"Foot goal bridge flag is unresolved"))
+                    throw Unsupported{"Foot bridge null-path mission fallback is not recovered"};
+            }
+        }
+        out.state=std::move(state); out.status=FootPathStatus::Complete;
     } catch(const Missing& missing) { out.detail=missing.text; }
     catch(const Unsupported& unsupported) { out.status=FootPathStatus::Unsupported; out.detail=unsupported.text; }
     catch(const std::exception& error) { out.status=FootPathStatus::Unsupported; out.detail=error.what(); }

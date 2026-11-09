@@ -19,6 +19,8 @@ struct FootPathInputs {
     std::optional<bool> field_5d4_is_null; // Base +4C4; nonnull distance helper remains separate.
     std::optional<bool> field_6c8_is_null,field_6d0; // Base +5B0/+5B8; linked-Unit propagation.
     std::optional<std::uint32_t> frame;
+    std::optional<std::int32_t> close_enough; // Rules base +1380 / expansion +1718; original internal distance units.
+    std::optional<double> path_delay; // Rules PathDelay, base +13C8 / expansion +1760, in minutes.
 };
 struct FootPathQuery {
     ra2map::Cell goal;
@@ -36,8 +38,11 @@ struct FootPathCallbacks {
     std::function<std::optional<bool>(bool)> mark; // Result is ignored; empty means unresolved body.
     std::function<std::optional<ResolvedFootPath>(const FootPathQuery&)> find;
     std::function<std::optional<ra2map::Cell>()> current_cell;
+    std::function<std::optional<bool>()> stop_locomotor; // Null path: Foot +48C/+500 calls locomotor virtual +48.
+    std::function<std::optional<bool>()> above_bridge; // Actor base +79 / expansion +8C after the stop callback.
+    std::function<std::optional<bool>(ra2map::Cell)> goal_bridge; // Explicit Cell +140 bit 100 after the stop callback.
 };
-enum class FootPathStep { CanQueue,Position,EnterGoal,MarkOut,Find,MarkIn,CurrentCell };
+enum class FootPathStep { CanQueue,Position,EnterGoal,MarkOut,Find,MarkIn,CurrentCell,StopLocomotor,FailurePosition,FailureBridgeLayer,GoalBridge };
 enum class FootPathStatus { Complete, NeedsInput, Unsupported };
 struct FootPathResult {
     FootPathStatus status=FootPathStatus::NeedsInput;
@@ -48,7 +53,7 @@ struct FootPathResult {
     std::string detail;
 };
 // Base 004C3000 / expansion 004D3920, ordinary Unit class, no retarget or
-// linked-Unit propagation, known nonnull path result. The Unit metadata
+// linked-Unit propagation. Null paths require a resolved nearby failure slice. The Unit metadata
 // virtual is a no-op: base 0041B540 / expansion 0041C140.
 // Called bodies remain explicit. Marks must operate on private staged state.
 // Only Complete supplies publishable queue state. No live Move command is enabled.
