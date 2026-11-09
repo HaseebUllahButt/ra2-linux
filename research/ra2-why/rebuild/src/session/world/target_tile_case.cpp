@@ -4,6 +4,7 @@
 #include "render/minimap.h"
 #include "world.h"
 #include "speed_type.h"
+#include "movement_zone.h"
 #include <cassert>
 #include <cstdint>
 #include <iostream>
@@ -105,6 +106,13 @@ int main(int argc,char** argv) {
         if (speed_key) type_input.key_value=speed_key->value;
         const auto type=resolve_base_speed_type(type_input);
         assert(type.status==SpeedTypeStatus::Complete && type.index==1);
+        BaseMovementZoneInput zone_input;
+        zone_input.initial_zone=0; // The original UnitType constructor prefix writes zero.
+        const auto* zone_key=rules.find("AMCV","MovementZone");
+        zone_input.key_state=zone_key?ZoneKeyState::Present:ZoneKeyState::Absent;
+        if (zone_key) zone_input.key_value=zone_key->value;
+        const auto zone=resolve_base_movement_zone(zone_input);
+        assert(zone.status==ZoneStatus::Complete && zone.zone==0 && zone.raw_flag_af5==false);
         Snapshot category_case; category_case.random=sim::Random(1).state();
         auto& category_cell=category_case.cells[0];
         category_cell.terrain.emplace(); category_cell.terrain->overlay_type_index=-1;

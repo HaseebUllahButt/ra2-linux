@@ -30,11 +30,11 @@ from original_image import load_original
 def cstring(address):
     return bytes(m.cpu.mem_read(address, 64)).split(b'\0', 1)[0].decode('ascii')
 
-def original_hashes():
+def original_hashes(names=('AMCV','Crusher','SpeedType')):
     cpu=load_original(executable)
     cpu.mem_map(0x1000000,0x10000)
     result={}
-    for name in ('AMCV','Crusher','SpeedType'):
+    for name in names:
         cpu.mem_write(0x1001000,bytes(16))
         cpu.mem_write(0x1002000,name.encode('ascii')+b'\0')
         cpu.mem_write(0x100e000,struct.pack('<III',0x100f000,0x1002000,len(name)))
@@ -113,6 +113,7 @@ for override, expected_index, crusher_value in ((None,1,real_crusher),('Wheel',2
     m.cpu.emu_start(0x70a600, 0x6da05f, count=100000)
     assert m.cpu.reg_read(UC_X86_REG_EIP)==0x6da05f, 'constructor prefix did not reach the +5A4 write boundary'
     assert m.read(m.TYPE+0x5a4)==0xffffffff
+    assert m.read(m.TYPE+0x500)==0
     m.cpu.reg_write(UC_X86_REG_EBP, m.TYPE)
     m.cpu.reg_write(UC_X86_REG_ESI, 0x100b000)
     m.cpu.reg_write(UC_X86_REG_EBX, 0x100a000)

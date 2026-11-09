@@ -17,6 +17,13 @@ int main(int argc, char** argv) {
     map.parse(original_test_ini(argv[1],"MP02T2.MAP",true));
     if (argc==3) {
         const std::string request=argv[2];
+        if (request=="--amcv-zone-info") {
+            rules.parse(original_test_ini(argv[1],"RULES.INI",true));
+            assert(map.key_count("AMCV")==0);
+            const auto* zone=rules.find("AMCV","MovementZone");
+            std::cout<<(zone?zone->value:"<absent>")<<'\n';
+            return std::cout?0:1;
+        }
         if (request=="--amcv-speed-info") {
             rules.parse(original_test_ini(argv[1],"RULES.INI",true));
             assert(map.key_count("AMCV")==0);
