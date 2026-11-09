@@ -40,6 +40,10 @@ struct ResolvedFootPath {
     std::optional<std::vector<std::int32_t>> words; // Original count, including any terminator.
 };
 struct FootPathCallbacks {
+    // Supported mutations: private actor position, owner bytes, global mode, destination,
+    // secondary slot, and mission records. Callbacks cannot read or change this kernel's
+    // working queue, timer fields, or last-cell field. No working-state view is supplied.
+    // A body that needs those fields must remain unresolved before live binding.
     std::function<std::optional<bool>(Coord)> can_queue;
     std::function<std::optional<Coord>()> position;
     std::function<std::optional<int>(ra2map::Cell)> enter_goal; // Direction -1, layer -1, source null, flag one.

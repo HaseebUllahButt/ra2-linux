@@ -1154,6 +1154,11 @@ The callback interface preserves these raw mission numbers without assigning unp
 It returns the original false result and preserves the prior last-cell field.
 Destination, secondary virtual, mission, and House-goal bodies remain resolved caller work.
 Read-only owner and mode getters must observe private staged state after earlier callbacks.
+The tested callback mutations cover actor position, owner bytes, global mode, destination, secondary slot, and mission records.
+Callbacks receive no view of the kernel's private working queue, timer fields, or last-cell field.
+Reading or changing those fields inside callbacks is outside the supported contract.
+A real callback body with that dependency needs an explicit working-state view before live binding.
+That body must remain unresolved through this API. The tests do not prove that such reads or writes are absent.
 
 Only Complete returns publishable queue state. Error results preserve the input state.
 Callbacks must use a private staged world because marking precedes later unresolved calls.
