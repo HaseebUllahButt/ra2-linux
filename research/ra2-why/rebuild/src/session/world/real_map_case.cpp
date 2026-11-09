@@ -14,8 +14,11 @@ int main(int argc, char** argv) {
     ra2::rules::IniFile map, rules, art;
     map.parse(original_test_ini(argv[1],"MP02T2.MAP",true));
     if (argc==3) {
-        if (std::string(argv[2])!="--tile-bytes") return 2;
-        const auto bytes=ra2::pack::read_section(map,"IsoMapPack5",ra2::pack::Codec::Lzo);
+        const std::string request=argv[2];
+        if (request!="--tile-bytes" && request!="--overlay-bytes") return 2;
+        const auto bytes=request=="--tile-bytes"?
+            ra2::pack::read_section(map,"IsoMapPack5",ra2::pack::Codec::Lzo):
+            ra2::pack::read_section(map,"OverlayPack",ra2::pack::Codec::Lcw);
         std::cout.write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));
         return std::cout?0:1;
     }

@@ -37,4 +37,6 @@ if [ "${2:-}" = "--original" ]; then
     ${PYTHON:-python3} original_map_order_check.py "$game/game.exe"
     ${PYTHON:-python3} original_reset_order_check.py "$game/game.exe"
     ${PYTHON:-python3} original_resize_check.py "$game/game.exe" "$build/real_map_case" "$game"
+    ${PYTHON:-python3} original_overlay_registry_check.py "$game/game.exe"
+    ${PYTHON:-python3} original_overlay_map_check.py "$game/game.exe" "$build/real_map_case" "$game"
 fi
