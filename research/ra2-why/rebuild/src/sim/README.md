@@ -1273,6 +1273,43 @@ Compare with `test_nearest_cell.sh base_executable expansion_executable --vector
 The default native test checks 2,048 searches and twenty-four input, candidate-cap, duplicate, tie, and unused-field cases.
 
 The rectangle body at 00550CF0 / 0056E7C0 and its Cell predicate at 00478760 / 004834A0 remain dependencies.
-Projection at 006A6A50 / 006D6410 and usable-area binding at 0055A740 / 00578540 also remain separate.
+The projection body below is available. World metadata and usable-area binding at 0055A740 / 00578540 remain separate.
 The optional nearest callback in the Foot wrapper is not automatically bound to this module.
 Live goal commands remain disabled until those inputs and the other staged-world dependencies are verified.
+
+## Original Cell projection
+
+`original_cell_projection` ports base 006A6A50 / expansion 006D6410.
+It uses a read-only Cell lookup. It does not query a Unit, Foot queue, timer, or random state.
+World X and Y divide by 256 toward zero, then wrap to the original 16-bit Cell coordinates.
+Input Z is ignored. The original checks also assert unchanged input coordinate bytes.
+
+The original makes two source lookups: first for raw flag 1000, then for signed height at Cell +11B.
+The trial point starts at source-cell coordinate times 256 plus 0x680 on each axis.
+Each iteration subtracts eight from both axes and looks up the resulting Cell.
+The trial height delta adds four only when source flag 1000 and trial bridge bit 100 are both set.
+The point adjusts by delta times 0x80 before comparison with the source coordinates.
+The result is the first trial whose adjusted Cell is no greater than the source on both axes, or the source itself.
+After 208 steps the trial reaches the source, so the original must return by then.
+No floor-height or sight-height divisor enters this calculation.
+
+`ProjectionCellState.flag_1000` and `bridge` keep the two raw flags separate.
+Unknown source flag 1000 returns NeedsInput. Trial bridge state is required only when that source flag is set.
+The lookup must resolve original aliases and the fallback Cell. Missing metadata cannot become a Cell answer.
+Only Complete supplies an answer, and its raw value must remain unchanged when another helper consumes it.
+
+`original_cell_projection_check.py executable [--base] --vectors` compares 4,096 complete original calls per edition.
+Only Map::GetCell is adapted. The original coordinate conversion, raw flag branches, signed height arithmetic, and exits execute unchanged.
+Cases include negative coordinates, integer limits, signed-byte height limits, bridge differences, unrelated flag bits, and varied input Z.
+Every lookup and returned Cell matches the native code. Both editions preserve hash 8E108462.
+`test_cell_projection.sh` runs these vectors and nine input, unused-field, and Z-independence checks.
+
+`original_nearest_projection_check.py executable [--base] --vectors` keeps the actual projection body inside the original nearest search.
+The normal 512 cases per edition match 27B77D4E. Its 512 `--edges` cases match 267F0E59.
+The check asserts Z zero at every original nearest-call projection entry and records every real projection lookup and result.
+Only usable-area, rectangle eligibility, and read-only Cell metadata are supplied answers.
+The native counterpart is `test_nearest_projection.sh base_executable expansion_executable --vectors`, with an additional `--edges` mode.
+Its default run checks 2,048 searches and two unknown-flag propagation cases.
+Unknown projection data produces no nearest answer. The tests keep bridge bit 100 independent from source flag 1000.
+The earlier standalone nearest vectors retain A7F1ECFF and 4E70DF25 after the oracle hook refactor.
+The new modules remain unbound to live goals while their world-state and fit dependencies are unresolved.

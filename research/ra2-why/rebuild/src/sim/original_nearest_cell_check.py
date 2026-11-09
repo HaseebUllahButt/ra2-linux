@@ -45,9 +45,9 @@ def write_metadata(address,cell):
     return usable
 def bind(address,pop,callback):
     callbacks[address]=callback;cpu.mem_write(address,b'\xc2'+struct.pack('<H',pop))
+    cpu.hook_add(UC_HOOK_CODE,hook,begin=address,end=address)
 def hook(cpu,address,size,user):
     if address in callbacks:callbacks[address]()
-cpu.hook_add(UC_HOOK_CODE,hook)
 cpu.reg_write(UC_X86_REG_FPCW,0xe7f)
 def usable():
     address=argument();cell=read(address+0x24);assert argument(1)==1
@@ -70,6 +70,8 @@ bind(0x550cf0 if base else 0x56e7c0,36,rectangle)
 bind(0x6a6a50 if base else 0x6d6410,8,projection)
 def rng():raise AssertionError('nearest-cell search consumed shared RNG')
 callbacks[0x638840 if base else 0x65c780]=rng;callbacks[0x6388a0 if base else 0x65c7e0]=rng
+for address in (0x638840,0x6388a0) if base else (0x65c780,0x65c7e0):
+    cpu.hook_add(UC_HOOK_CODE,hook,begin=address,end=address)
 word(0x832618 if base else 0x87f924,TABLE)
 # Execute the real registered static initializer, after poisoning both sentinel words.
 initializer=0x5441a0 if base else 0x5618b0
@@ -108,10 +110,11 @@ def run(seed):
     for word_value in (read(OUT),*(word for event in events for word in event)):
         value=((value^word_value)*16777619)&0xffffffff
     return value
-total=2166136261
-for seed in range(512):
-    digest=run(seed)
-    if '--vectors' in sys.argv:print(seed,f'{digest:08x}')
-    total=((total^digest)*16777619)&0xffffffff
-assert total==(0x4e70df25 if '--edges' in sys.argv else 0xa7f1ecff), 'original nearest-cell vectors changed'
-print('512 original nearest-cell scans',f'{total:08x}',file=sys.stderr)
+if __name__=='__main__':
+    total=2166136261
+    for seed in range(512):
+        digest=run(seed)
+        if '--vectors' in sys.argv:print(seed,f'{digest:08x}')
+        total=((total^digest)*16777619)&0xffffffff
+    assert total==(0x4e70df25 if '--edges' in sys.argv else 0xa7f1ecff), 'original nearest-cell vectors changed'
+    print('512 original nearest-cell scans',f'{total:08x}',file=sys.stderr)
