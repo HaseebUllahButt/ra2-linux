@@ -138,6 +138,15 @@ public:
         for(const auto& slot:args_.setup.opponents)if(slot.opponent && *slot.opponent!=ui::Opponent::Closed) {
             difficulty_=*slot.opponent;break;
         }
+        const auto ai_bytes=files.read_file("AI.INI");
+        if(!ai_bytes)throw std::runtime_error("Base AI.INI is missing");
+        rules::IniFile ai_ini;
+        ai_ini.parse(std::string_view(reinterpret_cast<const char*>(ai_bytes->data()),ai_bytes->size()));
+        const auto ai_difficulty=difficulty_==ui::Opponent::Hard?sim::PrototypeAI::Difficulty::Hard:
+            difficulty_==ui::Opponent::Medium?sim::PrototypeAI::Difficulty::Normal:sim::PrototypeAI::Difficulty::Easy;
+        ai_=sim::PrototypeAI(rules_,&ai_ini,ai_difficulty);
+        if(!ai_.uses_ai_ini())throw std::runtime_error("Base AI.INI has no usable team triggers");
+        std::cout<<"Computer policy: base AI.INI triggers="<<ai_.trigger_count()<<" difficulty="<<int(ai_difficulty)<<'\n';
         const auto delays=rules_.read_list("General","TeamDelays");
         const auto index=difficulty_==ui::Opponent::Hard?0u:difficulty_==ui::Opponent::Medium?1u:2u;
         if(delays.size()>index)ai_opening_=std::uint32_t(std::max(0,rules::IniFile::integer_value(delays[index]).value_or(3500)));
@@ -639,7 +648,7 @@ public:
         if(args_.autoplay)autoplay(frame);
         auto enemy_commands=ai_.tick(world_,enemy_,player_,std::int32_t(frame));
         // TODO-ORIGINAL: TeamDelays uses Hard/Normal/Easy registry order.
-        // The small prototype policy waits for that opening before attacking.
+        // Offensive team orders wait for that opening before attacking.
         enemy_commands.erase(std::remove_if(enemy_commands.begin(),enemy_commands.end(),[&](const auto& order) {
             return order.kind==OrderKind::Attack && frame<ai_opening_;
         }),enemy_commands.end());
