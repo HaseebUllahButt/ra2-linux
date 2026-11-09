@@ -8,6 +8,8 @@
 // rectangles stand in for the original sidebar shapes.
 
 #include "../render/minimap.h"
+#include "../gfx/palette.h"
+#include <optional>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -82,7 +84,8 @@ public:
     static constexpr int minimap_region_width = sidebar_width;
     static constexpr int minimap_region_height = 96;
 
-    // Load available original cameo images. Missing files use the fallback art.
+    // Register cameo images. Decode them on first draw. Files must outlive this HUD.
+    // Missing images use the fallback art.
     void load_assets(const fs::MixFileSystem& files, const rules::IniFile& rules,
                      const rules::IniFile& art, const std::vector<BuildChoice>& choices);
 
@@ -98,6 +101,10 @@ public:
     static render::Rectangle deploy_bounds();
 private:
     mutable BuildCategory active_category_ = BuildCategory::All;
-    std::unordered_map<std::string, render::Bitmap> cameos_;
+    const fs::MixFileSystem* cameo_files_=nullptr;
+    std::optional<gfx::Palette> cameo_palette_;
+    std::unordered_map<std::string,std::string> cameo_names_;
+    mutable std::unordered_map<std::string, render::Bitmap> cameos_;
+    const render::Bitmap* cameo(const std::string& type) const;
 };
 } // namespace ra2::app

@@ -65,23 +65,33 @@ bool inside(int x,int y,Rectangle r) {
 }
 void BattleHud::load_assets(const fs::MixFileSystem& files, const rules::IniFile& rules,
                             const rules::IniFile& art, const std::vector<BuildChoice>& choices) {
-    cameos_.clear();
-    auto pal = files.read_file("cameo.pal");
-    if (!pal) return;
-    for (const auto& c : choices) {
-        auto image = rules.read_string(c.type, "Image", c.type);
-        auto name = art.read_string(image, "Cameo", image + "ICON");
-        auto data = files.read_file(name + ".shp");
-        if (!data) continue;
-        try {
-            auto shp = gfx::ShpImage::parse(*data);
-            auto decoded = shp.decode_frame(0, gfx::Palette::from_bytes(*pal));
-            render::Bitmap b;
-            b.width = decoded.width; b.height = decoded.height; b.rgba = std::move(decoded.pixels);
-            cameos_[c.type] = std::move(b);
-        } catch (const std::exception&) { /* TODO-ORIGINAL: fallback for unsupported cameo art. */ }
+    cameos_.clear();cameo_names_.clear();cameo_palette_.reset();
+    cameo_files_=&files;
+    const auto pal=files.read_file("cameo.pal");
+    if(!pal)return;
+    try { cameo_palette_=gfx::Palette::from_bytes(*pal); }
+    catch(const std::exception&) { return; }
+    for(const auto& c:choices) {
+        const auto image=rules.read_string(c.type,"Image",c.type);
+        cameo_names_[c.type]=art.read_string(image,"Cameo",image+"ICON")+".shp";
     }
 }
+const render::Bitmap* BattleHud::cameo(const std::string& type) const {
+    auto cached=cameos_.find(type);
+    if(cached!=cameos_.end())return valid(cached->second)?&cached->second:nullptr;
+    if(!cameo_files_||!cameo_palette_)return nullptr;
+    const auto name=cameo_names_.find(type);
+    if(name==cameo_names_.end())return nullptr;
+    render::Bitmap bitmap;
+    const auto data=cameo_files_->read_file(name->second);
+    if(data)try {
+        auto decoded=gfx::ShpImage::parse(*data).decode_frame(0,*cameo_palette_);
+        bitmap.width=decoded.width;bitmap.height=decoded.height;bitmap.rgba=std::move(decoded.pixels);
+    } catch(const std::exception&) { /* TODO-ORIGINAL: fallback for unsupported cameo art. */ }
+    const auto item=cameos_.emplace(type,std::move(bitmap)).first;
+    return valid(item->second)?&item->second:nullptr;
+}
+
 render::Rectangle BattleHud::build_button_bounds(int i) {
     if(i<0 || i>=build_columns*build_rows) return {};
     return {palette_x+i%build_columns*build_button_pitch_x,
@@ -137,16 +147,16 @@ void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
         if (active_category_ != BuildCategory::All && c.category != active_category_) continue;
         if (i>=build_columns*build_rows) break;
         auto r=build_button_bounds(i++); border(b,r,edge);
-        auto image=cameos_.find(c.type);
-        if (image!=cameos_.end() && valid(image->second)) {
-            const auto& src=image->second;
+        const auto* image=cameo(c.type);
+        if (image) {
+            const auto& src=*image;
             for (int y=1;y<r.height-1;++y) for (int x=1;x<r.width-1;++x) {
                 auto p=(static_cast<std::size_t>(y-1)*src.height/(r.height-2)*src.width+(x-1)*src.width/(r.width-2))*4;
                 if (src.rgba[p+3]) pixel(b,r.x+x,r.y+y,{src.rgba[p],src.rgba[p+1],src.rgba[p+2],src.rgba[p+3]});
             }
         }
         auto color=c.enabled?ink:edge;
-        bool art_loaded=image!=cameos_.end() && valid(image->second);
+        const bool art_loaded=image!=nullptr;
         if (art_loaded) {
             // Original cameo art: no name, cost or BUILD text on top.
             if (c.progress>=1000) {
