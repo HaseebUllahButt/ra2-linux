@@ -13,6 +13,10 @@ std::vector<std::pair<std::string,CanBuild>> options(const session::world::Snaps
                                                     const Catalog&,std::uint32_t house_id);
 Outcome begin_production(session::world::Snapshot&,FactorySet&,const Catalog&,std::uint32_t house_id,
                          const std::string& type,std::uint64_t frame);
+Outcome hold_production(session::world::Snapshot&,FactorySet&,const Catalog&,std::uint32_t house_id,
+    const std::string& type,std::uint64_t frame);
+Outcome cancel_production(session::world::Snapshot&,FactorySet&,const Catalog&,std::uint32_t house_id,
+    const std::string& type,std::uint64_t frame);
 std::optional<bool> passes_proximity(const session::world::Snapshot&,const FactorySet&,const Catalog&,
                                      std::uint32_t house_id,const std::string& type,CellXY);
 Outcome place(session::world::Snapshot&,FactorySet&,const Catalog&,std::uint32_t house_id,

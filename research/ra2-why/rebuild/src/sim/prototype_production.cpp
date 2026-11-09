@@ -161,51 +161,18 @@ Outcome cleanup_destroyed(w::Snapshot& world,FactorySet& factories,const Catalog
     return {Status::Done,{},{},{}};
 }
 
-void decrement(std::optional<std::map<std::int32_t,std::int32_t>>& counts,std::int32_t index) {
-    if (!counts) return;
-    const auto item=counts->find(index);
-    if (item!=counts->end() && item->second>0) --item->second;
-}
-
-Outcome abandon_orphans(w::Snapshot& world,FactorySet& factories,const Catalog& catalog) {
-    for (auto& factory:factories.factories) {
+Outcome abandon_orphans(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,std::uint64_t frame) {
+    for (std::size_t index=0;index<factories.factories.size();++index) {
+        const auto& factory=factories.factories[index];
         if (!factory.object) continue;
         const auto wanted=product_kind(factory.slot);
         if (!wanted) return fail(Status::NeedsInput,"factory slot is unknown");
         if (choose_factory(world,factories,catalog,factory.house_id,*wanted,factory.slot==3)) continue;
-        auto* item=entity(world,factory.object);
-        auto* owner=house(world,factory.house_id);
-        const auto* type=catalog.find(factory.object_type);
-        if (!item || !owner || !type || item->house_id!=factory.house_id || item->type!=factory.object_type)
-            return fail(Status::NeedsInput,"orphaned factory product is invalid");
-        if (item->lifetime==w::Lifetime::Created) {
-            // Prototype refund follows the older Factory::Abandon shape. The
-            // exact base-game cost and destruction callbacks remain unresolved.
-            if (owner->cash && type->cost>=0 && factory.balance>=0) {
-                const auto paid=std::max<std::int64_t>(0,std::int64_t(type->cost)-factory.balance);
-                *owner->cash=static_cast<std::int32_t>(std::min<std::int64_t>(
-                    std::numeric_limits<std::int32_t>::max(),std::int64_t(*owner->cash)+paid));
-            }
-            switch (item->kind) {
-            case w::Kind::Structure:
-                decrement(owner->buildings_owned_5420,type->heap_index);
-                factories.buildings.erase(item->id);
-                break;
-            case w::Kind::Unit:
-                decrement(owner->units_owned_5430,type->heap_index);
-                decrement(owner->unit_type_counts,type->heap_index);
-                if (owner->unit_count && *owner->unit_count>0) --*owner->unit_count;
-                break;
-            case w::Kind::Infantry: decrement(owner->infantry_owned_5440,type->heap_index); break;
-            case w::Kind::Aircraft: decrement(owner->aircraft_owned_5450,type->heap_index); break;
-            default: return fail(Status::NeedsInput,"factory product kind is invalid");
-            }
-            item->lifetime=w::Lifetime::Destroyed; item->resolved_hp=0;
-            item->active=false; item->in_limbo=true; item->on_map=false; item->next=0;
-            item->object_field_74=0; item->object_field_76=1; item->target_id=0;
-        }
-        factory.object=0; factory.object_type.clear(); factory.progress=0;
-        factory.interval=0; factory.timer_duration=0; factory.balance=0; factory.suspended=true;
+        // 004B97C0: use the same refund and destruction path as manual cancel.
+        const auto owner=factory.house_id;
+        const auto type=factory.object_type;
+        auto result=ra2::sim::production::cancel_production(world,factories,catalog,owner,type,frame);
+        if (result.status!=Status::Done) return result;
     }
     return {Status::Done,{},{},{}};
 }
@@ -483,6 +450,19 @@ Outcome begin_production(w::Snapshot& world,FactorySet& factories,const Catalog&
     });
 }
 
+Outcome hold_production(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,
+                         std::uint32_t owner,const std::string& type,std::uint64_t frame) {
+    return transaction(world,factories,[&](w::Snapshot& candidate,FactorySet& next) {
+        return ra2::sim::production::hold_production(candidate,next,catalog,owner,type,frame);
+    });
+}
+Outcome cancel_production(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,
+                         std::uint32_t owner,const std::string& type,std::uint64_t frame) {
+    return transaction(world,factories,[&](w::Snapshot& candidate,FactorySet& next) {
+        return ra2::sim::production::cancel_production(candidate,next,catalog,owner,type,frame);
+    });
+}
+
 std::optional<bool> passes_proximity(const w::Snapshot& world,const FactorySet& factories,
                                       const Catalog& catalog,std::uint32_t house_id,
                                       const std::string& type,CellXY cell) {
@@ -556,7 +536,7 @@ Outcome tick(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,std
     return transaction(world,factories,[&](w::Snapshot& candidate,FactorySet& next) {
         auto cleanup=cleanup_destroyed(candidate,next,catalog);
         if (cleanup.status!=Status::Done) return cleanup;
-        cleanup=abandon_orphans(candidate,next,catalog);
+        cleanup=abandon_orphans(candidate,next,catalog,frame);
         if (cleanup.status!=Status::Done) return cleanup;
         auto result=ra2::sim::production::tick(candidate,next,catalog,frame);
         if (result.status!=Status::Done) return result;
