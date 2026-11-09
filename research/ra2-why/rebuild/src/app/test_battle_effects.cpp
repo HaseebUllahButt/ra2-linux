@@ -39,6 +39,13 @@ int main(int argc,char** argv) {
     sim::PrototypeCombatProjectile shot;shot.flight.arc.position={80,50,0};
     effects.observe(world,{shot},1001,project);
     image=blank();effects.draw(image,0,0,1001);assert(image.rgba[(50*160+80)*4+3]==255);
+    // GameLoop presents before update, then advances its frame counter.
+    auto next_present=blank();effects.draw(next_present,0,0,1002);
+    assert(next_present.rgba==image.rgba);
+    auto paused_shell=blank();effects.draw(paused_shell,0,0,1002);
+    assert(paused_shell.rgba==next_present.rgba);
+    auto stale_shell=blank();effects.draw(stale_shell,0,0,1003);
+    assert(!changed(stale_shell));
     effects.observe(world,{},1002,project);
     image=blank();effects.draw(image,0,0,1002);assert(!changed(image));
     app::BattleEffects deaths(files);

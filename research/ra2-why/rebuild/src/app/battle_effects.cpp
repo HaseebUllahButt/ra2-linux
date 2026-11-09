@@ -93,7 +93,8 @@ void BattleEffects::draw(render::Bitmap& b,int cx,int cy,std::uint64_t frame) co
             sprite(b,frames[std::min<std::size_t>((frame-e.born)/2,frames.size()-1)],x,y-8);
         }
     }
-    if(frame==frame_)for(const auto& p:shells_) {
+    // The loop presents tick N at frame N+1. Help can pause that frame.
+    if(frame>=frame_&&frame-frame_<=1)for(const auto& p:shells_) {
         pixel(b,p.x-cx,p.y-cy);pixel(b,p.x-cx-1,p.y-cy);pixel(b,p.x-cx,p.y-cy-1);
     }
 }
