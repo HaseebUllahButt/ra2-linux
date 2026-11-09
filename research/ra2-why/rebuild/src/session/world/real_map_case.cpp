@@ -17,6 +17,21 @@ int main(int argc, char** argv) {
     map.parse(original_test_ini(argv[1],"MP02T2.MAP",true));
     if (argc==3) {
         const std::string request=argv[2];
+        if (request=="--mission-rules") {
+            rules.parse(original_test_ini(argv[1],"RULES.INI",true));
+            int index=0;
+            for (const char* name:{"Sleep","Attack","Move","QMove","Retreat","Guard","Sticky","Enter",
+                 "Capture","Eaten","Harvest","Area Guard","Return","Stop","Ambush","Hunt","Unload",
+                 "Sabotage","Construction","Selling","Repair","Rescue","Missile","Harmless","Open",
+                 "Patrol","Paradrop Approach","Paradrop Overfly","Wait","Attack Move"}) {
+                assert(map.key_count(name)==0);
+                const auto* section=rules.find_section(name);
+                std::cout<<"S\t"<<index++<<'\t'<<name<<'\t'<<(section?1:0)<<'\n';
+                if (section) for (const auto& value:section->entries)
+                    std::cout<<"K\t"<<value.key<<'\t'<<value.value<<'\n';
+            }
+            return std::cout?0:1;
+        }
         if (request=="--mcv-all-art") {
             art.parse(original_test_ini(argv[1],"ART.INI",true));
             const auto* section=art.find_section("MCV");
