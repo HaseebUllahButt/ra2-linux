@@ -407,8 +407,9 @@ std::map<std::string, std::vector<std::string>> superweapon_grants(const IniFile
         const auto building = std::string(IniFile::trim(entry.value));
         if (building.empty()) continue;
         for (const auto* key : {"SuperWeapon", "SuperWeapon2"}) {
-            const auto section = IniFile::trim(rules.read_string(building, key));
-            if (!section.empty()) out[std::string(section)].push_back(building);
+            const std::string raw = rules.read_string(building, key);
+            const std::string section(IniFile::trim(raw));
+            if (!section.empty()) out[section].push_back(building);
         }
     }
     return out;
@@ -779,8 +780,9 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
                     if (const auto count = IniFile::integer_value(item)) counts.push_back(*count);
             } else {
                 // TODO-ORIGINAL: the generic ParaDrop count is engine data.
-                const auto paratrooper = IniFile::trim(rules_.read_string("General", "PParatrooper"));
-                if (!paratrooper.empty()) types.push_back(std::string(paratrooper));
+                const std::string raw = rules_.read_string("General", "PParatrooper");
+                const std::string paratrooper(IniFile::trim(raw));
+                if (!paratrooper.empty()) types.push_back(paratrooper);
                 counts.push_back(6);
             }
             std::vector<std::string> wave;

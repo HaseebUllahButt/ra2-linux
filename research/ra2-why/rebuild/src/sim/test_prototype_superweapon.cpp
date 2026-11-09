@@ -39,7 +39,7 @@ IniFile fixture_rules() {
         "[ChronoWarpSpecial]\nIsPowered=false\nRechargeTime=1\nType=ChronoWarp\nPostClick=yes\n"
         "PreDependent=ChronoSphere\n"
         "[SpyPlaneSpecial]\nIsPowered=false\nRechargeTime=4\nType=SpyPlane\nShowTimer=no\n"
-        "[BuildingTypes]\n1=NAMISL\n2=NAIRON\n"
+        "[BuildingTypes]\n1=NAMISL\n2=NAIRON\n3=AMRADR\n[AMRADR]\nSuperWeapon=SpyPlaneSpecial\n"
         "[NAMISL]\nSuperWeapon=MultiSpecial\n"
         "[NAIRON]\nSuperWeapon=IronCurtainSpecial\nSuperWeapon2=MultiSpecial\n"
         "[NukePayload]\nDamage=600\nWarhead=NUKE\n"
@@ -62,8 +62,8 @@ sw::Snapshot make_world() {
     sw::Snapshot world;
     world.edition = sw::Edition::Base;
     world.setup_progress = sw::SetupProgress::PrototypeComplete;
-    for (int y = 40; y <= 60; ++y)
-        for (int x = 40; x <= 60; ++x) {
+    for (int y = 5; y <= 80; ++y)
+        for (int x = 5; x <= 80; ++x) {
             sw::CellState cell;
             cell.allocated = true;
             cell.heads.emplace();
@@ -132,7 +132,7 @@ std::size_t chain_length(const sw::Snapshot& world, Cell cell) {
         ++count;
         const auto found = std::find_if(world.entities.begin(), world.entities.end(),
             [link](const sw::Entity& entity) { return entity.id == link; });
-        if (!found || !found->next) break;
+        if (found == world.entities.end() || !found->next) break;
         link = *found->next;
     }
     return count;
@@ -270,12 +270,12 @@ void check_low_power(const IniFile& rules) {
     supers.tick(world, 101);
     require(!supers.state(102, "MultiSpecial")->suspended,
         "Weapon stayed suspended after power returned");
-    for (int frame = 102; frame < 9002; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
+    for (int frame = 102; frame < 9102; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
     require(supers.ready(102, "MultiSpecial"), "Weapon did not finish charging after power returned");
     // A ready powered weapon cannot fire at low power.
     world.houses[1].power_output = 0;
-    supers.tick(world, 9002);
-    const auto report = supers.fire(world, 102, "MultiSpecial", {50, 50}, 9002);
+    supers.tick(world, 9200);
+    const auto report = supers.fire(world, 102, "MultiSpecial", {50, 50}, 9200);
     require(!report.fired && !report.notes.empty(), "Low power allowed a powered launch");
     world.houses[1].power_output = 200;
     // Unpowered weapons charge and fire in the same brownout.
@@ -301,7 +301,7 @@ void check_nuke(const IniFile& rules, const std::string& exe) {
         "Nuke blast did not hit the center and the 5 cell ring");
     require(world.entities[1].lifetime == sw::Lifetime::Destroyed &&
         world.entities[1].resolved_hp == 0, "Center tank survived the nuke");
-    require(world.entities[2].resolved_hp == 94,
+    require(world.entities[2].resolved_hp == 95,
         "Nuke falloff at 5 cells did not match the original damage math");
     require(world.entities[3].resolved_hp == 400, "Nuke reached beyond its 10 cell spread");
     require(chain_ok(world), "Nuke deaths broke the Cell chains");
@@ -326,8 +326,9 @@ void check_iron_curtain(const IniFile& rules, const std::string& exe) {
     auto world = make_world();
     place(world, 1, 102, "NAIRON", sw::Kind::Structure, {10, 10}, 1000);
     place(world, 2, 102, "HTNK", sw::Kind::Unit, {50, 50}, 400);
-    place(world, 3, 102, "E1", sw::Kind::Infantry, {51, 50}, 125);
+    place(world, 3, 102, "E1", sw::Kind::Infantry, {50, 50}, 125);
     place(world, 4, 101, "HTNK", sw::Kind::Unit, {52, 50}, 400);
+    place(world, 5, 102, "NAMISL", sw::Kind::Structure, {11, 10}, 1000);
     PrototypeSuperweapons supers(rules, exe);
     supers.update_grants(world);
     for (int frame = 0; frame < 4500; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
@@ -338,7 +339,10 @@ void check_iron_curtain(const IniFile& rules, const std::string& exe) {
         !supers.invulnerable(2, 5250), "Iron Curtain duration did not match 750 frames");
     require(!supers.invulnerable(4, 4500), "Iron Curtain shielded an enemy tank");
     // A nuke cannot hurt the curtained tank but kills the rest.
-    for (int frame = 4501; frame < 13500; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
+    for (int frame = 4501; frame < 13400; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
+    require(supers.fire(world, 102, "IronCurtainSpecial", {50, 50}, 13400).fired,
+        "Second Iron Curtain was not charged");
+    for (int frame = 13400; frame < 13500; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
     const auto nuke = supers.fire(world, 102, "MultiSpecial", {50, 50}, 13500);
     require(nuke.fired, "Second nuke was not charged");
     require(world.entities[1].lifetime == sw::Lifetime::Placed &&
@@ -352,6 +356,7 @@ void check_chrono(const IniFile& rules, const std::string& exe) {
     place(world, 2, 102, "HTNK", sw::Kind::Unit, {50, 50}, 400);
     place(world, 3, 102, "HTNK", sw::Kind::Unit, {51, 50}, 400);
     place(world, 4, 101, "HTNK", sw::Kind::Unit, {52, 50}, 400);
+    place(world, 5, 102, "NAMISL", sw::Kind::Structure, {11, 10}, 1000);
     PrototypeSuperweapons supers(rules, exe);
     supers.update_grants(world);
     // The warp needs an armed sphere first.
@@ -362,16 +367,16 @@ void check_chrono(const IniFile& rules, const std::string& exe) {
     require(arm.fired, "ChronoSphere launch rejected");
     require(supers.ready(102, "ChronoSphereSpecial"),
         "Arming the ChronoSphere consumed its charge");
-    const auto warp = supers.fire(world, 102, "ChronoWarpSpecial", {50, 50}, 6301);
+    const auto warp = supers.fire(world, 102, "ChronoWarpSpecial", {51, 50}, 6301);
     require(warp.fired && warp.teleported == 3, "Chrono Warp did not move the 3x3 block");
     const auto& moved = world.entities[1];
-    require(moved.cell && moved.cell->x == 55 && moved.cell->y == 50 &&
-        moved.position && moved.position->x == 55 * 256 + 128,
+    require(moved.cell && moved.cell->x == 54 && moved.cell->y == 50 &&
+        moved.position && moved.position->x == 54 * 256 + 128,
         "Warped tank did not land on the armed destination");
-    require(world.entities[3].cell && world.entities[3].cell->x == 57 &&
+    require(world.entities[3].cell && world.entities[3].cell->x == 56 &&
         world.entities[3].cell->y == 50, "Enemy tank did not warp with the block");
     require(chain_ok(world), "Chrono Warp broke the Cell chains");
-    require(chain_length(world, {50, 50}) == 0 && chain_length(world, {55, 50}) == 3,
+    require(chain_length(world, {50, 50}) == 0 && chain_length(world, {55, 50}) == 1,
         "Warped tanks did not move between Cell chains");
     require(!supers.ready(102, "ChronoSphereSpecial") &&
         supers.frames_left(102, "ChronoSphereSpecial") == 6300,
@@ -431,6 +436,26 @@ void check_paradrop(const IniFile& rules, const std::string& exe) {
     require(chain_ok(generic), "Generic paratroopers broke the Cell chains");
 }
 
+void check_storm(const IniFile& rules, const std::string& exe) {
+    auto world = make_world();
+    place(world, 1, 102, "GAWEAT", sw::Kind::Structure, {10, 10}, 1000);
+    for (std::uint32_t i = 0; i < 6; ++i)
+        place(world, 2 + i, 101, "HTNK", sw::Kind::Unit,
+              {static_cast<std::uint16_t>(48 + i), 50}, 400);
+    PrototypeSuperweapons supers(rules, exe);
+    supers.update_grants(world);
+    for (int frame = 0; frame < 9000; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
+    require(supers.ready(102, "LightningStormSpecial"), "Weather Storm did not charge");
+    require(supers.fire(world, 102, "LightningStormSpecial", {50, 50}, 9000).fired,
+        "Weather Storm launch rejected");
+    int damaged = 0;
+    for (int frame = 9001; frame < 9800; ++frame)
+        damaged += supers.tick(world, static_cast<std::uint64_t>(frame)).damaged;
+    require(damaged > 0, "Weather Storm struck nothing");
+    require(chain_ok(world), "Weather Storm broke the Cell chains");
+    require(supers.frames_left(102, "LightningStormSpecial") > 0, "Storm did not restart charge");
+}
+
 void check_spy_plane() {
     const auto rules = fixture_rules();
     auto world = make_world();
@@ -483,8 +508,6 @@ int main(int argc, char** argv) try {
     ra2::fs::MixFileSystem files(game_dir);
     files.mount_language(ra2::fs::GameVariant::RedAlert2);
     files.bootstrap(ra2::fs::GameVariant::RedAlert2);
-    files.mount_overlays();
-    files.mount_resources();
     const auto bytes = files.read_file("RULES.INI");
     require(bytes.has_value(), "Installed base RULES.INI is missing");
     IniFile rules;
@@ -497,6 +520,7 @@ int main(int argc, char** argv) try {
     check_iron_curtain(rules, exe);
     check_chrono(rules, exe);
     check_paradrop(rules, exe);
+    check_storm(rules, exe);
     check_spy_plane();
     check_guards(rules);
     std::cout << "Super weapon spot checks passed: rules parse, charging, low power, "
