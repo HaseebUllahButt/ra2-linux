@@ -37,6 +37,18 @@ bool remove_subcell(SubcellOccupancy& cell, OccupancyLayer layer, unsigned subce
     if (!(bits&0x1c)) field=-1;
     return true;
 }
+bool add_unit_occupancy(SubcellOccupancy& cell, OccupancyLayer layer) {
+    if (!valid(layer,0)) return false;
+    auto& bits=layer==OccupancyLayer::Ground?cell.ground:cell.bridge;
+    bits=static_cast<std::uint8_t>(bits|0x20u);
+    return true;
+}
+bool remove_unit_occupancy(SubcellOccupancy& cell, OccupancyLayer layer) {
+    if (!valid(layer,0)) return false;
+    auto& bits=layer==OccupancyLayer::Ground?cell.ground:cell.bridge;
+    bits=static_cast<std::uint8_t>(bits&~0x20u);
+    return true;
+}
 std::optional<std::uint32_t> terrain_occupancy_mask(std::optional<std::int32_t> session_field_838,
     std::optional<std::uint32_t> temperate_mask, std::optional<std::uint32_t> snow_mask) {
     // Base 006E38F6 selects the snow mask only when Scenario +838 equals 1.

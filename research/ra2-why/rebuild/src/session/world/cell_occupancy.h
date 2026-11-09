@@ -15,6 +15,9 @@ std::optional<OccupancyLayer> subcell_layer(bool adding, std::int32_t ground_hei
 // The caller resolves the layer and the original subcell (0 through 4).
 bool add_subcell(SubcellOccupancy&, OccupancyLayer, unsigned subcell, std::int32_t owner);
 bool remove_subcell(SubcellOccupancy&, OccupancyLayer, unsigned subcell);
+// Base Unit 00707980/007079E0 uses bit 20 on the resolved layer.
+bool add_unit_occupancy(SubcellOccupancy&, OccupancyLayer);
+bool remove_unit_occupancy(SubcellOccupancy&, OccupancyLayer);
 // The caller resolves the TerrainType mask and successful unlimbo.
 std::optional<std::uint32_t> terrain_occupancy_mask(std::optional<std::int32_t> session_field_838,
     std::optional<std::uint32_t> temperate_mask, std::optional<std::uint32_t> snow_mask);

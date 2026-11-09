@@ -58,7 +58,27 @@ for session in range(2):
                 cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,point))
                 cpu.emu_start(0x6e3850 if remove else 0x6e38f0,0x103e000,count=10000)
                 expected.append(str(cpu.mem_read(cell+0x124,1)[0]))
+# The original Unit layer methods also update Cell occupancy bit 20. Their
+# supplied floor is zero; the original add/remove layer checks execute.
+m.word(0xad057c,0)
+for bridge in range(2):
+    for z in (-1,0,1):
+        for bits in (0,1,4,7,28,255):
+            for remove in range(2):
+                cell=m.cell_for(0,0)
+                m.word(cell+0x124,0xa1b2c300|bits)
+                m.word(cell+0x128,0x12345600|(bits^0x55))
+                m.word(cell+0x140,0x100 if bridge else 0)
+                m.coord(point,(128,128,z))
+                cpu.reg_write(UC_X86_REG_ECX,m.FOOT)
+                cpu.reg_write(UC_X86_REG_ESP,0x103f000)
+                cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,point))
+                cpu.emu_start(0x7079e0 if remove else 0x707980,0x103e000,count=10000)
+                ground=m.read(cell+0x124)
+                upper=m.read(cell+0x128)
+                assert ground&0xffffff00==0xa1b2c300 and upper&0xffffff00==0x12345600
+                expected.append(f'{ground&255} {upper&255}')
 actual=subprocess.check_output([native],text=True).splitlines()
 assert actual==expected, next(((i,a,b) for i,(a,b) in enumerate(zip(actual,expected)) if a!=b),None)
-assert len(actual)==len(expected)==552
-print('360 subcell and 192 Terrain occupancy writes match original base x86')
+assert len(actual)==len(expected)==624
+print('360 subcell, 192 Terrain, and 72 Unit occupancy writes match original base x86')

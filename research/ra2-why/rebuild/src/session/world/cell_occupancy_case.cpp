@@ -14,6 +14,8 @@ int main() {
     SubcellOccupancy invalid;
     assert(!add_subcell(invalid,OccupancyLayer::Ground,5,7));
     assert(!remove_subcell(invalid,static_cast<OccupancyLayer>(2),0));
+    assert(!add_unit_occupancy(invalid,static_cast<OccupancyLayer>(2)));
+    assert(!remove_unit_occupancy(invalid,static_cast<OccupancyLayer>(2)));
     assert(!subcell_layer(true,0,0,0,{}));
     assert(!subcell_layer(true,std::numeric_limits<std::int32_t>::max(),1,0,false));
     assert(!terrain_occupancy_mask({},7,7));
@@ -27,5 +29,13 @@ int main() {
             if (remove) remove_terrain_occupancy(occupancy,*selected);
             else add_terrain_occupancy(occupancy,*selected);
             std::cout<<int(occupancy)<<'\n';
+        }
+    for (int bridge=0;bridge<2;++bridge) for (int z: {-1,0,1})
+        for (int bits: {0,1,4,7,28,255}) for (int remove=0;remove<2;++remove) {
+            SubcellOccupancy cell{static_cast<std::uint8_t>(bits),static_cast<std::uint8_t>(bits^0x55),3,9};
+            const auto layer=subcell_layer(!remove,0,0,z,bridge!=0); assert(layer);
+            assert(remove?remove_unit_occupancy(cell,*layer):add_unit_occupancy(cell,*layer));
+            assert(cell.ground_owner==3 && cell.bridge_owner==9);
+            std::cout<<int(cell.ground)<<' '<<int(cell.bridge)<<'\n';
         }
 }
