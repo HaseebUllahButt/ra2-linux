@@ -181,12 +181,13 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
                     throw std::runtime_error("Vehicle map facing is outside its original byte range");
                 if (!entity.turret_facing)
                     throw std::runtime_error("Vehicle turret facing is unresolved");
-                if (*entity.turret_facing != entity.facing)
-                    throw std::runtime_error("Independent vehicle turret poses are unresolved");
+                if (*entity.turret_facing < 0 || *entity.turret_facing > 255)
+                    throw std::runtime_error("Vehicle turret facing is outside its original byte range");
                 auto asset = vehicles_.find(entity.type);
                 if (asset == vehicles_.end())
                     asset = vehicles_.emplace(entity.type, VehicleArt::load(files_, art_, rules_, entity.type)).first;
-                const auto& sprite = asset->second.draw(static_cast<std::uint8_t>(entity.facing));
+                const auto& sprite = asset->second.draw(static_cast<std::uint8_t>(entity.facing),
+                    static_cast<std::uint8_t>(*entity.turret_facing));
                 result.drawn += blit(result.image, sprite.image,
                     {anchor.x + sprite.left, anchor.y + sprite.top});
                 continue;

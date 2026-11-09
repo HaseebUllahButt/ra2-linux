@@ -41,9 +41,15 @@ VehicleArt VehicleArt::load(const fs::MixFileSystem& files, const rules::IniFile
 }
 
 const VehicleSprite& VehicleArt::draw(std::uint8_t facing) {
-    auto found = images_.find(facing);
+    return draw(facing, facing);
+}
+
+const VehicleSprite& VehicleArt::draw(std::uint8_t facing, std::uint8_t turret_facing) {
+    const auto key = std::make_pair(facing, turret_facing);
+    auto found = images_.find(key);
     if (found != images_.end()) return found->second;
     auto pose = voxel::vehicle_pose_from_map(facing);
+    pose.turret_facing = std::uint16_t(turret_facing) << 8;
     pose.hull.model = &hull_.model;
     pose.hull.animation = &hull_.animation;
     if (turret_) { pose.turret.model = &turret_->model; pose.turret.animation = &turret_->animation; }
@@ -59,6 +65,6 @@ const VehicleSprite& VehicleArt::draw(std::uint8_t facing) {
         sprite.image.pixels.push_back(pixel.r); sprite.image.pixels.push_back(pixel.g);
         sprite.image.pixels.push_back(pixel.b); sprite.image.pixels.push_back(pixel.a);
     }
-    return images_.emplace(facing, std::move(sprite)).first->second;
+    return images_.emplace(key, std::move(sprite)).first->second;
 }
 }

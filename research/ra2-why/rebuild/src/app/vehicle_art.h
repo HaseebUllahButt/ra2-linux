@@ -15,12 +15,13 @@ public:
     static VehicleArt load(const fs::MixFileSystem& files, const rules::IniFile& art,
                             const rules::IniFile& rules, std::string_view type);
     const VehicleSprite& draw(std::uint8_t map_facing);
+    const VehicleSprite& draw(std::uint8_t hull_facing, std::uint8_t turret_facing);
 private:
     struct Part { voxel::Model model; voxel::Animation animation; };
     Part hull_;
     std::optional<Part> turret_, barrel_;
     voxel::Lighting lighting_;
     int turret_offset_ = 0;
-    std::map<std::uint8_t, VehicleSprite> images_;
+    std::map<std::pair<std::uint8_t, std::uint8_t>, VehicleSprite> images_;
 };
 }

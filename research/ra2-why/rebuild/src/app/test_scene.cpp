@@ -174,8 +174,36 @@ int main(int argc, char** argv) {
                         "Unknown turret facing became a guessed hull-facing pose");
                 state.entities[0].turret_facing = 32;
                 const auto independent_turret = fixture.render(empty, state, view);
-                require(independent_turret.drawn == 0 && independent_turret.gaps.size() == 1,
-                        "Unverified independent turret pose was drawn");
+                require(independent_turret.drawn == 1 && independent_turret.gaps.empty() &&
+                        independent_turret.image.rgba != tank_output.image.rgba,
+                        "Independent turret direction did not reach the scene");
+                const auto& turned_sprite = tank_art.draw(64, 32);
+                std::vector<std::uint8_t> expected(500*400*4);
+                for (std::size_t p=3;p<expected.size();p+=4) expected[p]=255;
+                std::size_t turned_pixels = 0;
+                for (int y = 0; y < turned_sprite.image.height; ++y)
+                    for (int x = 0; x < turned_sprite.image.width; ++x) {
+                        const auto source = (std::size_t(y)*turned_sprite.image.width+x)*4;
+                        if (!turned_sprite.image.pixels[source+3]) continue;
+                        const int dx = 250+turned_sprite.left+x, dy = 215+turned_sprite.top+y;
+                        require(dx>=0 && dy>=0 && dx<500 && dy<400, "Turned turret fixture was clipped");
+                        const auto target = (std::size_t(dy)*500+dx)*4;
+                        std::copy_n(turned_sprite.image.pixels.begin()+source,4,expected.begin()+target);
+                        ++turned_pixels;
+                    }
+                require(turned_pixels == 1092,
+                        ("Independent turret pixel count changed: " + std::to_string(turned_pixels)).c_str());
+                require(expected == independent_turret.image.rgba,
+                        "Independent turret alignment changed");
+                state.entities[0].turret_facing = 64;
+                require(fixture.render(empty,state,view).image.rgba == tank_output.image.rgba,
+                        "Turret pose cache changed the earlier pose");
+                for (int invalid : {-1,256}) {
+                    state.entities[0].turret_facing = invalid;
+                    const auto rejected = fixture.render(empty,state,view);
+                    require(rejected.drawn == 0 && rejected.gaps.size() == 1,
+                            "Invalid turret direction wrapped into a valid pose");
+                }
             }
             // A view beyond the map must not create an out-of-range iterator.
             require(fixture.render(empty, {}, {1000000, 0, 1, 1}).image.rgba.size() == 4,
