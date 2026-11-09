@@ -74,8 +74,20 @@ int main() {
     assert(staged.snapshot().houses[0].cash==5000 && staged.snapshot().houses[0].palette_color==3);
     assert(staged.snapshot().houses[0].unit_count==1 && staged.snapshot().houses[0].unit_type_counts->at(0)==1 && staged.snapshot().houses[0].unit_fixed_counts->at(0)==1);
     assert(staged.snapshot().entities[0].lifetime==Lifetime::Created && staged.snapshot().entities[0].resolved_hp==1000);
+    assert(staged.snapshot().entities[0].category && staged.snapshot().entities[0].category->runtime_type==1);
     assert(staged.snapshot().entities[0].constructor_random==static_cast<std::uint16_t>(expected_random.next()));
     assert(staged.snapshot().random.table==expected_random.table() && staged.snapshot().random.first==expected_random.first());
+    auto pending=staged.snapshot(); pending.pending_cell_setup=true;
+    Stage paused(pending);
+    assert(!paused.create_player_house("Next","Russians",5000,1,512));
+    assert(!paused.create_auxiliary_house(HouseRole::Neutral,512,{}));
+    assert(!paused.create_unit(*house,"AMCV",1000,0,false));
+    assert(paused.snapshot().random.table==pending.random.table &&
+           paused.snapshot().random.first==pending.random.first &&
+           paused.snapshot().random.second==pending.random.second);
+    assert(paused.snapshot().houses.size()==pending.houses.size() &&
+           paused.snapshot().entities.size()==pending.entities.size() &&
+           paused.snapshot().creation_order.size()==pending.creation_order.size());
     sim::Random battle_random(17);
     Stage battle(battle_random.state());
     const auto player=battle.create_player_house("Player","Americans",5000,0,64); assert(player);
@@ -141,6 +153,7 @@ int main() {
     assert(battle.snapshot().cells.at(69*512+54).ground_occupancy_124==0x20);
     assert(battle.snapshot().pending_cell_setup);
     assert(!battle.snapshot().cells.at(69*512+54).coarse_category);
+    assert(!coarse_inputs(battle.snapshot(),69*512+54));
     assert(battle.place_base_unit(*battle_unit,{56,69},32,profile)==PlacementResult::Unresolved);
     assert(battle.snapshot().houses[0].placed_unit_counts->at(0)==1);
     for (const auto& direction:std::vector<std::pair<int,int>>{{0,-1},{1,-1},{1,0},{1,1},{0,1},{-1,1},{-1,0},{-1,-1}})

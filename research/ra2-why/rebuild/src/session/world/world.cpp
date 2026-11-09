@@ -28,7 +28,7 @@ std::optional<std::uint32_t> Stage::next_id() const {
 std::optional<std::uint32_t> Stage::create_player_house(std::string name, std::string country,
     std::int32_t credits, std::int32_t selected_color, std::int32_t unit_registry_size,
     std::optional<std::int32_t> original_index) {
-    if (name.empty() || country.empty() || credits<0 || selected_color<0 || selected_color>7 ||
+    if (snapshot_.pending_cell_setup || name.empty() || country.empty() || credits<0 || selected_color<0 || selected_color>7 ||
         unit_registry_size<0 || unit_registry_size>512 || (original_index && *original_index<0)) return {};
     for (const auto& existing:snapshot_.houses)
         if (existing.role && *existing.role!=HouseRole::Player) return {};
@@ -59,7 +59,7 @@ std::optional<std::uint32_t> Stage::create_player_house(std::string name, std::s
 std::optional<std::uint32_t> Stage::create_auxiliary_house(HouseRole role,
     std::int32_t unit_registry_size, std::optional<std::int32_t> resolved_palette_color,
     std::optional<std::int32_t> original_index) {
-    if ((role!=HouseRole::Neutral && role!=HouseRole::Special) || unit_registry_size<0 ||
+    if (snapshot_.pending_cell_setup || (role!=HouseRole::Neutral && role!=HouseRole::Special) || unit_registry_size<0 ||
         unit_registry_size>512 || (resolved_palette_color && *resolved_palette_color<0) ||
         (original_index && *original_index<0)) return {};
     bool have_player=false,have_neutral=false,have_special=false;
@@ -93,7 +93,7 @@ std::optional<std::uint32_t> Stage::create_unit(std::uint32_t house_id, std::str
     auto found=snapshot_.houses.end();
     for (auto it=snapshot_.houses.begin();it!=snapshot_.houses.end();++it)
         if (it->id==house_id) { found=it; break; }
-    if (found==snapshot_.houses.end() || type.empty() || (resolved_hp && *resolved_hp<=0) ||
+    if (snapshot_.pending_cell_setup || found==snapshot_.houses.end() || type.empty() || (resolved_hp && *resolved_hp<=0) ||
         original_type_index<0 || original_type_index>=512 || !found->unit_registry_size ||
         original_type_index>=*found->unit_registry_size) return {};
     const auto id=next_id(); if (!id) return {};
@@ -107,6 +107,8 @@ std::optional<std::uint32_t> Stage::create_unit(std::uint32_t house_id, std::str
     unit.constructor_random=constructor_random;
     unit.next=0; unit.on_map=false; unit.hull_facing=0; unit.turret_facing=0;
     unit.occupancy_tracking=true; // Foot constructor 004C2B6E.
+    unit.category.emplace();
+    unit.category->runtime_type=1; // Unit virtual +2C, base 0070A2D0.
     unit.original_type_index=original_type_index;
     unit.excluded_from_house_tracking=excluded_from_house_tracking;
     auto updated_house=*found;
@@ -130,7 +132,7 @@ std::optional<std::uint32_t> Stage::create_unit(std::uint32_t house_id, std::str
 }
 bool Stage::install_base_cells(PlacementGeometry geometry, std::map<std::uint32_t,CellState> cells,
     std::optional<std::int32_t> tube_count, std::optional<std::int32_t> session_field) {
-    if (snapshot_.geometry || cells.empty() || (tube_count && *tube_count<0) ||
+    if (snapshot_.pending_cell_setup || snapshot_.geometry || cells.empty() || (tube_count && *tube_count<0) ||
         !placement_cell_in_map({0,0},PlacementEdition::Base,geometry,std::nullopt)) return false;
     auto candidate=snapshot_;
     candidate.geometry=geometry; candidate.cells=std::move(cells);
@@ -306,6 +308,7 @@ bool validate(const Snapshot& snapshot) {
     return true;
 }
 std::optional<sim::CoarseCategoryInputs> coarse_inputs(const Snapshot& snapshot, std::uint32_t cell) {
+    if (snapshot.pending_cell_setup) return {};
     const auto found=snapshot.cells.find(cell);
     if (found==snapshot.cells.end()) return {};
     sim::CoarseCategoryInputs input;

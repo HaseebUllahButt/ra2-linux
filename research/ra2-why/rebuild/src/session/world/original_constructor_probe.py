@@ -83,5 +83,10 @@ next_id=m.read(m.FOOT+0x30)
 on_map=cpu.mem_read(m.FOOT+0x32d,1)[0]
 hull=struct.unpack('<H',cpu.mem_read(m.FOOT+0x2e0,2))[0]>>8
 turret=struct.unpack('<H',cpu.mem_read(m.FOOT+0x2f8,2))[0]>>8
+assert m.read(m.read(m.FOOT)+0x2c)==0x70a2d0
+cpu.reg_write(UC_X86_REG_ECX,m.FOOT);cpu.reg_write(UC_X86_REG_ESP,0x103f000)
+cpu.mem_write(0x103f000,struct.pack('<I',0x103e000))
+cpu.emu_start(0x70a2d0,0x103e000,count=10000)
+assert cpu.reg_read(UC_X86_REG_EAX)==1
 print('RESULT',low,next_id,on_map,m.read(m.FOOT+0x6c),hull,turret,cpu.mem_read(m.FOOT+0x5a0,1)[0],
       m.read(house+0x228),m.read(0x1421000+4*type_index),m.read(house+0x1278+4*type_index),*indexes,*table)
