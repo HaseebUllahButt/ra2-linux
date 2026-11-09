@@ -102,6 +102,9 @@ const std::string& BaseBattleAssets::battle_rules_name() const { return data_->b
 const rules::IniFile& BaseBattleAssets::map_ini() const { return data_->map_ini; }
 const ra2map::MapFile& BaseBattleAssets::map() const { return data_->map; }
 render::TheaterArt& BaseBattleAssets::theater() { return *data_->theater; }
+std::optional<std::vector<std::uint8_t>> BaseBattleAssets::read_asset(const std::string& name) const {
+    return data_->files.read_file(name);
+}
 const PlacementGeometry& BaseBattleAssets::geometry() const { return data_->geometry; }
 const std::vector<BaseMapCellInput>& BaseBattleAssets::cells_in_original_order() const { return data_->cells; }
 const std::vector<BaseOverlayInput>& BaseBattleAssets::overlays_in_scan_order() const { return data_->overlays; }

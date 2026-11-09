@@ -40,6 +40,8 @@ public:
     const rules::IniFile& map_ini() const;
     const ra2map::MapFile& map() const;
     render::TheaterArt& theater();
+    // Read an installed file using this loader's mounted base archives.
+    std::optional<std::vector<std::uint8_t>> read_asset(const std::string& name) const;
     const PlacementGeometry& geometry() const;
     const std::vector<BaseMapCellInput>& cells_in_original_order() const;
     // Every nonempty packed byte, in the original 512-by-512 scan order.

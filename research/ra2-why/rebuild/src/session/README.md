@@ -210,3 +210,9 @@ The asset loader also reads the installed multiplayer mode catalog and its
 Battle rules file. For MP02T2, the map and Battle file do not override the
 checked Overlay reader fields for packed Overlay types. This does not prove
 the rest of type loading or establish final runtime type values.
+
+`world/overlay_shape.h` covers the base theater preload path when Theater is
+true and DemandLoad is false. It needs resolved reader fields and returns the
+installed bytes. With supplied reader fields, all 17 MP02T2 Overlay types
+find their named theater files. Original x86 builds the same filenames. The
+archive cache, other branches, fallback, and later type state remain separate.
