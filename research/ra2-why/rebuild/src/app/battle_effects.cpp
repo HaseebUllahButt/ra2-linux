@@ -44,7 +44,6 @@ std::uint64_t BattleEffects::lifetime(Kind k) const {
 }
 void BattleEffects::observe(const session::world::Snapshot& world,
     const std::vector<sim::PrototypeCombatProjectile>& shots,std::uint64_t frame,const Project& project) {
-    if(ready_&&frame==frame_)return; // Repeated paused compositions cannot emit effects.
     if(ready_&&frame<frame_){effects_.clear();seen_.clear();ready_=false;}
     frame_=frame;
     effects_.erase(std::remove_if(effects_.begin(),effects_.end(),[&](const auto& e){
@@ -62,12 +61,16 @@ void BattleEffects::observe(const session::world::Snapshot& world,
             if(hp<=0)add(Death,old->second.position,old->second.position);
             else if(hp<old->second.hp)add(Hit,*e.position,*e.position);
         }
-        if(ready_&&hp>0&&e.weapon_timer_start_frame&&*e.weapon_timer_start_frame==static_cast<std::int64_t>(frame)) {
+        // Compare timer changes, including the first tick at the setup frame.
+        // Repeated observations of an unchanged paused world emit nothing.
+        if(ready_&&old!=seen_.end()&&hp>0&&e.weapon_timer_start_frame&&
+           old->second.weapon_timer!=e.weapon_timer_start_frame&&
+           *e.weapon_timer_start_frame==static_cast<std::int64_t>(frame)) {
             add(Flash,*e.position,*e.position);
             const auto target=seen_.find(e.target_id.value_or(0));
             if(target!=seen_.end())add(Tracer,*e.position,target->second.position);
         }
-        seen_[e.id]={hp,*e.position};
+        seen_[e.id]={hp,*e.position,e.weapon_timer_start_frame};
     }
     shells_.clear();
     for(const auto& shot:shots) {

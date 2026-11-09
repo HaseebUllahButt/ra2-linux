@@ -50,6 +50,29 @@ int main(int argc,char** argv) {
     assert(deaths.active()==1);
     image=blank();deaths.draw(image,0,0,1);assert(changed(image));
     deaths.observe(world,{},1000,project);assert(deaths.active()==0);
+    // Setup and the first combat tick can both use frame zero.
+    app::BattleEffects first_tick(files);
+    world.entities[1].resolved_hp=100;
+    first_tick.observe(world,{},0,project);
+    world.entities[0].weapon_timer_start_frame=0;
+    world.entities[1].resolved_hp=75;
+    first_tick.observe(world,{},0,project);assert(first_tick.active()==3);
+    image=blank();first_tick.draw(image,0,0,0);assert(changed(image));
+    first_tick.observe(world,{},0,project);assert(first_tick.active()==3);
+    paused=blank();first_tick.draw(paused,0,0,0);assert(image.rgba==paused.rgba);
+    // Deployment removes the MCV but preserves its positive health.
+    app::BattleEffects deploy(files);
+    world.entities[0].weapon_timer_start_frame.reset();
+    world.entities[0].type="AMCV";
+    world.entities[0].lifetime=session::world::Lifetime::Placed;
+    deploy.observe(world,{},0,project);
+    world.entities[0].lifetime=session::world::Lifetime::Destroyed;
+    world.entities[0].on_map=false;world.entities[0].object_field_76=1;
+    world.entities[0].active=false;world.entities[0].in_limbo=true;
+    deploy.observe(world,{},1,project);assert(deploy.active()==0);
+    image=blank();deploy.draw(image,0,0,1);assert(!changed(image));
+    deploy.observe(world,{},1,project);assert(deploy.active()==0);
+    world.entities[1].resolved_hp=0;
     // Observation must not change health, firing timers, or projectile data.
     assert(world.entities[1].resolved_hp==0&&!world.entities[0].weapon_timer_start_frame);
     assert(shot.flight.arc.position[0]==80);

@@ -19,7 +19,7 @@ public:
 private:
     enum Kind { Flash, Hit, Death, Tracer };
     struct Effect { Kind kind; EffectPoint at,to; std::uint64_t born; };
-    struct Seen { int hp; sim::Coord position; };
+    struct Seen { int hp; sim::Coord position; std::optional<std::int32_t> weapon_timer; };
     std::map<std::uint32_t,Seen> seen_;
     std::vector<Effect> effects_;
     std::vector<EffectPoint> shells_;
