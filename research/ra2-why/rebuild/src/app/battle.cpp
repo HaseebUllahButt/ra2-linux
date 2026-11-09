@@ -1,5 +1,7 @@
 #include "battle_formation.h"
 #include "battle.h"
+#include "battle_status.h"
+#include "sidebar_choices.h"
 #include "camera_scroll.h"
 #include "house_color.h"
 #include "battle_hud.h"
@@ -128,9 +130,10 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     std::set<std::int32_t> keys_;
     std::set<std::string> gaps_;
     int camera_x_=0,camera_y_=0,pointer_x_=-1,pointer_y_=-1;
-    std::uint64_t status_time_=0;
+    BattleStatus status_;
+    SidebarChoices sidebar_choices_;
     CameraScroll camera_scroll_;
-    std::string placement_,status_="Select MCV. D deploys.";
+    std::string placement_;
     bool quit_=false,autoplay_moved_=false,autoplay_deployed_=false;
     bool help_visible_=true,show_score_=false;
     enum class PausePanel { Closed, Options, Abort };
@@ -160,8 +163,8 @@ public:
         if(const auto labels=assets_.read_asset("RA2.CSF"))labels_.parse(labels->data(),labels->size());
         score_assets_=ui::ScoreAssets::load(files,labels_);
         help_visible_=!args_.autoplay;
-        status_time_=clock_.now_ms();
-        camera_scroll_.reset(status_time_);
+        status("Select MCV. D deploys.");
+        camera_scroll_.reset(clock_.now_ms());
         for(const auto& slot:args_.setup.opponents)if(slot.opponent && *slot.opponent!=ui::Opponent::Closed) {
             difficulty_=*slot.opponent;break;
         }
@@ -255,7 +258,7 @@ public:
             !miner(e) && !rules_.read_string(e.type,"Primary").empty();
     }
     void queue(Order order) {pending_.push_back(std::move(order));}
-    void status(std::string message) {status_=std::move(message);status_time_=clock_.now_ms();}
+    void status(std::string message) {status_.set(std::move(message),clock_.now_ms());}
     int factory_slot(const p::TypeFacts& type) const {
         return type.rtti==p::Rtti::BuildingType?(type.build_cat==5?5:4):
             type.rtti==p::Rtti::InfantryType?1:type.rtti==p::Rtti::UnitType?2:0;
@@ -608,8 +611,8 @@ public:
         default:break;
         }
     }
-    void note(const p::Outcome& outcome,const std::string& success) {
-        status(outcome.status==p::Status::Done?success:outcome.detail);
+    void note(const p::Outcome& outcome,const std::string& success,const std::string& failure="Cannot complete this order.") {
+        status(production_status(outcome.status,success,failure));
         if (outcome.status==p::Status::NeedsInput || outcome.status==p::Status::Unsupported)
             gaps_.insert(outcome.detail);
     }
@@ -628,7 +631,7 @@ public:
                 const auto move=movement_.issue(world_,order.entity,goal,
                     sim::original_rule_speed(rules_.read_integer(e->type,"Speed",4)));
                 if(move.status==sim::PrototypeMoveStatus::Complete)manual_moves_[order.entity]=goal;
-                if (order.house==player_) status(move.status==sim::PrototypeMoveStatus::Complete?"Moving.":move.detail);
+                if (order.house==player_) status(move.status==sim::PrototypeMoveStatus::Complete?"Moving.":"Cannot move there.");
             }
             break;
         case OrderKind::Attack:
@@ -647,7 +650,7 @@ public:
             movement_.cancel(world_,order.entity);combat_.stop(world_,order.entity);attacks_.erase(order.entity);
             const auto outcome=proto::deploy(world_,factories_,catalog_,order.entity,true);
             if (outcome.status==p::Status::Done) ++deployed;
-            if (order.house==player_) note(outcome,"Construction yard deployed. Choose a building in the sidebar.");
+            if (order.house==player_) note(outcome,"Construction yard deployed. Choose a building in the sidebar.","Cannot deploy here.");
             break;
         }
         case OrderKind::Build: {
@@ -674,7 +677,7 @@ public:
             if (outcome.status==p::Status::Done && order.house==player_) {
                 placement_.clear();orders_.set_placement_active(false);
             }
-            if(order.house==player_)note(outcome,"Building placed.");
+            if(order.house==player_)note(outcome,"Building placed.","Can't build here.");
             break;
         }
         }
@@ -850,7 +853,7 @@ public:
                 <<" moved="<<moved<<" fired="<<fired<<" impacts="<<impacts<<" built="<<built<<'\n';
         }
         if(victory_.settled()) {
-            status_=result_name(victory_.result)+". Press Esc to return.";
+            status_.set(result_name(victory_.result)+". Press Esc to return.",clock_.now_ms(),true);
             show_score_=true;
             ui::ScoreScreen score;score.player_won=victory_.result==sim::Victory::PlayerWon;
             score.seconds=frame/30;
@@ -870,7 +873,7 @@ public:
             score.houses[1].kills_of[0]=score.houses[0].losses_to[1];
             score_assets_.continue_text="Esc: Main Menu / Click: View Battlefield / Tab: Score";
             score_image_=ui::draw_score_screen(score_assets_,score);
-            window_.title("Red Alert 2 native prototype: "+status_);
+            window_.title("Red Alert 2 native prototype: "+status_.text(clock_.now_ms()));
             if(args_.autoplay)state.running=false;
         }
         if(world_.setup_progress!=w::SetupProgress::PrototypeComplete)throw std::runtime_error("Prototype world phase changed");
@@ -881,7 +884,6 @@ public:
     void refresh_hud() {
         loop::profile::Timer probe(loop::profile::Phase::HudRefresh);
         const auto& h=house(world_,player_);
-        if(!victory_.settled() && placement_.empty() && clock_.now_ms()-status_time_>=5000)status_.clear();
         hud_state_.cash=h.cash.value_or(0);hud_state_.power_output=h.power_output.value_or(0);
         hud_state_.power_drain=h.power_drain.value_or(0);hud_state_.selected_labels.clear();
         hud_state_.pointer_x=pointer_x_;hud_state_.pointer_y=pointer_y_;hud_state_.can_deploy=false;
@@ -890,7 +892,7 @@ public:
                 hud_state_.selected_labels.push_back(name(e->type)+" "+std::to_string(e->resolved_hp.value_or(0)));
                 hud_state_.can_deploy|=!rules_.read_string(e->type,"DeploysInto").empty();
             }
-        hud_state_.status=status_;hud_state_.result=result_name(victory_.result);
+        hud_state_.status=status_.text(clock_.now_ms());hud_state_.result=result_name(victory_.result);
         hud_state_.choices.clear();
         const auto eligible=proto::options(world_,factories_,catalog_,player_);
         const auto available=sim::tech::buildable_types(rules_,world_,player_);
@@ -910,6 +912,7 @@ public:
             choice.queued=build_queue_.count(type)+active_count(type);
             hud_state_.choices.push_back(std::move(choice));
         }
+        hud_state_.choices=sidebar_choices_.update(hud_state_.choices);
         hud_state_.camera={camera_x_,camera_y_,BattleHud::sidebar_x,BattleHud::view_height};
         hud_state_.map_width=terrain_.width;hud_state_.map_height=terrain_.height;
         // Base radar requires a live radar building and enough power.

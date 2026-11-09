@@ -1,3 +1,4 @@
+#include "sidebar_choices.h"
 #include "battle_hud.h"
 #include "../fs/mix_bootstrap.h"
 #include "../rules/ini_file.h"
@@ -18,6 +19,19 @@ bool same(const render::Bitmap& a,const render::Bitmap& b,render::Rectangle r) {
 }
 }
 int main(int argc, char** argv) {
+    // Power loss cannot move a tank button onto a different product.
+    SidebarChoices stable;
+    auto initial=stable.update({{"GAREFN","REFINERY",2000,true,0},
+                               {"MTNK","GRIZZLY",700,true,0}});
+    assert(initial.size()==2 && initial[1].type=="MTNK");
+    auto low_power=stable.update({{"MTNK","GRIZZLY",700,true,300}});
+    assert(low_power.size()==2 && !low_power[0].enabled && low_power[1].type=="MTNK");
+    assert(low_power[1].progress==300);
+    auto restored=stable.update({{"GAREFN","REFINERY",2000,true,0},
+                                 {"MTNK","GRIZZLY",700,true,600},
+                                 {"NAFLAK","FLAK",1000,true,0}});
+    assert(restored[0].enabled && restored[1].type=="MTNK" && restored[2].type=="NAFLAK");
+
     BattleHud hud; HudState s;
     s.choices={{"E1","INFANTRY",100,true,500},{"MTNK","TANK",800,false,0}};
     auto r=BattleHud::build_button_bounds(0);
