@@ -144,6 +144,103 @@ p::CellXY place_building(w::Snapshot& world,p::FactorySet& factories,const p::Ca
         }
     throw std::runtime_error("no place for "+type);
 }
+
+// A mouse Cell whose whole cursor grid is legal, searched in rings around
+// the yard. The original grid is centred on the mouse (00498F10).
+std::optional<p::CellXY> legal_mouse(const w::Snapshot& world,const p::FactorySet& factories,const p::Catalog& catalog,
+                                     std::uint32_t house,const std::string& type,ra2map::Cell base,int rings) {
+    for (int radius=0;radius<=rings;++radius) for (int dy=-radius;dy<=radius;++dy)
+        for (int dx=-radius;dx<=radius;++dx) {
+            if (std::max(std::abs(dx),std::abs(dy))!=radius) continue;
+            const p::CellXY mouse{std::int16_t(base.x+1+dx),std::int16_t(base.y+1+dy)};
+            const auto cursor=proto::placement_cursor(world,factories,catalog,house,type,mouse);
+            require(cursor.has_value(),"no cursor for "+type);
+            bool every=!cursor->cells.empty();
+            for (const auto& cell:cursor->cells) every=every && cell.legal_cell==true;
+            require(every==(cursor->proximity==true && cursor->legal==true),
+                    type+" grid Cells disagree with the whole placement");
+            if (every) return mouse;
+        }
+    return std::nullopt;
+}
+
+// Place type with the mouse on a legal grid near the yard, as a player clicks.
+p::CellXY place_at_mouse(w::Snapshot& world,p::FactorySet& factories,const p::Catalog& catalog,std::uint32_t house,
+                         const std::string& type,std::uint64_t frame,ra2map::Cell base,p::CellXY offset) {
+    const auto mouse=legal_mouse(world,factories,catalog,house,type,base,6);
+    require(mouse.has_value(),"no legal "+type+" grid within six Cells of the yard");
+    const auto origin=proto::placement_origin(catalog,type,*mouse);
+    require(origin && origin->x==mouse->x+offset.x && origin->y==mouse->y+offset.y,
+            type+" grid is not centred on the mouse");
+    std::size_t count=world.entities.size();
+    done(proto::place(world,factories,catalog,house,type,*origin,frame),"place "+type+" at the mouse");
+    require_prototype(world);
+    bool found=false;
+    for (const auto& item:world.entities) if (item.type==type && item.cell && item.cell->x==origin->x &&
+        item.cell->y==origin->y && item.lifetime==w::Lifetime::Placed) found=true;
+    require(found && world.entities.size()>=count,type+" is not at the cursor origin");
+    return *origin;
+}
+
+// Units in the footprint block the Cell (004718B0), like the original. Only
+// that Cell turns red; the click is rejected and the product stays ready.
+int check_units_block(const w::Snapshot& world,const p::FactorySet& factories,const p::Catalog& catalog,
+                      std::uint32_t house,const std::string& type,std::uint32_t product,std::uint64_t frame,
+                      bool& other_cell_legal) {
+    int checked=0;
+    for (const auto& unit:world.entities) {
+        if (unit.lifetime!=w::Lifetime::Placed || !unit.cell || unit.in_limbo==true ||
+            (unit.kind!=w::Kind::Unit && unit.kind!=w::Kind::Infantry)) continue;
+        const p::CellXY mouse{std::int16_t(unit.cell->x+1),std::int16_t(unit.cell->y+1)};
+        const auto cursor=proto::placement_cursor(world,factories,catalog,house,type,mouse);
+        require(cursor.has_value(),"no cursor over a unit");
+        if (cursor->proximity!=true) continue;
+        require(cursor->legal==false,type+" grid accepted a unit in the footprint");
+        bool unit_cell=false;
+        for (const auto& cell:cursor->cells) {
+            if (cell.cell.x==unit.cell->x && cell.cell.y==unit.cell->y) {
+                require(cell.legal_cell==false,type+" grid showed a unit Cell as legal");
+                unit_cell=true;
+            } else if (cell.legal_cell==true) other_cell_legal=true;
+        }
+        require(unit_cell,type+" grid does not cover the unit under the mouse");
+        auto blocked=world; auto blocked_factories=factories;
+        const auto outcome=proto::place(blocked,blocked_factories,catalog,house,type,cursor->origin,frame);
+        require(outcome.status==p::Status::Rejected,type+" over a unit was not rejected: "+outcome.detail);
+        require(factory(blocked_factories,product) && factory(blocked_factories,product)->progress==54 &&
+                blocked.entities.size()==world.entities.size(),type+" rejected over a unit lost its product");
+        ++checked;
+    }
+    return checked;
+}
+
+// Clicks at the map edge: the grid is never legal and the product stays.
+void check_edge_clicks(const w::Snapshot& world,const p::FactorySet& factories,const p::Catalog& catalog,
+                       std::uint32_t house,const std::string& type,std::uint32_t product,std::uint64_t frame) {
+    require(world.geometry.has_value(),"map geometry is missing");
+    int edges=0;
+    for (int y=0;y<512 && edges<4;y+=37) for (int x=0;x<512;++x) {
+        const auto found=world.cells.find(std::uint32_t(y)*512+x);
+        if (found==world.cells.end() || !found->second.allocated || !*found->second.allocated) continue;
+        // First allocated Cell of the row: the map edge.
+        const p::CellXY mouse{std::int16_t(x),std::int16_t(y)};
+        const auto cursor=proto::placement_cursor(world,factories,catalog,house,type,mouse);
+        require(cursor && cursor->legal==false,type+" edge grid is not illegal at "+std::to_string(x)+","+std::to_string(y));
+        auto edge=world; auto edge_factories=factories;
+        const auto outcome=proto::place(edge,edge_factories,catalog,house,type,cursor->origin,frame);
+        require(outcome.status==p::Status::Rejected,type+" edge click was not rejected: "+outcome.detail);
+        require(factory(edge_factories,product) && factory(edge_factories,product)->progress==54,
+                type+" edge click lost its product");
+        ++edges; break;
+    }
+    require(edges>0,"no map edge was checked");
+    // Off the map: no Cell exists, so the grid cannot be legal or placed.
+    const auto off=proto::placement_cursor(world,factories,catalog,house,type,{-3,-3});
+    require(off && off->legal!=true,"off-map grid is legal");
+    auto edge=world; auto edge_factories=factories;
+    require(proto::place(edge,edge_factories,catalog,house,type,off->origin,frame).status!=p::Status::Done &&
+            factory(edge_factories,product),"off-map click placed a building");
+}
 }
 
 int main(int argc,char** argv) try {
@@ -164,6 +261,14 @@ int main(int argc,char** argv) try {
     require(catalog.find("GACNST") && catalog.find("NACNST") &&
             catalog.find("GACNST")->placement.foundation==18 &&
             catalog.find("NACNST")->placement.foundation==18,"installed yard foundations differ");
+    // 00498F10 centres the grid: origin = mouse - ((w-1)/2,(h-1)/2).
+    for (const auto& [type,offset]:std::vector<std::pair<std::string,std::pair<int,int>>>{
+             {"GAPOWR",{0,0}},{"GAREFN",{-1,-1}},{"GAWEAP",{-2,-1}},{"GACNST",{-1,-1}},{"GAPILE",{-1,0}}}) {
+        const auto origin=proto::placement_origin(catalog,type,{100,100});
+        require(origin && origin->x==100+offset.first && origin->y==100+offset.second,
+                type+" cursor offset differs");
+    }
+    require(!proto::placement_origin(catalog,"MTNK",{100,100}),"a Unit has a building cursor");
     p::FactorySet factories;
     {
         auto wrong=world; wrong.setup_progress=w::SetupProgress::Complete;
@@ -384,6 +489,15 @@ int main(int argc,char** argv) try {
                 sealed.random.first==before.first && sealed.random.second==before.second,
                 "blocked refinery exit changed the world or random state");
     }
+    {
+        bool other_cell_legal=false;
+        require(check_units_block(world,factories,catalog,player,"GAREFN",pending_refinery,frame,other_cell_legal)>0,
+                "no unit stood in a refinery grid near the base");
+        require(other_cell_legal,"a unit turned the whole refinery grid red");
+        check_edge_clicks(world,factories,catalog,player,"GAREFN",pending_refinery,frame);
+        auto near=world; auto near_factories=factories;
+        place_at_mouse(near,near_factories,catalog,player,"GAREFN",frame,base,{-1,-1});
+    }
     const auto before_free_unit=world.random;
     const auto cash_before_free_unit=*world.houses[0].cash;
     place_building(world,factories,catalog,player,"GAREFN",frame,base);
@@ -443,7 +557,14 @@ int main(int argc,char** argv) try {
                 "refinery build frames differ: first "+std::to_string(first_refinery_frames)+
                 ", second "+std::to_string(second_refinery_frames));
     }
-    build(world,factories,catalog,player,"GAWEAP",frame,false);
+    const auto pending_factory=build(world,factories,catalog,player,"GAWEAP",frame,false);
+    {
+        bool other_cell_legal=false;
+        check_units_block(world,factories,catalog,player,"GAWEAP",pending_factory,frame,other_cell_legal);
+        check_edge_clicks(world,factories,catalog,player,"GAWEAP",pending_factory,frame);
+        auto near=world; auto near_factories=factories;
+        place_at_mouse(near,near_factories,catalog,player,"GAWEAP",frame,base,{-2,-1});
+    }
     place_building(world,factories,catalog,player,"GAWEAP",frame,base);
     done(proto::tick(world,factories,catalog,++frame),"factory power update");
     const auto tank=build(world,factories,catalog,player,"MTNK",frame,false);

@@ -1033,6 +1033,18 @@ std::optional<bool> legal_placement(const w::Snapshot& s,const Catalog& c,
     return legal(s,c,*t,origin);
 }
 
+std::optional<std::vector<std::pair<CellXY,Placement>>> placement_cells(const w::Snapshot& s,const Catalog& c,
+                                                                       const std::string& type,CellXY origin) {
+    const auto* t=c.find(type);
+    if (!s.geometry || !t || t->rtti!=Rtti::BuildingType) return std::nullopt;
+    if (t->placement.foundation<0 || t->placement.foundation>=22) return std::nullopt;
+    const auto region=footprint(origin,t->placement.foundation);
+    const auto map=placement_view(s,c,region);
+    std::vector<std::pair<CellXY,Placement>> out;
+    for (const auto cell:region) out.push_back({cell,original_clear_to_build(map,cell,t->placement)});
+    return out;
+}
+
 // The checks that place() makes before its first write, in its order. It
 // returns the failure that place() would return, or nothing when place()
 // reaches its first write. It does not change the world or the factories.

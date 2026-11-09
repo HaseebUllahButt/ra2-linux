@@ -248,6 +248,11 @@ std::optional<bool> passes_proximity(const session::world::Snapshot&,const Facto
 // Read-only footprint check shared by the placement preview and Unlimbo.
 std::optional<bool> legal_placement(const session::world::Snapshot&,const Catalog&,
     const std::string& type,CellXY);
+// Read-only per-Cell form of legal_placement for the cursor grid. Each
+// footprint Cell of Occupy_List(true) goes through 004718B0 on its own, as
+// the grid draw 00473F20 does. Nothing when the map or the type is unknown.
+std::optional<std::vector<std::pair<CellXY,Placement>>> placement_cells(
+    const session::world::Snapshot&,const Catalog&,const std::string& type,CellXY origin);
 // Read-only: the failure that place() returns before its first write, with
 // its status and detail, or nothing when place() would reach that write.
 std::optional<Outcome> place_failure(const session::world::Snapshot&,const FactorySet&,const Catalog&,
