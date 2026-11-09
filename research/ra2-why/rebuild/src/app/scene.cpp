@@ -338,7 +338,7 @@ void Scene::prepare_color(const sim::Snapshot& state,const std::vector<std::stri
 }
 
 SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& state,
-                         render::Rectangle viewport) {
+                         render::Rectangle viewport, const session::world::Snapshot* world) {
     loop::profile::Timer probe(loop::profile::Phase::Scene);
     valid_image(terrain);
     if (viewport.x < 0 || viewport.y < 0 || viewport.width <= 0 || viewport.height <= 0 ||
@@ -365,6 +365,16 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
                 std::size_t(copy_width) * 4, pixels.begin() + std::size_t(y) * viewport.width * 4);
     }
     result.image = {viewport.width, viewport.height, std::move(pixels)};
+
+    if (world) {
+        if (!prototype_) result.gaps.push_back("Strict resource drawing is unresolved");
+        else try {
+            if (!resources_) resources_ = std::make_unique<ResourceRender>(files_, rules_, art_, theater_);
+            for (const auto& sprite : resources_->sprites(*world, map_camera_, result.gaps))
+                result.drawn += blit(result.image, *sprite.image,
+                    {sprite.origin.x - viewport.x, sprite.origin.y - viewport.y});
+        } catch (const std::exception& error) { result.gaps.push_back(error.what()); }
+    }
 
     struct Draw {
         const sim::Entity* entity;
