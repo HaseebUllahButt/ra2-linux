@@ -57,7 +57,12 @@ std::string side_of(const rules::IniFile& r,const w::Snapshot& s,unsigned id) {
 }
 BuildList buildable_types(const rules::IniFile& r,const w::Snapshot& s,unsigned id) {
     BuildList out; const auto* h=house(s,id); if(!h) return out;
-    const auto c=p::Catalog::from(r,{},{});
+    // The catalog depends only on this rules document. Build it once per
+    // document revision instead of once per call.
+    struct CatalogCache { std::uint64_t revision=0; std::optional<p::Catalog> catalog; };
+    static thread_local CatalogCache cache;
+    if(!cache.catalog || cache.revision!=r.revision()) { cache.catalog=p::Catalog::from(r,{},{}); cache.revision=r.revision(); }
+    const auto& c=*cache.catalog;
     p::CanBuildHouse in;
     in.tech_level=h->tech_level.value_or(10);
     in.country=h->country_index;
