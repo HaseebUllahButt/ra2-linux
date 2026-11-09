@@ -407,6 +407,28 @@ void camera_scroll() {
     require(back==-int(CameraScroll::travel(520)),"Reverse kept the old speed");
 }
 
+// The optional shroud filter hides enemies from targeting and own units
+// from selection. A click on a hidden enemy orders a move to its cell.
+void shroud_filter() {
+    Fixture f;
+    f.box();
+    f.selected({10,20,30,40,50});
+    f.controller.set_visible_filter([](const Entity& object) { return object.id!=200; });
+    // The hidden enemy tank at (220,60) is ground: the click moves there.
+    expect_orders(f.click(220,60),OrderKind::Move,{10,20,30,40,50},0,{122,206});
+    f.selected({10,20,30,40,50});
+    expect_orders(f.click(220,95),OrderKind::Attack,{10,20,30,40,50},210);
+    // A filter that rejects an own unit keeps it out of clicks and boxes.
+    f.controller.set_visible_filter([](const Entity& object) { return object.id!=20; });
+    f.controller.clear();
+    require(f.click(130,80).empty(),"Hidden own unit click issued an order");
+    f.selected({});
+    f.box();
+    f.selected({10,30,40,50});
+    f.controller.set_visible_filter({});
+    expect_orders(f.click(220,60),OrderKind::Attack,{10,30,40,50},200);
+}
+
 } // namespace
 
 int main() try {
@@ -419,6 +441,7 @@ int main() try {
     focus_and_stale_selection();
     callbacks_and_ordering();
     event_edges();
+    shroud_filter();
     std::cout << "Battle input checks passed: selection, bounds, orders, deployment, and cancellation.\n";
 } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

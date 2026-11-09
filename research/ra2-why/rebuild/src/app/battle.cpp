@@ -8,6 +8,7 @@
 #include "camera_scroll.h"
 #include "house_color.h"
 #include "battle_hud.h"
+#include "battle_shroud.h"
 #include "battle_queue.h"
 #include "battle_score.h"
 #include "battle_help.h"
@@ -114,6 +115,7 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     render::MapGeometry geometry_;
     loop::Clock& clock_;
     std::uint32_t player_,enemy_; // enemy_ is the first computer house.
+    BattleShroud shroud_;
     // Every computer house in house order, its policy, and its chosen enemy
     // house (zero before the first choice).
     std::vector<std::uint32_t> enemies_;
@@ -190,6 +192,7 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     bool force_draw_=false;
     int human_stage_=0;
     std::uint32_t human_target_=0,human_wait_frame_=0;
+    std::optional<std::uint32_t> human_scout_frame_;
     std::map<std::uint32_t,sim::Coord> human_positions_;
     int human_camera_=0;
     int human_cash_before_=0,human_hold_cash_=0,human_hold_progress_=0;
@@ -271,6 +274,17 @@ public:
             const auto c=house_color(rules_,*h.selected_color);
             radar_style_.houses[h.id]={c.r,c.g,c.b};
         }
+        shroud_.set_footprint([this](const w::Entity& e) {
+            std::vector<ra2map::Cell> cells;
+            if(e.kind==w::Kind::Structure && e.cell)if(const auto* type=catalog_.find(e.type))
+                for(const auto offset:p::original_foundation_cells(type->placement.foundation)) {
+                    const int x=int(e.cell->x)+offset.x,y=int(e.cell->y)+offset.y;
+                    if(x>=0&&y>=0&&x<512&&y<512)cells.push_back({std::uint16_t(x),std::uint16_t(y)});
+                }
+            return cells;
+        });
+        shroud_.update(world_,rules_);
+        orders_.set_visible_filter(shroud_.visible_filter(player_));
         effects_.observe(world_,combat_.projectiles(),0,effect_project());
         audio_.observe(world_,0);
         if(!args_.headless&&!audio_.enabled())std::cerr<<"Combat audio unavailable: "<<audio_.failure()<<'\n';
@@ -282,7 +296,9 @@ public:
         // Compose the initial view while loading. The first event pump can
         // change the camera, selection or help; overlays stay live below.
         initial_camera_x_=camera_x_;initial_camera_y_=camera_y_;
-        initial_scene_=scene_.render(terrain_,battle_scene_state(world_,0),{camera_x_,camera_y_,1024,768},&world_);
+        auto initial=battle_scene_state(world_,0);
+        shroud_.hide_entities(initial,world_,player_);
+        initial_scene_=scene_.render(terrain_,initial,{camera_x_,camera_y_,1024,768},&world_);
     }
     const w::Snapshot& world() const {return world_;}
     sim::Victory result() const {return victory_.result;}
@@ -309,12 +325,32 @@ public:
     }
     BattleEffects::Project effect_project() const {
         return [this](sim::Coord p)->std::optional<EffectPoint> {
-            if(p.x<0||p.y<0||p.x>=512*256||p.y>=512*256)return {};
+            if(p.x<0||p.y<0||p.x>=512*256||p.y>=512*256||!shroud_.coord_shown(player_,p))return {};
             sim::Entity e;e.kind=sim::Kind::Unit;e.position=p;
             e.cell={std::uint16_t(p.x/256),std::uint16_t(p.y/256)};
             try { const auto at=scene_.map_anchor(e);return EffectPoint{int(at.x),int(at.y)}; }
             catch(const std::exception&) {return {};}
         };
+    }
+    std::optional<BattleShroud::FramePoint> shroud_anchor(ra2map::Cell cell) const {
+        const auto found=world_.cells.find(std::uint32_t(cell.y)*512+cell.x);
+        if(found==world_.cells.end()||!found->second.terrain)return {};
+        sim::Entity e;e.kind=sim::Kind::Unit;e.cell=cell;
+        e.position=sim::Coord{int(cell.x)*256+128,int(cell.y)*256+128,
+            found->second.terrain->floor_world_height.value_or(0)};
+        try {const auto at=scene_.map_anchor(e);return BattleShroud::FramePoint{int(at.x),int(at.y)};}
+        catch(const std::exception&){return {};}
+    }
+    bool placement_revealed(const std::string& type,p::CellXY origin) const {
+        const auto* building=catalog_.find(type);if(!building)return false;
+        const auto cells=p::original_foundation_cells(building->placement.foundation);
+        if(cells.empty())return false;
+        for(const auto offset:cells) {
+            const int x=int(origin.x)+offset.x,y=int(origin.y)+offset.y;
+            if(x<0||y<0||x>=512||y>=512||
+                !shroud_.revealed(player_,{std::uint16_t(x),std::uint16_t(y)}))return false;
+        }
+        return true;
     }
     void center(const w::Entity& e) {
         const auto point=anchor(e);
@@ -330,7 +366,9 @@ public:
     }
     BattleView view() const {
         return {{0,0,BattleHud::sidebar_x,BattleHud::command_bar_y},
-            [this](const w::Entity& e){return anchor(e);},[this](BattlePoint p){return cell_at(p);}};
+            [this](const w::Entity& e)->std::optional<BattlePoint> {
+                return shroud_.entity_visible(player_,e)?anchor(e):std::nullopt;
+            },[this](BattlePoint p){return cell_at(p);}};
     }
     bool miner(const w::Entity& e) const {return rules_.read_bool(e.type,"Harvester");}
     bool fighter(const w::Entity& e) const {
@@ -510,7 +548,7 @@ public:
             if (input.key==SDL_BUTTON_RIGHT) {placement_.clear();orders_.set_placement_active(false);}
             else if (input.key==SDL_BUTTON_LEFT) if (const auto cell=cell_at({input.x,input.y})) {
                 const auto origin=proto::placement_origin(catalog_,placement_,{std::int16_t(cell->x),std::int16_t(cell->y)});
-                if(origin && origin->x>=0 && origin->y>=0)
+                if(origin && origin->x>=0 && origin->y>=0 && placement_revealed(placement_,*origin))
                     queue({OrderKind::Place,player_,0,0,placement_,
                         {std::uint16_t(origin->x),std::uint16_t(origin->y)}});
                 else status("Can't build here.");
@@ -746,9 +784,16 @@ public:
         case 9: {
             const auto* e=find(world_,human_target_);require(e,"Human input: target vanished");
             const auto at=anchor(*e);require(at.has_value(),"Human input: target has no anchor");
-            require(state.frame_counter-human_wait_frame_<1200,"Human input: camera did not reach enemy");
+            require(state.frame_counter-human_wait_frame_<2400,"Human input: camera or scouts did not reach enemy");
             if(at->x<40||at->x>760||at->y<40||at->y>720) {test_pan_to(*at);break;}
             test_pan_to({400,380});
+            if(!shroud_.entity_visible(player_,*e)) {
+                // A normal ground move scouts the black area before an attack.
+                if(!human_scout_frame_ || state.frame_counter-*human_scout_frame_>=90) {
+                    test_click(at->x,at->y);human_scout_frame_=state.frame_counter;
+                }
+                break;
+            }
             test_click(at->x,at->y);human_stage_=10;break;
         }
         case 10:
@@ -1013,7 +1058,7 @@ public:
         // Combat owns idle guard acquisition and uses each weapon's range.
         const auto fighting=combat_.tick(world_,frame);
         score_->combat(fighting.events);
-        effects_.observe(world_,combat_.projectiles(),frame,effect_project(),&fighting.events,&rules_);
+
         for(const auto& event:fighting.events) {
             if(ai_opening_check_ && !first_ai_shot_ && event.kind==sim::PrototypeCombatEventKind::Shot &&
                 is_enemy(event.source_house) && event.target_house==player_) {
@@ -1063,6 +1108,8 @@ public:
         const auto after_combat=proto::tick(world_,factories_,catalog_,frame);
         if(after_combat.status!=p::Status::Done)gaps_.insert(after_combat.detail);
         sim::tech::update(rules_,world_);
+        shroud_.update(world_,rules_);
+        effects_.observe(world_,combat_.projectiles(),frame,effect_project(),&fighting.events,&rules_);
         orders_.sync(world_);
         infantry=std::max(infantry,std::size_t(std::count_if(world_.entities.begin(),world_.entities.end(),[](const auto& e){return live(e)&&e.kind==w::Kind::Infantry;})));
         victory_.update(world_,player_,enemies_,victory_rules_);
@@ -1143,7 +1190,7 @@ public:
         hud_state_.camera={camera_x_,camera_y_,BattleHud::sidebar_x,BattleHud::command_bar_y};
         hud_state_.map_width=terrain_.width;hud_state_.map_height=terrain_.height;
         // Base radar requires a live radar building and enough power.
-        // TODO-ORIGINAL: Original shroud and house palettes remain separate.
+        // Black cells and house colours follow the live battle.
         const auto bounds=BattleHud::minimap_bounds();
         auto& radar=hud_state_.minimap;
         if(sim::tech::radar_online(rules_,world_,player_)) {
@@ -1151,6 +1198,7 @@ public:
                 {camera_x_/60+geometry_.local.x,camera_y_/30+geometry_.local.y,
                  (BattleHud::sidebar_x+59)/60,(BattleHud::command_bar_y+29)/30}};
             radar=render::draw_battle_radar(world_,assets_.theater(),radar_view,radar_style_,true);
+            shroud_.mask_radar(radar,radar_view,player_);
             return;
         }
         radar={};
@@ -1164,7 +1212,9 @@ public:
                 return std::move(*initial_scene_);
             const auto drawing=[&] {
                 loop::profile::Timer probe(loop::profile::Phase::SceneState);
-                return battle_scene_state(world_,state.frame_counter);
+                auto state_view=battle_scene_state(world_,state.frame_counter);
+                shroud_.hide_entities(state_view,world_,player_);
+                return state_view;
             }();
             return scene_.render(terrain_,drawing,{camera_x_,camera_y_,1024,768},&world_);
         }();
@@ -1174,11 +1224,11 @@ public:
         const w::Entity* hovered=nullptr;int nearest=24*24;
         if(!help_visible_&&!options_.visible()&&!show_score_&&pointer_x_>=0&&pointer_x_<BattleHud::sidebar_x&&
             pointer_y_>=0&&pointer_y_<BattleHud::command_bar_y)
-            for(const auto& e:world_.entities)if(const auto at=anchor(e)) {
+            for(const auto& e:world_.entities)if(shroud_.entity_visible(player_,e))if(const auto at=anchor(e)) {
                 const int dx=at->x-pointer_x_,dy=at->y-pointer_y_,d=dx*dx+dy*dy;
                 if(d<nearest){nearest=d;hovered=&e;}
             }
-        for(const auto& e:world_.entities)if(live(e)&&(e.house_id==player_||is_enemy(e.house_id))) {
+        for(const auto& e:world_.entities)if(live(e)&&shroud_.entity_visible(player_,e)&&(e.house_id==player_||is_enemy(e.house_id))) {
             const auto point=anchor(e);if(!point||point->x<0||point->x>=BattleHud::sidebar_x)continue;
             const auto color=radar_style_.houses.at(e.house_id);
             // TODO-ORIGINAL: House markers and health bars use simple native art.
@@ -1197,11 +1247,12 @@ public:
             const auto cursor=proto::placement_cursor(world_,factories_,catalog_,player_,placement_,
                 {std::int16_t(cell->x),std::int16_t(cell->y)});
             if(cursor) {
-                placement_legal=cursor->legal==true;
+                placement_legal=cursor->legal==true && placement_revealed(placement_,cursor->origin);
                 for(const auto& entry:cursor->cells) {
                     const int x=entry.cell.x,y=entry.cell.y;
                     if(x<0||y<0||x>=512||y>=512)continue;
-                    const std::array<std::uint8_t,3> color=entry.legal_cell==true?
+                    const std::array<std::uint8_t,3> color=entry.legal_cell==true &&
+                        shroud_.revealed(player_,{std::uint16_t(x),std::uint16_t(y)})?
                         std::array<std::uint8_t,3>{70,255,90}:std::array<std::uint8_t,3>{255,70,70};
                     const auto found=world_.cells.find(std::uint32_t(y)*512+x);
                     const int z=found!=world_.cells.end()&&found->second.terrain?
@@ -1217,6 +1268,8 @@ public:
                 }
             }
         }
+        shroud_.mask_scene(frame_,world_,player_,[this](ra2map::Cell c){return shroud_anchor(c);},
+            camera_x_,camera_y_,{0,0,BattleHud::sidebar_x,BattleHud::command_bar_y});
         refresh_hud();hud_.draw(frame_,hud_state_);
         if(show_score_ && score_image_) {
             const auto& score=*score_image_;
