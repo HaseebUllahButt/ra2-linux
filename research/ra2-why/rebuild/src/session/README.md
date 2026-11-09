@@ -198,3 +198,10 @@ known cash and all four arrays. The original x86 comparison checks 64 cases.
 The separate OverlayDataPack scan is implemented after the Overlay object
 phase. It matches the original x86 writes for all 19,900 MP02T2 cells. The
 preceding Overlay object phase is still required and is not marked complete.
+
+`world/overlay_rules.h` covers the base OverlayType constructor values and the
+Land, Wall, Tiberium, and Crate reader fields for one supplied INI layer. The
+reader preserves previous values when keys are absent and applies the original
+Clear-to-Tiberium change. The original x86 slice matches 221 installed base
+rule sections with INI and art services supplied. CellAnim, image loading,
+other type fields, subsequent layers, and Overlay placement remain unresolved.

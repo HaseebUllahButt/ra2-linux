@@ -18,7 +18,12 @@ ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} c
 ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} bridge_footprint.cpp bridge_footprint_case.cpp -o "$build/bridge_footprint_case"
 ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} speed_type.cpp speed_type_case.cpp -o "$build/speed_type_case"
 ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} -I "$shared" movement_zone.cpp movement_zone_case.cpp -o "$build/movement_zone_case"
+${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/render" \
+    overlay_rules.cpp overlay_rules_case.cpp "$shared/sim/test_inputs.cpp" "$shared"/render/{minimap,tmp_decode}.cpp \
+    "$shared/gfx/palette.cpp" "$shared"/fs/{mix_archive,mix_bootstrap,filename_hash}.cpp \
+    "$shared/rules/ini_file.cpp" "$shared/map/map_file.cpp" "$shared/pack/map_pack.cpp" -ldl -o "$build/overlay_rules_case"
 ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} unit_flags.cpp unit_flags_case.cpp -o "$build/unit_flags_case"
+"$build/overlay_rules_case" "$game" > /dev/null
 ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -I "$shared/render" \
     world.cpp speed_type.cpp movement_zone.cpp unit_flags.cpp ../session.cpp ../map_geometry.cpp ../placement_terrain.cpp target_tile_case.cpp \
     "$shared"/sim/{test_inputs,world,world_init,cell_setup,coarse_category,replacement,floor,random,distance}.cpp \
@@ -46,6 +51,7 @@ ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -
 "$build/speed_type_case"
 "$build/movement_zone_case"
 "$build/unit_flags_case"
+"$build/overlay_rules_case" "$game" > /dev/null
 "$build/real_map_case" "$game"
 "$build/target_tile_case" "$game"
 "$build/target_tile_case" "$game" --stage
@@ -61,6 +67,7 @@ if [ "${2:-}" = "--original" ]; then
     ${PYTHON:-python3} original_house_check.py "$game/game.exe" "$build/house_case"
     ${PYTHON:-python3} original_house_updates_check.py "$game/game.exe" "$build/house_updates_case"
     ${PYTHON:-python3} original_overlay_data_check.py "$game/game.exe" "$build/setup_case" "$game"
+    ${PYTHON:-python3} original_overlay_fields_check.py "$game/game.exe" "$build/overlay_rules_case" "$game"
     ${PYTHON:-python3} original_battle_start_check.py "$game/game.exe" "$build/setup_case"
     ${PYTHON:-python3} original_constructor_check.py "$game/game.exe" "$build/constructor_case"
     ${PYTHON:-python3} original_joint_check.py "$game/game.exe" "$build/constructor_case"
@@ -79,7 +86,9 @@ if [ "${2:-}" = "--original" ]; then
     ${PYTHON:-python3} original_speed_type_check.py "$game/game.exe" "$build/real_map_case" "$game" "$build/speed_type_case"
     ${PYTHON:-python3} original_movement_zone_check.py "$game/game.exe" "$build/real_map_case" "$game" "$build/movement_zone_case"
     ${PYTHON:-python3} original_unit_flags_check.py "$game/game.exe" "$build/real_map_case" "$game" "$build/unit_flags_case"
+"$build/overlay_rules_case" "$game" > /dev/null
     ${PYTHON:-python3} original_type_ctor_fields_check.py "$game/game.exe" "$build/unit_flags_case"
+"$build/overlay_rules_case" "$game" > /dev/null
     ${PYTHON:-python3} original_object_reader_205_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game"
     ${PYTHON:-python3} original_unit_reader_205_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game"
     ${PYTHON:-python3} original_techno_reader_205_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game"
@@ -120,6 +129,7 @@ if [ "${2:-}" = "--original" ]; then
     ${PYTHON:-python3} original_vehicle_registration_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game"
     ${PYTHON:-python3} original_vehicle_readers_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game"
     ${PYTHON:-python3} original_placement_type_check.py "$game/game.exe" "$build/real_map_case" "$game" "$build/unit_flags_case"
+"$build/overlay_rules_case" "$game" > /dev/null
     ${PYTHON:-python3} original_sight_rule_check.py "$game/game.exe" "$build/real_map_case" "$game"
     ${PYTHON:-python3} "$shared/sim/original_cell_setup_check.py" "$game/game.exe" --base --vectors > "$build/original-setup-vectors"
     "$build/cell_setup_case" --vectors > "$build/staged-setup-vectors"
