@@ -30,3 +30,14 @@ rebuild/hook/winmm.dll
 /rebuild/src/text/test_csf
 /rebuild/hook/*.o
 /rebuild/hook/test_trampoline
+
+# Decompiled original code, the full game install and QA captures stay out of git.
+/export/
+/game-full
+/qa/bin/
+/qa/xvfb-pkg/
+/qa/qa-input
+/qa/reports*/**/*.png
+/qa/reports*/**/*.ppm
+/qa/reports*/**/*.jpg
+/qa/reports*/**/*.log
