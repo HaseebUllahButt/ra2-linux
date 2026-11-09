@@ -923,3 +923,23 @@ Callbacks change the placement global and resource type byte in selected cases.
 Allocation returns null. The animation path then uses a supplied no-owner query.
 The test supplies called bodies and map lookup. It proves dispatcher control, not those called bodies.
 `test_overlay_mark.sh` also checks eight unsupported approach indexes and two missing-input cases.
+
+## Hierarchy retry edge selection
+
+`block_original_hierarchy_exit` ports base 0042A840 and expansion 0042CF80.
+It consumes one resolved hierarchy layer, its original path, the current region, and existing retry state.
+It selects the first matching path entry. At the last entry, it selects the preceding edge.
+It appends that edge and matching common-neighbor edges in the original reverse link order.
+It preserves duplicate edges and existing insertion order.
+Short paths and absent regions clear Search +38. Successful selection preserves its previous value.
+Unknown endpoint adjacency returns NeedsInput without changing the supplied state.
+Paths beyond the original 500-word buffer return Unsupported.
+The ordinary vector append executes at base 0042B0F0 and expansion 0042D830.
+
+`original_retry_edges_check.py executable [--base] --vectors` runs both original bodies without stubs.
+Compare its 4,096 lines per edition with `test_retry_edges.sh --vectors`.
+Both editions and native code preserve aggregate hash 0BBA8654.
+`test_retry_edges.sh` also checks duplicate order, unknown adjacency, path limits, and empty-path state.
+The tests supply initialized vector storage with enough capacity. Allocation failure is outside this slice.
+Local reachability at base 00565EB0 / expansion 005840C0 remains separate.
+The outer retry dispatcher and persistent regular-search progress must be resolved before live goal commands use this helper.
