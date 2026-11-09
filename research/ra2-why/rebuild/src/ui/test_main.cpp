@@ -123,6 +123,12 @@ int main(int argc,char** argv) {
     auto expansion_maps=ui::load_skirmish_maps(files,strings);
     auto base_modes=ui::load_skirmish_modes(base,base_strings);
     auto expansion_modes=ui::load_skirmish_modes(files,strings);
+    auto default_menu=ui::Menu::load(base,base_exe,base_strings);
+    default_menu.enable_prototype_start(true);
+    default_menu.configure_maps(base_maps,base_modes);
+    assert(default_menu.page()==ui::Page::Main);
+    assert(default_menu.setup().game_mode==1 && default_menu.setup().map_filename=="MP02T2.MAP");
+
     assert(base_modes.size()==8 && expansion_modes.size()==9);
     assert(base_modes[0].id==1 && base_modes[0].map_filter=="standard" && !base_modes[0].name.empty());
     auto base_countries=ui::load_skirmish_countries(base,base_strings);
