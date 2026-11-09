@@ -3,14 +3,20 @@
 
 namespace ra2::sim {
 namespace {
-// TODO-ORIGINAL: simplified defeat rule. The original gamemd.exe decides a
-// loss from live House asset counts and announces it through
-// HouseClass::Win 004FC9E0 and HouseClass::Lose 004FCBD0 (community-verified
-// YRpp bindings in rebuild/symbols-extended.csv); the player surrender path
-// is HouseClass::AcceptDefeat 004FC0B0. The exact original asset condition
-// (short game, ally carryover, aircraft and factory rules) is not recovered
-// yet. This prototype only counts surviving Units, Infantry and Structures
-// of the two given houses; Aircraft never count here.
+// TODO-ORIGINAL: simplified defeat rule. The original gamemd.exe announces a
+// result through HouseClass::Win 004FC9E0 and HouseClass::Lose 004FCBD0
+// (community-verified YRpp bindings in rebuild/symbols-extended.csv; both
+// YRpp forks agree). Known Lose callers: AcceptDefeat 004FC0B0, the trigger
+// dispatcher TActionClass::Execute 006DD8B0 and team script lose 006EDE60.
+// The automatic no-assets defeat check is not recovered yet.
+// Guide evidence, not RA2 proof: the RA1 ancestor checks the per-house asset
+// scans in HouseClass::AI after frame 0 and defeats a house with no
+// buildings, aircraft, units, infantry or vessels (CnC_Red_Alert
+// CODE/HOUSE.CPP, the MPlayer_Defeated call); TS keeps the same shape
+// (TSpp house.h IsDefeated; MPlayer_Defeated at TS 004BF4C0).
+// This prototype counts only surviving Units, Infantry and Structures of the
+// two given houses; Aircraft never count here, and short-game and ally
+// rules are not modeled.
 bool surviving_entity(const session::world::Entity& entity) {
     if (entity.lifetime==session::world::Lifetime::Destroyed) return false;
     switch (entity.kind) {
