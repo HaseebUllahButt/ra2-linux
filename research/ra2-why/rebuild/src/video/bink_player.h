@@ -24,7 +24,7 @@ struct BinkFrame {
 // Whole audio track as interleaved float samples.
 struct BinkAudio {
     std::uint32_t rate=0;       // Sample rate, e.g. 22050.
-    int channels=0;             // Two for the shipped movies.
+    int channels=0;             // Always 2; the player downmixes to stereo.
     std::vector<float> samples; // Interleaved frames in [-1,1].
 };
 
@@ -41,7 +41,8 @@ public:
     bool open(std::vector<std::uint8_t> bytes, std::string name="<memory>");
     // Next RGBA frame. Returns false once the movie ends or fails.
     bool next_frame(BinkFrame& frame);
-    // Whole audio track, interleaved float samples in [-1,1].
+    // Whole audio track, interleaved float samples in [-1,1]. Call after the
+    // last frame: next_frame collects audio while it scans for video.
     bool audio(BinkAudio& out);
 
     const std::string& name() const noexcept { return name_; }
