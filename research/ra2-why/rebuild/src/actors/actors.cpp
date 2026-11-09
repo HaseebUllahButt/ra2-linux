@@ -97,9 +97,14 @@ std::size_t terrain_initial_frame(const rules::IniFile& rules, std::string_view 
     // outside this helper. 0071C1B0 uses frame 1 for initial health < 2.
     if (rules.read_bool(type, "IsAnimated", false))
         throw std::runtime_error("animated terrain frame state is unresolved");
-    // ObjectType constructor 005F7090 initializes Strength to zero.
-    // Terrain constructor 0071BB90 copies that resolved value to Health.
-    return rules.read_integer(type, "Strength", 0) < 2 ? 1 : 0;
+    // TerrainType constructors (base 006E5260, expansion 0071DA80) set
+    // Strength to -1. After the ObjectType INI read, TerrainType ReadINI
+    // (base 006E5642..6E5663, expansion 0071DEC8..71DEDC) replaces -1 with
+    // Rules TreeStrength. Rules constructors (00640B80, 00665650) default
+    // TreeStrength to 25. Terrain constructor 0071BB90 copies Strength to Health.
+    auto strength = rules.read_integer(type, "Strength", -1);
+    if (strength == -1) strength = rules.read_integer("General", "TreeStrength", 25);
+    return strength < 2 ? 1 : 0;
 }
 WorldPosition building_draw_position(ra2map::Cell cell, std::int32_t z) {
     // 0x0044F820 stores cell*256+128. The building draw-position virtual
