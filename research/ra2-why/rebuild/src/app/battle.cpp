@@ -1,0 +1,611 @@
+#include "battle.h"
+#include "battle_hud.h"
+#include "battle_orders.h"
+#include "battle_scene.h"
+#include "scene.h"
+#include "terrain_inputs.h"
+#include "../session/world/setup.h"
+#include "../sim/prototype_ai.h"
+#include "../sim/prototype_economy.h"
+#include "../sim/prototype_movement.h"
+#include "../sim/prototype_production.h"
+#include "../sim/prototype_tech.h"
+#include "../sim/prototype_victory.h"
+#include "../render/battle_radar.h"
+#include "../sim/damage_runtime.h"
+#include "../loop/game_loop.h"
+#include <SDL.h>
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <iostream>
+#include <limits>
+#include <map>
+#include <set>
+#include <stdexcept>
+
+namespace ra2::app {
+namespace {
+namespace w=session::world;
+namespace p=sim::production;
+namespace proto=p::prototype;
+using sim::skirmish::Order;
+using sim::skirmish::OrderKind;
+
+bool live(const w::Entity& e) {
+    return e.lifetime==w::Lifetime::Placed && e.resolved_hp.value_or(0)>0 && e.cell && e.position;
+}
+const w::Entity* find(const w::Snapshot& s,std::uint32_t id) {
+    const auto it=std::find_if(s.entities.begin(),s.entities.end(),[&](const auto& e){return e.id==id;});
+    return it==s.entities.end()?nullptr:&*it;
+}
+const w::House& house(const w::Snapshot& s,std::uint32_t id) {
+    const auto it=std::find_if(s.houses.begin(),s.houses.end(),[&](const auto& h){return h.id==id;});
+    if (it==s.houses.end()) throw std::runtime_error("Match house is missing");
+    return *it;
+}
+void pixel(render::Bitmap& image,int x,int y,std::array<std::uint8_t,3> color) {
+    if (x<0 || y<0 || x>=image.width || y>=image.height) return;
+    const auto at=(std::size_t(y)*image.width+x)*4;
+    for (int c=0;c<3;++c) image.rgba[at+c]=color[c];
+    image.rgba[at+3]=255;
+}
+void rectangle(render::Bitmap& image,int x,int y,int width,int height,std::array<std::uint8_t,3> color) {
+    for (int i=0;i<width;++i) {pixel(image,x+i,y,color);pixel(image,x+i,y+height-1,color);}
+    for (int i=0;i<height;++i) {pixel(image,x,y+i,color);pixel(image,x+width-1,y+i,color);}
+}
+std::string result_name(sim::Victory result) {
+    switch (result) {
+    case sim::Victory::PlayerWon:return "VICTORY";
+    case sim::Victory::PlayerLost:return "DEFEAT";
+    case sim::Victory::Draw:return "DRAW";
+    default:return {};
+    }
+}
+
+// TODO-ORIGINAL: Native match orchestration. See RA1 CONQUER.CPP Main_Loop
+// and LOGIC.CPP for the input, object, factory and house boundaries. Original
+// base RA2 collection ordering, missions and event records remain separate.
+class Battle final : public loop::MessagePump, public loop::Renderer {
+    const BattleOptions& args_;
+    w::BaseBattleAssets& assets_;
+    w::Snapshot world_; // The single owning session world.
+    rules::IniFile rules_;
+    p::Catalog catalog_;
+    p::FactorySet factories_;
+    sim::PrototypeMovement movement_;
+    sim::PrototypeCombatRuntime combat_;
+    sim::PrototypeEconomy economy_;
+    sim::PrototypeAI ai_;
+    sim::VictoryState victory_;
+    Window& window_;
+    Scene& scene_;
+    const render::Bitmap& terrain_;
+    render::MapGeometry geometry_;
+    loop::Clock& clock_;
+    std::uint32_t player_,enemy_;
+    BattleOrders orders_;
+    BattleHud hud_;
+    HudState hud_state_;
+    render::Bitmap frame_;
+    std::map<std::uint32_t,std::uint32_t> attacks_;
+    std::vector<Order> pending_;
+    std::set<std::int32_t> keys_;
+    std::set<std::string> gaps_;
+    int camera_x_=0,camera_y_=0,pointer_x_=-1,pointer_y_=-1;
+    std::string placement_,status_="Select units. Right-click to move or attack. D deploys. Esc returns.";
+    bool quit_=false,autoplay_moved_=false,autoplay_deployed_=false;
+    std::uint32_t autoplay_unit_=0;
+    std::optional<sim::Coord> autoplay_start_;
+public:
+    std::size_t presented=0,moved=0,fired=0,impacts=0,built=0,deployed=0,ai_orders=0,infantry=0;
+    Battle(const BattleOptions& args,w::BaseBattleAssets& assets,w::Snapshot world,Window& window,
+           Scene& scene,const render::Bitmap& terrain,loop::Clock& clock)
+        :args_(args),assets_(assets),world_(std::move(world)),
+         rules_(overlay_rules(overlay_rules(assets.rules(),assets.battle_rules()),assets.map_ini())),
+         catalog_(p::Catalog::from(rules_,assets.art_ini(),assets.map_ini())),
+         combat_(assets.rules(),assets.battle_rules(),assets.map_ini(),assets.art_ini(),
+                 (args.game_directory/"game.exe").string()),economy_(rules_),ai_(rules_),
+         window_(window),scene_(scene),terrain_(terrain),geometry_(render::MapGeometry::from_ini(assets.map_ini())),
+         clock_(clock),player_(world_.houses.at(0).id),enemy_(world_.houses.at(1).id),orders_(player_) {
+        const auto initialized=proto::initialize(world_,factories_,catalog_,player_);
+        if (initialized.status!=p::Status::Done) throw std::runtime_error(initialized.detail);
+        const auto start=std::find_if(world_.entities.begin(),world_.entities.end(),[&](const auto& e){return live(e)&&e.house_id==player_;});
+        if (start!=world_.entities.end()) center(*start);
+        refresh_hud();
+    }
+    const w::Snapshot& world() const {return world_;}
+    sim::Victory result() const {return victory_.result;}
+    bool autoplay_moved() const {return autoplay_moved_;}
+    void pan(int dx,int dy) {
+        camera_x_=std::clamp(camera_x_+dx,0,std::max(0,terrain_.width-BattleHud::sidebar_x));
+        camera_y_=std::clamp(camera_y_+dy,0,std::max(0,terrain_.height-BattleHud::view_height));
+    }
+    std::optional<BattlePoint> anchor(const w::Entity& e) const {
+        if (!live(e)) return {};
+        sim::Entity drawing;
+        drawing.id=e.id;drawing.cell=*e.cell;drawing.position=e.position;
+        drawing.kind=e.kind==w::Kind::Structure?sim::Kind::Structure:
+            e.kind==w::Kind::Infantry?sim::Kind::Infantry:sim::Kind::Unit;
+        drawing.subcell=0;
+        try {
+            const auto p=scene_.map_anchor(drawing);
+            return BattlePoint{int(p.x)-camera_x_,int(p.y)-camera_y_};
+        } catch (const std::exception&) {return {};}
+    }
+    void center(const w::Entity& e) {
+        const auto point=anchor(e);
+        if (point) pan(point->x-BattleHud::sidebar_x/2,point->y-BattleHud::view_height/2);
+    }
+    std::optional<ra2map::Cell> cell_at(BattlePoint point) const {
+        if (point.x<0 || point.y<0 || point.x>=BattleHud::sidebar_x || point.y>=BattleHud::view_height) return {};
+        // TODO-ORIGINAL: Pick the nearest projected floor diamond. Original
+        // depth-buffer picking and bridge levels must replace this adapter.
+        int best=46;std::optional<ra2map::Cell> result;
+        for (const auto& [key,state]:world_.cells) {
+            (void)key;
+            if (!state.terrain || !state.terrain->floor_world_height) continue;
+            const auto& t=*state.terrain;
+            sim::Entity e;e.cell=t.cell;e.kind=sim::Kind::Unit;
+            e.position=sim::Coord{int(t.cell.x)*256+128,int(t.cell.y)*256+128,*t.floor_world_height};
+            const auto a=scene_.map_anchor(e);
+            const int distance=std::abs(int(a.x)-camera_x_-point.x)+2*std::abs(int(a.y)-camera_y_-point.y);
+            if (distance<best) {best=distance;result=t.cell;}
+        }
+        return result;
+    }
+    BattleView view() const {
+        return {{0,0,BattleHud::sidebar_x,BattleHud::view_height},
+            [this](const w::Entity& e){return anchor(e);},[this](BattlePoint p){return cell_at(p);}};
+    }
+    bool miner(const w::Entity& e) const {return rules_.read_bool(e.type,"Harvester");}
+    bool fighter(const w::Entity& e) const {
+        return live(e) && (e.kind==w::Kind::Unit || e.kind==w::Kind::Infantry) &&
+            !miner(e) && !rules_.read_string(e.type,"Primary").empty();
+    }
+    void queue(Order order) {pending_.push_back(std::move(order));}
+    void deploy_selected() {
+        for (const auto id:orders_.selected_ids()) queue({OrderKind::Deploy,player_,id,0,{},{}});
+    }
+    void input(const Input& input) {
+        if (input.kind==InputKind::Quit) {quit_=true;return;}
+        if (input.kind==InputKind::Focus && !input.pressed) keys_.clear();
+        if (input.kind==InputKind::Motion || input.kind==InputKind::Button) {
+            pointer_x_=input.x;pointer_y_=input.y;
+        }
+        if (input.kind==InputKind::Key) {
+            if (input.pressed) keys_.insert(input.key);else keys_.erase(input.key);
+            if (input.pressed && input.key==SDLK_ESCAPE) {
+                if (!placement_.empty()) {placement_.clear();orders_.set_placement_active(false);}
+                else quit_=true;
+                return;
+            }
+            if (input.pressed && input.key==SDLK_d) deploy_selected();
+            if (input.pressed && input.key==SDLK_h) {
+                for (const auto& e:world_.entities) if (live(e)&&e.house_id==player_) {center(e);break;}
+            }
+        }
+        if (victory_.settled()) return;
+        if (input.kind==InputKind::Button && input.x>=BattleHud::sidebar_x) {
+            if (input.pressed && input.key==SDL_BUTTON_LEFT) {
+                refresh_hud();
+                const auto action=hud_.handle_click(input.x,input.y,hud_state_);
+                if (action.kind==HudActionKind::Deploy) deploy_selected();
+                else if (action.kind==HudActionKind::Build) {
+                    bool ready=false;
+                    for (const auto& f:factories_.factories) if (f.house_id==player_ && f.object &&
+                        f.object_type==action.type && f.progress==54) ready=true;
+                    const auto* type=catalog_.find(action.type);
+                    if (ready && type && type->rtti==p::Rtti::BuildingType) {
+                        placement_=action.type;orders_.set_placement_active(true);
+                        status_="Place "+placement_+" near your base. Esc cancels.";
+                    } else queue({OrderKind::Build,player_,0,0,action.type,{}});
+                } else if (action.kind==HudActionKind::Minimap) {
+                    pan(action.position.x-camera_x_-BattleHud::sidebar_x/2,
+                        action.position.y-camera_y_-BattleHud::view_height/2);
+                }
+            }
+            return;
+        }
+        if (!placement_.empty() && input.kind==InputKind::Button && input.pressed) {
+            if (input.key==SDL_BUTTON_RIGHT) {placement_.clear();orders_.set_placement_active(false);}
+            else if (input.key==SDL_BUTTON_LEFT) if (const auto cell=cell_at({input.x,input.y}))
+                queue({OrderKind::Place,player_,0,0,placement_,*cell});
+            return;
+        }
+        auto commands=orders_.handle(input,world_,view(),clock_.now_ms());
+        pending_.insert(pending_.end(),commands.begin(),commands.end());
+    }
+    void pump(loop::State& state) override {
+        for (const auto& event:window_.poll()) {
+            if (!args_.headless && event.kind==InputKind::Focus) state.window_active=event.pressed;
+            input(event);
+        }
+        if (quit_) state.running=false;
+    }
+    void note(const p::Outcome& outcome,const std::string& success) {
+        status_=outcome.status==p::Status::Done?success:outcome.detail;
+        if (outcome.status==p::Status::NeedsInput || outcome.status==p::Status::Unsupported)
+            gaps_.insert(outcome.detail);
+    }
+    void execute(const Order& order,std::uint32_t frame) {
+        if (order.house!=player_ && order.house!=enemy_) return;
+        const auto* e=find(world_,order.entity);
+        if (order.kind!=OrderKind::Build && order.kind!=OrderKind::Place &&
+            (!e || !live(*e) || e->house_id!=order.house)) return;
+        switch (order.kind) {
+        case OrderKind::Move:
+            if (miner(*e)) {status_="Miners harvest automatically.";break;}
+            combat_.stop(world_,order.entity);attacks_.erase(order.entity);
+            {
+                const auto move=movement_.issue(world_,order.entity,order.cell,
+                    sim::original_rule_speed(rules_.read_integer(e->type,"Speed",4)));
+                if (order.house==player_) status_=move.status==sim::PrototypeMoveStatus::Complete?"Moving.":move.detail;
+            }
+            break;
+        case OrderKind::Attack:
+            if (combat_.attack(world_,order.entity,order.target)) attacks_[order.entity]=order.target;
+            break;
+        case OrderKind::Stop:
+            movement_.cancel(world_,order.entity);combat_.stop(world_,order.entity);attacks_.erase(order.entity);break;
+        case OrderKind::Deploy: {
+            movement_.cancel(world_,order.entity);combat_.stop(world_,order.entity);attacks_.erase(order.entity);
+            const auto outcome=proto::deploy(world_,factories_,catalog_,order.entity,true);
+            if (outcome.status==p::Status::Done) ++deployed;
+            if (order.house==player_) note(outcome,"Construction yard deployed. Choose a building in the sidebar.");
+            break;
+        }
+        case OrderKind::Build: {
+            // TODO-ORIGINAL: One product per factory slot. Repeated clicks
+            // cannot restart its timer or spend money twice.
+            const auto* type=catalog_.find(order.type);
+            if (!type) break;
+            const int slot=type->rtti==p::Rtti::BuildingType?(type->build_cat==5?5:4):
+                type->rtti==p::Rtti::InfantryType?1:type->rtti==p::Rtti::UnitType?2:0;
+            if (std::any_of(factories_.factories.begin(),factories_.factories.end(),[&](const auto& f){
+                return f.house_id==order.house && f.slot==slot && f.object;
+            })) break;
+            const auto outcome=proto::begin_production(world_,factories_,catalog_,order.house,order.type,frame);
+            if (outcome.status==p::Status::Done) ++built;
+            if (order.house==player_) note(outcome,"Building "+order.type+".");
+            break;
+        }
+        case OrderKind::Place: {
+            const auto proximity=proto::passes_proximity(world_,factories_,catalog_,order.house,order.type,
+                {std::int16_t(order.cell.x),std::int16_t(order.cell.y)});
+            if (!proximity || !*proximity) {if(order.house==player_)status_="Place this building closer to your base.";break;}
+            const auto outcome=proto::place(world_,factories_,catalog_,order.house,order.type,
+                {std::int16_t(order.cell.x),std::int16_t(order.cell.y)},frame);
+            if (outcome.status==p::Status::Done && order.house==player_) {
+                placement_.clear();orders_.set_placement_active(false);
+            }
+            if(order.house==player_)note(outcome,"Building placed.");
+            break;
+        }
+        }
+    }
+    void auto_place(std::uint32_t owner,std::uint32_t frame) {
+        std::vector<std::string> ready;
+        for (const auto& f:factories_.factories) if (f.house_id==owner && f.object && f.progress==54) {
+            const auto* type=catalog_.find(f.object_type);
+            if (type && type->rtti==p::Rtti::BuildingType) ready.push_back(f.object_type);
+        }
+        for (const auto& type:ready) {
+            std::vector<ra2map::Cell> bases;
+            for (const auto& e:world_.entities) if (live(e)&&e.house_id==owner&&e.kind==w::Kind::Structure) bases.push_back(*e.cell);
+            bool placed=false;
+            for (const auto base:bases) {
+                for (int radius=2;radius<=12 && !placed;++radius) for (int dy=-radius;dy<=radius && !placed;++dy)
+                    for (int dx=-radius;dx<=radius && !placed;++dx) {
+                        if (std::max(std::abs(dx),std::abs(dy))!=radius) continue;
+                        const p::CellXY cell{std::int16_t(int(base.x)+dx),std::int16_t(int(base.y)+dy)};
+                        const auto near=proto::passes_proximity(world_,factories_,catalog_,owner,type,cell);
+                        if (!near || !*near) continue;
+                        placed=proto::place(world_,factories_,catalog_,owner,type,cell,frame).status==p::Status::Done;
+                    }
+                if(placed)break;
+            }
+        }
+    }
+    void autoplay(std::uint32_t frame) {
+        if (frame==0) {
+            for (const auto& e:world_.entities) if (live(e)&&e.house_id==player_&&
+                !rules_.read_string(e.type,"DeploysInto").empty()) {
+                center(e);
+                const auto a=anchor(e);
+                if(a) {
+                    input({InputKind::Button,a->x,a->y,SDL_BUTTON_LEFT,true});
+                    input({InputKind::Button,a->x,a->y,SDL_BUTTON_LEFT,false});
+                    input({InputKind::Key,0,0,SDLK_d,true});
+                    input({InputKind::Key,0,0,SDLK_d,false});
+                    autoplay_deployed_=true;
+                }
+                break;
+            }
+        }
+        if (frame==1) {
+            for (const auto& e:world_.entities) if (e.house_id==player_&&fighter(e)) {
+                autoplay_unit_=e.id;autoplay_start_=e.position;center(e);
+                const auto a=anchor(e);
+                if(a) {
+                    input({InputKind::Button,a->x,a->y,SDL_BUTTON_LEFT,true});
+                    input({InputKind::Button,a->x,a->y,SDL_BUTTON_LEFT,false});
+                    for (const int delta:{3,-3,5,-5}) {
+                        auto destination=e;
+                        destination.cell=ra2map::Cell{std::uint16_t(int(e.cell->x)+delta),e.cell->y};
+                        destination.position=sim::Coord{int(destination.cell->x)*256+128,e.position->y,e.position->z};
+                        const auto b=anchor(destination);
+                        if(b && b->x>=0&&b->x<BattleHud::sidebar_x&&b->y>=0&&b->y<768) {
+                            input({InputKind::Button,b->x,b->y,SDL_BUTTON_RIGHT,true});break;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+        const auto* moving=find(world_,autoplay_unit_);
+        if(moving && moving->position && autoplay_start_ &&
+            (moving->position->x!=autoplay_start_->x || moving->position->y!=autoplay_start_->y)) autoplay_moved_=true;
+        if(frame%30) return;
+        const auto has=[&](const std::string& type){return std::any_of(world_.entities.begin(),world_.entities.end(),
+            [&](const auto& e){return live(e)&&e.house_id==player_&&e.type==type;});};
+        const bool allied=house(world_,player_).side_index.value_or(0)==0;
+        // TODO-ORIGINAL: A deterministic native player for app regression.
+        // It uses the same production and attack commands as the interface.
+        const std::vector<std::string> plan=allied?
+            std::vector<std::string>{"GAPOWR","GAPILE","GAREFN","GAWEAP"}:
+            std::vector<std::string>{"NAPOWR","NAHAND","NAREFN","NAWEAP"};
+        for(const auto& type:plan) if(!has(type)) {queue({OrderKind::Build,player_,0,0,type,{}});break;}
+        std::size_t foot=0;
+        for(const auto& e:world_.entities) if(e.house_id==player_&&live(e)&&e.kind==w::Kind::Infantry)++foot;
+        if(foot<6)queue({OrderKind::Build,player_,0,0,allied?"E1":"E2",{}});
+        queue({OrderKind::Build,player_,0,0,allied?"MTNK":"HTNK",{}});
+        if(frame<120) return;
+        std::vector<std::uint32_t> fighters;
+        for(const auto& e:world_.entities) if(e.house_id==player_&&fighter(e))fighters.push_back(e.id);
+        for(const auto id:fighters) {
+            const auto* source=find(world_,id);const w::Entity* target=nullptr;
+            std::int64_t best=std::numeric_limits<std::int64_t>::max();
+            for(const auto& other:world_.entities) if(live(other)&&other.house_id==enemy_&&other.kind!=w::Kind::Terrain) {
+                const auto dx=std::int64_t(source->position->x)-other.position->x;
+                const auto dy=std::int64_t(source->position->y)-other.position->y;
+                const auto distance=dx*dx+dy*dy;
+                if(distance<best){best=distance;target=&other;}
+            }
+            if(target)queue({OrderKind::Attack,player_,id,target->id,{},*target->cell});
+        }
+    }
+    void update(loop::State& state) {
+        const auto frame=state.frame_counter; // All match subsystems use this frame.
+        if(victory_.settled())return;
+        pan(24*(int(keys_.count(SDLK_RIGHT))-int(keys_.count(SDLK_LEFT))),
+            16*(int(keys_.count(SDLK_DOWN))-int(keys_.count(SDLK_UP))));
+        if(args_.autoplay)autoplay(frame);
+        auto enemy_commands=ai_.tick(world_,enemy_,player_,std::int32_t(frame));
+        ai_orders+=enemy_commands.size();
+        pending_.insert(pending_.end(),enemy_commands.begin(),enemy_commands.end());
+        auto commands=std::move(pending_);pending_.clear();
+        for(const auto& order:commands)execute(order,frame);
+        const auto production=proto::tick(world_,factories_,catalog_,frame);
+        if(production.status!=p::Status::Done)gaps_.insert(production.detail);
+        if(frame%15==0){auto_place(enemy_,frame);if(args_.autoplay)auto_place(player_,frame);}
+        economy_.tick(world_,frame);
+        const auto motion=movement_.tick(world_,frame);
+        moved+=motion.moved.size();
+        if(motion.status!=sim::PrototypeMoveStatus::Complete)gaps_.insert(motion.detail);
+        // TODO-ORIGINAL: Stationary troops acquire a nearby enemy. This is
+        // native guard behavior, not original Mission_Guard or threat selection.
+        if(frame%15==0) {
+            std::vector<std::pair<std::uint32_t,std::uint32_t>> acquire;
+            for(const auto& e:world_.entities) if(fighter(e)&&!movement_.moving(e.id)&&!attacks_.count(e.id)) {
+                const auto opponent=e.house_id==player_?enemy_:e.house_id==enemy_?player_:0;
+                if(!opponent)continue;
+                std::int64_t best=std::int64_t(6*256)*(6*256);std::uint32_t target=0;
+                for(const auto& other:world_.entities) if(live(other)&&other.house_id==opponent) {
+                    const auto dx=std::int64_t(e.position->x)-other.position->x;
+                    const auto dy=std::int64_t(e.position->y)-other.position->y;
+                    if(dx*dx+dy*dy<best){best=dx*dx+dy*dy;target=other.id;}
+                }
+                if(target)acquire.push_back({e.id,target});
+            }
+            for(const auto& [source,target]:acquire)if(combat_.attack(world_,source,target))attacks_[source]=target;
+        }
+        const auto fighting=combat_.tick(world_,frame);
+        fired+=fighting.fired;impacts+=fighting.impacts;
+        for(const auto& detail:fighting.unresolved)gaps_.insert(detail);
+        std::set<std::uint32_t> approach;
+        for(const auto& [source,target]:fighting.out_of_range) {
+            approach.insert(source);
+            if(frame%15 || movement_.moving(source))continue;
+            const auto* e=find(world_,source);const auto* goal=find(world_,target);
+            if(e&&goal&&live(*e)&&live(*goal)&&!miner(*e))
+                movement_.issue(world_,source,*goal->cell,sim::original_rule_speed(rules_.read_integer(e->type,"Speed",4)));
+        }
+        for(auto it=attacks_.begin();it!=attacks_.end();) {
+            const auto* source=find(world_,it->first);const auto* target=find(world_,it->second);
+            if(!source||!target||!live(*source)||!live(*target)) {
+                movement_.cancel(world_,it->first);combat_.stop(world_,it->first);it=attacks_.erase(it);
+            } else {if(!approach.count(it->first))movement_.cancel(world_,it->first);++it;}
+        }
+        sim::tech::update(rules_,world_);
+        orders_.sync(world_);
+        infantry=std::max(infantry,std::size_t(std::count_if(world_.entities.begin(),world_.entities.end(),[](const auto& e){return live(e)&&e.kind==w::Kind::Infantry;})));
+        victory_.update(world_,player_,enemy_);
+        if(args_.autoplay && frame%600==0) {
+            std::size_t ours=0,theirs=0;
+            for(const auto& e:world_.entities)if(live(e)) {
+                if(e.house_id==player_)++ours;
+                if(e.house_id==enemy_)++theirs;
+            }
+            std::cerr<<"Match frame="<<frame<<" player="<<ours<<" computer="<<theirs
+                <<" moved="<<moved<<" fired="<<fired<<" impacts="<<impacts<<" built="<<built<<'\n';
+        }
+        if(victory_.settled()) {
+            status_=result_name(victory_.result)+". Press Esc to return.";
+            window_.title("Red Alert 2 native prototype: "+status_);
+            if(args_.autoplay)state.running=false;
+        }
+        if(world_.setup_progress!=w::SetupProgress::PrototypeComplete)throw std::runtime_error("Prototype world phase changed");
+        if((frame%120==0 || victory_.settled())&&!w::validate(world_))throw std::runtime_error("Shared match links are invalid");
+    }
+    void refresh_hud() {
+        const auto& h=house(world_,player_);
+        hud_state_.cash=h.cash.value_or(0);hud_state_.power_output=h.power_output.value_or(0);
+        hud_state_.power_drain=h.power_drain.value_or(0);hud_state_.selected_labels.clear();
+        for(const auto id:orders_.selected_ids())if(const auto* e=find(world_,id))
+            hud_state_.selected_labels.push_back(e->type+" "+std::to_string(e->resolved_hp.value_or(0)));
+        hud_state_.status=status_;hud_state_.result=result_name(victory_.result);
+        hud_state_.choices.clear();
+        const auto eligible=proto::options(world_,factories_,catalog_,player_);
+        const auto available=sim::tech::buildable_types(rules_,world_,player_);
+        // TODO-ORIGINAL: A small build palette for the first base match.
+        // The checked production adapter validates prerequisites and factories.
+        const std::vector<std::string> palette={"GAPOWR","GAPILE","GAREFN","GAWEAP","GARADR","GAPILL",
+            "NAPOWR","NAHAND","NAREFN","NAWEAP","NARADR","NALASR","E1","E2","MTNK","HTNK"};
+        for(const auto& type:palette) {
+            const auto* facts=catalog_.find(type);if(!facts)continue;
+            const auto gate=std::find_if(eligible.begin(),eligible.end(),[&](const auto& item){return item.first==type;});
+            const p::FactoryState* factory=nullptr;
+            for(const auto& f:factories_.factories)if(f.house_id==player_&&f.object&&f.object_type==type)factory=&f;
+            bool allowed=false;
+            for(const auto* list:{&available.buildings,&available.units,&available.infantry})
+                if(std::find(list->begin(),list->end(),type)!=list->end())allowed=true;
+            if((!allowed || gate==eligible.end()||gate->second!=p::CanBuild::Can)&&!factory)continue;
+            BuildChoice choice;choice.type=type;choice.name=type;choice.cost=facts->cost;choice.enabled=true;
+            if(factory)choice.progress=factory->progress*1000/54;
+            hud_state_.choices.push_back(std::move(choice));
+        }
+        hud_state_.camera={camera_x_,camera_y_,BattleHud::sidebar_x,BattleHud::view_height};
+        hud_state_.map_width=terrain_.width;hud_state_.map_height=terrain_.height;
+        // TODO-ORIGINAL: The first match keeps its navigation map available.
+        // Radar power, shroud and original house palettes remain separate.
+        const auto bounds=BattleHud::minimap_bounds();
+        auto& radar=hud_state_.minimap;
+        radar={bounds.width,bounds.height,std::vector<std::uint8_t>(std::size_t(bounds.width)*bounds.height*4)};
+        for(int y=0;y<radar.height;++y)for(int x=0;x<radar.width;++x) {
+            const auto source=(std::size_t(y*terrain_.height/radar.height)*terrain_.width+x*terrain_.width/radar.width)*4;
+            const auto to=(std::size_t(y)*radar.width+x)*4;
+            std::copy_n(terrain_.rgba.begin()+source,4,radar.rgba.begin()+to);
+        }
+        for(const auto& e:world_.entities)if(live(e)&&e.house_id && e.kind!=w::Kind::Terrain) {
+            const auto a=anchor(e);if(!a)continue;
+            const int x=(a->x+camera_x_)*radar.width/terrain_.width;
+            const int y=(a->y+camera_y_)*radar.height/terrain_.height;
+            const std::array<std::uint8_t,3> color=e.house_id==player_?std::array<std::uint8_t,3>{70,255,90}:
+                e.house_id==enemy_?std::array<std::uint8_t,3>{255,65,50}:std::array<std::uint8_t,3>{160,160,160};
+            rectangle(radar,x-1,y-1,3,3,color);
+        }
+        if(sim::tech::radar_online(rules_,world_,player_)) {
+            auto style=render::battle_radar_style(rules_);
+            style.houses[player_]={70,255,90};style.houses[enemy_]={255,65,50};
+            render::RadarView radar_view{geometry_,bounds.width,bounds.height,
+                {camera_x_/60+geometry_.local.x,camera_y_/30+geometry_.local.y,
+                 (BattleHud::sidebar_x+59)/60,(BattleHud::view_height+29)/30}};
+            radar=render::draw_battle_radar(world_,assets_.theater(),radar_view,style,true);
+        }
+    }
+    void present(const loop::State& state) override {
+        // Headless checks compose at fixed intervals and at the final frame.
+        if(args_.headless && presented && state.frame_counter%60 && !victory_.settled())return;
+        const auto drawing=battle_scene_state(world_,state.frame_counter);
+        auto scene=scene_.render(terrain_,drawing,{camera_x_,camera_y_,1024,768});
+        for(const auto& detail:scene.gaps)gaps_.insert(detail);
+        frame_=std::move(scene.image);
+        for(const auto& e:world_.entities)if(live(e)&&(e.house_id==player_||e.house_id==enemy_)) {
+            const auto point=anchor(e);if(!point||point->x<0||point->x>=BattleHud::sidebar_x)continue;
+            const auto color=e.house_id==player_?std::array<std::uint8_t,3>{70,255,90}:std::array<std::uint8_t,3>{255,65,50};
+            // TODO-ORIGINAL: House markers and health bars use simple native art.
+            pixel(frame_,point->x,point->y,color);
+            if(std::find(orders_.selected_ids().begin(),orders_.selected_ids().end(),e.id)!=orders_.selected_ids().end()) {
+                rectangle(frame_,point->x-17,point->y-25,34,32,color);
+                const int health=std::clamp(e.resolved_hp.value_or(0)*30/std::max(1,e.maximum_hp.value_or(1)),0,30);
+                for(int x=0;x<health;++x)for(int y=0;y<3;++y)pixel(frame_,point->x-15+x,point->y-30+y,color);
+            }
+        }
+        if(const auto box=orders_.selection_rectangle())rectangle(frame_,box->x,box->y,box->width,box->height,{70,255,90});
+        if(!placement_.empty())if(const auto cell=cell_at({pointer_x_,pointer_y_})) {
+            w::Entity marker;marker.cell=cell;marker.position=sim::Coord{int(cell->x)*256+128,int(cell->y)*256+128,0};
+            marker.resolved_hp=1;marker.lifetime=w::Lifetime::Placed;
+            if(const auto at=anchor(marker))rectangle(frame_,at->x-30,at->y-15,60,30,{255,230,80});
+        }
+        refresh_hud();hud_.draw(frame_,hud_state_);
+        window_.present(frame_.rgba.data(),frame_.width,frame_.height,frame_.rgba.size());++presented;
+    }
+    void verify(const loop::State& state) {
+        // Force a final composition, including a settled result.
+        presented=0;present(state);
+        int width=0,height=0;const auto actual=window_.capture(width,height);
+        if(width!=frame_.width||height!=frame_.height||actual!=frame_.rgba)
+            throw std::runtime_error("Native match output differs from its composed frame");
+        if(!w::validate(world_))throw std::runtime_error("Final match links are invalid");
+        if(const auto* capture=std::getenv("RA2_MATCH_CAPTURE"))render::write_ppm(frame_,capture);
+    }
+    void report(std::uint32_t frame) const {
+        std::cout<<"Native prototype skirmish: frame="<<frame<<" moved="<<moved<<" fired="<<fired
+            <<" impacts="<<impacts<<" production="<<built<<" deployed="<<deployed<<" infantry="<<infantry
+            <<" ai_orders="<<ai_orders<<" result="<<(victory_.settled()?result_name(victory_.result):"IN_PROGRESS")
+            <<" world=PrototypeComplete\n";
+        for(const auto& gap:gaps_)std::cout<<"TODO-ORIGINAL: "<<gap<<'\n';
+        if(args_.autoplay && !victory_.settled())for(const auto& e:world_.entities)
+            if(live(e)&&(e.house_id==player_||e.house_id==enemy_))
+                std::cout<<"Survivor house="<<e.house_id<<" id="<<e.id<<" type="<<e.type<<" hp="
+                    <<e.resolved_hp.value_or(0)<<" cell="<<e.cell->x<<','<<e.cell->y<<'\n';
+        if(args_.autoplay && (!autoplay_deployed_||!autoplay_moved_||!moved||!fired||!impacts||!built||!infantry||
+            !ai_orders||!victory_.settled()))throw std::runtime_error("Autoplay did not complete the required match loop");
+    }
+};
+}
+
+int run_prototype_battle(const BattleOptions& args) {
+    auto assets=w::BaseBattleAssets::load(args.game_directory,args.map);
+    w::PrototypeBattleSetup setup;
+    const auto* country_registry=assets.rules().find_section("Countries");
+    if(!country_registry||country_registry->entries.empty())throw std::runtime_error("Base countries are missing");
+    auto country=args.setup.country.value_or("Americans");
+    if(!assets.rules().find_section(country)||assets.rules().read_string(country,"Side").empty())country="Americans";
+    const auto enemy=assets.rules().read_string(country,"Side")=="GDI"?"Russians":"Americans";
+    const int credits=std::clamp(args.setup.credits.value_or(10000),2500,10000);
+    const int count=std::clamp(args.setup.unit_count.value_or(2),1,12);
+    const int color=std::clamp(args.setup.color.value_or(0),0,7);
+    // TODO-ORIGINAL: This first match supports one human and one computer,
+    // Battle rules, two deterministic starting waypoints, and base factions.
+    setup.players.push_back({"Player",country,credits,color,-1,count,true});
+    setup.players.push_back({"Computer",enemy,credits,(color+1)%8,-1,count,false});
+    const auto seed=sim::Random(0x524132).state();
+    auto battle=w::prototype_battle(assets,setup,seed);
+    if(!battle)throw std::runtime_error("Cannot create prototype Battle setup for "+args.map);
+    for(const auto& gap:battle->gaps)std::cout<<"TODO-ORIGINAL: "<<gap<<'\n';
+    sim::TerrainCells cells;
+    for(const auto& [key,cell]:battle->snapshot.cells){(void)key;if(cell.terrain)cells.push_back(*cell.terrain);}
+    const auto geometry=render::MapGeometry::from_ini(assets.map_ini());
+    const auto terrain=allocated_terrain(pack::load_terrain(assets.map_ini()),geometry);
+    // TODO-ORIGINAL: The prototype has translated tiles and approximate
+    // floor metadata. Keep the exact initialized_terrain guard unchanged.
+    auto initialized=terrain;
+    for(auto& tile:initialized.tiles) {
+        const auto found=battle->snapshot.cells.find(std::uint32_t(tile.y)*512+tile.x);
+        if(found==battle->snapshot.cells.end()||!found->second.terrain)throw std::runtime_error("Prototype terrain cell is missing");
+        const auto& cell=*found->second.terrain;
+        tile.index=cell.resolved_tile_index.value_or(0xffff);
+        tile.subtile=cell.subtile;tile.height=std::uint8_t(cell.height_level.value_or(0));
+    }
+    auto terrain_image=render::render_minimap(initialized,geometry,assets.theater(),render::TileIndexSpace::LiveCell);
+    fs::MixFileSystem files(args.game_directory);files.mount_language(fs::GameVariant::RedAlert2);
+    files.bootstrap(fs::GameVariant::RedAlert2);files.mount_overlays();files.mount_resources();
+    auto scene_art=render::TheaterArt::load(files,assets.map_ini().read_string("Map","Theater"));
+    (void)scene_art;
+    const auto rules=overlay_rules(overlay_rules(assets.rules(),assets.battle_rules()),assets.map_ini());
+    Scene scene(files,assets.art_ini(),rules,geometry,cells,assets.map_ini().read_string("Map","Theater"),
+        assets.map().terrain(),true);
+    Window window("Red Alert 2 native prototype: skirmish",1024,768,!args.headless);
+    loop::SteadyClock real_clock;loop::SimulatedClock fast_clock;
+    loop::Clock& clock=args.headless?static_cast<loop::Clock&>(fast_clock):static_cast<loop::Clock&>(real_clock);
+    Battle match(args,assets,std::move(battle->snapshot),window,scene,terrain_image,clock);
+    loop::Hooks hooks;hooks.update=[&](loop::State& state){match.update(state);};
+    loop::GameLoop loop(match,match,clock,{},hooks);
+    if(args.frames)loop.run(args.frames);else while(loop.state().running)loop.step();
+    if(args.headless)match.verify(loop.state());
+    match.report(loop.state().frame_counter);
+    return 0;
+}
+}

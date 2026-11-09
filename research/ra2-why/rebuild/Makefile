@@ -16,6 +16,10 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
     src/sim/combat.cpp src/sim/damage_runtime.cpp src/sim/goal_runtime.cpp src/sim/unit_mark.cpp src/sim/live_cell_setup.cpp src/sim/unit_visibility.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp src/sim/path.cpp src/sim/path_smoothing.cpp src/sim/cell_entry.cpp src/sim/coarse_category.cpp src/sim/resource_cell.cpp src/sim/regions.cpp src/sim/hierarchy.cpp src/sim/hierarchy_route.cpp src/sim/production.cpp src/sim/production_runtime.cpp \
     src/sim/world.cpp src/sim/world_init.cpp src/sim/cell_setup.cpp src/sim/drive.cpp src/sim/movement.cpp src/sim/movement_regions.cpp src/sim/component_lookup.cpp src/sim/goal_path.cpp src/sim/retry_edges.cpp src/sim/hierarchy_retry.cpp src/sim/local_reachability.cpp src/sim/search_memory.cpp src/sim/foot_path.cpp src/sim/nearest_cell.cpp src/sim/cell_projection.cpp src/sim/cell_fit.cpp src/sim/overlay_mark.cpp src/sim/replacement.cpp src/sim/build_time.cpp src/voxel/voxel.cpp
+NATIVE_SOURCES += src/app/battle.cpp src/app/battle_scene.cpp src/app/battle_orders.cpp src/app/battle_hud.cpp \
+    src/sim/prototype_movement.cpp src/sim/prototype_ai.cpp src/sim/prototype_infantry.cpp \
+    src/sim/prototype_victory.cpp src/sim/prototype_production.cpp src/sim/prototype_economy.cpp \
+    src/sim/prototype_tech.cpp src/render/battle_radar.cpp
 NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
 
 build/native/%.o: %.cpp
@@ -45,6 +49,7 @@ native-check: native platform terrain-inputs scene base-move actors ui audio vox
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ALL01T.MAP --frames 3 --headless
 	build/ra2-native --game-dir ../game --map MP25MW.MAP --frames 3 --headless
+	build/ra2-native --game-dir ../game --skirmish --frames 3 --headless
 
 actors: build/actors_test
 	build/actors_test ../game
@@ -442,7 +447,7 @@ build/session_unit_loop_cases: build/native/src/session/session.o build/native/s
 build/session_mission_cases: build/native/src/session/session.o build/native/src/session/mission_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-COMBAT_RUNTIME_OBJECTS = build/native/src/weapons/unit_death.o build/native/src/weapons/detonation.o build/native/src/weapons/muzzle.o build/native/src/weapons/projectile_damage.o build/native/src/weapons/cannon_line.o build/native/src/weapons/cannon_range.o build/native/src/weapons/fire_eligibility.o build/native/src/weapons/fire_timer.o build/native/src/weapons/techno_damage.o build/native/src/weapons/weapons.o build/native/src/sim/damage_runtime.o build/native/src/sim/random.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o
+COMBAT_RUNTIME_OBJECTS = build/native/src/weapons/unit_death.o build/native/src/weapons/detonation.o build/native/src/weapons/muzzle.o build/native/src/weapons/projectile_damage.o build/native/src/weapons/cannon_line.o build/native/src/weapons/cannon_range.o build/native/src/weapons/fire_eligibility.o build/native/src/weapons/fire_timer.o build/native/src/weapons/techno_damage.o build/native/src/weapons/weapons.o build/native/src/weapons/object_damage.o build/native/src/sim/damage_runtime.o build/native/src/sim/random.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o build/native/src/rules/ini_file.o
 
 .PHONY: combat-runtime
 combat-runtime: build/combat_runtime_regression
@@ -526,6 +531,43 @@ build/platform_test: build/native/src/app/platform.o build/native/src/app/test_p
 
 native: build/ra2-native
 
+# Playable approximation checks stay separate from original behavior checks.
+PROTOTYPE_TEST_OBJECTS = $(filter-out build/native/src/app/main.o,$(NATIVE_OBJECTS))
+.PHONY: skirmish-check skirmish-tests
+skirmish-check: native skirmish-tests
+	build/ra2-native --game-dir ../game --skirmish --headless --frames 3
+	build/ra2-native --game-dir ../game --skirmish --headless --autoplay --frames 12000
+
+skirmish-tests: build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test
+	build/battle_hud_test
+	build/battle_orders_test
+	build/prototype_production_test ../game
+	build/prototype_combat_test ../game
+	build/prototype_victory_test
+	build/prototype_ai_test ../game
+	build/prototype_infantry_test ../game
+
+build/battle_hud_test: build/native/src/app/test_battle_hud.o build/native/src/app/battle_hud.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/battle_orders_test: build/native/src/app/test_battle_orders.o build/native/src/app/battle_orders.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/prototype_production_test: build/native/src/sim/test_prototype_production.o $(PROTOTYPE_TEST_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
+
+build/prototype_combat_test: build/native/src/weapons/prototype_combat_test.o $(PROTOTYPE_TEST_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
+
+build/prototype_victory_test: build/native/src/sim/test_prototype_victory.o build/native/src/sim/prototype_victory.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/prototype_ai_test: build/native/src/sim/test_prototype_ai.o build/native/src/sim/prototype_ai.o $(MAP_OBJECTS) $(FS_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
+
+build/prototype_infantry_test: build/native/src/sim/test_prototype_infantry.o build/native/src/sim/prototype_infantry.o $(MAP_OBJECTS) $(FS_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
+
 catalog: build/catalog_test
 	build/catalog_test ../game ../analysis/extracted/maps
 
@@ -544,7 +586,7 @@ build/ra2-native: $(NATIVE_OBJECTS)
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
 
-test: fs rules text map pack loop gfx hook native-check
+test: fs rules text map pack loop gfx hook native-check skirmish-tests
 	@echo "== all layer tests passed =="
 
 fs: run-fs

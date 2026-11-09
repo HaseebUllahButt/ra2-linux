@@ -1,6 +1,7 @@
 #include "platform.h"
 #include "terrain_inputs.h"
 #include "scene.h"
+#include "battle.h"
 #include "../loop/game_loop.h"
 #include "../render/minimap.h"
 #include "../sim/sim.h"
@@ -18,6 +19,7 @@ struct Options {
     std::filesystem::path game, map;
     std::size_t frames = 0;
     bool headless = false;
+    bool skirmish = false, autoplay = false;
     ra2::fs::GameVariant variant = ra2::fs::GameVariant::RedAlert2;
 };
 Options options(int argc, char** argv) {
@@ -25,6 +27,8 @@ Options options(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--headless") result.headless = true;
+        else if (arg == "--skirmish") result.skirmish = true;
+        else if (arg == "--autoplay") result.autoplay = true;
         else if (arg == "--yuri") result.variant = ra2::fs::GameVariant::YurisRevenge;
         else if (arg == "--game-dir" || arg == "--map" || arg == "--frames") {
             if (++i == argc) throw std::runtime_error("Missing value for " + arg);
@@ -44,6 +48,10 @@ Options options(int argc, char** argv) {
         throw std::runtime_error("Usage: ra2-native --game-dir <owned-game-folder> [--map <map-file>] [--yuri] [--frames N] [--headless]");
     if (result.headless && !result.frames)
         throw std::runtime_error("Headless checks need a frame budget");
+    if (result.skirmish && result.variant != ra2::fs::GameVariant::RedAlert2)
+        throw std::runtime_error("Playable prototype supports base RA2 only");
+    if (result.autoplay && !result.skirmish)
+        throw std::runtime_error("Autoplay needs --skirmish");
     return result;
 }
 
@@ -114,6 +122,7 @@ class MenuPump final : public ra2::loop::MessagePump {
     bool headless_;
     int pointer_x_ = -1, pointer_y_ = -1;
 public:
+    bool start_match = false;
     MenuPump(ra2::app::Window& window, ra2::ui::Menu& menu, bool headless)
         : window_(window), menu_(menu), headless_(headless) {}
     void pump(ra2::loop::State& state) override {
@@ -134,8 +143,14 @@ public:
             else if (input.kind == InputKind::Button && input.key == SDL_BUTTON_LEFT) {
                 pointer_x_ = input.x; pointer_y_ = input.y;
                 if (input.pressed) menu_.pointer_down(input.x, input.y);
-                else if (menu_.pointer_up(input.x, input.y) == ra2::ui::Action::Quit)
-                    state.running = false;
+                else {
+                    const auto action = menu_.pointer_up(input.x, input.y);
+                    if (action == ra2::ui::Action::Quit) state.running = false;
+                    if (action == ra2::ui::Action::StartMatch) {
+                        start_match = true;
+                        state.running = false;
+                    }
+                }
             } else if (input.kind == InputKind::Key && input.pressed && input.key == SDLK_ESCAPE)
                 menu_.key_down(ra2::ui::Key::Escape);
         }
@@ -173,6 +188,7 @@ int run_menu(const Options& args, ra2::fs::MixFileSystem& files) {
     ra2text::CsfFile strings;
     strings.parse(csf->data(), csf->size());
     auto menu = ra2::ui::Menu::load(files, *exe, strings);
+    menu.enable_prototype_start(!expansion);
     files.mount_resources();
     menu.configure_maps(ra2::ui::load_skirmish_maps(files, strings),
                         ra2::ui::load_skirmish_modes(files, strings));
@@ -181,11 +197,26 @@ int run_menu(const Options& args, ra2::fs::MixFileSystem& files) {
     MenuPresenter presenter(window, menu);
     ra2::loop::SteadyClock clock;
     ra2::loop::GameLoop loop(pump, presenter, clock);
-    if (args.frames) loop.run(args.frames);
-    else while (loop.state().running) loop.step();
-    if (args.headless) presenter.verify();
+    for (;;) {
+        if (args.frames) loop.run(args.frames);
+        else while (loop.state().running) loop.step();
+        if (args.headless) presenter.verify();
+        if (!pump.start_match) break;
+        ra2::app::BattleOptions battle;
+        battle.game_directory = args.game;
+        battle.setup = menu.skirmish_setup();
+        battle.map = battle.setup.map_filename.value_or("MP02T2.MAP");
+        battle.headless = args.headless;
+        battle.frames = args.frames;
+        ra2::app::run_prototype_battle(battle);
+        pump.start_match = false;
+        loop.state().running = true;
+        loop.state().window_active = true;
+        presenter.present(loop.state());
+    }
     std::cout << "Native " << (expansion ? "Yuri" : "base RA2") << " menu: "
-              << presenter.presented << " frames presented. Match start remains unsupported.\n";
+              << presenter.presented << " frames presented. "
+              << (expansion ? "Expansion match start remains unsupported.\n" : "Base skirmish Start is enabled.\n");
     return 0;
 }
 }
@@ -195,6 +226,15 @@ int main(int argc, char** argv) {
         const auto args = options(argc, argv);
         if (args.headless && SDL_setenv("SDL_VIDEODRIVER", "dummy", 1) != 0)
             throw std::runtime_error("Cannot select headless native video");
+        if (args.skirmish) {
+            ra2::app::BattleOptions battle;
+            battle.game_directory = args.game;
+            if (!args.map.empty()) battle.map = args.map.string();
+            battle.frames = args.frames;
+            battle.headless = args.headless;
+            battle.autoplay = args.autoplay;
+            return ra2::app::run_prototype_battle(battle);
+        }
         ra2::fs::MixFileSystem files(args.game);
         files.mount_language(args.variant);
         files.bootstrap(args.variant);
