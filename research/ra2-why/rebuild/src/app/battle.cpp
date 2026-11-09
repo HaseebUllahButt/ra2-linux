@@ -922,6 +922,15 @@ public:
             if(e&&goal&&live(*e)&&live(*goal)&&!miner(*e)&&e->kind!=w::Kind::Structure)
                 movement_.issue(world_,source,*goal->cell,sim::original_rule_speed(rules_.read_integer(e->type,"Speed",4)));
         }
+        for(const auto& [source,home]:fighting.guard_return) {
+            const auto* e=find(world_,source);
+            if(!e||!live(*e)||miner(*e)||e->kind==w::Kind::Structure||home.x<0||home.y<0)continue;
+            const ra2map::Cell goal{std::uint16_t(home.x/256),std::uint16_t(home.y/256)};
+            const auto route=movement_.issue(world_,source,goal,
+                sim::original_rule_speed(rules_.read_integer(e->type,"Speed",4)));
+            if(route.status==sim::PrototypeMoveStatus::Complete)manual_moves_[source]=goal;
+            else if(!route.detail.empty())gaps_.insert(route.detail);
+        }
         for(auto it=attacks_.begin();it!=attacks_.end();) {
             const auto* source=find(world_,it->first);const auto* target=find(world_,it->second);
             if(!source||!target||!live(*source)||!live(*target)||!combat_.can_attack(world_,it->first,it->second)) {

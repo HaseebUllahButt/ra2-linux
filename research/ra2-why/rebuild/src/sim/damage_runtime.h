@@ -139,6 +139,9 @@ struct PrototypeCombatTick {
     std::vector<std::string> unresolved;
     // Source and target IDs that need an approach route this frame.
     std::vector<std::pair<std::uint32_t,std::uint32_t>> out_of_range;
+    // Area Guard actors that strayed too far and should drive back to
+    // this guard place (original Assign_Destination, virtual +410).
+    std::vector<std::pair<std::uint32_t,Coord>> guard_return;
 };
 class PrototypeCombatRuntime {
 public:
@@ -165,7 +168,16 @@ private:
     OriginalDistance distance_;
     weapons::BaseBallisticAngles angles_;
     std::map<std::uint32_t,std::uint32_t> orders_;
-    std::map<std::uint32_t,std::uint32_t> guard_orders_;
+    // Targets found by the idle threat scan or kept after retaliation.
+    // Base 006D31E0 Threat_Range: Guard uses GuardRange or the weapon range,
+    // Area Guard uses twice GuardRange or the longer weapon range (max 16
+    // cells). An Area Guard target stays while it is in that range of the
+    // place where the scan found it, so the actor may approach it.
+    struct GuardOrder { std::uint32_t target=0; int range=0; Coord anchor{}; bool area=false; };
+    std::map<std::uint32_t,GuardOrder> guard_orders_;
+    // Original Foot +1B0 archive target: the Area Guard place. It is set by
+    // the first Area Guard scan and cleared by attack() and stop().
+    std::map<std::uint32_t,Coord> guard_place_;
     std::vector<PrototypeCombatProjectile> projectiles_;
     // Original Unit +2F8 turret FacingClass. The world keeps only the shown
     // raw facing; a different shown facing restarts this state from it.
