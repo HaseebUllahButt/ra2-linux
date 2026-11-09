@@ -1,3 +1,4 @@
+#include "cannon_range.h"
 #include "fire_eligibility.h"
 #include "fire_timer.h"
 #include "techno_damage.h"
@@ -93,6 +94,12 @@ void check_world(const sim::OriginalDistance& distance) {
     check(!sim::base_world_projectile_collision(world,center,impact,3,false,collision,distance).collision,"pending setup accepted");
 }
 void check_projectile(const std::string& path,const sim::OriginalDistance& distance) {
+    CannonRangeInput range_input{{0,0,0},{512,0,0},1024,0,6,true,false};
+    check(base_cannon_range(range_input,distance)==CannonRangeStatus::InRange,"original Cannon range");
+    range_input.target.x=1025;
+    check(base_cannon_range(range_input,distance)==CannonRangeStatus::OutOfRange,"Cannon maximum range");
+    range_input.target.x=512;range_input.line_blocked.reset();
+    check(base_cannon_range(range_input,distance)==CannonRangeStatus::NeedsInput,"unknown Cannon line trace accepted");
     const auto angles=BaseBallisticAngles::from_executable(path);
     const std::array<std::int32_t,3> delta{{512,128,0}};
     const int range=distance.between({0,0,0},{512,128,0},true);

@@ -188,3 +188,10 @@ results in this slice. Unknown inputs block the decision.
 it the owned base `game.exe` path. It checks firing, reload RNG replay, Techno
 damage guards, shared cell order, allied masking, projectile replay and unknown
 state rejection. The expected replay values were checked against game.exe.
+
+`base_cannon_range()` implements the normal ground Cannon branch of the original
+006C4BB0 range check. It checks minimum distance, horizontal range, the
+ballistic height solution and a caller-resolved 004BBAA0 line trace. It rejects
+unknown flags, gravity, bridge state or trace. Its comparison covers 5,033
+original cases. Target and muzzle position selection, the real line trace and
+turret facing remain separate.
