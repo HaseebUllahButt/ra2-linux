@@ -2,6 +2,7 @@
 #include "house_color.h"
 #include "terrain_inputs.h"
 #include <algorithm>
+#include <set>
 #include <iostream>
 #include <stdexcept>
 
@@ -210,6 +211,25 @@ int main(int argc, char** argv) {
             const auto infantry = fixture.map_anchor(state.entities[0]);
             require(infantry.x == 1800 && infantry.y == 1267, "Original infantry subcell was lost");
             require(fixture.render(empty, state, view).drawn == 1, "Original infantry main image did not draw");
+            if(!expansion) {
+                app::Scene native(files,art,rules,geometry,{flat},"TEMPERATE",{},true);
+                auto soldier=state.entities[0];soldier.subcell=0;
+                std::set<std::pair<std::int64_t,std::int64_t>> anchors;
+                for(const auto spot:{2,3,4}) {
+                    const auto pos=actors::infantry_position(flat.cell,spot,0);
+                    soldier.position=sim::Coord{int(pos.x),int(pos.y),int(pos.z)};
+                    const auto at=native.map_anchor(soldier);
+                    const auto expected=actors::project_world(pos,actors::ScreenPoint{geometry.local.x*60-geometry.size.width*30,
+                        geometry.local.y*30+(geometry.size.width+1)*15});
+                    require(at.x==expected.x && at.y==expected.y,"Native soldier lost its resolved position");
+                    anchors.emplace(at.x,at.y);
+                }
+                require(anchors.size()==3,"Native soldiers in one cell share a draw position");
+                const auto before=native.map_anchor(soldier);
+                soldier.position->x+=16;
+                const auto after=native.map_anchor(soldier);
+                require(before.x!=after.x || before.y!=after.y,"Infantry walking did not move the draw anchor");
+            }
             state.entities[0].kind = sim::Kind::Unit;
             const auto unsupported = fixture.render(empty, state, view);
             require(unsupported.drawn == 0 && unsupported.gaps.size() == 1, "Unresolved vehicle draw was invented");

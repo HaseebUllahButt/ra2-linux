@@ -1,5 +1,6 @@
 #include "setup.h"
 #include <algorithm>
+#include <set>
 #include <cassert>
 #include <iostream>
 #include <stdexcept>
@@ -243,6 +244,17 @@ int main(int argc,char** argv) {
                    entity.object_field_74==1 && entity.object_field_75==1 && entity.object_field_76==0);
 
         }
+        auto soviet_player=options;
+        soviet_player.players[0].country="Russians";
+        soviet_player.players[1].country="Americans";
+        const auto soviet_match=prototype_battle(assets,soviet_player,initial);
+        assert(soviet_match);
+        std::set<std::pair<int,int>> soldier_positions;
+        for(const auto& e:soviet_match->snapshot.entities)
+            if(e.house_id==soviet_match->snapshot.houses[0].id && e.type=="E2") {
+                assert(e.position);soldier_positions.emplace(e.position->x,e.position->y);
+            }
+        assert(soldier_positions.size()==12);
         auto allied_only=options;
         allied_only.players[1].country="Americans";
         const auto allied_match=prototype_battle(assets,allied_only,initial);

@@ -202,6 +202,7 @@ int main(int argc,char** argv) {
     auto menu=ui::Menu::load(base,base_exe,base_strings);
     rules::IniFile defaults;
     auto empty_setup=ui::read_skirmish_setup(defaults);
+    assert(empty_setup.unit_count==10);
     assert(empty_setup.scenario_index==0 && empty_setup.credits==10000 && empty_setup.game_speed==6);
     assert(empty_setup.short_game==false && empty_setup.super_weapons==true);
     assert(empty_setup.opponents[0].opponent==ui::Opponent::Easy);
