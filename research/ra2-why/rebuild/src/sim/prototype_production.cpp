@@ -396,14 +396,16 @@ Outcome initialize(w::Snapshot& world,FactorySet& factories,const Catalog& catal
         if (!owner || owner->role!=w::HouseRole::Player || !catalog.find(item.type)) continue;
         next.buildings.try_emplace(item.id,BuildingState{});
     }
-    if (!w::validate(candidate)) return fail(Status::NeedsInput,"prototype links are invalid");
     {
         // Rebuild the Cell map in key order. The content is the same; the
         // nodes now sit in memory in the order that full Cell walks read them.
+        // Check after the rebuild, so the check's saved node addresses point
+        // at the final map for the first match frame.
         std::map<std::uint32_t,w::CellState> cells;
         for (auto& item:candidate.cells) cells.emplace_hint(cells.end(),item.first,std::move(item.second));
         candidate.cells=std::move(cells);
     }
+    if (!w::validate(candidate)) return fail(Status::NeedsInput,"prototype links are invalid");
     world=std::move(candidate);
     factories=std::move(next);
     return {Status::Done,{},{},{}};
