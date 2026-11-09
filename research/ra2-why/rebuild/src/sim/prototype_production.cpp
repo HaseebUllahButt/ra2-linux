@@ -482,10 +482,11 @@ Outcome place(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,st
         if (!*proximity) return fail(Status::Rejected,"building is too far from the base");
         if (auto failure=ra2::sim::production::place_failure(world,factories,catalog,house_id,type,cell)) return *failure;
     }
+    // The transaction runs only for a ready world, so the check above has
+    // passed proximity on the same world and factories; nothing changes
+    // them before the callback except the Undo copy and the Complete marker
+    // that the check also used.
     return transaction(world,factories,[&](w::Snapshot& candidate,FactorySet& next) {
-        const auto proximity=ra2::sim::production::passes_proximity(candidate,next,catalog,house_id,type,cell);
-        if (!proximity) return fail(Status::NeedsInput,"building proximity is unknown");
-        if (!*proximity) return fail(Status::Rejected,"building is too far from the base");
         auto result=ra2::sim::production::place(candidate,next,catalog,house_id,type,cell,frame);
         if (result.status==Status::Done && result.entity) {
             auto* building=entity(candidate,*result.entity);
