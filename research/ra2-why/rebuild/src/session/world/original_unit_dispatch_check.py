@@ -22,8 +22,10 @@ g=loaded['trace_code'].__globals__
 m=g['m']
 unit_dispatch=[]
 tail_calls=[]
+trace_enabled=[True]
 
 def trace(cpu,address,size,user):
+    if not trace_enabled[0]: return
     dispatch_sites=(0x65228d,0x6522b0,0x6522d7,0x6522fa,0x65231d,0x652340,
                     0x652363,0x652386,0x6523a9,0x6523cc,0x6523ec,0x65240f,
                     0x652435,0x652459,0x65247c,0x65249f,0x6524c2,0x6524e5)

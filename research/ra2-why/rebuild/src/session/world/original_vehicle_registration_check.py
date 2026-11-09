@@ -35,6 +35,7 @@ objects=0x1500000; object_size=0xc10; original_ini=0x100b000; rules=0x14b0000
 names=[]; allocated=[]; constructed=[]; returned=[]; count_reads=[]; key_reads=[]; writes=[]
 count_pending={}; key_pending={}; value_pending={}
 count_results=[]; key_results=[]; value_results=[]
+registration_active=[True]
 
 def c_string(ptr):
     return bytes(m.cpu.mem_read(ptr,256)).split(b'\0',1)[0].decode('ascii')
@@ -67,6 +68,7 @@ def allocate():
     allocated.append(address); m.cpu.reg_write(UC_X86_REG_EAX,address)
 
 def trace(cpu,address,size,user):
+    if not registration_active[0]: return
     if address in count_pending:
         name,expected=count_pending.pop(address)
         assert cpu.reg_read(UC_X86_REG_EAX)==expected
@@ -113,6 +115,7 @@ def trace(cpu,address,size,user):
         returned.append(cpu.reg_read(UC_X86_REG_EAX))
 
 def trace_write(cpu,access,address,size,value,user):
+    if not registration_active[0]: return
     if objects<=address<objects+len(rows)*object_size:
         offset=address-objects
         index=offset//object_size
@@ -145,4 +148,5 @@ for index,(address,(_,name)) in enumerate(zip(returned,rows)):
     assert m.read(unit_vector+index*4)==address and m.read(object_vector+index*4)==address
     assert c_string(address+0x24)==name and m.signed(address+0xb90)==index
     assert bytes(m.cpu.mem_read(address+0x205,1))==b'\x01'
+registration_active[0]=False
 print('base x86 rules loader registers all 55 installed VehicleTypes before type readers')

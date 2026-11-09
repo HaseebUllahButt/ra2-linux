@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <map>
 #include <sstream>
+#include <utility>
 
 // Check data used by the adapted x86 fixture. Runtime cell state is supplied
 // separately by the fixture; this does not reconstruct the full Battle world.
@@ -17,6 +18,19 @@ int main(int argc, char** argv) {
     map.parse(original_test_ini(argv[1],"MP02T2.MAP",true));
     if (argc==3) {
         const std::string request=argv[2];
+        if (request=="--base-rule-art") {
+            rules.parse(original_test_ini(argv[1],"RULES.INI",true));
+            art.parse(original_test_ini(argv[1],"ART.INI",true));
+            for (const auto& item:{std::pair<char,const ra2::rules::IniFile*>{'R',&rules},
+                                   std::pair<char,const ra2::rules::IniFile*>{'A',&art}}) {
+                for (const auto& section:item.second->sections()) {
+                    std::cout<<item.first<<"\tS\t"<<section.name<<'\n';
+                    for (const auto& entry:section.entries)
+                        std::cout<<item.first<<"\tK\t"<<entry.key<<'\t'<<entry.value<<'\n';
+                }
+            }
+            return std::cout?0:1;
+        }
         if (request=="--vehicle-all-entries") {
             rules.parse(original_test_ini(argv[1],"RULES.INI",true));
             assert(map.key_count("VehicleTypes")==0);
