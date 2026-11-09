@@ -17,6 +17,22 @@ int main(int argc, char** argv) {
     map.parse(original_test_ini(argv[1],"MP02T2.MAP",true));
     if (argc==3) {
         const std::string request=argv[2];
+        if (request=="--neighbor-info") {
+            // Packed-map and static TMP inputs only. Live prior passes can
+            // change the tile and ramp values before Cell setup.
+            const auto cells=original_test_cells(argv[1],"MP02T2.MAP",true);
+            const std::pair<int,int> offsets[]={{0,0},{0,-1},{1,0},{0,1},{-1,0},{2,2},{1,1},{-1,1},{1,-1}};
+            for (const auto& offset:offsets) {
+                const auto item=std::find_if(cells.begin(),cells.end(),[&](const auto& value) {
+                    return value.x==135+offset.first && value.y==80+offset.second;
+                });
+                assert(item!=cells.end());
+                std::cout<<item->x<<' '<<item->y<<' '<<item->tile<<' '<<item->resolved<<' '
+                         <<int(item->subtile)<<' '<<int(item->raw)<<' '<<int(item->ramp)<<' '
+                         <<int(item->height)<<' '<<item->overlay<<'\n';
+            }
+            return std::cout?0:1;
+        }
         if (request!="--tile-bytes" && request!="--overlay-bytes") return 2;
         const auto bytes=request=="--tile-bytes"?
             ra2::pack::read_section(map,"IsoMapPack5",ra2::pack::Codec::Lzo):
