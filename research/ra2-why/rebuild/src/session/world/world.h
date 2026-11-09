@@ -78,7 +78,7 @@ struct CellState {
     std::optional<sim::CoarseOverlayState> overlay;
     std::optional<float> land_wheel;
     std::optional<bool> usable;
-    std::optional<std::uint8_t> coarse_category, neighbor_count;
+    std::optional<std::uint8_t> coarse_category, neighbor_count; // Base Cell +122.
     std::optional<std::uint8_t> cell_field_11d, coarse_cache_height, hierarchy_cache_height;
     std::optional<std::vector<std::uint8_t>> coarse_category_writes;
     std::optional<bool> cell_flag_20000;
@@ -92,7 +92,7 @@ struct CellState {
     // state is not proved. Only +116 is known to index the TubeClass vector.
     std::optional<std::int32_t> cell_field_54, cell_field_58;
     std::optional<std::int16_t> tube_field_116;
-    std::optional<std::uint8_t> cell_field_122, bridge_occupancy_128;
+    std::optional<std::uint8_t> bridge_occupancy_128;
     std::optional<std::int32_t> wall_owner;
 };
 // An owning snapshot. IDs use zero as null. Original creation order does not
