@@ -1,5 +1,9 @@
 #include "world.h"
 #include "sim/floor.h"
+#include "world_hash.h"
+#include <cstdio>
+#include <cstdlib>
+#include <algorithm>
 #include <map>
 #include <limits>
 #include <set>
@@ -385,6 +389,40 @@ bool Stage::finish_battle_house(std::uint32_t house_id,std::int32_t remaining_bu
     return true;
 }
 
+namespace {
+thread_local Undo* active_undo=nullptr;
+bool undo_check() {
+    static const bool enabled=[]{ const char* v=std::getenv("RA2_UNDO_CHECK"); return v && *v && *v!='0'; }();
+    return enabled;
+}
+}
+Undo::Undo(Snapshot& snapshot):snapshot_(snapshot),outer_(active_undo) {
+    auto cells=std::move(snapshot_.cells);
+    backup_=snapshot_;
+    snapshot_.cells=std::move(cells);
+    if (undo_check()) check_=snapshot_;
+    active_undo=this;
+}
+Undo::~Undo() {
+    active_undo=outer_;
+    if (!committed_) restore();
+}
+void Undo::restore() {
+    for (auto it=cells_.rbegin();it!=cells_.rend();++it) snapshot_.cells[it->first]=std::move(it->second);
+    backup_.cells=std::move(snapshot_.cells);
+    snapshot_=std::move(backup_);
+    if (check_ && world_hash(snapshot_)!=world_hash(*check_)) {
+        std::fprintf(stderr,"RA2_UNDO_CHECK: restored world differs from its full copy\n");
+        std::abort();
+    }
+}
+void Undo::save_cell(const Snapshot& snapshot, std::uint32_t key) {
+    for (auto* undo=active_undo;undo;undo=undo->outer_) {
+        if (std::any_of(undo->cells_.begin(),undo->cells_.end(),[&](const auto& item){return item.first==key;})) continue;
+        const auto found=snapshot.cells.find(key);
+        if (found!=snapshot.cells.end()) undo->cells_.emplace_back(key,found->second);
+    }
+}
 bool validate(const Snapshot& snapshot) {
     if (snapshot.edition!=Edition::Base && snapshot.edition!=Edition::Yuri) return false;
     if (snapshot.setup_progress!=SetupProgress::Unknown && snapshot.setup_progress!=SetupProgress::PackedMapRead &&

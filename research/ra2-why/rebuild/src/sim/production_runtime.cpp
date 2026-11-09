@@ -720,6 +720,7 @@ const std::array<std::pair<int,int>,22> kFoundationBounds{{{1,1},{2,1},{1,2},{2,
 
 // Cell::Occupy_Up / Occupy_Down link writes (00473D20 / 00473B30).
 bool unlink(w::Snapshot& s,std::uint32_t key,std::uint32_t object) {
+    w::Undo::save_cell(s,key);
     auto& cell=s.cells.at(key);
     if (!cell.heads) return false;
     auto* item=entity_of(s,object); if (!item || !item->next) return false;
@@ -733,6 +734,7 @@ bool unlink(w::Snapshot& s,std::uint32_t key,std::uint32_t object) {
     return true;
 }
 bool link(w::Snapshot& s,std::uint32_t key,std::uint32_t object,bool building) {
+    w::Undo::save_cell(s,key);
     auto& cell=s.cells.at(key);
     if (!cell.heads) return false;
     auto* item=entity_of(s,object); if (!item) return false;
@@ -758,6 +760,7 @@ bool mark_unit(w::Snapshot& s,w::Entity& u,bool down) {
     const auto key=cell_key({std::int16_t(u.cell->x),std::int16_t(u.cell->y)}); if (!key) return false;
     auto it=s.cells.find(*key); if (it==s.cells.end() || !it->second.ground_occupancy_124) return false;
     if (!(down?link(s,*key,u.id,false):unlink(s,*key,u.id))) return false;
+    w::Undo::save_cell(s,*key);
     auto& bits=*s.cells.at(*key).ground_occupancy_124;
     bits=down?(bits|0x20u):(bits&~0x20u);
     entity_of(s,u.id)->object_field_74=down?1:0;
@@ -813,7 +816,7 @@ Outcome unlimbo_building(w::Snapshot& s,FactorySet& f,const Catalog& c,std::uint
 
 Outcome deploy(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint32_t unit_id,std::optional<bool> can_deploy) {
     if (!runtime_ready(snapshot)) return fail(Status::NeedsInput,"setup is not complete");
-    auto s=snapshot; auto f=factories;
+    w::Undo undo(snapshot); auto& s=snapshot; auto f=factories; // Restores unless committed.
     auto* u=entity_of(s,unit_id);
     if (!u || u->kind!=w::Kind::Unit || u->lifetime!=w::Lifetime::Placed) return fail(Status::Rejected,"no placed unit");
     if (!can_deploy) return fail(Status::NeedsInput,"006CD340 deploy check unresolved");
@@ -839,14 +842,14 @@ Outcome deploy(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std:
     if (!ok) return fail(Status::NeedsInput,"deploy cells unresolved");
     if (!mark_unit(s,*entity_of(s,unit_id),true)) return fail(Status::NeedsInput,"unit occupancy unresolved");
     if (!*ok) {                                                            // 006FE0C9: Mark down again.
-        snapshot=std::move(s); factories=std::move(f);
+        undo.commit(); factories=std::move(f);
         return fail(Status::Rejected,"cannot deploy here");
     }
     u=entity_of(s,unit_id);
     const auto want=original_deploy_facing(bt->sensor_array,bt->tick_tank,bt->icbm,bt->artillery);
     const auto have=std::uint8_t(((*u->hull_facing_raw>>7)+1)>>1);
     if (have!=want) {                                                      // 006FE16B: turn first.
-        snapshot=std::move(s); factories=std::move(f);
+        undo.commit(); factories=std::move(f);
         Outcome o=fail(Status::NeedsTurn,"turn to the deploy facing, then deploy again"); o.value=want; return o;
     }
     if (!mark_unit(s,*entity_of(s,unit_id),false)) return fail(Status::NeedsInput,"unit occupancy unresolved");
@@ -868,14 +871,14 @@ Outcome deploy(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std:
     if (!counter_add(h->units_owned_5430,ut->heap_index,-1)) return fail(Status::NeedsInput,"owned unit counter unresolved");
     if (h->unit_count) --*h->unit_count;
     if (h->unit_type_counts) (*h->unit_type_counts)[ut->heap_index]-=1;
-    snapshot=std::move(s); factories=std::move(f);
+    undo.commit(); factories=std::move(f);
     Outcome o; o.status=Status::Done; o.entity=id; return o;
 }
 
 Outcome begin_production(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint32_t house_id,
                          const std::string& type,std::uint64_t frame) {
     if (!runtime_ready(snapshot)) return fail(Status::NeedsInput,"setup is not complete");
-    auto s=snapshot; auto f=factories;
+    w::Undo undo(snapshot); auto& s=snapshot; auto f=factories; // Restores unless committed.
     const auto* t=c.find(type); if (!t) return fail(Status::Rejected,"unknown type");
     auto* h=house_of(s,house_id); if (!h) return fail(Status::Rejected,"unknown house");
     // Sidebar gate: the cameo exists only when Can_Build(type,false,true) is positive.
@@ -913,7 +916,7 @@ Outcome begin_production(w::Snapshot& snapshot,FactorySet& factories,const Catal
     factory->suspended=false;
     factory->interval=factory_stage_frames(*frames);
     factory->timer_start=frame;
-    snapshot=std::move(s); factories=std::move(f);
+    undo.commit(); factories=std::move(f);
     Outcome o; o.status=Status::Done; o.entity=factory_in_slot(factories,house_id,slot)->object; o.value=*frames; return o;
 }
 
@@ -949,7 +952,7 @@ std::optional<bool> passes_proximity(const w::Snapshot& s,const FactorySet& f,co
 Outcome place(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint32_t house_id,
               const std::string& type,CellXY cell,std::uint64_t) {
     if (!runtime_ready(snapshot)) return fail(Status::NeedsInput,"setup is not complete");
-    auto s=snapshot; auto f=factories;
+    w::Undo undo(snapshot); auto& s=snapshot; auto f=factories; // Restores unless committed.
     const auto* t=c.find(type); if (!t || t->rtti!=Rtti::BuildingType) return fail(Status::Rejected,"not a building type");
     auto* factory=factory_in_slot(f,house_id,slot_of(*t));
     if (!factory || !factory->object || factory->progress!=54) return fail(Status::Rejected,"no completed building"); // 004B9900.
@@ -964,7 +967,7 @@ Outcome place(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::
     factory=factory_in_slot(f,house_id,slot_of(*t));                       // Factory::Completed 004B9970.
     factory->object=0; factory->object_type.clear(); factory->suspended=true; factory->progress=0; factory->interval=0;
     // House::Just_Built 004E6F10 is reached for buildings from the construction mission, not here.
-    snapshot=std::move(s); factories=std::move(f);
+    undo.commit(); factories=std::move(f);
     Outcome o; o.status=Status::Done; o.entity=object; return o;
 }
 
