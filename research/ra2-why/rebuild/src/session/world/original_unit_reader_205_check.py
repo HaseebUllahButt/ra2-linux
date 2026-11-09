@@ -24,6 +24,7 @@ The connected-real-section mode also runs the original AMCV section lookup.
 The connected-real-copy mode also runs the original string-copy routine.
 The connected-real-color mode runs the color reader with supplied decimal
 formatting and scanning services for its tested default values.
+The connected-color-override mode supplies two synthetic color values.
 The connected-real-tokens mode runs the original tokenizer at other calls too.
 The connected-real-format mode runs the original formatter; scanning remains supplied.
 Other INI, formatting, enumeration, allocation, and asset services are supplied.
@@ -38,13 +39,14 @@ from itertools import product
 from unicorn import UC_HOOK_CODE,UC_HOOK_MEM_READ,UC_HOOK_MEM_WRITE
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EIP,UC_X86_REG_ESP
 
-if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--connected','--connected-real-bool','--connected-real-art','--connected-real-integer','--connected-real-float','--connected-real-speed','--connected-speed-wheel','--connected-zone-subterranean','--connected-real-placement','--connected-restricted-water','--connected-real-armor','--connected-real-vhpscan','--connected-vhpscan-strong','--connected-real-compare','--connected-compare-strong','--connected-real-token','--connected-token-strong','--connected-real-section','--connected-real-copy','--connected-real-color','--connected-real-tokens','--connected-real-format')):
+if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--connected','--connected-real-bool','--connected-real-art','--connected-real-integer','--connected-real-float','--connected-real-speed','--connected-speed-wheel','--connected-zone-subterranean','--connected-real-placement','--connected-restricted-water','--connected-real-armor','--connected-real-vhpscan','--connected-vhpscan-strong','--connected-real-compare','--connected-compare-strong','--connected-real-token','--connected-token-strong','--connected-real-section','--connected-real-copy','--connected-real-color','--connected-real-tokens','--connected-real-format','--connected-color-override')):
     raise SystemExit('usage: original_unit_reader_205_check.py game.exe unit_flags_case real_map_case game_dir [mode]')
 executable,native,fixture,game=sys.argv[1:5]
 connected=len(sys.argv)==6
 real_format=connected and sys.argv[5]=='--connected-real-format'
 real_tokens=connected and (real_format or sys.argv[5]=='--connected-real-tokens')
-real_color=connected and (real_tokens or sys.argv[5]=='--connected-real-color')
+color_override=connected and sys.argv[5]=='--connected-color-override'
+real_color=connected and (real_tokens or color_override or sys.argv[5]=='--connected-real-color')
 real_copy=connected and (real_color or sys.argv[5]=='--connected-real-copy')
 real_section=connected and (real_copy or sys.argv[5]=='--connected-real-section')
 real_token=connected and (real_section or sys.argv[5] in ('--connected-real-token','--connected-token-strong'))
@@ -68,6 +70,9 @@ if connected:
     lines=subprocess.check_output([fixture,game,'--amcv-all-rules'],text=True).splitlines()
     base['installed'].update({key.casefold():value for key,value in (line.split('\t',1) for line in lines)})
     raw_rules=dict(line.split('\t',1) for line in lines)
+    if color_override:
+        assert not any(key.casefold()=='radialcolor' for key in raw_rules)
+        raw_rules['RadialColor']='10,20,30'
     if real_vhpscan:
         assert not any(key.casefold()=='vhpscan' for key in raw_rules)
         if vhpscan_override: raw_rules['VHPScan']='Strong'
@@ -84,6 +89,9 @@ if connected:
         assert raw_rules.get('Image')=='MCV'
         lines=subprocess.check_output([fixture,game,'--mcv-all-art'],text=True).splitlines()
         raw_art=dict(line.split('\t',1) for line in lines)
+        if color_override:
+            assert not any(key.casefold()=='linetrailcolor' for key in raw_art)
+            raw_art['LineTrailColor']='40,50,60'
 else:
     base=runpy.run_path(os.path.join(os.path.dirname(__file__),'original_object_reader_205_check.py'))
 m=base['m']
@@ -271,10 +279,13 @@ def trace_code(cpu,address,size,user):
             incoming=cpu.reg_read(UC_X86_REG_ECX)
             assert (section_name,incoming) in (('AMCV',0x100b000),('MCV',0x8397f0)), (section_name,key,hex(incoming))
             records=raw_rules if section_name=='AMCV' else raw_art
-            assert not any(name.casefold()==key.casefold() for name in records)
+            supplied=next((value for name,value in records.items() if name.casefold()==key.casefold()),None)
+            overrides={('AMCV','RadialColor'):'10,20,30',('MCV','LineTrailColor'):'40,50,60'}
+            assert supplied==(overrides.get((section_name,key)) if color_override else None)
             ret=struct.unpack('<I',bytes(cpu.mem_read(cpu.reg_read(UC_X86_REG_ESP),4)))[0]
             assert ret not in color_pending
-            color_pending[ret]=(target,bytes(cpu.mem_read(source,3)))
+            expected=bytes(map(int,supplied.split(','))) if supplied is not None else bytes(cpu.mem_read(source,3))
+            color_pending[ret]=(target,expected)
             color_entries.append(key)
         if real_copy and mode==3 and address==0x7823d0:
             target,source,count=m.argument(0),m.argument(1),m.argument(2)
@@ -506,7 +517,9 @@ if real_bool:
     boolean_prologue=bytes(hash_cpu.mem_read(0x50f410,3))
     if real_art:
         art_cache,art_section,art_ini,art_array=0x1311000,0x1312000,0x1313000,0x1314000
-        assert {key.casefold():value for key,value in raw_art.items()}=={'cameo':'MCVICON','remapable':'yes','voxel':'yes'}
+        expected_art={'cameo':'MCVICON','remapable':'yes','voxel':'yes'}
+        if color_override: expected_art['linetrailcolor']='40,50,60'
+        assert {key.casefold():value for key,value in raw_art.items()}==expected_art
         art_values=sorted(((original_hash(key),key,value) for key,value in raw_art.items()),
                           key=lambda pair:pair[0] if pair[0]<0x80000000 else pair[0]-0x100000000)
         assert len(art_values)<1024 and len({digest for digest,_,_ in art_values})==len(art_values)
@@ -718,8 +731,8 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
         if real_copy: assert len(copy_results)==(96 if real_tokens else 89 if real_color else 87) and not copy_pending
         if real_color:
             assert color_entries==['RadialColor','LineTrailColor']
-            assert color_results==[b'\0\0\0',b'\x80\x80\x80']
-            assert color_scan_results==[(0,0,0),(128,128,128)] and not color_pending
+            assert color_results==([bytes((10,20,30)),bytes((40,50,60))] if color_override else [b'\0\0\0',b'\x80\x80\x80'])
+            assert color_scan_results==([(10,20,30),(40,50,60)] if color_override else [(0,0,0),(128,128,128)]) and not color_pending
         if real_format:
             assert format_entries==['%d,%d,%d']*2+['FiringSyncFrame%d']*2+['BurstDelay%d']*4
             assert len(format_results)==8 and not format_pending
@@ -764,4 +777,4 @@ if real_section:
     assert calls=={'parent':1,'pair':0,'format':0,'compare':0}
     assert chain_calls==[0x70ab40,0x6daf60,0x5d7810,0x4107e0]
 print('base x86 %sreader chain preserves supplied Type +205 in %d checked cases'%
-      ('connected real-format ' if real_format else 'connected real-tokens ' if real_tokens else 'connected real-color ' if real_color else 'connected real-copy ' if real_copy else 'connected real-section ' if real_section else 'connected token-Strong ' if real_token and vhpscan_override else 'connected real-token ' if real_token else 'connected compare-Strong ' if real_compare and vhpscan_override else 'connected real-compare ' if real_compare else 'connected synthetic-VHPScan ' if vhpscan_override else 'connected real-VHPScan ' if real_vhpscan else 'connected real-armor ' if real_armor else 'connected synthetic-Water ' if restricted_override else 'connected real-placement ' if real_restricted else 'connected synthetic-zone ' if zone_override else 'connected synthetic-Wheel ' if speed_override else 'connected real-speed ' if real_speed else 'connected real-float ' if real_float else 'connected real-integer ' if real_integer else 'connected real-art ' if real_art else 'connected real-boolean ' if real_bool else 'connected ' if connected else 'UnitType ',10 if real_section else 9 if connected else 7))
+      ('connected synthetic-color ' if color_override else 'connected real-format ' if real_format else 'connected real-tokens ' if real_tokens else 'connected real-color ' if real_color else 'connected real-copy ' if real_copy else 'connected real-section ' if real_section else 'connected token-Strong ' if real_token and vhpscan_override else 'connected real-token ' if real_token else 'connected compare-Strong ' if real_compare and vhpscan_override else 'connected real-compare ' if real_compare else 'connected synthetic-VHPScan ' if vhpscan_override else 'connected real-VHPScan ' if real_vhpscan else 'connected real-armor ' if real_armor else 'connected synthetic-Water ' if restricted_override else 'connected real-placement ' if real_restricted else 'connected synthetic-zone ' if zone_override else 'connected synthetic-Wheel ' if speed_override else 'connected real-speed ' if real_speed else 'connected real-float ' if real_float else 'connected real-integer ' if real_integer else 'connected real-art ' if real_art else 'connected real-boolean ' if real_bool else 'connected ' if connected else 'UnitType ',10 if real_section else 9 if connected else 7))
