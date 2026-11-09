@@ -1,5 +1,6 @@
 #include "battle.h"
 #include "battle_hud.h"
+#include "battle_queue.h"
 #include "battle_help.h"
 #include "battle_cursor.h"
 #include "battle_orders.h"
@@ -39,7 +40,7 @@ using sim::skirmish::OrderKind;
 
 const std::vector<std::string>& build_palette() {
     static const std::vector<std::string> palette={"GAPOWR","GAPILE","GAREFN","GAWEAP","GARADR","GAPILL",
-        "NAPOWR","NAHAND","NAREFN","NAWEAP","NARADR","NALASR","E1","E2","MTNK","HTNK"};
+        "NAPOWR","NAHAND","NAREFN","NAWEAP","NARADR","NALASR","E1","E2","MTNK","HTNK","CMIN","HARV"};
     return palette;
 }
 bool live(const w::Entity& e) {
@@ -108,7 +109,7 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     ui::ScoreAssets score_assets_;
     std::optional<gfx::RgbaImage> score_image_;
     HudState hud_state_;
-    render::Bitmap frame_,navigation_base_;
+    render::Bitmap frame_;
     std::optional<SceneFrame> initial_scene_;
     int initial_camera_x_=0,initial_camera_y_=0;
     render::RadarStyle radar_style_;
@@ -116,9 +117,11 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     std::map<std::uint32_t,ra2map::Cell> manual_moves_;
     std::set<std::uint32_t> move_destinations_;
     std::vector<Order> pending_;
+    BattleBuildQueue build_queue_;
     std::set<std::int32_t> keys_;
     std::set<std::string> gaps_;
     int camera_x_=0,camera_y_=0,pointer_x_=-1,pointer_y_=-1;
+    std::uint64_t status_time_=0;
     std::string placement_,status_="Select MCV. D deploys.";
     bool quit_=false,autoplay_moved_=false,autoplay_deployed_=false;
     bool help_visible_=true,show_score_=false;
@@ -145,6 +148,7 @@ public:
         if(const auto labels=assets_.read_asset("RA2.CSF"))labels_.parse(labels->data(),labels->size());
         score_assets_=ui::ScoreAssets::load(files,labels_);
         help_visible_=!args_.autoplay;
+        status_time_=clock_.now_ms();
         for(const auto& slot:args_.setup.opponents)if(slot.opponent && *slot.opponent!=ui::Opponent::Closed) {
             difficulty_=*slot.opponent;break;
         }
@@ -222,6 +226,30 @@ public:
             !miner(e) && !rules_.read_string(e.type,"Primary").empty();
     }
     void queue(Order order) {pending_.push_back(std::move(order));}
+    void status(std::string message) {status_=std::move(message);status_time_=clock_.now_ms();}
+    int factory_slot(const p::TypeFacts& type) const {
+        return type.rtti==p::Rtti::BuildingType?(type.build_cat==5?5:4):
+            type.rtti==p::Rtti::InfantryType?1:type.rtti==p::Rtti::UnitType?2:0;
+    }
+    int active_count(const std::string& type) const {
+        return int(std::count_if(factories_.factories.begin(),factories_.factories.end(),[&](const auto& f){
+            return f.house_id==player_ && f.object && f.object_type==type;
+        }));
+    }
+    void run_build_queue(std::uint32_t frame) {
+        for(const auto& [slot,line]:build_queue_.slots()) {
+            if(line.empty())continue;
+            if(std::any_of(factories_.factories.begin(),factories_.factories.end(),[&](const auto& f){
+                return f.house_id==player_ && f.slot==slot && f.object;
+            }))continue;
+            const auto type=line.front();
+            if(!sim::tech::can_build(rules_,world_,player_,type)) {build_queue_.pop(slot);continue;}
+            const auto outcome=proto::begin_production(world_,factories_,catalog_,player_,type,frame);
+            if(outcome.status==p::Status::Done) {
+                ++built;build_queue_.pop(slot);note(outcome,"Building "+name(type)+".");
+            }
+        }
+    }
     void deploy_selected() {
         for (const auto id:orders_.selected_ids()) queue({OrderKind::Deploy,player_,id,0,{},{}});
     }
@@ -272,9 +300,14 @@ public:
             return;
         }
         if (input.kind==InputKind::Button && input.x>=BattleHud::sidebar_x) {
-            if (input.pressed && input.key==SDL_BUTTON_LEFT) {
+            if (input.pressed && (input.key==SDL_BUTTON_LEFT || input.key==SDL_BUTTON_RIGHT)) {
                 refresh_hud();
                 const auto action=hud_.handle_click(input.x,input.y,hud_state_);
+                if(input.key==SDL_BUTTON_RIGHT) {
+                    if(action.kind==HudActionKind::Build)if(const auto* type=catalog_.find(action.type))
+                        if(build_queue_.cancel(factory_slot(*type),action.type))status("Queued product removed.");
+                    return;
+                }
                 if (action.kind==HudActionKind::Deploy && !victory_.settled()) deploy_selected();
                 else if (action.kind==HudActionKind::Build) {
                     if(victory_.settled())return;
@@ -284,7 +317,11 @@ public:
                     const auto* type=catalog_.find(action.type);
                     if (ready && type && type->rtti==p::Rtti::BuildingType) {
                         placement_=action.type;orders_.set_placement_active(true);
-                        status_="Place "+name(placement_)+". Esc cancels.";
+                        status("Place "+name(placement_)+". Esc cancels.");
+                    } else if(type && (type->rtti==p::Rtti::UnitType || type->rtti==p::Rtti::InfantryType)) {
+                        if(build_queue_.add(factory_slot(*type),action.type,active_count(action.type)))
+                            status("Queued "+name(action.type)+".");
+                        else status("Queue full: five per type.");
                     } else queue({OrderKind::Build,player_,0,0,action.type,{}});
                 } else if (action.kind==HudActionKind::Minimap) {
                     pan(action.position.x-camera_x_-BattleHud::sidebar_x/2,
@@ -319,6 +356,12 @@ public:
     void test_key(int key) {
         window_.inject_for_test({InputKind::Key,0,0,key,true});
         window_.inject_for_test({InputKind::Key,0,0,key,false});
+    }
+    void test_pan_to(BattlePoint point) {
+        for(const auto& [key,held]:std::vector<std::pair<int,bool>>{
+            {SDLK_LEFT,point.x<40},{SDLK_RIGHT,point.x>760},
+            {SDLK_UP,point.y<40},{SDLK_DOWN,point.y>720}})
+            if(bool(keys_.count(key))!=held)window_.inject_for_test({InputKind::Key,0,0,key,held});
     }
     void checkpoint(const loop::State& state,const std::string& label) {
         force_draw_=true;present(state);force_draw_=false;
@@ -444,16 +487,18 @@ public:
             for(const auto& e:world_.entities)if(live(e)&&e.house_id==enemy_&&fighter(e)) {
                 human_target_=e.id;
                 const auto at=anchor(e);require(at.has_value(),"Human input: enemy has no anchor");
-                const auto radar=BattleHud::minimap_bounds();
-                test_click(radar.x+(at->x+camera_x_)*radar.width/terrain_.width,
-                    radar.y+(at->y+camera_y_)*radar.height/terrain_.height);
+                // No radar exists in this opening. Pan through real key events.
+                test_pan_to(*at);human_wait_frame_=state.frame_counter;
                 human_stage_=9;return;
             }
             throw std::runtime_error("Human input: enemy tank is missing");
         }
         case 9: {
             const auto* e=find(world_,human_target_);require(e,"Human input: target vanished");
-            const auto at=anchor(*e);require(at&&at->x>=0&&at->x<804&&at->y>=0&&at->y<768,"Human input: minimap did not show enemy");
+            const auto at=anchor(*e);require(at.has_value(),"Human input: target has no anchor");
+            require(state.frame_counter-human_wait_frame_<300,"Human input: camera did not reach enemy");
+            if(at->x<40||at->x>760||at->y<40||at->y>720) {test_pan_to(*at);break;}
+            test_pan_to({400,380});
             test_click(at->x,at->y);human_stage_=10;break;
         }
         case 10:
@@ -482,7 +527,7 @@ public:
         }
     }
     void note(const p::Outcome& outcome,const std::string& success) {
-        status_=outcome.status==p::Status::Done?success:outcome.detail;
+        status(outcome.status==p::Status::Done?success:outcome.detail);
         if (outcome.status==p::Status::NeedsInput || outcome.status==p::Status::Unsupported)
             gaps_.insert(outcome.detail);
     }
@@ -494,14 +539,14 @@ public:
             (!e || !live(*e) || e->house_id!=order.house)) return;
         switch (order.kind) {
         case OrderKind::Move:
-            if (miner(*e)) {status_="Miners harvest automatically.";break;}
+            if (miner(*e)) {status("Miners harvest automatically.");break;}
             combat_.stop(world_,order.entity);attacks_.erase(order.entity);
             {
                 const auto goal=formation_cell(order.cell);
                 const auto move=movement_.issue(world_,order.entity,goal,
                     sim::original_rule_speed(rules_.read_integer(e->type,"Speed",4)));
                 if(move.status==sim::PrototypeMoveStatus::Complete)manual_moves_[order.entity]=goal;
-                if (order.house==player_) status_=move.status==sim::PrototypeMoveStatus::Complete?"Moving.":move.detail;
+                if (order.house==player_) status(move.status==sim::PrototypeMoveStatus::Complete?"Moving.":move.detail);
             }
             break;
         case OrderKind::Attack:
@@ -541,7 +586,7 @@ public:
         case OrderKind::Place: {
             const auto proximity=proto::passes_proximity(world_,factories_,catalog_,order.house,order.type,
                 {std::int16_t(order.cell.x),std::int16_t(order.cell.y)});
-            if (!proximity || !*proximity) {if(order.house==player_)status_="Place this building closer to your base.";break;}
+            if (!proximity || !*proximity) {if(order.house==player_)status("Place this building closer to your base.");break;}
             const auto outcome=proto::place(world_,factories_,catalog_,order.house,order.type,
                 {std::int16_t(order.cell.x),std::int16_t(order.cell.y)},frame);
             if (outcome.status==p::Status::Done && order.house==player_) {
@@ -654,6 +699,7 @@ public:
             16*(int(keys_.count(SDLK_DOWN))-int(keys_.count(SDLK_UP))+
                 int(edge&&pointer_y_>=760)-int(edge&&pointer_y_<8)));
         if(victory_.settled())return;
+        run_build_queue(frame);
         if(args_.autoplay)autoplay(frame);
         auto enemy_commands=ai_.tick(world_,enemy_,player_,std::int32_t(frame));
         // TODO-ORIGINAL: TeamDelays uses Hard/Normal/Easy registry order.
@@ -765,10 +811,15 @@ public:
     void refresh_hud() {
         loop::profile::Timer probe(loop::profile::Phase::HudRefresh);
         const auto& h=house(world_,player_);
+        if(!victory_.settled() && placement_.empty() && clock_.now_ms()-status_time_>=5000)status_.clear();
         hud_state_.cash=h.cash.value_or(0);hud_state_.power_output=h.power_output.value_or(0);
         hud_state_.power_drain=h.power_drain.value_or(0);hud_state_.selected_labels.clear();
+        hud_state_.pointer_x=pointer_x_;hud_state_.pointer_y=pointer_y_;hud_state_.can_deploy=false;
         for(const auto id:orders_.selected_ids())if(const auto* e=find(world_,id))
-            hud_state_.selected_labels.push_back(name(e->type)+" "+std::to_string(e->resolved_hp.value_or(0)));
+            if(live(*e)) {
+                hud_state_.selected_labels.push_back(name(e->type)+" "+std::to_string(e->resolved_hp.value_or(0)));
+                hud_state_.can_deploy|=!rules_.read_string(e->type,"DeploysInto").empty();
+            }
         hud_state_.status=status_;hud_state_.result=result_name(victory_.result);
         hud_state_.choices.clear();
         const auto eligible=proto::options(world_,factories_,catalog_,player_);
@@ -789,12 +840,13 @@ public:
             choice.category=facts->rtti==p::Rtti::BuildingType?BuildCategory::Buildings:
                 facts->rtti==p::Rtti::InfantryType?BuildCategory::Infantry:BuildCategory::Vehicles;
             if(factory)choice.progress=factory->progress*1000/54;
+            choice.queued=build_queue_.count(type)+active_count(type);
             hud_state_.choices.push_back(std::move(choice));
         }
         hud_state_.camera={camera_x_,camera_y_,BattleHud::sidebar_x,BattleHud::view_height};
         hud_state_.map_width=terrain_.width;hud_state_.map_height=terrain_.height;
-        // TODO-ORIGINAL: The first match keeps its navigation map available.
-        // Radar power, shroud and original house palettes remain separate.
+        // Base radar requires a live radar building and enough power.
+        // TODO-ORIGINAL: Original shroud and house palettes remain separate.
         const auto bounds=BattleHud::minimap_bounds();
         auto& radar=hud_state_.minimap;
         if(sim::tech::radar_online(rules_,world_,player_)) {
@@ -804,25 +856,8 @@ public:
             radar=render::draw_battle_radar(world_,assets_.theater(),radar_view,radar_style_,true);
             return;
         }
-        if(navigation_base_.rgba.empty()) {
-            navigation_base_={bounds.width,bounds.height,
-                std::vector<std::uint8_t>(std::size_t(bounds.width)*bounds.height*4)};
-            for(int y=0;y<bounds.height;++y)for(int x=0;x<bounds.width;++x) {
-                const auto source=(std::size_t(y*terrain_.height/bounds.height)*terrain_.width+x*terrain_.width/bounds.width)*4;
-                const auto to=(std::size_t(y)*bounds.width+x)*4;
-                std::copy_n(terrain_.rgba.begin()+source,4,navigation_base_.rgba.begin()+to);
-            }
-        }
-        radar=navigation_base_;
-        for(const auto& e:world_.entities)if(live(e)&&e.house_id && e.kind!=w::Kind::Terrain) {
-            const auto a=anchor(e);if(!a)continue;
-            const int x=(a->x+camera_x_)*radar.width/terrain_.width;
-            const int y=(a->y+camera_y_)*radar.height/terrain_.height;
-            const std::array<std::uint8_t,3> color=e.house_id==player_?std::array<std::uint8_t,3>{70,255,90}:
-                e.house_id==enemy_?std::array<std::uint8_t,3>{255,65,50}:std::array<std::uint8_t,3>{160,160,160};
-            rectangle(radar,x-1,y-1,3,3,color);
-        }
-
+        radar={};
+        hud_state_.map_width=hud_state_.map_height=0;
     }
     void present(const loop::State& state) override {
         // Headless checks compose at fixed intervals and at the final frame.
