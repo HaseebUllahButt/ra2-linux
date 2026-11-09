@@ -209,13 +209,24 @@ int main(int argc,char** argv) {
             return entity.type=="AMCV" && entity.house_id==world.houses[0].id;
         });
         assert(player!=world.entities.end() && player->cell && player->cell->x==135 && player->cell->y==80 &&
-               player->position && player->position->z==416 && player->resolved_hp==1000 && player->next);
+               player->position && player->position->z==416 && player->resolved_hp==1000 && player->next &&
+               player->hull_facing==128 && player->hull_facing_raw==0x8000);
         const auto& start=world.cells.at(80u*512+135);
         assert(start.heads && start.heads->ground_head==player->id && start.ground_occupancy_124==0x20);
         for (const auto& entity:world.entities) if (entity.lifetime==Lifetime::Placed) {
             assert(entity.cell && entity.position && entity.next && entity.layer==Layer::Ground);
             const auto& cell=world.cells.at(std::uint32_t(entity.cell->y)*512+entity.cell->x);
             assert(cell.heads && cell.ground_occupancy_124 && (*cell.ground_occupancy_124&0x20));
+        }
+        for (const auto& entity:world.entities) if (entity.type=="AMCV" || entity.type=="SMCV") {
+            if (entity.house_id!=world.houses[0].id && entity.house_id!=world.houses[1].id) continue;
+            assert(entity.cell && entity.hull_facing==128 && entity.hull_facing_raw==0x8000);
+            for (int dy=-1;dy<=1;++dy) for (int dx=-1;dx<=1;++dx) {
+                if (!dx && !dy) continue;
+                const auto key=std::uint32_t(int(entity.cell->y)+dy)*512+int(entity.cell->x)+dx;
+                const auto& cell=world.cells.at(key);
+                assert(cell.ground_occupancy_124==0 && cell.heads && cell.heads->ground_head==0);
+            }
         }
         const auto repeated=prototype_battle(assets,options,initial);
         assert(repeated && repeated->snapshot.random.table==world.random.table &&

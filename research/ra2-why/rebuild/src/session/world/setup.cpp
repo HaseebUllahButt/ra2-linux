@@ -335,7 +335,7 @@ std::optional<PrototypeBattle> prototype_battle(BaseBattleAssets& assets,
                                                  static_cast<std::int32_t>(players.size()+1));
     if (!houses) return {};
     Stage stage(*houses);
-    struct PlannedUnit { std::uint32_t id; ra2map::Cell start; };
+    struct PlannedUnit { std::uint32_t id; ra2map::Cell start; bool mcv; };
     std::vector<PlannedUnit> planned;
     for (std::size_t i=0;i<options.players.size();++i) {
         // TODO-ORIGINAL: use the original starting-unit budget and selection.
@@ -349,7 +349,7 @@ std::optional<PrototypeBattle> prototype_battle(BaseBattleAssets& assets,
             if (!strength || *strength<=0 || !index) return {};
             const auto id=stage.create_unit(houses->houses[i].id,type,*strength,*index,false);
             if (!id) return {};
-            planned.push_back({*id,chosen_starts[i]});
+            planned.push_back({*id,chosen_starts[i],n==0});
         }
     }
     PrototypeBattle result;
@@ -478,6 +478,7 @@ std::optional<PrototypeBattle> prototype_battle(BaseBattleAssets& assets,
     for (const auto& object:assets.map().infantry()) actor(Kind::Infantry,object.house,object.type,object.cell,object.facing,object.health);
     for (const auto& object:assets.map().structures()) actor(Kind::Structure,object.house,object.type,object.cell,object.facing,object.health);
     for (const auto& object:assets.map().terrain()) actor(Kind::Terrain,"",object.type,object.cell,0,256);
+    std::vector<ra2map::Cell> placed_mcvs;
     for (const auto& unit:planned) {
         auto entity=std::find_if(world.entities.begin(),world.entities.end(),[&](const auto& item){return item.id==unit.id;});
         if (entity==world.entities.end()) return {};
@@ -492,7 +493,33 @@ std::optional<PrototypeBattle> prototype_battle(BaseBattleAssets& assets,
                 if (cell==world.cells.end() || !cell->second.terrain || !cell->second.unit_land_speed ||
                     *cell->second.unit_land_speed<=0 || !cell->second.ground_occupancy_124 ||
                     *cell->second.ground_occupancy_124 || cell->second.terrain->overlay_type_index!= -1) continue;
-                placed=place(*entity,{static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)},0);
+                // TODO-ORIGINAL: use the deployed BuildingType foundation and
+                // real placement checks. Keep a clear area for prototype MCVs.
+                const auto near=[&](ra2map::Cell start) {
+                    return std::abs(x-int(start.x))<=2 && std::abs(y-int(start.y))<=2;
+                };
+                if (!unit.mcv && (std::any_of(chosen_starts.begin(),chosen_starts.end(),near) ||
+                                  std::any_of(placed_mcvs.begin(),placed_mcvs.end(),near))) continue;
+                if (unit.mcv) {
+                    bool clear=true;
+                    for (int fy=-1;fy<=1 && clear;++fy) for (int fx=-1;fx<=1 && clear;++fx) {
+                        const int nx=x+fx,ny=y+fy;
+                        if (nx<0 || ny<0 || nx>=512 || ny>=512) { clear=false; break; }
+                        const auto neighbor=world.cells.find(std::uint32_t(ny)*512+nx);
+                        if (neighbor==world.cells.end() || !neighbor->second.terrain ||
+                            !neighbor->second.unit_land_speed || *neighbor->second.unit_land_speed<=0 ||
+                            !neighbor->second.ground_occupancy_124 || *neighbor->second.ground_occupancy_124 ||
+                            neighbor->second.terrain->overlay_type_index!= -1 ||
+                            neighbor->second.terrain->ramp_index!=0 ||
+                            neighbor->second.terrain->height_level!=cell->second.terrain->height_level) clear=false;
+                    }
+                    if (!clear) continue;
+                }
+                const ra2map::Cell target{static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)};
+                // TODO-ORIGINAL: recover each live BuildingType flag. Base
+                // 0045EC90 returns 128 for the ordinary zero-flag case.
+                placed=place(*entity,target,unit.mcv ? 128 : 0);
+                if (placed && unit.mcv) placed_mcvs.push_back(target);
             }
         if (!placed) return {};
         entity->maximum_hp=entity->resolved_hp;
