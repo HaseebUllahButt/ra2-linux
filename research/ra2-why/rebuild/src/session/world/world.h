@@ -32,6 +32,7 @@ struct House {
     std::optional<std::map<std::int32_t,std::int32_t>> unit_type_counts, unit_fixed_counts;
     std::optional<std::map<std::int32_t,std::int32_t>> placed_unit_counts;
     bool constructor_complete=false;
+    std::optional<double> reload_multiplier; // Base House +F0.
 };
 struct BaseUnitProfile {
     std::optional<std::int32_t> restricted_land, movement_mode, placement_mode, speed_type, level_height;
@@ -69,6 +70,7 @@ struct Entity {
     std::optional<std::uint32_t> target_id;
     // Base Techno +244 and +24C. The intervening +248 is unresolved.
     std::optional<std::int32_t> weapon_timer_start_frame, weapon_timer_duration;
+    std::optional<std::uint8_t> object_field_74, object_field_76, techno_field_370;
 };
 struct CellState {
     std::optional<bool> allocated; // The original allocated Cell, not the fallback receiver.
@@ -116,6 +118,7 @@ struct Snapshot {
     SetupProgress setup_progress=SetupProgress::Unknown;
     // Original map iteration order, expressed as y*512+x. Empty means unknown.
     std::optional<std::vector<std::uint32_t>> cell_order;
+    std::optional<double> veteran_reload_multiplier; // Base Rules +5B0.
 };
 enum class PlacementResult { Placed, Blocked, Unresolved };
 // Checks every head and shared next chain. Invalid and cyclic snapshots fail.
