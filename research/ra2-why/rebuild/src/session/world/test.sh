@@ -34,4 +34,5 @@ if [ "${2:-}" = "--original" ]; then
     ${PYTHON:-python3} original_real_map_check.py "$game/game.exe" "$build/placement_case"
     ${PYTHON:-python3} original_cell_occupancy_check.py "$game/game.exe" "$build/cell_occupancy_case"
     ${PYTHON:-python3} original_bridge_check.py "$game/game.exe" "$build/bridge_footprint_case"
+    ${PYTHON:-python3} original_map_order_check.py "$game/game.exe"
 fi
