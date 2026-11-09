@@ -3,8 +3,9 @@
 
 Base 00652270 dispatches one UnitType and visits 30 mission objects. Each
 00594E30 body and its INI readers execute. Section records, initial object
-bytes, and decimal scanning are supplied. Other type registries and full
-rules loading remain omitted.
+bytes, and decimal scanning are supplied. Initial bytes match the executable
+image; earlier startup writes are not checked. Other registries and full rules
+loading remain omitted.
 """
 import os
 import runpy
@@ -36,7 +37,9 @@ loaded=runpy.run_path(os.path.join(os.path.dirname(__file__),'original_unit_disp
 g=loaded['g']; m=g['m']
 m.cpu.mem_write(0x594e30,bytes(g['hash_cpu'].mem_read(0x594e30,3)))
 m.callbacks.pop(0x594e30,None); m.cpu.ctl_remove_cache(0x594e30,0x594e33)
-m.cpu.mem_write(0xa403b0,bytes(30*0x20))
+image_missions=bytes(g['hash_cpu'].mem_read(0xa403b0,30*0x20))
+assert image_missions==bytes(30*0x20)
+m.cpu.mem_write(0xa403b0,image_missions)
 tail_ini,cache,section,array=0x14c3000,0x14c3100,0x14c3200,0x14c3300
 entries=[]; sections=[]; completed=[]; writes=[]; scans=[]
 current=[None]
