@@ -38,9 +38,7 @@ void resolve_overlay_free_terrain(TerrainCells& cells,std::uint8_t cliff) {
             else if (unknown) continue;
         }
         cell.land_type=final;
-        // 0047BBF0 clears the bridge bit. The supported non-overlay clear/road slice keeps it clear.
-        // LandType 10 creates tunnel links at 00727FD0. Overlay bridge decisions remain unresolved.
-        if ((mapped==0 || mapped==1) && cell.ramp_index && *cell.ramp_index==0 && !cell.bridge) cell.bridge=false;
+        // Preserve the explicit Cell +140 bit 100 state. Neighbor bridge setters can affect clear cells.
     }
 }
 }

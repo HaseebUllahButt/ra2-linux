@@ -384,15 +384,14 @@ The shared asset reader uses its normal optimized build. SIM_TEST_FLAGS instrume
 It loads original C1A02MD.MAP, the original ART INI, and exact TMP metadata from original MIX archives.
 Add `/path/to/user/ra2/game /path/to/user/ra2/analysis/extracted --base` to test base ALL02S.MAP.
 The base test reads RULES.INI, ART.INI, and the map from original MIX archives.
-Original HTNK entity 60 moves from 114,67 to 114,68 on road in 12 ticks.
-Original HTNK entity 61 moves from 117,67 to 117,68 on clear ground in 12 ticks.
-Both base commands match every original position and deterministic replay.
-The two initialization passes keep all floor heights unchanged on both real fixture maps.
-Original YTNK entity 259 moves from 113,115 to 113,114 in 12 movement ticks.
-Each position matches original x86 output at its real Speed=6, converted to 15.
-The original IQ=3 house makes this YTNK enter Area Guard after arrival.
-A second simulation replays the commands and matches each tick.
-An unsupported path and an unsupported health change leave entity state intact.
+The real-map checks now require an explicit error for unknown bridge flags.
+They compare actor state before and after rejection, plus deterministic command replay.
+Base connected routes also reject unresolved bridge state without changing the actor.
+Earlier integration checks inferred clear bridge flags from local terrain and overlay absence.
+That inference was wrong. Neighboring bridge roots can set the same flag.
+The earlier real-map movement claims are withdrawn until fresh-map bridge setup is proved.
+Isolated original drive traces still prove their explicit flat-map input slice.
+The two tile passes keep all floor heights unchanged on these two real fixture maps.
 
 ## Overlay-free terrain initialization
 
@@ -403,9 +402,12 @@ The six height tests use their exact original offsets and order.
 CliffBackImpassability=2 changes eligible land types to rock when a tested neighbor is four levels higher.
 Missing required neighbor heights leave the final land unresolved.
 Overlay cells remain unresolved until their original overlay decisions are recovered.
-Cell construction clears the bridge bit. The supported non-overlay clear/road slice keeps it clear.
+Cell construction clears the bridge bit. Later setup can set it from a neighboring bridge root.
+Tile and land setup preserve an explicit bridge value, including unknown.
 LandType 10 is Tunnel. 00727FD0 creates tube links and writes Cell +116.
 Bridge overlay initialization is separate and remains unrecovered.
+Base setters 004732D0/00473700 and expansion setters 0047E040/0047E470 write neighboring cells.
+Each setter writes bit 100 at the root, two cells forward, and one cell backward.
 
 `original_land_check.py executable [--base]` checks 4,096 original branch cases in each edition.
 Both produce hash BC614341. The native tests compare the same grid.
@@ -528,10 +530,10 @@ The native game reads only the original static curve data.
 The traces include eight headings, five speeds, 2/3/23-cell straight paths, and both final turn sizes and signs.
 They compare every frame's position, facing, track, sample, signed remainder, and all 24 path entries.
 Both x86 editions produce identical vectors.
-The real base map test also moves unchanged ALL02S HTNK 61 through paths {4,4}, {4,3}, and {4,2}.
-These take 23, 26, and 19 movement ticks.
-Every real-map position and facing matches separately captured base x86 vectors.
-The real-map tests replay each route and reject invalid paths without changing the entity.
+Captured base HTNK 61 route vectors remain in `real_route_golden.inc` for later setup recovery.
+Their resolved drive traces take 23, 26, and 19 ticks for {4,4}, {4,3}, and {4,2}.
+The current real-map test rejects these commands because bridge state is unknown.
+It does not supply assumed clear flags to restore the earlier movement claims.
 
 ## Setup random-state handoff
 

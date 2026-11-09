@@ -70,121 +70,30 @@ int main(int argc,char** argv) try {
         move.destination={static_cast<std::uint16_t>(e.cell.x+directions[direction][0]),static_cast<std::uint16_t>(e.cell.y+directions[direction][1])};
         require(first.issue(move).error==Error::None,"Move did not queue"); first.tick();
         const auto result=first.snapshot().results.at(0);
-        if (result.error!=Error::None) { std::cout<<e.id<<" "<<e.type<<" "<<e.cell.x<<","<<e.cell.y<<" rejected: "<<result.detail<<"\n"; continue; }
+        require(result.error==Error::Unsupported && result.detail=="Move swept-cell bridge state is unresolved","real Move did not reject unknown bridge state");
+        const auto after=first.snapshot().entities.at(e.id-1);
+        require(e.position && after.position && after.position->x==e.position->x && after.position->y==e.position->y && after.position->z==e.position->z && !after.moving,"unknown bridge state changed the actor");
+        require(after.hp==e.hp && after.house==e.house && after.mission==e.mission && after.turret_facing==e.turret_facing,"unknown bridge state changed actor fields");
         Simulation replay(rules,map,9,terrain,&theater); replay.load_ground_assets(executable,art);
-        require(replay.issue(move).error==Error::None,"replay did not queue"); replay.tick();
-        require(trace(first.snapshot(),e.id)==trace(replay.snapshot(),e.id),"dispatch replay mismatch");
-        const auto goal=Coord{move.destination.x*256+128,move.destination.y*256+128,e.position->z};
-        require(base?(e.type=="HTNK" && e.cell.x==114 && e.cell.y==67 && e.facing==128):(e.type=="YTNK" && e.cell.x==113 && e.cell.y==115 && e.facing==0),"real Move fixture changed");
-        require(e.turret_facing==e.facing,"original map turret facing differs");
-        require(first.types().at(e.type).speed==6,"real vehicle Speed changed");
-        // Original 004B0F20 and base 004A1000 at resolved speed 15, relative to their source.
-        const int original_y[]={23,47,70,94,117,141,164,188,212,235,253,256};
-        Command health; health.op=Op::ResolvedDamage; health.entity=e.id; health.amount=1; health.frame=1;
-        require(first.issue(health).error==Error::None && replay.issue(health).error==Error::None,"health guard did not queue");
-        unsigned ticks=0;
-        while (first.snapshot().entities.at(e.id-1).moving && ticks<1024) {
-            first.tick(); replay.tick(); ++ticks;
-            require(trace(first.snapshot(),e.id)==trace(replay.snapshot(),e.id),"movement replay mismatch");
-            if (ticks==1) require(first.snapshot().results.at(0).error==Error::Unsupported,"unrecovered movement damage was accepted");
-            const auto position=first.snapshot().entities.at(e.id-1).position.value();
-            require(ticks<=12 && position.x==e.position->x && position.y==e.position->y+directions[direction][1]*original_y[ticks-1],"real map Move differs from original x86 positions");
-        }
-        const auto final=first.snapshot().entities.at(e.id-1);
-        require(ticks==12,"original movement duration changed");
-        require(!final.moving && final.position->x==goal.x && final.position->y==goal.y && final.position->z==goal.z,"Move did not reach the original destination");
-        require(final.cell.x==move.destination.x && final.cell.y==move.destination.y,"Move cell mismatch");
-        require(final.turret_facing==e.turret_facing,"straight Move changed the separate turret pose");
-        require(final.hp==e.hp && final.house==e.house,"Move changed health or owner");
-        const auto expected_mission="Area Guard";
-        std::cout<<"original IQ="<<map.read_integer(e.house,"IQ",0)<<" GuardArea="<<rules.read_integer("IQ","GuardArea",4)<<"\n";
-        if (final.mission!=expected_mission) std::cout<<"actual idle mission "<<final.mission<<" owner="<<e.house<<"\n";
-        require(final.mission==expected_mission,"completed single Move did not select the original IQ-based idle mission");
-        for (const auto& cell:first.terrain()) if (cell.cell.x==e.cell.x && (cell.cell.y==e.cell.y || cell.cell.y==move.destination.y))
-            std::cout<<"fixture cell "<<cell.cell.x<<","<<cell.cell.y<<" land="<<cell.land_type.value_or(-1)<<"\n";
+        require(replay.issue(move).error==Error::None,"unresolved Move replay did not queue"); replay.tick();
+        require(trace(first.snapshot(),e.id)==trace(replay.snapshot(),e.id),"unresolved Move replay differs");
+        require(base?(e.type=="HTNK" && e.cell.x==114 && e.cell.y==67):(e.type=="YTNK" && e.cell.x==113 && e.cell.y==115),"real unknown-bridge fixture changed");
         if (base) {
             const auto& routed=initial.entities.at(60);
-            require(routed.id==61 && routed.type=="HTNK" && routed.cell.x==117 && routed.cell.y==67 && routed.facing==128,"real route fixture changed");
-            struct RealRoute { std::vector<unsigned> path; std::vector<DrivePoint> points; };
-            const RealRoute route_vectors[]={
-#include "real_route_golden.inc"
-            };
-            for (const auto& golden:route_vectors) {
-                Simulation route_case(rules,map,9,a.terrain()),route_replay(rules,map,9,a.terrain());
-                route_case.load_ground_assets(executable,art); route_replay.load_ground_assets(executable,art);
-                Command route; route.op=Op::Move; route.entity=routed.id; route.path_directions=golden.path;
-                route.destination=routed.cell;
-                for (auto direction:golden.path) { route.destination.x+=directions[direction][0]; route.destination.y+=directions[direction][1]; }
-                require(route_case.issue(route).error==Error::None && route_replay.issue(route).error==Error::None,"real route did not queue");
-                route_case.tick(); route_replay.tick();
-                require(route_case.snapshot().results.at(0).error==Error::None,"real route rejected");
-                require(trace(route_case.snapshot(),routed.id)==trace(route_replay.snapshot(),routed.id),"real route dispatch replay differs");
-                for (std::size_t step=0;step<golden.points.size();++step) {
-                    route_case.tick(); route_replay.tick();
-                    const auto actual=route_case.snapshot().entities.at(routed.id-1);
-                    const auto expected=golden.points[step];
-                    if (golden.path[0]==golden.path[1]) require(actual.turret_facing==routed.turret_facing,"straight route changed the separate turret pose");
-                    else require(!actual.turret_facing,"turn invented a turret pose from the hull facing");
-                    require(actual.position->x==routed.position->x+expected.x && actual.position->y==routed.position->y+expected.y && actual.position->z==routed.position->z && actual.facing==expected.facing,"real route position or facing differs from original x86");
-                    require(actual.moving==(step+1<golden.points.size()),"real route duration differs from original x86");
-                    require(trace(route_case.snapshot(),routed.id)==trace(route_replay.snapshot(),routed.id),"real route replay differs");
-                }
-                const auto final_route=route_case.snapshot().entities.at(routed.id-1);
-                require(final_route.cell.x==route.destination.x && final_route.cell.y==route.destination.y && final_route.mission==expected_mission && final_route.hp==routed.hp,"real route completion state differs");
-                std::cout<<"real base route passed: entity 61 path="<<golden.path[0]<<","<<golden.path[1]<<" ticks="<<golden.points.size()<<"\n";
+            require(routed.id==61 && routed.type=="HTNK" && routed.cell.x==117 && routed.cell.y==67,"real route fixture changed");
+            for (const auto& path:{std::vector<unsigned>{4,4},std::vector<unsigned>{4,3},std::vector<unsigned>{4,2}}) {
+                Simulation route_case(rules,map,9,terrain,&theater); route_case.load_ground_assets(executable,art);
+                Command route; route.op=Op::Move; route.entity=routed.id; route.path_directions=path; route.destination=routed.cell;
+                for (auto direction:path) { route.destination.x+=directions[direction][0]; route.destination.y+=directions[direction][1]; }
+                require(route_case.issue(route).error==Error::None,"unresolved route did not queue"); route_case.tick();
+                const auto status=route_case.snapshot().results.at(0);
+                require(status.error==Error::Unsupported && status.detail=="Move swept-cell bridge state is unresolved","route accepted unknown bridge state");
+                const auto unchanged=route_case.snapshot().entities.at(routed.id-1);
+                require(!unchanged.moving && unchanged.position->x==routed.position->x && unchanged.position->y==routed.position->y && unchanged.facing==routed.facing && unchanged.mission==routed.mission && unchanged.turret_facing==routed.turret_facing,"unresolved route changed entity state");
             }
-            for (const auto& path:{std::vector<unsigned>{4,5},std::vector<unsigned>{4,8},std::vector<unsigned>{4,3,2}}) {
-                Simulation rejected_case(rules,map,9,a.terrain()); rejected_case.load_ground_assets(executable,art);
-                Command rejected_route; rejected_route.op=Op::Move; rejected_route.entity=routed.id; rejected_route.path_directions=path;
-                rejected_route.destination=path==std::vector<unsigned>{4,5}?ra2map::Cell{116,69}:ra2map::Cell{118,69};
-                require(rejected_case.issue(rejected_route).error==Error::None,"rejected route did not queue"); rejected_case.tick();
-                require(rejected_case.snapshot().results.at(0).error==Error::Unsupported,"invalid or unrecovered route was accepted");
-                if (path==std::vector<unsigned>{4,5}) require(rejected_case.snapshot().results.at(0).detail.find("resolved clear or road")!=std::string::npos,"real curve terrain guard was not reached");
-                const auto unchanged=rejected_case.snapshot().entities.at(routed.id-1);
-                require(!unchanged.moving && unchanged.position->x==routed.position->x && unchanged.position->y==routed.position->y && unchanged.facing==routed.facing && unchanged.mission==routed.mission && unchanged.turret_facing==routed.turret_facing,"rejected route changed entity state");
-            }
-            bool moved_on_clear=false;
-            for (const auto& candidate:initial.entities) {
-                if (candidate.kind!=Kind::Unit || candidate.type!="HTNK" || candidate.house!=e.house || !candidate.position || candidate.facing<0 || candidate.facing>=256 || candidate.facing%64) continue;
-                const unsigned facing=static_cast<unsigned>(candidate.facing)/32;
-                const ra2map::Cell target{static_cast<std::uint16_t>(candidate.cell.x+directions[facing][0]),static_cast<std::uint16_t>(candidate.cell.y+directions[facing][1])};
-                bool source_clear=false,target_clear=false;
-                for (const auto& cell:a.terrain()) {
-                    const bool supported=cell.land_type==0 && cell.ramp_index==0 && cell.bridge==false && cell.overlay_type_index==-1 && cell.tile_replacement_resolved;
-                    if (cell.cell.x==candidate.cell.x && cell.cell.y==candidate.cell.y) source_clear=supported;
-                    if (cell.cell.x==target.x && cell.cell.y==target.y) target_clear=supported;
-                }
-                if (!source_clear || !target_clear) continue;
-                require(floor_changes==0,"real base clear fixture needs first-pass placement floors");
-                Simulation clear_case(rules,map,9,a.terrain()),clear_replay(rules,map,9,a.terrain());
-                clear_case.load_ground_assets(executable,art); clear_replay.load_ground_assets(executable,art);
-                Command next; next.op=Op::Move; next.entity=candidate.id; next.destination=target;
-                require(clear_case.issue(next).error==Error::None && clear_replay.issue(next).error==Error::None,"base clear command did not queue");
-                clear_case.tick(); clear_replay.tick();
-                const auto status=clear_case.snapshot().results.at(0);
-                if (status.error!=Error::None) { std::cout<<"clear candidate "<<candidate.id<<" rejected: "<<status.detail<<"\n"; continue; }
-                for (unsigned step=0;step<12;++step) {
-                    clear_case.tick(); clear_replay.tick();
-                    require(trace(clear_case.snapshot(),candidate.id)==trace(clear_replay.snapshot(),candidate.id),"base clear movement replay differs");
-                    const auto actual=clear_case.snapshot().entities.at(candidate.id-1);
-                    require(actual.position->x==candidate.position->x+directions[facing][0]*original_y[step] && actual.position->y==candidate.position->y+directions[facing][1]*original_y[step] && actual.position->z==candidate.position->z,"base clear movement differs from original x86 positions");
-                    require(actual.moving==(step<11),"base clear movement duration differs");
-                }
-                moved_on_clear=true;
-                std::cout<<"real base clear Move passed: entity "<<candidate.id<<" "<<candidate.cell.x<<","<<candidate.cell.y<<" -> "<<target.x<<","<<target.y<<"\n";
-                break;
-            }
-            require(moved_on_clear,"real base map has no completed supported clear-cell Move");
         }
-        const auto last_completed=first.snapshot().entities.at(e.id-1);
-        Command invalid=move; invalid.frame=first.snapshot().frame; invalid.destination.y-=2;
-        require(first.issue(invalid).error==Error::None,"unsupported path command did not queue for validation");
-        first.tick();
-        require(first.snapshot().results.at(0).error==Error::Unsupported,"unrecovered path command was accepted");
-        const auto rejected=first.snapshot().entities.at(e.id-1);
-        require(rejected.position->x==last_completed.position->x && rejected.position->y==last_completed.position->y && !rejected.moving,"failed Move changed position");
-        std::cout<<"real map Move passed: "<<e.id<<" "<<e.type<<" "<<e.cell.x<<","<<e.cell.y<<" -> "<<move.destination.x<<","<<move.destination.y<<" ticks="<<ticks<<"\n";
+        std::cout<<map_source<<" Move rejects unknown bridge flags; actor state and replay match\n";
         return 0;
     }
-    throw std::runtime_error("no real map vehicle completed a supported Move");
+    throw std::runtime_error("real map bridge-state fixture is missing");
 } catch(const std::exception& error) { std::cerr<<error.what()<<"\n"; return 1; }

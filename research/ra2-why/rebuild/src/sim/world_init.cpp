@@ -31,7 +31,7 @@ void initialize_original_tile_pass(TerrainCells& cells,const TheaterInputs& thea
     std::map<std::uint32_t,TerrainCell*> by_cell;
     for (auto& cell:cells) {
         if (!by_cell.emplace(key(cell.cell.x,cell.cell.y),&cell).second) throw std::invalid_argument("duplicate original terrain cell");
-        if (first_pass) { cell.ramp_index=0; cell.land_type.reset(); cell.bridge.reset(); cell.tile_replacement_resolved=false; }
+        if (first_pass) { cell.ramp_index=0; cell.land_type.reset(); cell.tile_replacement_resolved=false; }
         if (!cell.resolved_tile_index) {
             if (cell.tile_index==0xffff) cell.resolved_tile_index=0xffff;
             else throw std::invalid_argument("missing live tile index at "+cell_name(cell));
@@ -105,10 +105,8 @@ void initialize_original_tile_pass(TerrainCells& cells,const TheaterInputs& thea
             cell.floor_world_height=original_floor_height(static_cast<std::int8_t>(*cell.height_level),static_cast<std::uint8_t>(*cell.ramp_index),coord.x*256+128,coord.y*256+128);
         else throw std::runtime_error("original ramp plane is outside 0..20 at "+cell_name(cell));
         cell.tile_replacement_resolved=true;
-        // The supported non-overlay flat clear/road slice keeps the Cell constructor bridge bit clear.
-        // Tunnel links, bridge overlays, animations, and shadow objects are separate unrecovered effects.
-        if (no_overlay && cell.land_type && (*cell.land_type==0 || *cell.land_type==1) && *cell.ramp_index==0) cell.bridge=false;
-        else cell.bridge.reset();
+        // Cell setup preserves bit 100. Bridge setters can change neighboring cells independently of their overlays.
+        // Keep a supplied value, including unknown, until the separate bridge phase resolves it.
     }
 }
 }

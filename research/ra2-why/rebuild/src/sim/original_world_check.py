@@ -52,6 +52,7 @@ expected_hashes={"ramps":(0x51b86d71,0x3ed322b2),"mixed":(0x3f6d0fc3,0x22342bbc)
 for name,indexes,subtiles,levels in fixtures:
     for n,(x,y) in enumerate(coords):
         c=CELL+n*0x200; cpu.mem_write(c,b'\0'*0x200)
+        word(c+0x140,0x100 if n%2 else 0)
         word(c+0x24,x|(y<<16)); word(c+0x38,indexes[n]); word(c+0x44,-1)
         cpu.mem_write(c+0x116,b'\xff\xff'); cpu.mem_write(c+0x11a,bytes([subtiles[n],levels[n],0]))
     for phase in range(2):
@@ -63,6 +64,7 @@ for name,indexes,subtiles,levels in fixtures:
         h=2166136261
         for n in range(10):
             c=CELL+n*0x200
+            assert bool(read(c+0x140)&0x100)==bool(n%2),'original tile pass changed bridge bit'
             values=(read(c+0x38),cpu.mem_read(c+0x11c,1)[0],read(c+0xec),cpu.mem_read(c+0x11a,1)[0])
             if '--trace' in sys.argv: print(name,phase+1,n,*values)
             for v in values: h=((h^v)*16777619)&0xffffffff

@@ -48,16 +48,20 @@ int main() try {
         for (unsigned i=0;i<10;++i) {
             TerrainCell cell; cell.cell={static_cast<std::uint16_t>(coords[i][0]),static_cast<std::uint16_t>(coords[i][1])};
             cell.tile_index=indexes[fixture][i]; cell.resolved_tile_index=cell.tile_index;
+            cell.bridge=i%3==0?std::optional<bool>{}:std::optional<bool>{i%3==2};
             cell.subtile=subtiles[fixture][i]; cell.height_level=heights[fixture][i]; cell.overlay_type_index=-1;
             cells.push_back(cell);
         }
+        std::vector<std::optional<bool>> bridges; for (const auto& cell:cells) bridges.push_back(cell.bridge);
         initialize_original_tile_pass(cells,theater,3,2,2,true);
+        for (unsigned i=0;i<cells.size();++i) require(cells[i].bridge==bridges[i],"first tile pass changed explicit bridge state");
         if (digest(cells)!=expected[fixture][0]) std::cerr<<"fixture "<<fixture<<" phase 1 hash "<<std::hex<<digest(cells)<<std::dec<<"\n";
         if (digest(cells)!=expected[fixture][0]) for (unsigned i=0;i<cells.size();++i) std::cerr<<i<<" "<<*cells[i].resolved_tile_index<<" "<<*cells[i].ramp_index<<" "<<*cells[i].land_type<<" "<<int(cells[i].subtile)<<"\n";
         require(digest(cells)==expected[fixture][0],"original first tile pass differs");
         initialize_original_tile_pass(cells,theater,3,2,2,false);
+        for (unsigned i=0;i<cells.size();++i) require(cells[i].bridge==bridges[i],"second tile pass changed explicit bridge state");
         if (digest(cells)!=expected[fixture][1]) std::cerr<<"fixture "<<fixture<<" phase 2 hash "<<std::hex<<digest(cells)<<std::dec<<"\n";
         require(digest(cells)==expected[fixture][1],"original second tile pass differs");
     }
-    std::cout<<"5 original map orders and 6 ordered tile-pass snapshots match\n";
+    std::cout<<"5 original map orders and 6 ordered tile-pass snapshots and 60 bridge-state preservation checks match\n";
 } catch(const std::exception& error) { std::cerr<<error.what()<<"\n"; return 1; }

@@ -213,7 +213,12 @@ int main(int argc,char** argv) try {
         cliff_cells.push_back(cell);
     }
     auto clear_cells=cliff_cells; resolve_overlay_free_terrain(clear_cells,2);
-    check(clear_cells[0].land_type==0 && clear_cells[0].bridge==false,"original clear-cell initialization");
+    check(clear_cells[0].land_type==0 && !clear_cells[0].bridge.has_value(),"clear land does not resolve the bridge flag");
+    for (const auto bridge:std::array<std::optional<bool>,3>{std::nullopt,false,true}) {
+        auto preserved=cliff_cells; for (auto& cell:preserved) cell.bridge=bridge;
+        resolve_overlay_free_terrain(preserved,2);
+        check(preserved[0].bridge==bridge,"land resolution preserves explicit bridge state");
+    }
     cliff_cells[1].height_level=4; resolve_overlay_free_terrain(cliff_cells,2);
     check(cliff_cells[0].land_type==3,"original cliff-back land conversion");
     auto unresolved=TerrainCells{clear_cells[0]}; unresolved[0].land_type.reset();

@@ -99,6 +99,7 @@ Result Simulation::start_move(const Command& c) {
         const auto found=terrain_index_.find(key(crossed));
         if (found==terrain_index_.end()) return unsupported("Move swept-cell terrain is missing");
         const auto& cell=terrain_[found->second];
+        if (!cell.bridge.has_value()) return unsupported("Move swept-cell bridge state is unresolved");
         if (!cell.land_type || (*cell.land_type!=0 && *cell.land_type!=1) || !cell.ramp_index || *cell.ramp_index || !cell.bridge || *cell.bridge || !cell.overlay_type_index || *cell.overlay_type_index!=-1 || !cell.floor_world_height)
             return unsupported("Move currently supports resolved clear or road flat cells without overlays or bridges");
         if (*cell.land_type==0 && !cell.tile_replacement_resolved)

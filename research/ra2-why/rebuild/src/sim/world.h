@@ -19,7 +19,7 @@ struct TerrainCell {
     std::optional<std::int32_t> height_level;
     std::optional<std::int32_t> ramp_index;
     std::optional<std::int32_t> floor_world_height;
-    std::optional<bool> bridge;
+    std::optional<bool> bridge; // Explicit Cell +140 bit 100. Terrain and overlay absence do not derive this flag.
     std::optional<std::int32_t> overlay_type_index; // -1 means no overlay.
 };
 using TerrainCells=std::vector<TerrainCell>;
