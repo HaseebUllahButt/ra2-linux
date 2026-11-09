@@ -140,3 +140,37 @@ vectors, 512 speed limits, 512 pitch vectors, 515 Lobber branches, 256 connected
 launches, 1,024 arc proposals, 256 fire events, 96 impact checks, 1,024 damage recipients, 12 impact gates and 2,048 first terrain candidates. The
 connected launch uses a resolved branch stub. Terrain trace and impact height
 are resolved stubs.
+
+The live-world adapters are in `sim/damage_runtime.h`. The ground collision
+adapter follows the session snapshot's Cell +E4 head and shared Object +30
+links. Its resolver supplies original collision flags, virtual positions and
+alliance. Missing links, cells, or selected-object state block the result. The
+original comparison covers 2,048 object selections and collisions. It does not
+claim a complete projectile update.
+
+`base_small_ground_area_candidates()` collects Unit recipients in the original
+cell and link order for CellSpread up to 0.5. It preserves repeated IDs and
+excludes the source. It stops on buildings, other object kinds, overlays,
+bridges, airborne collection, special groups and unknown state. The original
+comparison covers 600 area collections. It does not run damage callbacks or
+other detonation effects. `base_advance_flat_projectile()` retains projectile
+state across the existing guarded Cannon ticks. It stops at impact until the
+original impact and removal callbacks are recovered. It preserves state on an
+unknown tick. A replay check covers 32 launches and 256 original tick snapshots.
+
+`base_fire_eligibility_prefix()` follows the first 006C9260 checks and returns
+original rejection codes. Continue does not permit firing: later eligibility,
+range, facing and callback paths still need the original checks. Its comparison
+covers 5,000 original paths. `base_fire_timer_ready()` is the separate original
+Techno +244/+24C timer check, with 4,096 comparisons. The one-shot Unit reload
+calculation uses weapon ROF, the House multiplier, veteran state and rules
+multiplier. It advances the shared RNG with the original inclusive 0..2 draw.
+The comparison covers 2,000 delays and the complete RNG table and indexes.
+Call it only after the original shot and burst decisions succeed.
+
+`base_techno_damage_prefix()` implements the original Techno damage multiplier,
+minimum damage, same-type immunity, invulnerability, virtual immunity and
+warhead immunity before Object damage. Type +5D0 side effects still block that
+path. The original comparison covers 5,000 prefix cases. Foot and Unit derived
+effects, Object callbacks, trigger execution and death/removal are not complete.
+These APIs do not enable live Attack or replace the derived damage handlers.
