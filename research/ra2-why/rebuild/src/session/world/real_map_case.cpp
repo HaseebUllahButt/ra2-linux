@@ -49,10 +49,11 @@ int main(int argc, char** argv) {
     const auto cells=original_test_cells(argv[1],"MP02T2.MAP",true);
     const auto cell=std::find_if(cells.begin(),cells.end(),[](const auto& item){return item.x==135 && item.y==80;});
     assert(cell!=cells.end() && cell->raw==13 && cell->ramp==0 && cell->height==4 && cell->overlay==-1);
+    assert(parsed.terrain().size()==206 && parsed.structures().size()==25 && parsed.units().size()==5);
     const auto& overlay=parsed.packed_terrain().overlay;
     if (!overlay.empty()) {
         assert(overlay.size()==512u*512u);
-        for (int y=78;y<=82;++y) for (int x=133;x<=137;++x)
+        for (int y=72;y<=88;++y) for (int x=127;x<=143;++x)
             assert(overlay[std::size_t(y)*512+std::size_t(x)]==255);
     }
     // 006E4D60/006E5630 use a one-cell footprint for these original types.
@@ -60,7 +61,7 @@ int main(int argc, char** argv) {
     for (const auto& item:parsed.terrain()) {
         assert(map.key_count(item.type)==0 && rules.read_string(item.type,"Image").empty());
         assert(art.read_string(item.type,"Foundation")=="1x1");
-        assert(std::abs(int(item.cell.x)-135)>2 || std::abs(int(item.cell.y)-80)>2);
+        assert(std::abs(int(item.cell.x)-135)>17 || std::abs(int(item.cell.y)-80)>17);
     }
     // Base 00458940 supplies the original maximum bounds for these foundations.
     const std::map<std::string,std::pair<int,int>> foundations={
@@ -72,15 +73,16 @@ int main(int argc, char** argv) {
         const auto foundation=foundations.find(art.read_string(image,"Foundation","1x1"));
         assert(foundation!=foundations.end());
         const int dx=135-int(item.cell.x), dy=80-int(item.cell.y);
+        assert(std::abs(dx)>19 || std::abs(dy)>19);
         // One extra row covers Bib; two cells cover nearby Cell counters.
         assert(dx < -2 || dy < -2 || dx > foundation->second.first+1 || dy > foundation->second.second+2);
     }
     assert(parsed.infantry().empty() && parsed.aircraft().empty());
     for (const auto& item:parsed.units())
-        assert(std::abs(int(item.cell.x)-135)>2 || std::abs(int(item.cell.y)-80)>2);
+        assert(std::abs(int(item.cell.x)-135)>41 || std::abs(int(item.cell.y)-80)>41);
     std::cout<<"MP02T2 waypoint, terrain, rules, and Unit registry match the placement fixture\n";
     std::cout<<"No authored Terrain footprint covers MP02T2 waypoint 0\n";
     std::cout<<"No authored Unit, Structure, or Terrain footprint reaches waypoint 0 or its neighbors\n";
-    std::cout<<"No packed overlay appears within two cells of waypoint 0\n";
+    std::cout<<"No packed overlay appears within eight cells of waypoint 0\n";
     std::cout<<"MP02T2 CellTags entries: "<<map.key_count("CellTags")<<'\n';
 }

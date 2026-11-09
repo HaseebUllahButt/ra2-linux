@@ -49,5 +49,5 @@ m.cpu.emu_start(0x5db780,0x5db8ae,count=50000000)
 assert m.cpu.reg_read(UC_X86_REG_EIP)==0x5db8ae and cursor[0]==len(data)
 expected=[(index%512,index//512,value) for index,value in enumerate(data) if value!=255]
 assert len(expected)==407 and records==expected
-assert all(abs(x-135)>2 or abs(y-80)>2 for x,y,value in records)
+assert all(abs(x-135)>8 or abs(y-80)>8 for x,y,value in records)
 print(f'base x86 scans all {len(data)} MP02T2 overlay bytes and admits {len(records)} fixture objects')
