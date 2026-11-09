@@ -20,8 +20,9 @@ struct SceneFrame {
 };
 
 // Native scene integration for stationary SHP actors and flat base tanks.
-// Main images use original object order. Pixel depth, shadows, house colors,
+// Main images use original object order. Pixel depth, shadows,
 // world lighting, damaged states, and attached animations remain separate.
+// House colours apply only to the playable prototype.
 class Scene {
 public:
     Scene(const fs::MixFileSystem& files, rules::IniFile art, rules::IniFile rules,
@@ -32,6 +33,7 @@ public:
                       render::Rectangle viewport);
     // Resolve initial art and fixed floor lookups before the first frame.
     void prepare(const sim::Snapshot& state,const std::vector<std::string>& products={});
+    void set_house_color(const std::string& house,int selected);
     actors::ScreenPoint map_anchor(const sim::Entity& entity) const;
     // The floor Cell nearest to a map pixel, by |dx|+2|dy| between the pixel
     // and the Cell's centre anchor, below 46. Ties pick the lowest packed key
@@ -40,6 +42,8 @@ public:
     // during a match, so the buckets are built once on the first call.
     std::optional<ra2map::Cell> pick_cell(std::int64_t map_x, std::int64_t map_y) const;
 private:
+    friend struct SceneColorTest;
+    void prepare_color(const sim::Snapshot& state,const std::vector<std::string>& products);
     struct PickCell { std::int64_t x, y; std::uint32_t key; ra2map::Cell cell; };
     void prepare_pick() const;
     mutable bool pick_ready_ = false;
@@ -49,7 +53,7 @@ private:
     mutable std::vector<std::vector<PickCell>> pick_buckets_;
     struct Asset {
         actors::ActorArt art;
-        std::map<std::size_t, gfx::RgbaImage> frames;
+        std::map<std::pair<std::size_t,int>, gfx::RgbaImage> frames;
     };
     // One map terrain object. Its position, sort key and art never change
     // during a match, so they are resolved once on the first render.
@@ -78,7 +82,10 @@ private:
     char theater_;
     std::map<std::uint32_t, sim::TerrainCell> cells_;
     std::map<std::pair<actors::Kind, std::string>, Asset> assets_;
-    std::map<std::string, VehicleArt> vehicles_;
+    std::map<std::pair<std::string,int>, VehicleArt> vehicles_;
+    std::map<std::string,int> house_colors_;
+    std::map<int,gfx::Palette> house_palettes_;
+    int active_color_=-1;
     std::map<std::string, actors::ShpVehicleFrames> shp_layouts_;
     std::vector<ra2map::TerrainObject> terrain_objects_;
     bool terrain_ready_ = false;

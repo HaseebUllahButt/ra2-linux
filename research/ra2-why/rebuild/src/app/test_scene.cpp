@@ -1,8 +1,15 @@
 #include "scene.h"
+#include "house_color.h"
 #include "terrain_inputs.h"
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
+
+namespace ra2::app {
+struct SceneColorTest {
+    static std::size_t vehicles(const Scene& scene) { return scene.vehicles_.size(); }
+};
+}
 
 namespace {
 void require(bool condition, const char* message) {
@@ -48,6 +55,24 @@ int main(int argc, char** argv) {
             const auto cells = app::terrain_inputs(packed, terrain_art);
             const auto rules = read_ini(files, expansion ? "RULESMD.INI" : "RULES.INI");
             const auto art = read_ini(files, expansion ? "ARTMD.INI" : "ART.INI");
+            if(!expansion) {
+                const auto red=app::house_color(rules,1), blue=app::house_color(rules,2);
+                require(red.r>red.g && red.r>red.b && blue.b>blue.r,
+                    "Base picker colours lost the original rules order");
+                const auto pal_bytes=files.read_file("UNITTEM.PAL");
+                require(bool(pal_bytes),"Missing unit palette for colour check");
+                const auto source=gfx::Palette::from_bytes(*pal_bytes);
+                const auto ramp=app::house_ramp(rules,2);
+                const auto remapped=source.with_house_ramp(ramp);
+                for(unsigned i=0;i<256;++i) {
+                    const auto expected=i>=16 && i<32?ramp[i-16]:source[i];
+                    require(remapped[i].r==expected.r && remapped[i].g==expected.g &&
+                        remapped[i].b==expected.b && remapped[i].a==expected.a,
+                        "House remap changed an unrelated palette entry");
+                }
+                require(ramp.front().b>ramp.back().b,"House ramp lost shade order");
+            }
+
             const auto theater = app::theater_inputs(terrain_art);
             sim::Simulation simulation(rules, map, 0, cells, &theater);
             const auto live = app::initialized_terrain(packed, simulation.terrain());
@@ -120,6 +145,35 @@ int main(int argc, char** argv) {
                 ++checked;
             }
             require(checked > 100, "Original actor pixel check was empty");
+            if(!expansion) {
+                app::Scene coloured(files,art,rules,geometry,{flat},"TEMPERATE",{},true);
+                state.entities[0].type="GAPOWR";
+                state.entities[0].house="Player";
+                coloured.set_house_color("Player",2);
+                coloured.set_house_color("Player",1);
+                coloured.prepare(state,{"MTNK"});
+                const auto prepared_vehicles=app::SceneColorTest::vehicles(coloured);
+                const auto red=coloured.render(empty,state,view);
+                coloured.set_house_color("Player",2);
+                const auto blue=coloured.render(empty,state,view);
+                require(red.gaps.empty() && blue.gaps.empty() && red.drawn==1 && blue.drawn==1 &&
+                    red.image.rgba!=blue.image.rgba,"Building house colours did not change pixels");
+                coloured.set_house_color("Player",1);
+                require(coloured.render(empty,state,view).image.rgba==red.image.rgba,
+                    "Switching house colours reused the wrong cached frame");
+                state.entities[0].type="MTNK"; state.entities[0].kind=sim::Kind::Unit;
+                state.entities[0].turret_facing=0;
+                const auto tank_position=actors::building_draw_position(flat.cell,0);
+                state.entities[0].position=sim::Coord{int(tank_position.x),int(tank_position.y),0};
+                const auto red_tank=coloured.render(empty,state,view);
+                coloured.set_house_color("Player",2);
+                const auto blue_tank=coloured.render(empty,state,view);
+                require(red_tank.gaps.empty() && blue_tank.gaps.empty() &&
+                    red_tank.image.rgba!=blue_tank.image.rgba,"Tank house colours did not change pixels");
+                require(app::SceneColorTest::vehicles(coloured)==prepared_vehicles,
+                    "First coloured tank render loaded an unwarmed vehicle variant");
+                state.entities[0]=building;
+            }
             state.entities[0].dead = true;
             require(fixture.render(empty, state, view).drawn == 0, "Dead actor remained visible");
             state.entities[0].dead = false;

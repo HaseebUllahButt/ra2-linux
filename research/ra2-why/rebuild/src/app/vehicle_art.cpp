@@ -43,6 +43,13 @@ VehicleArt VehicleArt::load(const fs::MixFileSystem& files, const rules::IniFile
     return result;
 }
 
+void VehicleArt::set_house_ramp(const std::array<gfx::Rgba,16>& ramp) {
+    auto colors=lighting_.palette;
+    for(unsigned i=0;i<16;++i) colors[16+i]=ramp[i];
+    lighting_=voxel::team_colors(lighting_,colors);
+    images_.clear(); hull_layers_.clear(); upper_layers_.clear();
+}
+
 const VehicleSprite& VehicleArt::draw(std::uint8_t facing) {
     return draw(facing, facing);
 }
