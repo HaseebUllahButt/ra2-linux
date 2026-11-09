@@ -525,6 +525,30 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
         frame>static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
         report.unresolved.push_back("world setup, RNG, or frame is invalid");return report;
     }
+    const auto record=[&](PrototypeCombatEventKind kind,const PrototypeCombatProjectile& shot,
+                          const session::world::Entity& target,int before,int after) {
+        const auto* source=prototype_find(world,shot.source_id);
+        PrototypeCombatEvent event;
+        event.kind=kind;event.frame=frame;event.fired_frame=shot.fired_frame;
+        event.source_id=shot.source_id;event.target_id=target.id;
+        if (source) {
+            event.source_house=source->house_id;event.source_type=source->type;
+            event.source_position=source->position.value_or(Coord{});
+        }
+        event.target_house=target.house_id;event.target_type=target.type;
+        event.target_position=target.position.value_or(Coord{});
+        event.weapon=shot.weapon;event.warhead=shot.warhead;event.raw_damage=shot.damage;
+        event.hp_before=before;event.hp_after=after;
+        report.events.push_back(event);
+        // Always keep attribution in the captured match log, including off-screen deaths.
+        std::fprintf(stderr,"combat event=%s frame=%llu fired_frame=%llu source=%u type=%s house=%u source_pos=%d,%d,%d weapon=%s warhead=%s target=%u target_type=%s target_house=%u target_pos=%d,%d,%d raw=%d hp_before=%d hp_after=%d\n",
+            kind==PrototypeCombatEventKind::Shot?"shot":kind==PrototypeCombatEventKind::Death?"death":"damage",
+            static_cast<unsigned long long>(frame),static_cast<unsigned long long>(shot.fired_frame),
+            event.source_id,event.source_type.c_str(),event.source_house,
+            event.source_position.x,event.source_position.y,event.source_position.z,
+            event.weapon.c_str(),event.warhead.c_str(),event.target_id,event.target_type.c_str(),event.target_house,
+            event.target_position.x,event.target_position.y,event.target_position.z,shot.damage,before,after);
+    };
     // TODO-ORIGINAL: The prototype advances saved bullets before attack orders.
     // Recover global object update order before treating this as replay exact.
     auto impact=[&](const PrototypeCombatProjectile& shot,Coord position,bool scatter) {
@@ -555,17 +579,23 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
         for (const auto& candidate:candidates) {
             auto* target=prototype_find(world,candidate.id);
             if (!prototype_alive(target) || candidate.distance>radius) continue;
+            const int before=*target->resolved_hp;
             auto hit=prototype_damage(world,candidate.id,shot.source_id,shot.damage,
                                       candidate.distance,*weapon,base_,map_);
             if (!hit.missing.empty()) report.unresolved.push_back(hit.missing);
+            if (hit.applied) record(PrototypeCombatEventKind::Damage,shot,*target,before,*target->resolved_hp);
+            if (hit.destroyed) record(PrototypeCombatEventKind::Death,shot,*target,before,*target->resolved_hp);
             hit_any|=hit.applied;
             if (hit.destroyed) ++report.destroyed;
         }
         if (!hit_any && prototype_alive(aimed) && prototype_cell(*aimed->position)==prototype_cell(position)) {
             // TODO-ORIGINAL: Permit a direct hit when the flat prototype's
             // impact height misses the original area distance check.
+            const int before=*aimed->resolved_hp;
             auto hit=prototype_damage(world,aimed->id,shot.source_id,shot.damage,0,*weapon,base_,map_);
             if (!hit.missing.empty()) report.unresolved.push_back(hit.missing);
+            if (hit.applied) record(PrototypeCombatEventKind::Damage,shot,*aimed,before,*aimed->resolved_hp);
+            if (hit.destroyed) record(PrototypeCombatEventKind::Death,shot,*aimed,before,*aimed->resolved_hp);
             if (hit.destroyed) ++report.destroyed;
         }
         if (scatter) {
@@ -721,7 +751,7 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             const auto amount=weapons::base_projectile_damage(damage);
             if (!amount || *amount<=0) {report.unresolved.push_back("projectile damage is unresolved");++it;continue;}
             PrototypeCombatProjectile shot;shot.source_id=source->id;shot.target_id=target->id;
-            shot.weapon=weapon->name;shot.warhead=weapon->warhead;shot.damage=*amount;
+            shot.fired_frame=frame;shot.weapon=weapon->name;shot.warhead=weapon->warhead;shot.damage=*amount;
             if (weapon->arcing && source->kind==session::world::Kind::Unit) {
                 const auto dx=static_cast<long long>(target->position->x)-source->position->x;
                 const auto dy=static_cast<long long>(target->position->y)-source->position->y;
@@ -757,10 +787,7 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             const int delay=weapons::base_single_shot_unit_delay(reload,rng);
             source->weapon_timer_start_frame=static_cast<int>(frame);source->weapon_timer_duration=delay;
             world.random=rng.state();++report.fired;
-            if (std::getenv("RA2_COMBAT_TRACE"))
-                std::fprintf(stderr,"combat frame=%llu source=%u type=%s weapon=%s range=%d distance=%d target=%u target_type=%s hp=%d reload=%d\n",
-                    static_cast<unsigned long long>(frame),source->id,source->type.c_str(),weapon->name.c_str(),
-                    weapon->range,d,target->id,target->type.c_str(),target->resolved_hp.value_or(0),delay);
+            record(PrototypeCombatEventKind::Shot,shot,*target,*target->resolved_hp,*target->resolved_hp);
 
             if (weapon->arcing && source->kind==session::world::Kind::Unit) projectiles_.push_back(std::move(shot));
             else {
