@@ -68,8 +68,8 @@ std::uint32_t build(w::Snapshot& world,p::FactorySet& factories,const p::Catalog
     return id;
 }
 
-void place_building(w::Snapshot& world,p::FactorySet& factories,const p::Catalog& catalog,
-                    std::uint32_t house,const std::string& type,std::uint64_t frame,ra2map::Cell base) {
+p::CellXY place_building(w::Snapshot& world,p::FactorySet& factories,const p::Catalog& catalog,
+                         std::uint32_t house,const std::string& type,std::uint64_t frame,ra2map::Cell base) {
     const auto* facts=catalog.find(type);
     require(facts,"missing building rules for "+type);
     const auto& offsets=p::original_foundation_cells(facts->placement.foundation);
@@ -93,7 +93,7 @@ void place_building(w::Snapshot& world,p::FactorySet& factories,const p::Catalog
             }
             if (!clear) continue;
             const auto outcome=proto::place(world,factories,catalog,house,type,origin,frame);
-            if (outcome.status==p::Status::Done) { require_prototype(world); return; }
+            if (outcome.status==p::Status::Done) { require_prototype(world); return origin; }
         }
     throw std::runtime_error("no place for "+type);
 }
@@ -177,8 +177,40 @@ int main(int argc,char** argv) try {
     require((*world.cells.at(std::uint32_t(foot.y)*512+foot.x).ground_occupancy_124&0x20)!=0,
             "infantry exit did not reserve its Cell");
 
-    build(world,factories,catalog,player,"GAREFN",frame,false);
+    const auto pending_refinery=build(world,factories,catalog,player,"GAREFN",frame,false);
+    {
+        auto probe=world;
+        auto probe_factories=factories;
+        const auto origin=place_building(probe,probe_factories,catalog,player,"GAREFN",frame,base);
+        auto sealed=world;
+        auto sealed_factories=factories;
+        for (auto& item:sealed.cells) if (item.second.ground_occupancy_124)
+            *item.second.ground_occupancy_124|=0x20;
+        for (const auto& offset:p::original_foundation_cells(catalog.find("GAREFN")->placement.foundation)) {
+            const auto key=std::uint32_t(origin.y+offset.y)*512+origin.x+offset.x;
+            sealed.cells.at(key).ground_occupancy_124=0;
+        }
+        const auto before=sealed.random;
+        const auto blocked=proto::place(sealed,sealed_factories,catalog,player,"GAREFN",origin,frame);
+        require(blocked.status==p::Status::Rejected && actor(sealed,pending_refinery).lifetime==w::Lifetime::Created &&
+                factory(sealed_factories,pending_refinery) && sealed.random.table==before.table &&
+                sealed.random.first==before.first && sealed.random.second==before.second,
+                "blocked refinery exit changed the world or random state");
+    }
+    const auto before_free_unit=world.random;
+    const auto cash_before_free_unit=*world.houses[0].cash;
     place_building(world,factories,catalog,player,"GAREFN",frame,base);
+    const auto* allied_refinery=catalog.find("GAREFN");
+    require(allied_refinery && !allied_refinery->free_unit.empty(),"refinery has no installed free Unit");
+    const auto allied_miner=find_unit(player,allied_refinery->free_unit);
+    require(actor(world,allied_miner).lifetime==w::Lifetime::Placed && actor(world,allied_miner).active==true &&
+            actor(world,allied_miner).maximum_hp>0 && actor(world,allied_miner).next,
+            "Allied refinery did not place its free miner");
+    sim::Random free_unit_random(before_free_unit);
+    free_unit_random.next();
+    require(world.random.table==free_unit_random.state().table && world.random.first==free_unit_random.first() &&
+            world.random.second==free_unit_random.second() && *world.houses[0].cash==cash_before_free_unit,
+            "free miner changed cash or used a different random stream");
     done(proto::tick(world,factories,catalog,++frame),"refinery power update");
     build(world,factories,catalog,player,"GAWEAP",frame,false);
     place_building(world,factories,catalog,player,"GAWEAP",frame,base);
@@ -200,6 +232,12 @@ int main(int argc,char** argv) try {
             "AI infantry did not leave the barracks");
     build(world,factories,catalog,enemy,"NAREFN",frame,false);
     place_building(world,factories,catalog,enemy,"NAREFN",frame,enemy_base);
+    const auto* soviet_refinery=catalog.find("NAREFN");
+    require(soviet_refinery && !soviet_refinery->free_unit.empty(),"AI refinery has no installed free Unit");
+    const auto soviet_miner=find_unit(enemy,soviet_refinery->free_unit);
+    require(actor(world,soviet_miner).lifetime==w::Lifetime::Placed && actor(world,soviet_miner).active==true &&
+            actor(world,soviet_miner).maximum_hp>0 && actor(world,soviet_miner).next,
+            "AI refinery did not place its free miner");
     done(proto::tick(world,factories,catalog,++frame),"AI refinery power update");
     build(world,factories,catalog,enemy,"NAWEAP",frame,false);
     place_building(world,factories,catalog,enemy,"NAWEAP",frame,enemy_base);

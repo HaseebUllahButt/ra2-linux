@@ -117,6 +117,52 @@ std::optional<ra2map::Cell> exit_cell(const w::Snapshot& world,const Catalog& ca
     return {};
 }
 
+bool place_exit_actor(w::Snapshot& world,w::Entity& item,ra2map::Cell cell) {
+    const auto found=world.cells.find(std::uint32_t(cell.y)*512+cell.x);
+    if (found==world.cells.end() || !found->second.heads || !found->second.ground_occupancy_124 ||
+        !found->second.terrain || !found->second.terrain->floor_world_height) return false;
+    auto& target=found->second;
+    if (target.heads->ground_head || *target.ground_occupancy_124) return false;
+    item.cell=cell; item.layer=w::Layer::Ground; item.lifetime=w::Lifetime::Placed;
+    item.position=sim::Coord{int(cell.x)*256+128,int(cell.y)*256+128,*target.terrain->floor_world_height};
+    item.next=target.heads->ground_head;
+    target.heads->ground_head=item.id;
+    // TODO-ORIGINAL: Infantry uses real subcell bits. Prototype movement
+    // currently reserves bit 20 for both movable kinds.
+    *target.ground_occupancy_124|=0x20;
+    return activate(world,item);
+}
+
+Outcome add_free_unit(w::Snapshot& world,const Catalog& catalog,const w::Entity& building,
+                      const TypeFacts& building_type) {
+    if (building_type.free_unit.empty()) return {Status::Done,{},{},{}};
+    const auto* type=catalog.find(building_type.free_unit);
+    if (!type || type->rtti!=Rtti::UnitType || type->strength<=0)
+        return fail(Status::NeedsInput,"free Unit type is unknown");
+    const auto cell=exit_cell(world,catalog,building);
+    if (!cell) return fail(Status::Rejected,"no clear exit for the free Unit");
+    const auto owner_id=building.house_id;
+    // TODO-ORIGINAL: replace this immediate exit with the refinery's original
+    // free-unit creation, docking, animation, and radio phases.
+    w::Stage stage(world);
+    const auto id=stage.create_unit(owner_id,type->id,type->strength,type->heap_index,false);
+    if (!id) return fail(Status::NeedsInput,"free Unit construction is unresolved");
+    world=stage.snapshot();
+    auto* item=entity(world,*id);
+    auto* owner=house(world,owner_id);
+    if (!item || !owner || !owner->units_owned_5430 || !owner->units_ever_54b0 ||
+        !owner->placed_unit_counts) return fail(Status::NeedsInput,"free Unit House counts are unknown");
+    item->maximum_hp=type->strength;
+    for (auto* counts:{&*owner->units_owned_5430,&*owner->units_ever_54b0,&*owner->placed_unit_counts}) {
+        auto& count=(*counts)[type->heap_index];
+        if (count==std::numeric_limits<std::int32_t>::max())
+            return fail(Status::NeedsInput,"free Unit count is too large");
+        ++count;
+    }
+    if (!place_exit_actor(world,*item,*cell)) return fail(Status::NeedsInput,"free Unit exit is unresolved");
+    return {Status::Done,{},*id,{}};
+}
+
 // The completed FactoryState owns its object until a free exit is found.
 // A failed exit keeps the object and lets the next tick try again.
 Outcome discharge(w::Snapshot& world,FactorySet& factories,const Catalog& catalog) {
@@ -132,15 +178,7 @@ Outcome discharge(w::Snapshot& world,FactorySet& factories,const Catalog& catalo
         if (!building) { result.detail="waiting for a factory exit"; continue; }
         const auto cell=exit_cell(world,catalog,*building);
         if (!cell) { result.detail="waiting for a clear factory exit"; continue; }
-        auto& target=world.cells.at(std::uint32_t(cell->y)*512+cell->x);
-        item->cell=*cell; item->layer=w::Layer::Ground; item->lifetime=w::Lifetime::Placed;
-        item->position=sim::Coord{int(cell->x)*256+128,int(cell->y)*256+128,*target.terrain->floor_world_height};
-        item->next=target.heads->ground_head;
-        target.heads->ground_head=item->id;
-        // TODO-ORIGINAL: Infantry uses real subcell bits. Prototype movement
-        // currently reserves bit 20 for both movable kinds.
-        *target.ground_occupancy_124|=0x20;
-        if (!activate(world,*item)) return fail(Status::NeedsInput,"factory object cannot be activated");
+        if (!place_exit_actor(world,*item,*cell)) return fail(Status::NeedsInput,"factory object cannot be activated");
         if (kind==w::Kind::Unit && item->original_type_index) {
             auto* owner=house(world,item->house_id);
             if (!owner || !owner->placed_unit_counts) return fail(Status::NeedsInput,"placed Unit counts are unknown");
@@ -272,6 +310,10 @@ Outcome place(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,st
         if (result.status==Status::Done && result.entity) {
             auto* building=entity(candidate,*result.entity);
             if (!building || !activate(candidate,*building)) return fail(Status::NeedsInput,"building is incomplete");
+            const auto* building_type=catalog.find(building->type);
+            if (!building_type) return fail(Status::NeedsInput,"building type is missing");
+            const auto free_unit=add_free_unit(candidate,catalog,*building,*building_type);
+            if (free_unit.status!=Status::Done) return free_unit;
         }
         return result;
     });
