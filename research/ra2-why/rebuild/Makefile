@@ -286,6 +286,7 @@ session-world: build/session_world_cell_setup_test build/session_world_snapshot_
 	build/session_world_cell_setup_test
 	build/session_world_map_test ../game
 	build/session_world_target_tile_test ../game
+	build/session_world_target_tile_test ../game --stage
 	build/session_world_cell_occupancy_cases > /dev/null
 	build/session_world_bridge_cases > /dev/null
 
@@ -313,7 +314,7 @@ build/session_world_bridge_cases: build/native/src/session/world/bridge_footprin
 build/session_world_map_test: build/native/src/session/world/real_map_case.o build/native/src/sim/test_inputs.o $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
-build/session_world_target_tile_test: build/native/src/session/world/target_tile_case.o $(SESSION_OBJECTS) build/native/src/sim/test_inputs.o $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
+build/session_world_target_tile_test: build/native/src/session/world/target_tile_case.o $(SESSION_WORLD_OBJECTS) build/native/src/sim/test_inputs.o $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 .PHONY: session-terrain
