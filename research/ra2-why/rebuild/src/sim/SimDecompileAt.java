@@ -6,6 +6,15 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Function;
 public class SimDecompileAt extends GhidraScript {
     public void run() throws Exception {
+        // Optional original __alloca_probe address. Apply only in the transient
+        // read-only project view. Its EAX-sized stack frame defeats auto analysis.
+        if (getScriptArgs().length>1) {
+            Address probeAddress=toAddr(getScriptArgs()[1]);
+            Function probe=getFunctionAt(probeAddress);
+            if (probe==null) { disassemble(probeAddress); probe=createFunction(probeAddress,"sim_stack_probe"); }
+            if (probe==null) throw new IllegalStateException("Cannot recover stack probe at "+probeAddress);
+            probe.setCallFixup("alloca_probe");
+        }
         Address address=toAddr(getScriptArgs()[0]);
         Function function=getFunctionAt(address);
         if (function==null) {

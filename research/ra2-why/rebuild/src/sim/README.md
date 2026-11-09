@@ -1042,3 +1042,10 @@ Both preserve aggregate hash 5D485D4E.
 Compare both original outputs with `test_hierarchy_memory.sh --vectors`.
 The native test checks 768 searches and twenty failed-lower-level cases across both editions.
 Original builder, route, and vector bodies execute with the existing bounded storage and usable-area adapters.
+
+`SimDecompileAt.java` accepts an optional second address for the original stack probe.
+It applies Ghidra's `alloca_probe` fixup only in the transient read-only view.
+Base Foot wrapper 004C3000 calls probe 00783850; expansion 004D3920 calls 007CA650.
+The original instructions allocate 0x1F9C bytes and return with `ret 0xC`.
+The fixup exposes the frame, but some indirect call signatures still need instruction checks.
+Use `-readOnly -noanalysis`; the script must not save changes to either shared project.
