@@ -242,6 +242,10 @@ std::optional<bool> passes_proximity(const session::world::Snapshot&,const Facto
 // Read-only footprint check shared by the placement preview and Unlimbo.
 std::optional<bool> legal_placement(const session::world::Snapshot&,const Catalog&,
     const std::string& type,CellXY);
+// Read-only: the failure that place() returns before its first write, with
+// its status and detail, or nothing when place() would reach that write.
+std::optional<Outcome> place_failure(const session::world::Snapshot&,const FactorySet&,const Catalog&,
+                                     std::uint32_t house_id,const std::string& type,CellXY cell);
 // Event PLACE with a cell: House::Place_Object 004E6950 building path.
 Outcome place(session::world::Snapshot&,FactorySet&,const Catalog&,std::uint32_t house_id,
     const std::string& type,CellXY,std::uint64_t frame);

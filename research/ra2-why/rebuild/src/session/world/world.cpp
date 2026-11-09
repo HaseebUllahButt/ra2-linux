@@ -1,12 +1,12 @@
 #include "world.h"
 #include "sim/floor.h"
 #include "world_hash.h"
+#include "loop/profile.h"
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
 #include <array>
 #include <map>
-#include <thread>
 #include <limits>
 #include <set>
 #include <stdexcept>
@@ -26,12 +26,15 @@ Stage::Stage(Snapshot snapshot) {
         throw std::invalid_argument("invalid base staged world");
     snapshot_=std::move(snapshot);
 }
-std::optional<std::uint32_t> Stage::next_id() const {
+namespace {
+std::optional<std::uint32_t> next_snapshot_id(const Snapshot& snapshot) {
     std::uint32_t largest=0;
-    for (const auto& item:snapshot_.creation_order) if (item.id>largest) largest=item.id;
+    for (const auto& item:snapshot.creation_order) if (item.id>largest) largest=item.id;
     if (largest==std::numeric_limits<std::uint32_t>::max()) return {};
     return largest+1;
 }
+}
+std::optional<std::uint32_t> Stage::next_id() const { return next_snapshot_id(snapshot_); }
 std::optional<std::uint32_t> Stage::create_player_house(std::string name, std::string country,
     std::int32_t credits, std::int32_t selected_color, std::int32_t unit_registry_size,
     std::optional<std::int32_t> original_index) {
@@ -97,16 +100,22 @@ std::optional<std::uint32_t> Stage::create_auxiliary_house(HouseRole role,
 std::optional<std::uint32_t> Stage::create_unit(std::uint32_t house_id, std::string type,
     std::optional<std::int32_t> resolved_hp, std::int32_t original_type_index,
     bool excluded_from_house_tracking) {
-    auto found=snapshot_.houses.end();
-    for (auto it=snapshot_.houses.begin();it!=snapshot_.houses.end();++it)
+    return create_staged_unit(snapshot_,house_id,std::move(type),resolved_hp,original_type_index,
+        excluded_from_house_tracking);
+}
+std::optional<std::uint32_t> create_staged_unit(Snapshot& snapshot, std::uint32_t house_id, std::string type,
+    std::optional<std::int32_t> resolved_hp, std::int32_t original_type_index,
+    bool excluded_from_house_tracking) {
+    auto found=snapshot.houses.end();
+    for (auto it=snapshot.houses.begin();it!=snapshot.houses.end();++it)
         if (it->id==house_id) { found=it; break; }
-    if (snapshot_.pending_cell_setup || found==snapshot_.houses.end() || type.empty() || (resolved_hp && *resolved_hp<=0) ||
+    if (snapshot.pending_cell_setup || found==snapshot.houses.end() || type.empty() || (resolved_hp && *resolved_hp<=0) ||
         original_type_index<0 || original_type_index>=512 || !found->unit_registry_size ||
         original_type_index>=*found->unit_registry_size) return {};
-    const auto id=next_id(); if (!id) return {};
+    const auto id=next_snapshot_id(snapshot); if (!id) return {};
     // Unit 006FA400 calls its Techno parent. At 006C12AA the parent consumes
     // one shared RNG word and stores its low 16 bits at Unit +320.
-    auto random=sim::Random(snapshot_.random);
+    auto random=sim::Random(snapshot.random);
     const auto constructor_random=static_cast<std::uint16_t>(random.next());
     Entity unit;
     unit.id=*id; unit.house_id=house_id; unit.type=std::move(type);
@@ -133,12 +142,12 @@ std::optional<std::uint32_t> Stage::create_unit(std::uint32_t house_id, std::str
         if (dynamic==std::numeric_limits<std::int32_t>::max() || fixed==std::numeric_limits<std::int32_t>::max()) return {};
         ++*updated_house.unit_count; ++dynamic; ++fixed;
     }
-    snapshot_.entities.reserve(snapshot_.entities.size()+1);
-    snapshot_.creation_order.reserve(snapshot_.creation_order.size()+1);
-    snapshot_.entities.push_back(std::move(unit));
-    snapshot_.creation_order.push_back({CreatedKind::Entity,*id});
+    snapshot.entities.reserve(snapshot.entities.size()+1);
+    snapshot.creation_order.reserve(snapshot.creation_order.size()+1);
+    snapshot.entities.push_back(std::move(unit));
+    snapshot.creation_order.push_back({CreatedKind::Entity,*id});
     *found=std::move(updated_house);
-    snapshot_.random=random.state();
+    snapshot.random=random.state();
     return id;
 }
 bool Stage::install_base_cells(PlacementGeometry geometry, std::map<std::uint32_t,CellState> cells,
@@ -428,6 +437,7 @@ void Undo::save_cell(const Snapshot& snapshot, std::uint32_t key) {
     }
 }
 bool validate(const Snapshot& snapshot) {
+    loop::profile::Timer probe(loop::profile::Phase::Validation);
     if (snapshot.edition!=Edition::Base && snapshot.edition!=Edition::Yuri) return false;
     if (snapshot.setup_progress!=SetupProgress::Unknown && snapshot.setup_progress!=SetupProgress::PackedMapRead &&
         snapshot.setup_progress!=SetupProgress::Complete && snapshot.setup_progress!=SetupProgress::OverlayObjectsRead &&
@@ -437,100 +447,138 @@ bool validate(const Snapshot& snapshot) {
     if (snapshot.pending_setup_cell && (!snapshot.pending_cell_setup ||
         *snapshot.pending_setup_cell>=512u*512u || !snapshot.cells.count(*snapshot.pending_setup_cell))) return false;
     try { (void)sim::Random(snapshot.random); } catch (...) { return false; }
-    std::set<std::uint32_t> ids;
-    std::map<std::uint32_t,const House*> houses;
-    std::map<std::uint32_t,const Entity*> entities;
+    // Flat, ID-sorted indexes. Every check below is a pure test; only the
+    // chain pass depends on order, and it keeps ascending Entity ID order.
+    std::vector<std::pair<std::uint32_t,const House*>> houses;
+    std::vector<std::pair<std::uint32_t,const Entity*>> entities;
+    houses.reserve(snapshot.houses.size()); entities.reserve(snapshot.entities.size());
     for (const auto& house:snapshot.houses) {
-        if (!house.id || !ids.insert(house.id).second || house.name.empty() || house.country.empty()) return false;
+        if (!house.id || house.name.empty() || house.country.empty()) return false;
         if (house.role && *house.role!=HouseRole::Player && *house.role!=HouseRole::Neutral && *house.role!=HouseRole::Special) return false;
-        houses.emplace(house.id,&house);
+        houses.emplace_back(house.id,&house);
     }
+    const auto by_id=[](const auto& a,const auto& b){ return a.first<b.first; };
+    std::sort(houses.begin(),houses.end(),by_id);
+    for (std::size_t i=1;i<houses.size();++i) if (houses[i-1].first==houses[i].first) return false;
+    const auto find=[](const auto& index,std::uint32_t id)->std::size_t {
+        const auto it=std::lower_bound(index.begin(),index.end(),id,[](const auto& item,std::uint32_t key){return item.first<key;});
+        return it!=index.end() && it->first==id ? std::size_t(it-index.begin()) : index.size();
+    };
     for (const auto& entity:snapshot.entities) {
-        if (!entity.id || !ids.insert(entity.id).second || entity.type.empty() ||
-            (!houses.count(entity.house_id) && !(entity.kind==Kind::Terrain && !entity.house_id))) return false;
+        if (!entity.id || entity.type.empty() ||
+            (find(houses,entity.house_id)==houses.size() && !(entity.kind==Kind::Terrain && !entity.house_id))) return false;
         if (entity.kind!=Kind::Unit && entity.kind!=Kind::Infantry &&
             entity.kind!=Kind::Aircraft && entity.kind!=Kind::Structure && entity.kind!=Kind::Terrain) return false;
         if (entity.lifetime!=Lifetime::Created && entity.lifetime!=Lifetime::Placed &&
             entity.lifetime!=Lifetime::Destroyed) return false;
         if (entity.lifetime==Lifetime::Placed && (!entity.position || !entity.cell || !entity.layer)) return false;
         if (entity.layer && *entity.layer!=Layer::Ground && *entity.layer!=Layer::Bridge) return false;
-        entities.emplace(entity.id,&entity);
+        if (find(houses,entity.id)!=houses.size()) return false; // An ID names one object only.
+        entities.emplace_back(entity.id,&entity);
     }
-    if (snapshot.creation_order.size()!=ids.size()) return false;
-    std::set<std::uint32_t> ordered;
-    for (const auto& object:snapshot.creation_order) {
-        if (!ordered.insert(object.id).second) return false;
-        if (object.kind==CreatedKind::House) { if (!houses.count(object.id)) return false; }
-        else if (object.kind==CreatedKind::Entity) { if (!entities.count(object.id)) return false; }
-        else return false;
-    }
-    std::set<std::uint32_t> complete;
-    for (const auto& item:entities) {
-        const auto& entity=*item.second;
-        if (entity.next && *entity.next && !entities.count(*entity.next)) return false;
-        std::set<std::uint32_t> chain;
-        auto current=entity.id;
-        while (current && !complete.count(current)) {
-            if (!chain.insert(current).second) return false;
-            const auto it=entities.find(current);
-            if (it==entities.end() || it->second->lifetime!=Lifetime::Placed) {
-                if (current==entity.id && (!entity.next || !*entity.next) && entity.lifetime!=Lifetime::Placed) break;
-                return false;
-            }
-            if (!it->second->next) break;
-            current=*it->second->next;
+    std::sort(entities.begin(),entities.end(),by_id);
+    for (std::size_t i=1;i<entities.size();++i) if (entities[i-1].first==entities[i].first) return false;
+    if (snapshot.creation_order.size()!=houses.size()+entities.size()) return false;
+    {
+        // Each listed ID must name an object of its kind, once.
+        std::vector<std::uint8_t> house_listed(houses.size(),0),entity_listed(entities.size(),0);
+        for (const auto& object:snapshot.creation_order) {
+            if (object.kind==CreatedKind::House) {
+                const auto at=find(houses,object.id);
+                if (at==houses.size() || house_listed[at]) return false;
+                house_listed[at]=1;
+            } else if (object.kind==CreatedKind::Entity) {
+                const auto at=find(entities,object.id);
+                if (at==entities.size() || entity_listed[at]) return false;
+                entity_listed[at]=1;
+            } else return false;
         }
-        complete.insert(chain.begin(),chain.end());
+    }
+    const auto entity_at=[&](std::uint32_t id){ return find(entities,id); };
+    {
+        // complete: the chain from this Entity already passed. walk holds the
+        // index of the start Entity whose chain last visited it, plus one.
+        std::vector<std::uint8_t> complete(entities.size(),0);
+        std::vector<std::size_t> walk(entities.size(),0),chain;
+        for (std::size_t start=0;start<entities.size();++start) {
+            const auto& entity=*entities[start].second;
+            if (entity.next && *entity.next && entity_at(*entity.next)==entities.size()) return false;
+            chain.clear();
+            auto current=entity.id;
+            while (current) {
+                const auto at=entity_at(current);
+                if (at!=entities.size() && complete[at]) break;
+                if (at==entities.size()) {
+                    // A missing ID is never the start Entity, which exists.
+                    return false;
+                }
+                if (walk[at]==start+1) return false;
+                walk[at]=start+1; chain.push_back(at);
+                const auto& item=*entities[at].second;
+                if (item.lifetime!=Lifetime::Placed) {
+                    if (current==entity.id && (!entity.next || !*entity.next) && entity.lifetime!=Lifetime::Placed) break;
+                    return false;
+                }
+                if (!item.next) break;
+                current=*item.next;
+            }
+            for (const auto at:chain) complete[at]=1;
+        }
     }
     // Every check is a pure test, so their order does not change the result.
     // The Cell order check below reads one flag per packed Cell:
     // 1 is allocated, 2 is already listed.
     std::vector<std::uint8_t> allocated;
     if (snapshot.cell_order) allocated.assign(512u*512u,0);
-    // Each Cell check reads only its own Cell and the shared, unchanged
-    // Entity index, and writes only its own allocated flag. Split the Cell
-    // map into key ranges and check them on several threads.
-    const auto check_cells=[&](auto first,auto last) {
-        for (auto it=first;it!=last;++it) {
-            const auto& item=*it;
-            const auto& cell=item.second;
-            if (!allocated.empty() && item.first<512u*512u && cell.allocated && *cell.allocated) allocated[item.first]=1;
-            if (cell.cell_flags_140) {
-                const auto same=[&](const std::optional<bool>& field,std::uint32_t bit) {
-                    return !field || *field==bool(*cell.cell_flags_140 & bit);
-                };
-                if (!same(cell.cell_flag_80,0x80) || !same(cell.cell_flag_100,0x100) || !same(cell.cell_flag_200,0x200) ||
-                    !same(cell.cell_flag_20000,0x20000) || !same(cell.cell_flag_40000,0x40000) ||
-                    (cell.terrain && !same(cell.terrain->bridge,0x100))) return false;
-            }
-            if (cell.terrain && cell.cell_flag_100 && cell.terrain->bridge &&
-                *cell.cell_flag_100!=*cell.terrain->bridge) return false;
-            if (item.first>=512*512) return false;
-            if (item.second.terrain && (item.second.terrain->cell.x>=512 || item.second.terrain->cell.y>=512 ||
-                std::uint32_t(item.second.terrain->cell.y)*512+item.second.terrain->cell.x!=item.first)) return false;
-            if (item.second.heads)
-                for (const auto head:{item.second.heads->ground_head,item.second.heads->bridge_head})
-                    if (head && (!entities.count(head) || entities.at(head)->lifetime!=Lifetime::Placed)) return false;
+    // Each Cell check reads only its own Cell and the shared Entity index,
+    // and writes only its own allocated flag, so any visit order gives the
+    // same result.
+    const auto check_cell=[&](const std::pair<const std::uint32_t,CellState>& item) {
+        const auto& cell=item.second;
+        if (!allocated.empty() && item.first<512u*512u && cell.allocated && *cell.allocated) allocated[item.first]=1;
+        if (cell.cell_flags_140) {
+            const auto same=[&](const std::optional<bool>& field,std::uint32_t bit) {
+                return !field || *field==bool(*cell.cell_flags_140 & bit);
+            };
+            if (!same(cell.cell_flag_80,0x80) || !same(cell.cell_flag_100,0x100) || !same(cell.cell_flag_200,0x200) ||
+                !same(cell.cell_flag_20000,0x20000) || !same(cell.cell_flag_40000,0x40000) ||
+                (cell.terrain && !same(cell.terrain->bridge,0x100))) return false;
         }
+        if (cell.terrain && cell.cell_flag_100 && cell.terrain->bridge &&
+            *cell.cell_flag_100!=*cell.terrain->bridge) return false;
+        if (item.first>=512*512) return false;
+        if (cell.terrain && (cell.terrain->cell.x>=512 || cell.terrain->cell.y>=512 ||
+            std::uint32_t(cell.terrain->cell.y)*512+cell.terrain->cell.x!=item.first)) return false;
+        if (cell.heads)
+            for (const auto head:{cell.heads->ground_head,cell.heads->bridge_head})
+                if (head) {
+                    const auto at=entity_at(head);
+                    if (at==entities.size() || entities[at].second->lifetime!=Lifetime::Placed) return false;
+                }
         return true;
     };
-    constexpr std::size_t parts=4;
-    if (snapshot.cells.size()<4096) {
-        if (!check_cells(snapshot.cells.begin(),snapshot.cells.end())) return false;
-    } else {
-        std::array<std::map<std::uint32_t,CellState>::const_iterator,parts+1> bounds;
-        bounds[0]=snapshot.cells.begin(); bounds[parts]=snapshot.cells.end();
-        const auto low=snapshot.cells.begin()->first,high=snapshot.cells.rbegin()->first;
-        for (std::size_t i=1;i<parts;++i)
-            bounds[i]=snapshot.cells.lower_bound(low+std::uint32_t((std::uint64_t(high-low)*i)/parts));
-        std::array<bool,parts> ok{};
-        std::array<std::thread,parts-1> workers;
-        for (std::size_t i=1;i<parts;++i)
-            workers[i-1]=std::thread([&,i]{ ok[i]=check_cells(bounds[i],bounds[i+1]); });
-        ok[0]=check_cells(bounds[0],bounds[1]);
-        for (auto& worker:workers) worker.join();
-        for (const bool part:ok) if (!part) return false;
+    // The Cell map nodes are usually not in the CPU cache, and a map walk
+    // waits for each node in turn. Ask the CPU to load nodes ahead, from the
+    // node addresses of the previous walk. This hint does not change what
+    // is read: the walk below still follows the map itself. A stale address
+    // only wastes a load; a prefetch never faults.
+    // Addresses stay plain integers; only the prefetch sees a pointer.
+    thread_local std::vector<std::uintptr_t> ahead;
+    constexpr std::size_t distance=48;
+    std::size_t index=0;
+    for (auto it=snapshot.cells.begin();it!=snapshot.cells.end();++it,++index) {
+        if (index+distance<ahead.size()) {
+            const auto node=ahead[index+distance];
+            // The map node header sits before the value; the read fields
+            // sit in its first 160 bytes.
+            for (const std::uintptr_t offset:{std::uintptr_t(0),std::uintptr_t(64),std::uintptr_t(128)})
+                __builtin_prefetch(reinterpret_cast<const void*>(node-32+offset));
+        }
+        const auto here=reinterpret_cast<std::uintptr_t>(&*it);
+        if (index<ahead.size()) ahead[index]=here; else ahead.push_back(here);
+        if (!check_cell(*it)) return false;
     }
+    ahead.resize(index);
     // A listed key at or above 512*512 cannot be an allocated Cell here: the
     // Cell loop above already rejects such a key in the Cell map.
     if (snapshot.cell_order)

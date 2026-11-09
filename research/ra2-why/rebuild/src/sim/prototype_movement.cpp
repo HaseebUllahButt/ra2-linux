@@ -5,6 +5,8 @@
 #include <array>
 #include <cstdlib>
 #include <limits>
+#include <map>
+#include <optional>
 #include <queue>
 #include <set>
 #include <utility>
@@ -35,11 +37,14 @@ std::optional<std::string> unit_error(const Entity* e) {
 }
 // TODO-ORIGINAL: this prototype uses explicit staged Cell occupancy and a
 // conservative ground-only check, not original Unit CanEnterCell decisions.
+std::optional<bool> open_state(const session::world::CellState& cell,std::uint32_t self);
 std::optional<bool> open_cell(const World& w,ra2map::Cell c,std::uint32_t self) {
     if (c.x>=512 || c.y>=512) return false;
     const auto it=w.cells.find(key(c));
     if (it==w.cells.end()) return false; // The prototype setup owns the complete allocation list.
-    const auto& cell=it->second;
+    return open_state(it->second,self);
+}
+std::optional<bool> open_state(const session::world::CellState& cell,std::uint32_t self) {
     if (!cell.allocated || !cell.heads || !cell.ground_occupancy_124 || !cell.cell_flag_100 ||
         !cell.terrain || !cell.terrain->floor_world_height) return {};
     if (!*cell.allocated || *cell.cell_flag_100) return false;
@@ -48,7 +53,80 @@ std::optional<bool> open_cell(const World& w,ra2map::Cell c,std::uint32_t self) 
     return cell.heads->ground_head==0 && *cell.ground_occupancy_124==0;
 }
 struct RouteResult { PrototypeMoveStatus status=PrototypeMoveStatus::Blocked;std::vector<ra2map::Cell> path;std::string detail; };
-RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map::Cell goal) {
+// Work shared by the searches of one route_or_nearby call. The World, the
+// Unit and the start do not change during that call, so each Cell answer
+// of open_cell() stays the same. After one search finds no route, its
+// touched Cells are every Cell reachable from the start; a later goal
+// outside that set gets the same "no route" answer without a new search.
+struct SearchMemo {
+    // 0 unknown, 1 open, 2 closed, 3 unresolved.
+    std::vector<std::uint8_t> open=std::vector<std::uint8_t>(512*512,0);
+    std::vector<std::uint8_t> reachable=std::vector<std::uint8_t>(512*512,0);
+    std::vector<std::uint32_t> touched,reached;
+    bool have_reachable=false,all=false;
+    static std::uint8_t code(std::optional<bool> answer) { return !answer?3:*answer?1:2; }
+    std::optional<bool> cell(const World& w,ra2map::Cell c,std::uint32_t self) {
+        if (c.x>=512 || c.y>=512) return false;
+        auto& value=open[key(c)];
+        if (!value) {
+            // After fill(), a Cell without an answer is not in the map.
+            if (all) return false;
+            // A map search is slow when the map is not in the CPU cache.
+            // Answer the 16 Cells of this row block with one search and a
+            // short ordered walk; a route search reads nearby Cells next.
+            // A Cell missing from the map is closed, as in open_cell().
+            const auto first=key(c)&~15u,last=first+16;
+            auto it=w.cells.lower_bound(first);
+            for (auto k=first;k<last;++k) {
+                std::optional<bool> answer=false;
+                if (it!=w.cells.end() && it->first==k) { answer=open_state(it->second,self); ++it; }
+                if (!open[k]) { open[k]=code(answer); touched.push_back(k); }
+            }
+            // A large search reads every Cell once instead.
+            if (touched.size()>=8192) fill(w,self);
+        }
+        if (value==3) return {};
+        return value==1;
+    }
+    // Answer every Cell of the map in one ordered walk. It walks eight key
+    // ranges in step so the CPU can load several map nodes at once.
+    void fill(const World& w,std::uint32_t self) {
+        if (w.cells.size()<lanes) {
+            for (const auto& item:w.cells) set(item,self);
+        } else {
+            using Iterator=std::map<std::uint32_t,session::world::CellState>::const_iterator;
+            std::array<Iterator,lanes+1> bounds;
+            bounds[0]=w.cells.begin(); bounds[lanes]=w.cells.end();
+            const auto low=w.cells.begin()->first,high=w.cells.rbegin()->first;
+            for (std::size_t i=1;i<lanes;++i)
+                bounds[i]=w.cells.lower_bound(low+std::uint32_t((std::uint64_t(high-low)*i)/lanes));
+            std::array<Iterator,lanes> at;
+            for (std::size_t i=0;i<lanes;++i) at[i]=bounds[i];
+            for (bool more=true;more;) {
+                more=false;
+                for (std::size_t i=0;i<lanes;++i) if (at[i]!=bounds[i+1]) { set(*at[i],self); ++at[i]; more=true; }
+            }
+        }
+        all=true;
+    }
+    void set(const std::pair<const std::uint32_t,session::world::CellState>& item,std::uint32_t self) {
+        if (item.first>=512u*512u) return; // open_cell() never looks up such a key.
+        auto& value=open[item.first];
+        if (value) return;
+        value=code(open_state(item.second,self));
+        touched.push_back(item.first);
+    }
+    void clear() {
+        for (const auto i:touched) open[i]=0;
+        for (const auto i:reached) reachable[i]=0;
+        touched.clear();reached.clear();have_reachable=false;all=false;
+    }
+    static constexpr std::size_t lanes=8;
+};
+RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map::Cell goal,SearchMemo* memo=nullptr) {
+    const auto open_cell=[&](const World& w,ra2map::Cell c,std::uint32_t self) {
+        return memo?memo->cell(w,c,self):ra2::sim::open_cell(w,c,self);
+    };
     if (!world.cell_order) return {PrototypeMoveStatus::NeedsInput,{},"prototype Cell allocation order is unresolved"};
     if (goal.x>=512 || goal.y>=512) return {PrototypeMoveStatus::Invalid,{},"goal is outside the Cell array"};
     const auto destination=open_cell(world,goal,id);
@@ -103,12 +181,20 @@ RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map:
             cost[index]=next_cost;previous[index]=node.index;open.push({next_cost+heuristic(nx,ny),next_cost,serial++,index});
         }
     }
+    if (memo && !memo->have_reachable) {
+        for (const auto i:touched) {memo->reachable[i]=1;memo->reached.push_back(i);}
+        memo->have_reachable=true;
+    }
     return {PrototypeMoveStatus::Blocked,{},"no open prototype route"};
 }
 // TODO-ORIGINAL: the playable group order chooses a nearby open Cell when
 // the requested Cell is blocked. Original Foot retargeting remains separate.
 RouteResult route_or_nearby(const World& world,std::uint32_t id,ra2map::Cell start,ra2map::Cell goal) {
-    auto result=route(world,id,start,goal);
+    static thread_local SearchMemo shared;
+    struct Clear { SearchMemo& m; ~Clear() { m.clear(); } } clear{shared};
+    auto* memo=&shared;
+    const auto open_cell=[&](const World& w,ra2map::Cell c,std::uint32_t self) { return memo->cell(w,c,self); };
+    auto result=route(world,id,start,goal,memo);
     if (result.status!=PrototypeMoveStatus::Blocked) return result;
     for (int radius=1;radius<=8;++radius) for (int dy=-radius;dy<=radius;++dy) for (int dx=-radius;dx<=radius;++dx) {
         if (std::max(std::abs(dx),std::abs(dy))!=radius) continue;
@@ -119,7 +205,10 @@ RouteResult route_or_nearby(const World& world,std::uint32_t id,ra2map::Cell sta
         const auto open=open_cell(world,candidate,id);
         if (!open) return {PrototypeMoveStatus::NeedsInput,{},"nearby prototype Cell state is unresolved"};
         if (!*open) continue;
-        auto alternative=route(world,id,start,candidate);
+        // A Cell outside the known reachable set gives the same "no route"
+        // result that a full search would return.
+        if (memo->have_reachable && !memo->reachable[key(candidate)]) continue;
+        auto alternative=route(world,id,start,candidate,memo);
         if (alternative.status==PrototypeMoveStatus::Complete && !alternative.path.empty()) return alternative;
         if (alternative.status==PrototypeMoveStatus::NeedsInput || alternative.status==PrototypeMoveStatus::Invalid) return alternative;
     }
@@ -153,6 +242,7 @@ std::optional<std::string> transfer(World& world,std::uint32_t id,ra2map::Cell f
 }
 }
 PrototypeMoveResult PrototypeMovement::issue(const World& world,std::uint32_t id,ra2map::Cell goal,int speed) {
+    loop::profile::Scope probe(loop::profile::Phase::Movement);
     if (world.setup_progress!=session::world::SetupProgress::PrototypeComplete)
         return fail(PrototypeMoveStatus::NeedsInput,"prototype Battle setup is unfinished");
     const auto* actor=find_unit(world,id);

@@ -3,7 +3,9 @@
 #include "session/world/world.h"
 #include <algorithm>
 #include <limits>
+#include <map>
 #include <set>
+#include <stdexcept>
 #include <utility>
 
 namespace ra2::sim::production::prototype {
@@ -29,8 +31,10 @@ w::House* house(w::Snapshot& world,std::uint32_t id) {
 }
 // TODO-ORIGINAL: the exact checked functions require Complete. This adapter
 // uses a private candidate with prototype inputs, then restores the marker.
+// known_valid: the callback sets it only when it proved that validate()
+// holds for the final world; the full check is then skipped.
 template<class F>
-Outcome transaction(w::Snapshot& world,FactorySet& factories,F&& callback) {
+Outcome transaction(w::Snapshot& world,FactorySet& factories,F&& callback,const bool* known_valid=nullptr) {
     loop::profile::Scope probe(loop::profile::Phase::Production);
     if (!ready(world)) return fail(Status::NeedsInput,"prototype setup is not complete");
     // Edit the live world; the Undo restores it unless the command commits.
@@ -40,7 +44,7 @@ Outcome transaction(w::Snapshot& world,FactorySet& factories,F&& callback) {
     auto result=callback(world,next_factories);
     if (result.status!=Status::Done) return result;
     world.setup_progress=w::SetupProgress::PrototypeComplete;
-    if (!w::validate(world)) return fail(Status::NeedsInput,"prototype result has invalid links");
+    if (!(known_valid && *known_valid) && !w::validate(world)) return fail(Status::NeedsInput,"prototype result has invalid links");
     undo.commit();
     factories=std::move(next_factories);
     return result;
@@ -257,8 +261,33 @@ bool place_exit_actor(w::Snapshot& world,w::Entity& item,ra2map::Cell cell) {
     return activate(world,item);
 }
 
+// validate() held just before Stage::create_unit made this Unit. Since
+// then only these things changed: the random state, one new Entity with
+// one creation-order entry, House counters, the Unit's own fields, and one
+// Cell whose empty ground head now names the Unit. validate() reads none
+// of the other changes. So when the Unit and that Cell pass the checks
+// below, the full validate() of the world returns true.
+bool checked_new_unit(const w::Snapshot& world,std::uint32_t id,ra2map::Cell at) {
+    try { (void)sim::Random(world.random); } catch (...) { return false; }
+    if (!id || world.creation_order.empty() || world.creation_order.back().kind!=w::CreatedKind::Entity ||
+        world.creation_order.back().id!=id) return false;
+    const w::Entity* unit=nullptr;
+    for (const auto& item:world.entities) if (item.id==id) { if (unit) return false; unit=&item; }
+    for (const auto& item:world.houses) if (item.id==id) return false;
+    if (!unit || unit->type.empty() || unit->kind!=w::Kind::Unit || unit->lifetime!=w::Lifetime::Placed ||
+        !unit->position || !unit->cell || unit->layer!=w::Layer::Ground || unit->next!=std::optional<std::uint32_t>(0) ||
+        unit->cell->x!=at.x || unit->cell->y!=at.y) return false;
+    bool owner=false;
+    for (const auto& item:world.houses) if (item.id==unit->house_id) owner=true;
+    if (!owner) return false;
+    const auto cell=world.cells.find(std::uint32_t(at.y)*512+at.x);
+    return cell!=world.cells.end() && cell->second.heads && cell->second.heads->ground_head==id;
+}
+
+// valid: set when validate() is proved to hold for the world on return.
 Outcome add_free_unit(w::Snapshot& world,const Catalog& catalog,const w::Entity& building,
-                      const TypeFacts& building_type) {
+                      const TypeFacts& building_type,bool& valid) {
+    valid=false;
     if (building_type.free_unit.empty()) return {Status::Done,{},{},{}};
     const auto* type=catalog.find(building_type.free_unit);
     if (!type || type->rtti!=Rtti::UnitType || type->strength<=0)
@@ -268,10 +297,11 @@ Outcome add_free_unit(w::Snapshot& world,const Catalog& catalog,const w::Entity&
     const auto owner_id=building.house_id;
     // TODO-ORIGINAL: replace this immediate exit with the refinery's original
     // free-unit creation, docking, animation, and radio phases.
-    w::Stage stage(world);
-    const auto id=stage.create_unit(owner_id,type->id,type->strength,type->heap_index,false);
+    // Create the Unit in place, with the checks of a Stage built from a
+    // copy of this world. The transaction Undo covers the edit.
+    if (world.edition!=w::Edition::Base || !w::validate(world)) throw std::invalid_argument("invalid base staged world");
+    const auto id=w::create_staged_unit(world,owner_id,type->id,type->strength,type->heap_index,false);
     if (!id) return fail(Status::NeedsInput,"free Unit construction is unresolved");
-    world=stage.snapshot();
     auto* item=entity(world,*id);
     auto* owner=house(world,owner_id);
     if (!item || !owner || !owner->units_owned_5430 || !owner->units_ever_54b0 ||
@@ -284,6 +314,7 @@ Outcome add_free_unit(w::Snapshot& world,const Catalog& catalog,const w::Entity&
         ++count;
     }
     if (!place_exit_actor(world,*item,*cell)) return fail(Status::NeedsInput,"free Unit exit is unresolved");
+    valid=checked_new_unit(world,*id,*cell);
     return {Status::Done,{},*id,{}};
 }
 
@@ -366,6 +397,13 @@ Outcome initialize(w::Snapshot& world,FactorySet& factories,const Catalog& catal
         next.buildings.try_emplace(item.id,BuildingState{});
     }
     if (!w::validate(candidate)) return fail(Status::NeedsInput,"prototype links are invalid");
+    {
+        // Rebuild the Cell map in key order. The content is the same; the
+        // nodes now sit in memory in the order that full Cell walks read them.
+        std::map<std::uint32_t,w::CellState> cells;
+        for (auto& item:candidate.cells) cells.emplace_hint(cells.end(),item.first,std::move(item.second));
+        candidate.cells=std::move(cells);
+    }
     world=std::move(candidate);
     factories=std::move(next);
     return {Status::Done,{},{},{}};
@@ -427,6 +465,21 @@ std::optional<bool> passes_proximity(const w::Snapshot& world,const FactorySet& 
 
 Outcome place(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,std::uint32_t house_id,
               const std::string& type,CellXY cell,std::uint64_t frame) {
+    bool known_valid=false;
+    if (ready(world)) {
+        // Find a failure first without the transaction copy. These checks
+        // match the transaction below up to its first write, and that
+        // transaction would roll back such a failure exactly.
+        struct Progress {
+            w::Snapshot& world; w::SetupProgress saved;
+            ~Progress() { world.setup_progress=saved; }
+        } progress{world,world.setup_progress};
+        world.setup_progress=w::SetupProgress::Complete;
+        const auto proximity=ra2::sim::production::passes_proximity(world,factories,catalog,house_id,type,cell);
+        if (!proximity) return fail(Status::NeedsInput,"building proximity is unknown");
+        if (!*proximity) return fail(Status::Rejected,"building is too far from the base");
+        if (auto failure=ra2::sim::production::place_failure(world,factories,catalog,house_id,type,cell)) return *failure;
+    }
     return transaction(world,factories,[&](w::Snapshot& candidate,FactorySet& next) {
         const auto proximity=ra2::sim::production::passes_proximity(candidate,next,catalog,house_id,type,cell);
         if (!proximity) return fail(Status::NeedsInput,"building proximity is unknown");
@@ -437,11 +490,11 @@ Outcome place(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,st
             if (!building || !activate(candidate,*building)) return fail(Status::NeedsInput,"building is incomplete");
             const auto* building_type=catalog.find(building->type);
             if (!building_type) return fail(Status::NeedsInput,"building type is missing");
-            const auto free_unit=add_free_unit(candidate,catalog,*building,*building_type);
+            const auto free_unit=add_free_unit(candidate,catalog,*building,*building_type,known_valid);
             if (free_unit.status!=Status::Done) return free_unit;
         }
         return result;
-    });
+    },&known_valid);
 }
 
 Outcome tick(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,std::uint64_t frame) {
