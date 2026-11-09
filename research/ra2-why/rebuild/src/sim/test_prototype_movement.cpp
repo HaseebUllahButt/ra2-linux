@@ -482,6 +482,93 @@ int main() try {
             require(run.all_arrived && run.frames==c.frames,"tank speed differs from the original drive");
         }
     }
+    {
+        // QA5 freeze: the harvester has its own movement owner. Its tank
+        // asks a soldier on the Cell center (bit 0x20) to step aside, so
+        // the soldier now holds spot 2 in a new Cell. The Battle movement
+        // remembered spot 0 for it. It must read the spot from the Cell,
+        // or every later frame fails with "not linked on ground" and no
+        // Unit moves.
+        rules::IniFile ini;
+        ini.parse("[General]\nCloseEnough=2.25\nBlockagePathDelay=60\n[E2]\nSpeed=4\n"
+                  "[HARV]\nLocomotor={4A582741-9839-11d1-B709-00A024DDAFD1}\nSpeed=4\nROT=5\nCrusher=yes\nStrength=1000\n");
+        auto world=field(30,20);
+        for (int x=6;x<=16;++x) world.cells.at(key(x,9)).cell_flag_100=true,world.cells.at(key(x,11)).cell_flag_100=true;
+        world.cells.at(key(11,11)).cell_flag_100=false;
+        put(world,1,"E2",sw::Kind::Infantry,1,11,10);put(world,2,"HARV",sw::Kind::Unit,1,5,10);
+        PrototypeMovement battle,economy;battle.use_rules(ini);economy.use_rules(ini);
+        // A pending order to its own Cell makes the Battle owner remember
+        // spot 0. The Battle frame runs only after the harvester passes.
+        require(battle.issue(world,1,{11,10},10).status==PrototypeMoveStatus::Complete,"soldier order failed");
+        require(economy.issue(world,2,{20,10},4).status==PrototypeMoveStatus::Complete,"harvester order failed");
+        std::uint32_t frame=1;
+        for (;frame<600 && economy.moving(2);++frame)
+            require(economy.tick(world,frame).status==PrototypeMoveStatus::Complete,"harvester frame failed");
+        require(same_cell(*unit(world,1).cell,{11,11}) && *world.cells.at(key(11,11)).ground_occupancy_124==4u,
+                "harvester did not move the soldier aside to spot 2");
+        // The QA5 freeze: this Battle frame failed for every Unit.
+        const auto pending=battle.tick(world,frame++);
+        if (pending.status!=PrototypeMoveStatus::Complete) std::cerr<<pending.detail<<'\n';
+        require(pending.status==PrototypeMoveStatus::Complete,"moved-aside soldier stopped every Unit");
+        const auto order=battle.issue(world,1,{25,15},10);
+        require(order.status==PrototypeMoveStatus::Complete,"moved-aside soldier refused a new order");
+        const auto before=*unit(world,1).position;
+        for (const auto stop=frame+400;frame<stop && battle.moving(1);++frame) {
+            const auto r=battle.tick(world,frame);
+            if (r.status!=PrototypeMoveStatus::Complete) std::cerr<<r.detail<<'\n';
+            require(r.status==PrototypeMoveStatus::Complete,"moved-aside soldier stopped every Unit");
+        }
+        require(!battle.moving(1) && same_cell(*unit(world,1).cell,{25,15}) && unit(world,1).position->x!=before.x,
+                "moved-aside soldier did not reach its goal");
+        std::cout<<"moved-aside soldier arrived frames="<<frame<<'\n';
+    }
+    {
+        // An incomplete snapshot: a soldier linked in the same Cell has no
+        // position. Reading spots must keep the remembered spots and not
+        // read the missing position.
+        auto world=field(20,12);PrototypeMovement movement;
+        soldier(world,1,1,5,5,2);soldier(world,2,1,5,5,3);
+        world.entities[1].position.reset();
+        const auto order=movement.issue(world,1,{10,5},10);
+        require(order.status==PrototypeMoveStatus::Complete,"soldier beside an incomplete soldier refused an order");
+    }
+    {
+        // QA5: 30 Conscripts packed one per Cell (production puts each on
+        // the Cell center with bit 0x20) beside 4 Rhinos. One far group
+        // order, driven like the Battle loop. Every Unit must leave the
+        // block and no frame may fail.
+        const auto rules=test_rules();
+        auto world=field(70,24);PrototypeMovement movement;movement.use_rules(rules);
+        std::vector<std::pair<std::uint32_t,ra2map::Cell>> orders;std::map<std::uint32_t,int> speeds;
+        std::uint32_t id=900;
+        for (int y=8;y<=12;++y) for (int x=50;x<=55;++x) {
+            put(world,++id,"E1",sw::Kind::Infantry,1,x,y);
+            orders.push_back({id,{static_cast<std::uint16_t>(x-40),static_cast<std::uint16_t>(y)}});speeds[id]=original_rule_speed(4);
+        }
+        for (int y=9;y<=12;++y) {
+            put(world,++id,"MTNK",sw::Kind::Unit,1,57,y);
+            orders.push_back({id,{static_cast<std::uint16_t>(17),static_cast<std::uint16_t>(y)}});speeds[id]=original_rule_speed(7);
+        }
+        std::map<std::uint32_t,ra2map::Cell> pending;
+        for (const auto& [unit_id,goal]:orders) {
+            require(movement.issue(world,unit_id,goal,speeds[unit_id]).status==PrototypeMoveStatus::Complete,"packed group order was rejected");
+            pending[unit_id]=goal;
+        }
+        std::uint32_t frame=1;
+        for (;frame<=3000 && !pending.empty();++frame) {
+            const auto motion=movement.tick(world,frame);
+            if (motion.status!=PrototypeMoveStatus::Complete) std::cerr<<"packed group frame "<<frame<<": "<<motion.detail<<'\n';
+            require(motion.status==PrototypeMoveStatus::Complete,"packed group frame failed");
+            for (const auto b:motion.blocked) movement.cancel(world,b);
+            for (const auto a:motion.arrived) pending.erase(a);
+            for (const auto& [unit_id,goal]:pending)
+                if (frame%15==0 && !movement.moving(unit_id)) movement.issue(world,unit_id,goal,speeds[unit_id]);
+        }
+        int far=0;
+        for (const auto& [unit_id,goal]:orders) if (unit(world,unit_id).cell->x<=30) ++far;
+        std::cout<<"packed group frames="<<frame<<" left="<<pending.size()<<" west="<<far<<'\n';
+        require(far==int(orders.size()),"packed group did not leave its block");
+    }
     original_rules_tests();
     std::cout<<"prototype routed 3 Units around obstacles in "<<frames<<" shared frames; replay and atomic rejection passed\n";
 } catch(const std::exception& e) { std::cerr<<e.what()<<'\n';return 1; }

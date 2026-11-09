@@ -322,6 +322,37 @@ int free_spot(std::uint32_t bits) {
     for (int s=2;s<=4;++s) if (!(bits&(1u<<s))) return s;
     return 0;
 }
+// Read the spot of each soldier in a Cell from the live Cell, and store it
+// in spots. The Cell bits (base 00508410) are the truth; a remembered spot
+// is only a hint. Another movement owner, such as the harvester movement
+// that asks soldiers to step aside, can move a soldier after this owner
+// remembered its spot. Each soldier gets one set bit: first the spot under
+// its position, then the center bit 0x20 for a soldier on the center, then
+// its remembered spot, then any free set bit.
+void read_spots(const World& w,ra2map::Cell at,std::map<std::uint32_t,int>& spots) {
+    const auto found=w.cells.find(key(at));
+    if (found==w.cells.end() || !found->second.heads || !found->second.ground_occupancy_124) return;
+    const auto bits=*found->second.ground_occupancy_124;
+    std::vector<const Entity*> chain;
+    for (auto id=found->second.heads->ground_head;id && chain.size()<64;) {
+        const auto* e=find_unit(w,id);
+        // An incomplete link or position leaves the remembered spots as they are.
+        if (!e || !e->next || !e->position) return;
+        if (e->kind!=session::world::Kind::Infantry) return;
+        chain.push_back(e);id=*e->next;
+    }
+    std::map<std::uint32_t,int> assigned;std::uint32_t used=0;
+    const auto bit=[](int s) { return s?1u<<s:0x20u; };
+    const auto take=[&](const Entity* e,int s) {
+        if (assigned.count(e->id) || !(bits&bit(s)) || (used&bit(s))) return;
+        assigned[e->id]=s;used|=bit(s);
+    };
+    for (const auto* e:chain) if (const int s=spot_of(*e->position)) take(e,s);
+    for (const auto* e:chain) if (e->position->x%256==spot_x[0] && e->position->y%256==spot_y[0]) take(e,0);
+    for (const auto* e:chain) if (const auto hint=spots.find(e->id);hint!=spots.end()) take(e,hint->second);
+    for (const auto* e:chain) for (const int s:{2,3,4,0}) take(e,s);
+    for (const auto& [id,s]:assigned) spots[id]=s;
+}
 // Move one object between Cell chains. A vehicle needs an empty target;
 // Infantry takes a free spot there and returns it in spot.
 std::optional<std::string> transfer(World& world,std::uint32_t id,ra2map::Cell from,ra2map::Cell to,int* spot=nullptr) {
@@ -442,6 +473,7 @@ PrototypeMoveResult PrototypeMovement::issue(const World& world,std::uint32_t id
     if (source==world.cells.end() || !source->second.heads || !source->second.ground_occupancy_124 ||
         !source->second.cell_flag_100) return fail(PrototypeMoveStatus::NeedsInput,"prototype source Cell is unresolved");
     if (!spots_.count(id)) spots_[id]=actor->kind==session::world::Kind::Infantry?spot_of(*actor->position):0;
+    if (actor->kind==session::world::Kind::Infantry) read_spots(world,*actor->cell,spots_);
     if (!on_source(world,*actor,spots_.at(id)))
         return fail(PrototypeMoveStatus::Blocked,"prototype source Unit is not linked on ground");
     const auto self=profile(*actor);
@@ -556,6 +588,7 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
             !source->second.cell_flag_100) return fail(PrototypeMoveStatus::NeedsInput,"prototype source Cell is unresolved");
         const bool walker=actor->kind==session::world::Kind::Infantry;
         if (!spots.count(id)) spots[id]=walker?spot_of(*actor->position):0;
+        if (walker) read_spots(candidate,*actor->cell,spots);
         int& spot=spots[id];
         if (!on_source(candidate,*actor,spot)) return fail(PrototypeMoveStatus::Blocked,"prototype source Unit is not linked on ground");
         const auto self=profile(*actor);
