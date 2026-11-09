@@ -21,7 +21,9 @@ int main() {
     assert(hud.handle_click(r.x+r.width-1,r.y+r.height-1,s).kind==HudActionKind::Build);
     assert(hud.handle_click(r.x+r.width,r.y,s).kind==HudActionKind::None);
     assert(hud.handle_click(916,44,s).kind==HudActionKind::None);
-    assert(hud.handle_click(808,106,s).kind==HudActionKind::None);
+    assert(hud.handle_click(r.x,r.y,s).kind==HudActionKind::None);
+    hud.handle_click(808,44,s);
+    assert(hud.handle_click(808,117,s).kind==HudActionKind::None);
     assert(hud.handle_click(808,560,s).kind==HudActionKind::Deploy);
     assert(hud.handle_click(808,600,s).kind==HudActionKind::None);
     assert(hud.handle_click(803,560,s).kind==HudActionKind::None);
@@ -34,7 +36,7 @@ int main() {
     assert(hud.handle_click(914,768,s).kind==HudActionKind::None);
     assert(BattleHud::build_button_bounds(16).width==0);
     s.choices.resize(17,{"EXTRA","EXTRA",1,true,0});
-    assert(hud.handle_click(808,540,s).kind==HudActionKind::None);
+    assert(hud.handle_click(808,556,s).kind==HudActionKind::None);
     auto blank=frame(), b=blank;hud.draw(b,s);
     assert(same(blank,b,{0,0,804,768}));
     assert(!same(blank,b,{804,0,220,768}));

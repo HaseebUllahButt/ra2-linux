@@ -3,6 +3,9 @@
 // CnC_Red_Alert/CODE/RADAR.CPP (radar coordinate scaling).
 // TODO-ORIGINAL: plain rectangles replace original sidebar/cameo artwork.
 #include "battle_hud.h"
+#include "../fs/mix_bootstrap.h"
+#include "../rules/ini_file.h"
+#include "../gfx/shp_decode.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
@@ -59,6 +62,25 @@ bool inside(int x,int y,Rectangle r) {
     return x>=r.x && y>=r.y && x<r.x+r.width && y<r.y+r.height;
 }
 }
+void BattleHud::load_assets(const fs::MixFileSystem& files, const rules::IniFile& rules,
+                            const rules::IniFile& art, const std::vector<BuildChoice>& choices) {
+    cameos_.clear();
+    auto pal = files.read_file("cameo.pal");
+    if (!pal) return;
+    for (const auto& c : choices) {
+        auto image = rules.read_string(c.type, "Image", c.type);
+        auto name = art.read_string(image, "Cameo", image + "ICON");
+        auto data = files.read_file(name + ".shp");
+        if (!data) continue;
+        try {
+            auto shp = gfx::ShpImage::parse(*data);
+            auto decoded = shp.decode_frame(0, gfx::Palette::from_bytes(*pal));
+            render::Bitmap b;
+            b.width = decoded.width; b.height = decoded.height; b.rgba = std::move(decoded.pixels);
+            cameos_[c.type] = std::move(b);
+        } catch (const std::exception&) { /* TODO-ORIGINAL: fallback for unsupported cameo art. */ }
+    }
+}
 render::Rectangle BattleHud::build_button_bounds(int i) {
     if(i<0 || i>=build_columns*build_rows) return {};
     return {palette_x+i%build_columns*build_button_pitch_x,
@@ -67,9 +89,18 @@ render::Rectangle BattleHud::build_button_bounds(int i) {
 render::Rectangle BattleHud::deploy_bounds() { return {palette_x,deploy_y,deploy_width,deploy_height}; }
 render::Rectangle BattleHud::minimap_bounds() { return {minimap_x,minimap_y,minimap_region_width,minimap_region_height}; }
 HudAction BattleHud::handle_click(int x,int y,const HudState& s) const {
-    for(int i=0;i<static_cast<int>(s.choices.size()) && i<build_columns*build_rows;++i)
-        if(inside(x,y,build_button_bounds(i)) && s.choices[i].enabled)
-            return {HudActionKind::Build,s.choices[i].type,{}};
+    if (y >= 38 && y < 56 && x >= 808 && x < 1018) {
+        active_category_ = static_cast<BuildCategory>((x-808)/42);
+        return {};
+    }
+    int slot=0;
+    for (const auto& c : s.choices) {
+        if (active_category_ != BuildCategory::All && c.category != active_category_) continue;
+        if (slot >= build_columns*build_rows) break;
+        if (inside(x,y,build_button_bounds(slot)) && c.enabled)
+            return {HudActionKind::Build,c.type,{}};
+        ++slot;
+    }
     if(inside(x,y,deploy_bounds())) return {HudActionKind::Deploy,{}, {}};
     auto r=minimap_bounds();
     if(inside(x,y,r) && s.map_width>0 && s.map_height>0)
@@ -87,10 +118,30 @@ void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
     const auto capacity=std::max({1,s.power_output,s.power_drain});
     fill(b,{808,29,static_cast<int>(212LL*std::max(0,s.power_output)/capacity),6},
          s.power_output<s.power_drain?red:green);
-    for(int i=0;i<build_columns*build_rows;++i) {
-        auto r=build_button_bounds(i); border(b,r,edge);
-        if(i>=static_cast<int>(s.choices.size())) continue;
-        const auto& c=s.choices[i]; auto color=c.enabled?ink:edge;
+    const char* tabs[] = {"ALL", "BLD", "INF", "VEH", "AIR"};
+    for (int i=0;i<5;++i) {
+        Rectangle tab{808+i*42,38,40,18};
+        border(b,tab,static_cast<int>(active_category_)==i?gold:edge);
+        text(b,tab.x+3,tab.y+4,tabs[i],ink,34,1);
+    }
+    if (s.choices.empty()) {
+        text(b,816,90,"DEPLOY YOUR",gold,200);
+        text(b,816,106,"MCV FIRST",gold,200);
+    }
+    int i=0;
+    for (const auto& c : s.choices) {
+        if (active_category_ != BuildCategory::All && c.category != active_category_) continue;
+        if (i>=build_columns*build_rows) break;
+        auto r=build_button_bounds(i++); border(b,r,edge);
+        auto image=cameos_.find(c.type);
+        if (image!=cameos_.end() && valid(image->second)) {
+            const auto& src=image->second;
+            for (int y=1;y<r.height-1;++y) for (int x=1;x<r.width-1;++x) {
+                auto p=(static_cast<std::size_t>(y-1)*src.height/(r.height-2)*src.width+(x-1)*src.width/(r.width-2))*4;
+                if (src.rgba[p+3]) pixel(b,r.x+x,r.y+y,{src.rgba[p],src.rgba[p+1],src.rgba[p+2],src.rgba[p+3]});
+            }
+        }
+        auto color=c.enabled?ink:edge;
         text(b,r.x+4,r.y+6,c.name.empty()?c.type:c.name,color,r.width-8);
         text(b,r.x+4,r.y+19,"$"+std::to_string(c.cost),color,r.width-8);
         text(b,r.x+4,r.y+31,c.progress>=1000?"READY":c.progress>0?std::to_string(c.progress/10)+"%":"BUILD",color,r.width-8);

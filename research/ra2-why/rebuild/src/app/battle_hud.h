@@ -10,6 +10,10 @@
 #include "../render/minimap.h"
 #include <string>
 #include <vector>
+#include <unordered_map>
+
+namespace ra2::fs { class MixFileSystem; }
+namespace ra2::rules { class IniFile; }
 
 // The sidebar API needs a plain 2-D point. Render had no point type, so the
 // HUD owns this one.
@@ -20,12 +24,15 @@ struct Point { int x = 0, y = 0; };
 namespace ra2::app {
 
 // One purchasable entry in the build palette.
+enum class BuildCategory { All, Buildings, Infantry, Vehicles, Aircraft };
+
 struct BuildChoice {
     std::string type;     // Rules type name, the Build action payload.
     std::string name;     // Short display label.
     int cost = 0;         // Credits shown on the button.
     bool enabled = false; // False dims the entry and rejects clicks.
     int progress = 0;     // 0..1000 production clock, 1000 means ready.
+    BuildCategory category = BuildCategory::All;
 };
 
 // Everything the sidebar needs for one draw pass.
@@ -66,7 +73,7 @@ public:
     static constexpr int build_button_pitch_x = 108; // 104 button + 4 gap.
     static constexpr int build_button_pitch_y = 62;  // 56 button + 6 gap.
     static constexpr int palette_x = 808;            // First button origin.
-    static constexpr int palette_y = 44;
+    static constexpr int palette_y = 60;
     static constexpr int deploy_width = 212;
     static constexpr int deploy_height = 40;
     static constexpr int deploy_y = 560;
@@ -74,6 +81,10 @@ public:
     static constexpr int minimap_y = 672;
     static constexpr int minimap_region_width = sidebar_width;
     static constexpr int minimap_region_height = 96;
+
+    // Load available original cameo images. Missing files use the fallback art.
+    void load_assets(const fs::MixFileSystem& files, const rules::IniFile& rules,
+                     const rules::IniFile& art, const std::vector<BuildChoice>& choices);
 
     // Draw the whole sidebar over the frame. Clips against the frame.
     void draw(render::Bitmap& frame, const HudState& state) const;
@@ -85,5 +96,8 @@ public:
     static render::Rectangle build_button_bounds(int index);
     static render::Rectangle minimap_bounds();
     static render::Rectangle deploy_bounds();
+private:
+    mutable BuildCategory active_category_ = BuildCategory::All;
+    std::unordered_map<std::string, render::Bitmap> cameos_;
 };
 } // namespace ra2::app
