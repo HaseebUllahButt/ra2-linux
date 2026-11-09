@@ -1009,8 +1009,9 @@ VehicleMatrices vehicle_matrices(const VehiclePose &vehicle) {
   Matrix barrel = base_barrel_transform(base, rotation, vehicle.barrel_tilt);
   return {hull, turret, barrel};
 }
-std::vector<SceneImage> draw_vehicle_parts(const VehiclePose &vehicle,
-                                           const Lighting &lighting) {
+static std::vector<SceneImage> vehicle_layers(const VehiclePose &vehicle,
+                                              const Lighting &lighting,
+                                              bool hull, bool upper) {
   if (!vehicle.hull.model || !vehicle.hull.animation)
     throw std::runtime_error("vehicle hull is missing");
   std::vector<ScenePart> parts;
@@ -1036,16 +1037,20 @@ std::vector<SceneImage> draw_vehicle_parts(const VehiclePose &vehicle,
                      source.frame % source.animation->frames, light});
   };
   auto matrices = vehicle_matrices(vehicle);
-  append(vehicle.hull, matrices.hull);
-  // Base caller 0x43B14A chooses which side of the turret receives the barrel.
-  const unsigned quadrant =
-      (((unsigned(vehicle.turret_facing) >> 13) + 1) >> 1) & 3;
-  if (quadrant == 0 || quadrant == 3) {
-    append(vehicle.barrel, matrices.barrel);
-    append(vehicle.turret, matrices.turret);
-  } else {
-    append(vehicle.turret, matrices.turret);
-    append(vehicle.barrel, matrices.barrel);
+  if (hull)
+    append(vehicle.hull, matrices.hull);
+  if (upper) {
+    // Base caller 0x43B14A chooses which side of the turret receives the
+    // barrel.
+    const unsigned quadrant =
+        (((unsigned(vehicle.turret_facing) >> 13) + 1) >> 1) & 3;
+    if (quadrant == 0 || quadrant == 3) {
+      append(vehicle.barrel, matrices.barrel);
+      append(vehicle.turret, matrices.turret);
+    } else {
+      append(vehicle.turret, matrices.turret);
+      append(vehicle.barrel, matrices.barrel);
+    }
   }
   // The original caller renders each vehicle part into its own surface before
   // compositing it at that part's screen offset.
@@ -1053,6 +1058,87 @@ std::vector<SceneImage> draw_vehicle_parts(const VehiclePose &vehicle,
   for (const auto &part : parts)
     layers.push_back(draw_scene({part}, lighting));
   return layers;
+}
+std::vector<SceneImage> draw_vehicle_parts(const VehiclePose &vehicle,
+                                           const Lighting &lighting) {
+  return vehicle_layers(vehicle, lighting, true, true);
+}
+std::vector<SceneImage> draw_vehicle_hull_layers(const VehiclePose &vehicle,
+                                                 const Lighting &lighting) {
+  return vehicle_layers(vehicle, lighting, true, false);
+}
+std::vector<SceneImage> draw_vehicle_upper_layers(const VehiclePose &vehicle,
+                                                  const Lighting &lighting) {
+  return vehicle_layers(vehicle, lighting, false, true);
+}
+VehicleLayer crop_vehicle_layer(const SceneImage &layer) {
+  const auto &image = layer.image;
+  if (std::size_t(image.width) * image.height != image.pixels.size())
+    throw std::runtime_error("invalid vehicle layer image");
+  unsigned min_x = image.width, min_y = image.height, max_x = 0, max_y = 0;
+  bool opaque = false;
+  for (unsigned y = 0; y < image.height; ++y)
+    for (unsigned x = 0; x < image.width; ++x)
+      if (image.pixels[std::size_t(y) * image.width + x].a) {
+        opaque = true;
+        min_x = std::min(min_x, x);
+        min_y = std::min(min_y, y);
+        max_x = std::max(max_x, x);
+        max_y = std::max(max_y, y);
+      }
+  VehicleLayer result;
+  if (!opaque)
+    return result;
+  result.left = layer.left + int(min_x);
+  result.top = layer.top + int(min_y);
+  result.width = max_x - min_x + 1;
+  result.height = max_y - min_y + 1;
+  result.pixels.reserve(std::size_t(result.width) * result.height);
+  for (unsigned y = min_y; y <= max_y; ++y) {
+    const auto row = image.pixels.begin() +
+                     std::ptrdiff_t(std::size_t(y) * image.width + min_x);
+    result.pixels.insert(result.pixels.end(), row, row + result.width);
+  }
+  return result;
+}
+SceneImage compose_vehicle_layers(const std::vector<const VehicleLayer *> &layers) {
+  // Same bounds, limits and draw order as draw_vehicle. Cropped layers keep
+  // every opaque pixel, so their rectangles give the same bounds.
+  int min_x = 1000000, min_y = 1000000, max_x = -1000000, max_y = -1000000;
+  for (const auto *layer : layers) {
+    if (!layer)
+      throw std::runtime_error("missing vehicle layer");
+    if (std::size_t(layer->width) * layer->height != layer->pixels.size())
+      throw std::runtime_error("invalid vehicle layer");
+    if (!layer->width || !layer->height)
+      continue;
+    min_x = std::min(min_x, layer->left);
+    min_y = std::min(min_y, layer->top);
+    max_x = std::max(max_x, layer->left + int(layer->width) - 1);
+    max_y = std::max(max_y, layer->top + int(layer->height) - 1);
+  }
+  if (max_x < min_x)
+    return {{256, 256, std::vector<ra2::gfx::Rgba>(65536, {0, 0, 0, 0})}, 0, 0};
+  if (max_x - min_x >= 256 || max_y - min_y >= 256)
+    throw std::runtime_error("vehicle exceeds voxel surface");
+  SceneImage result{
+      {256, 256, std::vector<ra2::gfx::Rgba>(65536, {0, 0, 0, 0})},
+      min_x,
+      min_y};
+  for (const auto *layer : layers) {
+    if (!layer->width || !layer->height)
+      continue;
+    for (unsigned y = 0; y < layer->height; ++y) {
+      const auto source = layer->pixels.data() + std::size_t(y) * layer->width;
+      auto target = result.image.pixels.data() +
+                    std::size_t(layer->top + int(y) - min_y) * 256 +
+                    std::size_t(layer->left - min_x);
+      for (unsigned x = 0; x < layer->width; ++x)
+        if (source[x].a)
+          target[x] = source[x];
+    }
+  }
+  return result;
 }
 FlatPartDepth base_flat_part_depth(const SceneImage &part, int anchor_y,
                                    int surface_height, int projected_height) {

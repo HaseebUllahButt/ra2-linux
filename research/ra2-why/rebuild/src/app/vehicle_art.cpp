@@ -47,11 +47,7 @@ const VehicleSprite& VehicleArt::draw(std::uint8_t facing) {
     return draw(facing, facing);
 }
 
-const VehicleSprite& VehicleArt::draw(std::uint8_t facing, std::uint8_t turret_facing) {
-    const auto key = std::make_pair(facing, turret_facing);
-    auto found = images_.find(key);
-    if (found != images_.end()) return found->second;
-    loop::profile::asset_event("pose",type_.c_str(),facing,turret_facing);
+voxel::VehiclePose VehicleArt::pose(std::uint8_t facing, std::uint8_t turret_facing) const {
     auto pose = voxel::vehicle_pose_from_map(facing);
     pose.turret_facing = std::uint16_t(turret_facing) << 8;
     pose.hull.model = &hull_.model;
@@ -59,15 +55,50 @@ const VehicleSprite& VehicleArt::draw(std::uint8_t facing, std::uint8_t turret_f
     if (turret_) { pose.turret.model = &turret_->model; pose.turret.animation = &turret_->animation; }
     if (barrel_) { pose.barrel.model = &barrel_->model; pose.barrel.animation = &barrel_->animation; }
     pose.turret_offset = turret_offset_;
-    auto rendered = voxel::draw_vehicle(pose, lighting_);
+    return pose;
+}
+
+static std::vector<voxel::VehicleLayer> crop(const std::vector<voxel::SceneImage>& layers) {
+    std::vector<voxel::VehicleLayer> result;
+    result.reserve(layers.size());
+    for (const auto& layer : layers) result.push_back(voxel::crop_vehicle_layer(layer));
+    return result;
+}
+
+const std::vector<voxel::VehicleLayer>& VehicleArt::hull_layers(std::uint8_t facing) {
+    auto found = hull_layers_.find(facing);
+    if (found != hull_layers_.end()) return found->second;
+    // The hull layer ignores the turret facing.
+    return hull_layers_.emplace(facing,
+        crop(voxel::draw_vehicle_hull_layers(pose(facing, facing), lighting_))).first->second;
+}
+
+const std::vector<voxel::VehicleLayer>& VehicleArt::upper_layers(std::uint8_t facing) {
+    auto found = upper_layers_.find(facing);
+    if (found != upper_layers_.end()) return found->second;
+    // Turret and barrel layers ignore the hull facing.
+    return upper_layers_.emplace(facing,
+        crop(voxel::draw_vehicle_upper_layers(pose(facing, facing), lighting_))).first->second;
+}
+
+const VehicleSprite& VehicleArt::draw(std::uint8_t facing, std::uint8_t turret_facing) {
+    const auto key = std::make_pair(facing, turret_facing);
+    auto found = images_.find(key);
+    if (found != images_.end()) return found->second;
+    loop::profile::asset_event("pose",type_.c_str(),facing,turret_facing);
+    std::vector<const voxel::VehicleLayer*> layers;
+    for (const auto& layer : hull_layers(facing)) layers.push_back(&layer);
+    for (const auto& layer : upper_layers(turret_facing)) layers.push_back(&layer);
+    const auto rendered = voxel::compose_vehicle_layers(layers);
     if (rendered.image.width > 65535 || rendered.image.height > 65535)
         throw std::runtime_error("Vehicle image dimensions exceed scene bounds");
     VehicleSprite sprite{{static_cast<std::uint16_t>(rendered.image.width),
         static_cast<std::uint16_t>(rendered.image.height), {}}, rendered.left, rendered.top};
-    sprite.image.pixels.reserve(rendered.image.pixels.size() * 4);
+    sprite.image.pixels.resize(rendered.image.pixels.size() * 4);
+    auto* out = sprite.image.pixels.data();
     for (const auto pixel : rendered.image.pixels) {
-        sprite.image.pixels.push_back(pixel.r); sprite.image.pixels.push_back(pixel.g);
-        sprite.image.pixels.push_back(pixel.b); sprite.image.pixels.push_back(pixel.a);
+        out[0] = pixel.r; out[1] = pixel.g; out[2] = pixel.b; out[3] = pixel.a;
+        out += 4;
     }
     return images_.emplace(key, std::move(sprite)).first->second;
 }
