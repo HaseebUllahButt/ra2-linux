@@ -9,12 +9,15 @@ The default tile index is supplied. The trace stops before packed tile data,
 overlays, and later Battle phases.
 """
 import struct
+import subprocess
 import sys
 from unicorn import UC_HOOK_CODE
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_ESP,UC_X86_REG_EIP
-if len(sys.argv)!=2:
-    raise SystemExit('usage: original_resize_check.py game.exe')
-sys.argv=[sys.argv[0],sys.argv[1],'--base']
+if len(sys.argv) not in (2,4):
+    raise SystemExit('usage: original_resize_check.py game.exe [real_map_case game_dir]')
+executable=sys.argv[1]
+tile_source=tuple(sys.argv[2:])
+sys.argv=[sys.argv[0],executable,'--base']
 import original_move_trace as m
 map_object=0x8324e0
 vector=0x1200000
@@ -138,3 +141,54 @@ for index in range(262144):
     assert m.cpu.mem_read(cell+0x122,1)==b'\0' and m.cpu.mem_read(cell+0x124,1)==b'\0'
 assert count==19900
 print('base x86 default tile assignment preserves tested fields in all 19900 cells')
+
+if tile_source:
+    # Supply the actual decoded MP02T2 IsoMapPack5 stream to the original
+    # 0054E1E0 reader. Stream services and tile-index conversion are supplied.
+    # The next map phases and their state changes remain outside this check.
+    emitter,game=tile_source
+    data=subprocess.check_output([emitter,game,'--tile-bytes'])
+    assert len(data)>=4 and (len(data)-4)%11==0 and data[-4:]==b'\0'*4
+    expected={}
+    for offset in range(0,len(data)-4,11):
+        x,y,tile,subtile,height,ice=struct.unpack_from('<HHIBBB',data,offset)
+        if x<512 and y<512 and m.read(vector+(y*512+x)*4):
+            expected[y*512+x]=(tile,subtile,height,ice)
+    cursor=[0]
+    def read_stream():
+        target=m.argument(0)
+        size=m.argument(1)
+        end=cursor[0]+size
+        assert end<=len(data)
+        m.cpu.mem_write(target,data[cursor[0]:end])
+        cursor[0]=end
+    def tile_identity():
+        m.cpu.reg_write(UC_X86_REG_EAX,m.cpu.reg_read(UC_X86_REG_ECX))
+    m.word(0xa6f238,0)
+    m.bind(0x53efb0,8,m.ret(0))
+    m.bind(0x69b050,4,m.ret(0))
+    m.bind(0x53f010,0,m.ret(0))
+    m.bind(0x53f050,8,read_stream)
+    m.bind(0x529550,0,tile_identity)
+    m.cpu.reg_write(UC_X86_REG_ECX,map_object)
+    m.cpu.reg_write(UC_X86_REG_ESP,0x103f000)
+    m.cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,0))
+    m.cpu.emu_start(0x54e1e0,0x103e000,count=50000000)
+    assert m.cpu.reg_read(UC_X86_REG_EIP)==0x103e000 and cursor[0]==len(data)
+    for index,(tile,subtile,height,ice) in expected.items():
+        cell=m.read(vector+index*4)
+        assert m.read(cell+0x38)==tile
+        assert bytes(m.cpu.mem_read(cell+0x119,3))==bytes((ice,subtile,height))
+    count=0
+    for index in range(262144):
+        cell=m.read(vector+index*4)
+        if not cell:
+            continue
+        count+=1
+        assert not (m.read(cell+0x140)&0x180)
+        assert m.read(cell+0x54)==0xffffffff and m.read(cell+0x58)==0xffffffff
+        assert struct.unpack('<h',m.cpu.mem_read(cell+0x116,2))[0]==-1
+        assert m.read(cell+0xe4)==0 and m.read(cell+0xe8)==0
+        assert m.cpu.mem_read(cell+0x122,1)==b'\0' and m.cpu.mem_read(cell+0x124,1)==b'\0'
+    assert count==19900 and target_index in expected
+    print(f'base x86 reads {len(expected)} MP02T2 packed tiles and preserves tested fields in 19900 cells')

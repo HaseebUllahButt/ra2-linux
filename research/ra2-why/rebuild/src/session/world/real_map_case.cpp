@@ -10,13 +10,22 @@
 // Check data used by the adapted x86 fixture. Runtime cell state is supplied
 // separately by the fixture; this does not reconstruct the full Battle world.
 int main(int argc, char** argv) {
-    if (argc!=2) return 2;
+    if (argc!=2 && argc!=3) return 2;
     ra2::rules::IniFile map, rules, art;
     map.parse(original_test_ini(argv[1],"MP02T2.MAP",true));
+    if (argc==3) {
+        if (std::string(argv[2])!="--tile-bytes") return 2;
+        const auto bytes=ra2::pack::read_section(map,"IsoMapPack5",ra2::pack::Codec::Lzo);
+        std::cout.write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));
+        return std::cout?0:1;
+    }
     rules.parse(original_test_ini(argv[1],"RULES.INI",true));
     art.parse(original_test_art(argv[1],true));
     assert(map.read_string("Map","Size")=="0,0,100,100");
     assert(map.read_string("Map","LocalSize")=="5,5,90,89");
+    for (const char* section:{"IsoMapPack","IsoMapPack2","IsoMapPack3","IsoMapPack4"})
+        assert(map.key_count(section)==0);
+    assert(map.key_count("CellTags")==0);
     assert(map.key_count("AMCV")==0 && map.key_count("Clear")==0 && map.key_count("Water")==0);
     assert(rules.read_string("AMCV","Strength")=="1000");
     assert(rules.read_string("AMCV","Crusher")=="yes");
@@ -70,4 +79,5 @@ int main(int argc, char** argv) {
     std::cout<<"No authored Terrain footprint covers MP02T2 waypoint 0\n";
     std::cout<<"No authored Unit, Structure, or Terrain footprint reaches waypoint 0 or its neighbors\n";
     std::cout<<"No packed overlay appears within two cells of waypoint 0\n";
+    std::cout<<"MP02T2 CellTags entries: "<<map.key_count("CellTags")<<'\n';
 }
