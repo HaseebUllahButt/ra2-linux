@@ -1002,3 +1002,33 @@ Map indexing, neighbors, actor entry, usable-area, and allocation are explicit t
 
 This resolves the local algorithm used by the outer hierarchy retry dispatcher.
 Live goal binding still needs exact regular-search progress, retained path buffers, and staged-world callback inputs.
+
+## Retained path memory and regular-search progress
+
+`OriginalSearchMemory` exposes the original three 500-word path buffers, their counts, Search +6C, and Search +70.
+The defaults follow base 00427FB0 / expansion 0042A6D0: zero words and counts, progress -1, and cell zero.
+`retain_original_hierarchy_paths` applies completed hierarchy levels from two to zero.
+It overwrites each successful prefix and count. It preserves every unused tail and failed lower level.
+Base reset 00427E90 / expansion 0042A5B0 preserves these fields.
+
+`find_original_ground_path` accepts an optional trailing `OriginalSearchMemory*`.
+Existing callers retain their prior API behavior.
+With valid resolved endpoints, the regular search sets progress zero and its cell to the source.
+Each generated node compares its region with the next retained word.
+A match increments progress and records that generated cell.
+This happens during node generation, regardless of hierarchy filtering or the eventual result.
+The progress cell cannot be replaced by the path endpoint.
+The comparison sign-extends the region and zero-extends the path word.
+Expansion 0042A159..0042A178 proves the comparison and writes.
+Reads can cross a 500-word boundary into the next retained buffer.
+The native API rejects reads beyond all three buffers instead of reading unrelated fields.
+Unknown generated-cell regions return NeedsInput.
+These private search-state changes do not authorize movement or publish entity changes.
+
+`original_search_memory_check.py executable [--base] --vectors` checks 120 original vectors per edition.
+The original constructor, reset, regular search, Unit entry, and path postprocessing execute.
+Its four retained-word patterns include tails that remain significant beyond their logical path count.
+Each vector includes progress, progress cell, all retained words and counts, output directions, and cost bits.
+Compare both editions with `test_search_memory.sh base_executable expansion_executable --vectors`.
+Both preserve aggregate hash B1259F48.
+The native test also checks constructor values, prefix retention, unknown regions, and explicit buffer limits.

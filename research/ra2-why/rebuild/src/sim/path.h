@@ -2,6 +2,7 @@
 #include "../map/map_file.h"
 #include "distance.h"
 #include "cell_entry.h"
+#include "search_memory.h"
 #include <optional>
 #include <string>
 #include <vector>
@@ -37,7 +38,7 @@ struct PathResult {
 // Preserves the original direction order, open-list ties, float storage, and lookup heuristic.
 // Smoothing and nonmonotone paths need explicit postprocessing state and known shortcut cell inputs.
 PathResult find_original_ground_path(ra2map::Cell source,ra2map::Cell goal,
-    const std::vector<ResolvedGroundPathCell>&,const OriginalDistance&,int expansion_limit=-1,const PathHierarchyFilter* filter=nullptr,const PathPostprocessing* postprocessing=nullptr);
+    const std::vector<ResolvedGroundPathCell>&,const OriginalDistance&,int expansion_limit=-1,const PathHierarchyFilter* filter=nullptr,const PathPostprocessing* postprocessing=nullptr,OriginalSearchMemory* memory=nullptr);
 PathResult find_original_flat_path(ra2map::Cell source,ra2map::Cell goal,
     const std::vector<ResolvedFlatPathCell>&,const OriginalDistance&,int expansion_limit=-1);
 }

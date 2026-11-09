@@ -60,7 +60,7 @@ def can_enter():
 # The C runtime exit-registration callback does not affect the search output.
 m.bind(0x78298a if base else 0x7c978a,0,m.ret(0))
 
-def run(goal,walls=(),scenario=0,hierarchy_profile=None):
+def run(goal,walls=(),scenario=0,hierarchy_profile=None,retained_paths=None):
     global blocked,last_cost
     last_cost=0
     r.setup((0,),15); blocked=set(walls)
@@ -90,6 +90,11 @@ def run(goal,walls=(),scenario=0,hierarchy_profile=None):
             cpu.mem_write(cell+0x122,bytes([neighbors]))
             m.word(cell+0x140,0x40000 if hierarchy_profile==22 and (x,y)==(55,68) else 0)
             cpu.mem_write(regions+(y*512+x)*10,struct.pack('<h',zone))
+    if retained_paths is not None:
+        words,counts=retained_paths
+        assert len(words)==1500 and len(counts)==3
+        cpu.mem_write(SEARCH+0xbc,struct.pack('<1500H',*words))
+        cpu.mem_write(SEARCH+0xc74,struct.pack('<3I',*counts))
     invoke(0x427e90 if base else 0x42a5b0,SEARCH)
     if hierarchy_profile is not None:
         marks=m.read(SEARCH+0x40); cpu.mem_write(marks,bytes(16))

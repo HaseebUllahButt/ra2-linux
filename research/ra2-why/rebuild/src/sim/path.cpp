@@ -23,7 +23,7 @@ struct Node { std::size_t cell,parent; float cost,priority; unsigned depth; };
 constexpr std::size_t none=static_cast<std::size_t>(-1);
 }
 PathResult find_original_ground_path(ra2map::Cell source,ra2map::Cell goal,
-    const std::vector<ResolvedGroundPathCell>& cells,const OriginalDistance& distance,int limit,const PathHierarchyFilter* filter,const PathPostprocessing* postprocessing) {
+    const std::vector<ResolvedGroundPathCell>& cells,const OriginalDistance& distance,int limit,const PathHierarchyFilter* filter,const PathPostprocessing* postprocessing,OriginalSearchMemory* memory) {
     PathResult result; result.end=source;
     std::map<int,std::size_t> lookup;
     for (std::size_t i=0;i<cells.size();++i) {
@@ -32,7 +32,7 @@ PathResult find_original_ground_path(ra2map::Cell source,ra2map::Cell goal,
     }
     if (source.x>511 || source.y>511 || goal.x>511 || goal.y>511)
         throw std::invalid_argument("original search endpoint exceeds the map array");
-    if (!lookup.count(key(source)) || !lookup.count(key(goal)) || same(source,goal)) {
+    if (!lookup.count(key(source)) || !lookup.count(key(goal)) || (!memory && same(source,goal))) {
         result.evidence="00429A90: missing endpoint or identical flat endpoints"; return result;
     }
     const auto& start_height=cells[lookup.at(key(source))].height;
@@ -43,6 +43,8 @@ PathResult find_original_ground_path(ra2map::Cell source,ra2map::Cell goal,
     if (start_height->flag_100 || goal_height->flag_100) {
         result.status=PathStatus::Unsupported; result.evidence="00429A90: bridge path states are not recovered"; return result;
     }
+    if (memory) { memory->progress_6c=0; memory->progress_cell_70=source; }
+    if (same(source,goal)) { result.evidence="00429A90: identical flat endpoints"; return result; }
     if (limit<0) limit=0xfff7; // Original default, not a native gameplay value.
     std::vector<Node> nodes; nodes.reserve(std::min<std::size_t>(cells.size(),65536));
     std::vector<bool> seen(cells.size());
@@ -133,6 +135,19 @@ PathResult find_original_ground_path(ra2map::Cell source,ra2map::Cell goal,
             const auto candidate=create(next,current,single(1.0+static_cast<double>(bias[direction])));
             if (last!=none) push(last);
             last=candidate; seen[next]=true;
+            if (memory) {
+                if (!cells[next].hierarchy_zone) {
+                    result.status=PathStatus::NeedsInput; result.evidence="0042A159: generated-cell hierarchy region is unresolved"; return result;
+                }
+                const auto word=static_cast<std::size_t>(memory->progress_6c)+1;
+                if (word>=1500) {
+                    result.status=PathStatus::Unsupported; result.evidence="0042A159: progress reads beyond the three retained path buffers"; return result;
+                }
+                // Original compares a sign-extended region against a zero-extended path word.
+                if (*cells[next].hierarchy_zone<0x8000 && *cells[next].hierarchy_zone==memory->paths[word/500][word%500]) {
+                    ++memory->progress_6c; memory->progress_cell_70=cells[next].cell;
+                }
+            }
         }
         if (stopped_at_blocked_goal) break;
         if (last==none) {
