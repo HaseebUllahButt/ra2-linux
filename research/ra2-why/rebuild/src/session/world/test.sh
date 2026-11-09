@@ -74,6 +74,8 @@ if [ "${2:-}" = "--original" ]; then
     ${PYTHON:-python3} original_unit_reader_205_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game" --connected-real-speed
     ${PYTHON:-python3} original_unit_reader_205_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game" --connected-speed-wheel
     ${PYTHON:-python3} original_unit_reader_205_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game" --connected-zone-subterranean
+    ${PYTHON:-python3} original_unit_reader_205_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game" --connected-real-placement
+    ${PYTHON:-python3} original_unit_reader_205_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game" --connected-restricted-water
     ${PYTHON:-python3} original_placement_type_check.py "$game/game.exe" "$build/real_map_case" "$game" "$build/unit_flags_case"
     ${PYTHON:-python3} original_sight_rule_check.py "$game/game.exe" "$build/real_map_case" "$game"
     ${PYTHON:-python3} "$shared/sim/original_cell_setup_check.py" "$game/game.exe" --base --vectors > "$build/original-setup-vectors"
