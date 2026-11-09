@@ -40,8 +40,10 @@ std::optional<std::string> unit_error(const Entity* e) {
 // Busy is open ground held only by a Unit that has a pending move. A route
 // may plan through it, as original pathing treats a moving blocker as
 // temporary. Held is ground held only by a stopped Unit. Busy and Held
-// Cells do not stop a diagonal step past their corner; walls, buildings
-// and blocked terrain do. A Unit may only enter an Open Cell.
+// Cells do not stop a planned diagonal step past their corner; walls,
+// buildings and blocked terrain do. A Unit may only enter an Open Cell.
+// At move time, a diagonal step waits while a corner Cell is Busy, so two
+// Units never cross one Cell corner together.
 enum class Pass : std::uint8_t { Unknown=0,Open=1,Closed=2,Unresolved=3,Busy=4,Held=5 };
 using Movers=std::set<std::uint32_t>;
 Pass open_state(const session::world::CellState& cell,std::uint32_t self,const Movers* movers) {
@@ -357,6 +359,13 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
         const auto hold=[&] {
             ++movement.waited;movement.stalled=true;actor->locomotor_moving=false;++it;
         };
+        // A moving Unit in a corner Cell of a diagonal step, if any.
+        const auto busy_corner=[&](ra2map::Cell from,ra2map::Cell to)->std::optional<ra2map::Cell> {
+            if (from.x==to.x || from.y==to.y) return {};
+            for (const ra2map::Cell corner:{ra2map::Cell{to.x,from.y},ra2map::Cell{from.x,to.y}})
+                if (pass_cell(candidate,corner,id,&movers)==Pass::Busy) return corner;
+            return {};
+        };
         auto target=movement.path.front();auto available=pass_cell(candidate,target,id,&movers);
         if (available==Pass::Unresolved) return fail(PrototypeMoveStatus::NeedsInput,"prototype next Cell is unresolved");
         if (available==Pass::Busy && wait_for(target)) { hold();continue; }
@@ -372,12 +381,15 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
             target=movement.path.front();
             if (pass_cell(candidate,target,id,nullptr)!=Pass::Open) { hold();continue; }
         }
+        if (const auto corner=busy_corner(*actor->cell,target)) {
+            if (wait_for(*corner)) { hold();continue; }
+        }
         // Move speed world units this frame. Units left at a Cell center
         // carry on toward the next Cell in the same frame if it is open.
         int budget=movement.speed;bool moved=false,blocked=false;
         while (budget>0 && !movement.path.empty()) {
             target=movement.path.front();
-            if (moved && pass_cell(candidate,target,id,nullptr)!=Pass::Open) break;
+            if (moved && (pass_cell(candidate,target,id,nullptr)!=Pass::Open || busy_corner(*actor->cell,target))) break;
             auto found=candidate.cells.find(key(target));
             if (found==candidate.cells.end() || !found->second.terrain || !found->second.terrain->floor_world_height)
                 return fail(PrototypeMoveStatus::NeedsInput,"prototype target floor is unresolved");

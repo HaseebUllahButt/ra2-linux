@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 using namespace ra2;
 using namespace ra2::sim;
@@ -59,7 +60,7 @@ int chebyshev(ra2map::Cell a,ra2map::Cell b) { return std::max(std::abs(int(a.x)
 // Drive a group order like the Battle loop: a blocked Unit is canceled and
 // its order is issued again every 15 frames. Return the frames to arrive,
 // and the largest step back away from each goal.
-struct GroupRun { unsigned frames=0;int worst_retreat=0;bool all_arrived=false;unsigned blocked=0,idle=0,steps=0,direct=0; };
+struct GroupRun { unsigned frames=0;int worst_retreat=0;bool all_arrived=false;unsigned blocked=0,idle=0,steps=0,direct=0;std::int64_t closest=std::numeric_limits<std::int64_t>::max(); };
 GroupRun drive_group(sw::Snapshot& world,PrototypeMovement& movement,const std::vector<std::pair<std::uint32_t,ra2map::Cell>>& orders,int speed,unsigned limit) {
     std::map<std::uint32_t,ra2map::Cell> pending;std::map<std::uint32_t,int> best;GroupRun run;
     const auto cell_of=[&](std::uint32_t id) { for (const auto& e:world.entities) if (e.id==id) return *e.cell; throw std::runtime_error("lost Unit"); };
@@ -82,6 +83,13 @@ GroupRun drive_group(sw::Snapshot& world,PrototypeMovement& movement,const std::
             run.worst_retreat=std::max(run.worst_retreat,now-best[id]);best[id]=std::min(best[id],now);
         }
         for (auto& [id,cell]:last) { const auto now=cell_of(id); if (!same_cell(now,cell)) ++run.steps; cell=now; }
+        // The closest two Unit centers come, in world units.
+        for (std::size_t i=0;i<world.entities.size();++i) for (std::size_t j=i+1;j<world.entities.size();++j) {
+            const auto dx=std::int64_t(world.entities[i].position->x)-world.entities[j].position->x;
+            const auto dy=std::int64_t(world.entities[i].position->y)-world.entities[j].position->y;
+            std::int64_t d=0;while ((d+1)*(d+1)<=dx*dx+dy*dy) ++d;
+            run.closest=std::min(run.closest,d);
+        }
         run.frames=frame;
     }
     run.all_arrived=pending.empty();
@@ -180,10 +188,11 @@ int main() try {
         }
         // Grizzly Speed=7 gives original_rule_speed(7)=17 world units a frame.
         const auto run=drive_group(world,movement,orders,17,900);
-        std::cout<<"group of 8 arrived="<<run.all_arrived<<" frames="<<run.frames<<" worst_retreat="<<run.worst_retreat<<" blocked="<<run.blocked<<" idle_unit_frames="<<run.idle<<" steps="<<run.steps<<" direct="<<run.direct<<'\n';
+        std::cout<<"group of 8 arrived="<<run.all_arrived<<" frames="<<run.frames<<" worst_retreat="<<run.worst_retreat<<" blocked="<<run.blocked<<" idle_unit_frames="<<run.idle<<" steps="<<run.steps<<" direct="<<run.direct<<" closest="<<run.closest<<'\n';
         // The far tank drives 28 Cells: 28*256/17 is about 422 frames alone.
-        // Before the fix: 544 frames, and one tank stopped on a wrong Cell.
-        require(run.all_arrived && run.frames<=470,"group of 8 was slow to reach its goals");
+        // Before the fix: 544 frames, one tank stopped on a wrong Cell, and two
+        // tanks came 94 units apart. Corner waits cost a few frames.
+        require(run.all_arrived && run.frames<=500 && run.closest>=181,"group of 8 was slow to reach its goals");
         require(run.worst_retreat<=1,"a group Unit drove back away from its goal");
         for (std::uint32_t i=0;i<8;++i) require(same_cell(*world.entities[i].cell,goals[i]),"group Unit stopped away from its own goal");
     }
@@ -196,6 +205,16 @@ int main() try {
         std::cout<<"head-on arrived="<<run.all_arrived<<" frames="<<run.frames<<" worst_retreat="<<run.worst_retreat<<" blocked="<<run.blocked<<'\n';
         require(run.all_arrived && run.blocked==0 && run.worst_retreat<=1 && run.frames<=270,"head-on tanks did not pass each other");
         require(same_cell(*world.entities[0].cell,{20,6}) && same_cell(*world.entities[1].cell,{5,6}),"head-on tanks stopped away from their goals");
+    }
+    {
+        // Two tanks side by side drive diagonally across each other. They
+        // must not pass through the same Cell corner at the same time.
+        auto world=field(30,12);PrototypeMovement movement;
+        place(world,601,10,4);place(world,602,11,4);
+        const auto run=drive_group(world,movement,{{601,{13,7}},{602,{8,7}}},17,400);
+        std::cout<<"crossing arrived="<<run.all_arrived<<" frames="<<run.frames<<" closest="<<run.closest<<'\n';
+        // 181 is a Cell center to its corner: a pass beside a stopped tank.
+        require(run.all_arrived && run.closest>=181,"crossing tanks overlapped at a Cell corner");
     }
     {
         // A stopped tank holds the goal. The mover stops on the near side
