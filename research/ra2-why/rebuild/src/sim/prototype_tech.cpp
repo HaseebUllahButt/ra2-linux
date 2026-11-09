@@ -117,6 +117,7 @@ void update(const rules::IniFile& r,w::Snapshot& s) {
     // Benchmark proof: the match calls this once per game frame. Print a
     // world hash every 100 calls so two builds can be compared.
     if(loop::profile::enabled()) {
+        const loop::profile::Exclude probe_only;
         static std::uint64_t calls=0;
         if(++calls%100==0) std::fprintf(stderr,"RA2_BENCH world call=%llu hash=%016llx\n",
             static_cast<unsigned long long>(calls),static_cast<unsigned long long>(w::world_hash(s)));

@@ -35,6 +35,10 @@ public:
     bool enabled() const { return enabled_; }
     void add(Phase phase, double ms) {
         auto& stat = stats_[std::size_t(phase)];
+        // Name each slow update or present with its call number.
+        if ((phase == Phase::Update || phase == Phase::Present) && ms >= 50)
+            std::fprintf(stderr, "RA2_BENCH slow %s call=%llu ms=%.1f\n", phase == Phase::Update ? "update" : "present",
+                static_cast<unsigned long long>(stat.calls + 1), ms);
         stat.total_ms += ms; stat.worst_ms = std::max(stat.worst_ms, ms); ++stat.calls;
     }
     void first_present() {
@@ -42,6 +46,7 @@ public:
             startup_ms_ = std::chrono::duration<double, std::milli>(Clock::now() - start_).count();
     }
     int depth = 0;
+    double excluded_ms = 0; // Probe work, such as world hashes, not game work.
 private:
     void report() const {
         static const char* names[] = {"update (all)", "  movement", "  combat", "  economy", "  ai",
@@ -71,12 +76,13 @@ public:
     explicit Scope(Phase phase) : phase_(phase), on_(enabled()) {
         if (!on_) return;
         outer_ = instance().depth++ == 0;
-        if (outer_) start_ = Clock::now();
+        if (outer_) {start_ = Clock::now(); excluded_ = instance().excluded_ms;}
     }
     ~Scope() {
         if (!on_) return;
         --instance().depth;
-        if (outer_) instance().add(phase_, std::chrono::duration<double, std::milli>(Clock::now() - start_).count());
+        if (outer_) instance().add(phase_, std::chrono::duration<double, std::milli>(Clock::now() - start_).count() -
+            (instance().excluded_ms - excluded_));
     }
     Scope(const Scope&) = delete;
     Scope& operator=(const Scope&) = delete;
@@ -84,19 +90,39 @@ private:
     Phase phase_;
     bool on_, outer_ = false;
     Clock::time_point start_;
+    double excluded_ = 0;
 };
 
 // A top-level or drawing phase. Always records, independent of nesting.
 class Timer {
 public:
-    explicit Timer(Phase phase) : phase_(phase), on_(enabled()) { if (on_) start_ = Clock::now(); }
+    explicit Timer(Phase phase) : phase_(phase), on_(enabled()) {
+        if (on_) {start_ = Clock::now(); excluded_ = instance().excluded_ms;}
+    }
     ~Timer() {
-        if (on_) instance().add(phase_, std::chrono::duration<double, std::milli>(Clock::now() - start_).count());
+        if (on_) instance().add(phase_, std::chrono::duration<double, std::milli>(Clock::now() - start_).count() -
+            (instance().excluded_ms - excluded_));
     }
     Timer(const Timer&) = delete;
     Timer& operator=(const Timer&) = delete;
 private:
     Phase phase_;
+    bool on_;
+    Clock::time_point start_;
+    double excluded_ = 0;
+};
+
+// Probe-only work inside a timed phase. Its time is removed from every
+// enclosing Timer and Scope.
+class Exclude {
+public:
+    Exclude() : on_(enabled()) { if (on_) start_ = Clock::now(); }
+    ~Exclude() {
+        if (on_) instance().excluded_ms += std::chrono::duration<double, std::milli>(Clock::now() - start_).count();
+    }
+    Exclude(const Exclude&) = delete;
+    Exclude& operator=(const Exclude&) = delete;
+private:
     bool on_;
     Clock::time_point start_;
 };
