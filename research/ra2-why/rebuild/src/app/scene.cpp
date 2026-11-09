@@ -227,6 +227,35 @@ VehicleArt& Scene::vehicle(const std::string& type) {
     }
     return found->second;
 }
+bool Scene::shp_vehicle(const std::string& type) const {
+    return !art_.read_bool(rules_.read_string(type, "Image", type), "Voxel", false);
+}
+const actors::ShpVehicleFrames& Scene::shp_layout(const std::string& type) {
+    if (const auto found = shp_layouts_.find(type); found != shp_layouts_.end()) return found->second;
+    // Base SHP unit draw 007005B0, no-turret body path 00700E1E.
+    bool registered = false;
+    if (const auto* list = rules_.find_section("VehicleTypes"))
+        for (const auto& item : list->entries) registered |= item.value == type;
+    if (!registered) throw std::runtime_error("SHP vehicle type is not in VehicleTypes");
+    if (files_.variant() != fs::GameVariant::RedAlert2)
+        throw std::runtime_error("Expansion SHP vehicle drawing is unresolved");
+    if (rules_.read_bool(type, "Turret", false))
+        throw std::runtime_error("SHP vehicle turret drawing is unresolved");
+    if (rules_.read_bool(type, "TooBigToFitUnderBridge", false))
+        throw std::runtime_error("SHP vehicle bridge drawing is unresolved");
+    // TechnoType IdleRate (+0x268) animates resting units.
+    if (rules_.read_integer(type, "IdleRate", 0) != 0)
+        throw std::runtime_error("SHP vehicle idle animation is unresolved");
+    return shp_layouts_.emplace(type, actors::shp_vehicle_frames(rules_, art_, type)).first->second;
+}
+Scene::ShpSprite Scene::shp_vehicle_image(const std::string& type, std::uint8_t facing, bool moving) {
+    const auto& frames = shp_layout(type);
+    // The walk counter (+0x430, FootClass AI 004C9279) is not
+    // simulated. The prototype shows the first walk frame.
+    if (moving && !prototype_) throw std::runtime_error("SHP vehicle walk counter is unresolved");
+    auto& asset = actor(actors::Kind::Vehicle, type);
+    return {asset, image(asset, actors::shp_vehicle_frame(frames, facing, moving, 0))};
+}
 Scene::Asset& Scene::actor(actors::Kind kind,const std::string& type) {
     const auto key=std::make_pair(kind,type);
     auto found=assets_.find(key);
@@ -249,9 +278,12 @@ void Scene::prepare(const sim::Snapshot& state,const std::vector<std::string>& p
     if(!terrain_ready_)prepare_terrain(terrain_gaps_);
     for(const auto& entity:state.entities)if(!entity.dead)try {
         if(entity.kind==sim::Kind::Unit) {
-            if(entity.facing<0||entity.facing>255||!entity.turret_facing||
-                *entity.turret_facing<0||*entity.turret_facing>255)continue;
-            vehicle(entity.type).draw(std::uint8_t(entity.facing),std::uint8_t(*entity.turret_facing));
+            if(entity.facing<0||entity.facing>255)continue;
+            if(shp_vehicle(entity.type))shp_vehicle_image(entity.type,std::uint8_t(entity.facing),entity.moving);
+            else {
+                if(!entity.turret_facing||*entity.turret_facing<0||*entity.turret_facing>255)continue;
+                vehicle(entity.type).draw(std::uint8_t(entity.facing),std::uint8_t(*entity.turret_facing));
+            }
             const auto deploy=rules_.read_string(entity.type,"DeploysInto");
             if(!deploy.empty())image(actor(actors::Kind::Building,deploy),0);
         } else {
@@ -267,16 +299,21 @@ void Scene::prepare(const sim::Snapshot& state,const std::vector<std::string>& p
         return section&&std::any_of(section->entries.begin(),section->entries.end(),
             [&](const auto& entry){return entry.value==type;});
     };
+    // Resting SHP products: one stand frame for each of the 8 directions.
+    const auto product_vehicle=[&](const std::string& type) {
+        if(!shp_vehicle(type)) { vehicle(type).draw(0,0); return; }
+        for(unsigned facing=0;facing<256;facing+=32)shp_vehicle_image(type,std::uint8_t(facing),false);
+    };
     for(const auto& type:products)try {
         if(registered("BuildingTypes",type)) {
             image(actor(actors::Kind::Building,type),0);
             const auto free_unit=rules_.read_string(type,"FreeUnit");
-            if(!free_unit.empty())vehicle(free_unit).draw(0,0);
+            if(!free_unit.empty())product_vehicle(free_unit);
         } else if(registered("InfantryTypes",type)) {
             auto& asset=actor(actors::Kind::Infantry,type);
             for(unsigned facing=0;facing<256;facing+=32)
                 image(asset,asset.art.frame_for_map("Ready",std::uint8_t(facing),0));
-        } else if(registered("VehicleTypes",type))vehicle(type).draw(0,0);
+        } else if(registered("VehicleTypes",type))product_vehicle(type);
     } catch(const std::exception&) { /* Keep the normal render fallback. */ }
 }
 
@@ -351,32 +388,10 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
                     throw std::runtime_error("Damaged vehicle drawing states are unresolved");
                 if (entity.facing < 0 || entity.facing > 255)
                     throw std::runtime_error("Vehicle map facing is outside its original byte range");
-                const auto image_name = rules_.read_string(entity.type, "Image", entity.type);
-                if (!art_.read_bool(image_name, "Voxel", false)) {
-                    // Base SHP unit draw 007005B0, no-turret body path 00700E1E.
-                    bool registered = false;
-                    if (const auto* list = rules_.find_section("VehicleTypes"))
-                        for (const auto& item : list->entries) registered |= item.value == entity.type;
-                    if (!registered) throw std::runtime_error("SHP vehicle type is not in VehicleTypes");
-                    if (files_.variant() != fs::GameVariant::RedAlert2)
-                        throw std::runtime_error("Expansion SHP vehicle drawing is unresolved");
-                    if (rules_.read_bool(entity.type, "Turret", false))
-                        throw std::runtime_error("SHP vehicle turret drawing is unresolved");
-                    if (rules_.read_bool(entity.type, "TooBigToFitUnderBridge", false))
-                        throw std::runtime_error("SHP vehicle bridge drawing is unresolved");
-                    // TechnoType IdleRate (+0x268) animates resting units.
-                    if (rules_.read_integer(entity.type, "IdleRate", 0) != 0)
-                        throw std::runtime_error("SHP vehicle idle animation is unresolved");
-                    // The walk counter (+0x430, FootClass AI 004C9279) is not
-                    // simulated. The prototype shows the first walk frame.
-                    if (entity.moving && !prototype_)
-                        throw std::runtime_error("SHP vehicle walk counter is unresolved");
-                    const auto frames = actors::shp_vehicle_frames(rules_, art_, entity.type);
-                    auto& asset = actor(actors::Kind::Vehicle, entity.type);
-                    const auto frame = actors::shp_vehicle_frame(frames,
-                        static_cast<std::uint8_t>(entity.facing), entity.moving, 0);
-                    const auto& sprite = image(asset, frame);
-                    result.drawn += blit(result.image, sprite, asset.art.main_canvas_origin(anchor));
+                if (shp_vehicle(entity.type)) {
+                    const auto shp = shp_vehicle_image(entity.type,
+                        static_cast<std::uint8_t>(entity.facing), entity.moving);
+                    result.drawn += blit(result.image, shp.image, shp.asset.art.main_canvas_origin(anchor));
                     continue;
                 }
                 if (!entity.turret_facing)

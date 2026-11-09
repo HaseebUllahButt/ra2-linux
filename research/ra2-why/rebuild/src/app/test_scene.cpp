@@ -186,6 +186,11 @@ int main(int argc, char** argv) {
                     ++drone_checked;
                 }
                 require(drone_checked > 50, "Original SHP vehicle pixel check was empty");
+                app::Scene warm_drone(files, art, rules, geometry, {flat}, "TEMPERATE");
+                warm_drone.prepare(state, {"DRON"});
+                const auto warm_output = warm_drone.render(empty, state, view);
+                require(warm_output.image.rgba == drone_output.image.rgba && warm_output.drawn == 1 &&
+                        warm_output.gaps.empty(), "Preparing the SHP vehicle changed its pixels");
                 drone.moving = true; state.entities = {drone};
                 const auto strict_moving = fixture.render(empty, state, view);
                 require(strict_moving.drawn == 0 && strict_moving.gaps.size() == 1,
