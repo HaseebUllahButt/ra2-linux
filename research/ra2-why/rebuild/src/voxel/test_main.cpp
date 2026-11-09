@@ -1,4 +1,5 @@
 #include "../fs/mix_bootstrap.h"
+#include <cstdlib>
 #include "voxel.h"
 #include <algorithm>
 #include <cmath>
@@ -126,7 +127,8 @@ int main(int argc, char **argv) {
     flat_vehicle.harvester = true;
     if (supports_base_flat_vehicle_depth(flat_cells, flat_vehicle))
       throw std::runtime_error("flat depth guard accepted a harvester");
-    ra2::fs::MixFileSystem fs("/path/to/user/ra2/game");
+    const char* game=std::getenv("RA2_TEST_GAME_DIR");
+    ra2::fs::MixFileSystem fs(game?game:"../game");
     fs.bootstrap();
     fs.mount("conquer.mix", false);
     fs.mount("conqmd.mix", false);

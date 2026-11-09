@@ -10,7 +10,7 @@ int main(int argc, char** argv) {
         const auto ini = ra2::rules::IniFile::from_file(argv[2]);
         const auto terrain = ra2::pack::load_terrain(ini);
         ra2::fs::MixFileSystem files(argv[1]);
-        files.bootstrap();
+        files.bootstrap(ra2::fs::GameVariant::RedAlert2);
         auto art = ra2::render::TheaterArt::load(files, ini.read_string("Map", "Theater"));
         const auto inputs = ra2::app::terrain_inputs(terrain, art);
         if (inputs.size() != terrain.tiles.size() || inputs.empty())

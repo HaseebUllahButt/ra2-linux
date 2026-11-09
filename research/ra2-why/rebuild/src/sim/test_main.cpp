@@ -24,6 +24,7 @@ std::string digest(const Snapshot& s) {
 }
 }
 int main(int argc,char** argv) try {
+    const char* owned_game=std::getenv("RA2_TEST_GAME_DIR");
     const std::string root=argc>1?argv[1]:"/path/to/user/ra2/analysis/extracted";
     auto rules=Ini::from_file(root+"/config/rulesmd.ini");
     auto map=Ini::from_file(root+"/maps/AUSTINTX.MAP");
@@ -254,13 +255,13 @@ int main(int argc,char** argv) try {
     TerrainCell structure_floor=known_floor; structure_floor.cell=snap.entities.front().cell;
     Simulation other_placement(rules,map,1,TerrainCells{structure_floor});
     check(snap.entities.front().kind==Kind::Structure && !other_placement.snapshot().entities.front().position,"unrecovered building placement does not become a guessed center");
-    const auto distance_table=OriginalDistance::from_executable(root+"/../../game/game.exe");
+    const auto distance_table=OriginalDistance::from_executable((owned_game?std::string(owned_game):root+"/../../game")+"/game.exe");
     check(distance_table.square_root(0)==0,"original zero distance");
     check(distance_table.between({0,0,0},{3,4,0})==5,"original table distance");
     check(distance_table.between({0,0,0},{0,0,256},true)==0,"original planar distance");
     check(distance_table.between({0,0,0},{0,0,256})==256,"original vertical distance");
     check(distance_table.between({0,0,0},{1792,0,0})==1792,"original threat distance input");
-    const auto expansion_distance=OriginalDistance::from_executable(root+"/../../game/gamemd.exe");
+    const auto expansion_distance=OriginalDistance::from_executable((owned_game?std::string(owned_game):root+"/../../game")+"/gamemd.exe");
     const double squared_vectors[]={0,1,2,3,25,10000,3211264,123456789,68719476736.0};
     const std::uint32_t distance_bits[]={0,0x3f800000,0x3fb504f3,0x3fddb3d7,0x40a00000,0x42c80000,0x44e00000,0x462d9bd7,0x48800000};
     for (unsigned i=0;i<9;++i) {
@@ -269,8 +270,8 @@ int main(int argc,char** argv) try {
         check(bits==distance_bits[i],"original lookup square root bits");
         check(expansion_distance.square_root(squared_vectors[i])==value,"base and expansion distance table parity");
     }
-    const auto base_drive=DriveTables::from_executable(root+"/../../game/game.exe");
-    const auto expansion_drive=DriveTables::from_executable(root+"/../../game/gamemd.exe");
+    const auto base_drive=DriveTables::from_executable((owned_game?std::string(owned_game):root+"/../../game")+"/game.exe");
+    const auto expansion_drive=DriveTables::from_executable((owned_game?std::string(owned_game):root+"/../../game")+"/gamemd.exe");
     struct DriveGolden { unsigned facing; int speed,frames; std::uint32_t hash; };
     const DriveGolden drive_golden[]={
 #include "move_golden.inc"

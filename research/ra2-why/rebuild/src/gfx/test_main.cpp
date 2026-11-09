@@ -172,7 +172,7 @@ void write_ppm(const RgbaImage& image) {
 }
 void real_archive_test() {
     MixFileSystem files("game");
-    files.bootstrap();
+    files.bootstrap(ra2::fs::GameVariant::RedAlert2);
     const std::filesystem::path loose = "game/conquer.mix";
     auto conquer = std::filesystem::exists(loose) ? MixArchive::open(loose) : files.mount("CONQUER.MIX");
     if (!std::filesystem::exists(loose))

@@ -1,10 +1,11 @@
+TEST_GAME_DIR ?= $(if $(wildcard ../game-full/game.exe),../game-full,../game)
 # RA2 engine rebuild - one command builds and tests every layer.
 # Layers land one at a time; each must compile clean and pass its
 # tests against the real game data in game/ (read-only).
 
 CXX ?= g++
 .DEFAULT_GOAL := all
-FEATURE_GAME_DIR ?= $(abspath ../game)
+FEATURE_GAME_DIR ?= $(abspath $(TEST_GAME_DIR))
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O2
 SDL_FLAGS = $(shell pkg-config --cflags --libs sdl2)
 NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cpp src/app/scene.cpp src/app/vehicle_art.cpp \
@@ -85,29 +86,29 @@ SESSION_OBJECTS = build/native/src/session/session.o build/native/src/session/ma
 SESSION_WORLD_OBJECTS = build/native/src/session/world/world.o build/native/src/session/world/speed_type.o build/native/src/session/world/movement_zone.o build/native/src/session/world/unit_flags.o $(SESSION_OBJECTS) build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/sim/coarse_category.o build/native/src/sim/cell_setup.o build/native/src/sim/replacement.o build/native/src/sim/world.o build/native/src/sim/floor.o build/native/src/rules/ini_file.o build/native/src/weapons/occupant_order.o
 
 native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-postprocessed-path sim-filtered-path sim-smoothing sim-full-smoothing sim-entry-height sim-category sim-resource-cell sim-regions sim-movement-regions sim-component-lookup sim-goal-control sim-retry-edges sim-hierarchy-retry sim-local-reachability sim-search-memory sim-foot-path sim-nearest-cell sim-cell-projection sim-nearest-projection sim-cell-fit sim-rectangle-fit sim-nearest-fit sim-hierarchy-memory sim-overlay-mark sim-hierarchy sim-hierarchy-route sim-replacement sim-world sim-cell-setup sim-build-time sim-production sim-production-runtime sim-goal-runtime sim-goal-runtime-real sim-live-cell-setup sim-unit-visibility session session-terrain session-world weapons combat-runtime
-	build/ra2-native --game-dir ../game --frames 3 --headless
-	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
-	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
-	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless --yuri
-	build/ra2-native --game-dir ../game --map ALL01T.MAP --frames 3 --headless
-	build/ra2-native --game-dir ../game --map MP25MW.MAP --frames 3 --headless
-	build/ra2-native --game-dir ../game --skirmish --frames 3 --headless
+	build/ra2-native --game-dir $(TEST_GAME_DIR) --frames 3 --headless
+	build/ra2-native --game-dir $(TEST_GAME_DIR) --frames 3 --headless --yuri
+	build/ra2-native --game-dir $(TEST_GAME_DIR) --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
+	build/ra2-native --game-dir $(TEST_GAME_DIR) --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless --yuri
+	build/ra2-native --game-dir $(TEST_GAME_DIR) --map ALL01T.MAP --frames 3 --headless
+	build/ra2-native --game-dir $(TEST_GAME_DIR) --map MP25MW.MAP --frames 3 --headless
+	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --frames 3 --headless
 
 actors: build/actors_test
-	build/actors_test ../game
+	build/actors_test $(TEST_GAME_DIR)
 
 build/actors_test: build/native/src/actors/test_main.o build/native/src/actors/actors.o $(FS_OBJECTS) $(GFX_OBJECTS) build/native/src/rules/ini_file.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 ui: build/ui_test
-	build/ui_test ../game
+	build/ui_test $(TEST_GAME_DIR)
 
 build/ui_test: build/native/src/ui/ui.o build/native/src/ui/shell.o build/native/src/ui/skirmish.o build/native/src/ui/test_main.o build/native/src/text/csf.o build/native/src/rules/ini_file.o $(FS_OBJECTS) $(GFX_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 audio: build/audio_test build/audio_integration_test
 	build/audio_test
-	build/audio_integration_test ../game
+	build/audio_integration_test $(TEST_GAME_DIR)
 
 build/audio_test: build/native/src/audio/audio.o build/native/src/audio/test_main.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
@@ -121,48 +122,48 @@ build/native/src/audio/integration_test.o: src/audio/integration_test.cpp
 	$(CXX) $(CXXFLAGS) -I src/fs -MMD -MP -c $< -o $@
 
 voxel: build/voxel_test
-	build/voxel_test
+	RA2_TEST_GAME_DIR=$(TEST_GAME_DIR) build/voxel_test
 
 build/voxel_test: build/native/src/voxel/voxel.o build/native/src/voxel/test_main.o $(FS_OBJECTS) build/native/src/gfx/palette.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 sim: build/sim_test
-	build/sim_test ../analysis/extracted
+	RA2_TEST_GAME_DIR=$(TEST_GAME_DIR) build/sim_test ../analysis/extracted
 
 build/sim_test: build/native/src/sim/test_main.o $(SIM_OBJECTS) $(MAP_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 sim-move: build/sim_move_test
-	build/sim_move_test ../game ../analysis/extracted
-	build/sim_move_test ../game ../analysis/extracted --base
+	build/sim_move_test $(TEST_GAME_DIR) ../analysis/extracted
+	build/sim_move_test $(TEST_GAME_DIR) ../analysis/extracted --base
 
 build/sim_move_test: build/native/src/sim/test_move.o build/native/src/sim/test_inputs.o $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 .PHONY: sim-route
 sim-route: build/sim_route_test
-	build/sim_route_test ../game/game.exe ../game/gamemd.exe
+	build/sim_route_test $(TEST_GAME_DIR)/game.exe $(TEST_GAME_DIR)/gamemd.exe
 
 build/sim_route_test: build/native/src/sim/test_route.o build/native/src/sim/drive.o build/native/src/sim/ground.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 .PHONY: sim-path sim-entry-height
 sim-path: build/sim_path_test
-	build/sim_path_test ../game/game.exe ../game/gamemd.exe
+	build/sim_path_test $(TEST_GAME_DIR)/game.exe $(TEST_GAME_DIR)/gamemd.exe
 
 build/sim_path_test: build/native/src/sim/test_path.o build/native/src/sim/path.o build/native/src/sim/path_smoothing.o build/native/src/sim/cell_entry.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 .PHONY: sim-postprocessed-path
 sim-postprocessed-path: build/sim_postprocessed_path_test
-	build/sim_postprocessed_path_test ../game/game.exe ../game/gamemd.exe
+	build/sim_postprocessed_path_test $(TEST_GAME_DIR)/game.exe $(TEST_GAME_DIR)/gamemd.exe
 
 build/sim_postprocessed_path_test: build/native/src/sim/test_postprocessed_path.o build/native/src/sim/path.o build/native/src/sim/path_smoothing.o build/native/src/sim/cell_entry.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 .PHONY: sim-filtered-path
 sim-filtered-path: build/sim_filtered_path_test
-	build/sim_filtered_path_test ../game/game.exe ../game/gamemd.exe
+	build/sim_filtered_path_test $(TEST_GAME_DIR)/game.exe $(TEST_GAME_DIR)/gamemd.exe
 
 build/sim_filtered_path_test: build/native/src/sim/test_filtered_path.o build/native/src/sim/path.o build/native/src/sim/path_smoothing.o build/native/src/sim/cell_entry.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
@@ -238,21 +239,21 @@ build/sim_local_reachability_test: build/native/src/sim/test_local_reachability.
 
 .PHONY: sim-search-memory
 sim-search-memory: build/sim_search_memory_test
-	build/sim_search_memory_test ../game/game.exe ../game/gamemd.exe
+	build/sim_search_memory_test $(TEST_GAME_DIR)/game.exe $(TEST_GAME_DIR)/gamemd.exe
 
 build/sim_search_memory_test: build/native/src/sim/test_search_memory.o build/native/src/sim/search_memory.o build/native/src/sim/path.o build/native/src/sim/path_smoothing.o build/native/src/sim/cell_entry.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 .PHONY: sim-foot-path
 sim-foot-path: build/sim_foot_path_test
-	build/sim_foot_path_test ../game/game.exe ../game/gamemd.exe
+	build/sim_foot_path_test $(TEST_GAME_DIR)/game.exe $(TEST_GAME_DIR)/gamemd.exe
 
 build/sim_foot_path_test: build/native/src/sim/test_foot_path.o build/native/src/sim/foot_path.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 .PHONY: sim-nearest-cell
 sim-nearest-cell: build/sim_nearest_cell_test
-	build/sim_nearest_cell_test ../game/game.exe ../game/gamemd.exe
+	build/sim_nearest_cell_test $(TEST_GAME_DIR)/game.exe $(TEST_GAME_DIR)/gamemd.exe
 
 build/sim_nearest_cell_test: build/native/src/sim/test_nearest_cell.o build/native/src/sim/nearest_cell.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
@@ -266,7 +267,7 @@ build/sim_cell_projection_test: build/native/src/sim/test_cell_projection.o buil
 
 .PHONY: sim-nearest-projection
 sim-nearest-projection: build/sim_nearest_projection_test
-	build/sim_nearest_projection_test ../game/game.exe ../game/gamemd.exe
+	build/sim_nearest_projection_test $(TEST_GAME_DIR)/game.exe $(TEST_GAME_DIR)/gamemd.exe
 
 build/sim_nearest_projection_test: build/native/src/sim/test_nearest_projection.o build/native/src/sim/nearest_cell.o build/native/src/sim/cell_projection.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
@@ -287,7 +288,7 @@ build/sim_rectangle_fit_test: build/native/src/sim/test_rectangle_fit.o build/na
 
 .PHONY: sim-nearest-fit
 sim-nearest-fit: build/sim_nearest_fit_test
-	build/sim_nearest_fit_test ../game/game.exe ../game/gamemd.exe
+	build/sim_nearest_fit_test $(TEST_GAME_DIR)/game.exe $(TEST_GAME_DIR)/gamemd.exe
 
 build/sim_nearest_fit_test: build/native/src/sim/test_nearest_fit.o build/native/src/sim/nearest_cell.o build/native/src/sim/cell_fit.o build/native/src/sim/cell_projection.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
@@ -370,7 +371,7 @@ build/sim_production_test: build/native/src/sim/test_production.o build/native/s
 
 .PHONY: session
 session: build/session_test
-	build/session_test ../game
+	build/session_test $(TEST_GAME_DIR)
 
 build/session_test: $(SESSION_OBJECTS) build/native/src/session/test_main.o build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/rules/ini_file.o $(FS_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@
@@ -380,17 +381,17 @@ build/session_test: $(SESSION_OBJECTS) build/native/src/session/test_main.o buil
 session-world: build/session_world_overlay_profiles_cases build/session_world_overlay_shape_cases build/session_world_overlay_rules_cases build/session_world_house_updates_cases build/session_world_setup_test build/session_world_unit_flags_test build/session_world_movement_zone_test build/session_world_speed_type_test build/session_world_cell_setup_test build/session_world_snapshot_test build/session_world_map_test build/session_world_target_tile_test build/session_world_cell_occupancy_cases build/session_world_bridge_cases
 	build/session_world_snapshot_test
 	build/session_world_house_updates_cases > /dev/null
-	build/session_world_overlay_rules_cases ../game > /dev/null
-	build/session_world_overlay_shape_cases ../game > /dev/null
-	build/session_world_overlay_profiles_cases ../game
-	build/session_world_setup_test ../game
+	build/session_world_overlay_rules_cases $(TEST_GAME_DIR) > /dev/null
+	build/session_world_overlay_shape_cases $(TEST_GAME_DIR) > /dev/null
+	build/session_world_overlay_profiles_cases $(TEST_GAME_DIR)
+	build/session_world_setup_test $(TEST_GAME_DIR)
 	build/session_world_speed_type_test
 	build/session_world_movement_zone_test
 	build/session_world_unit_flags_test
 	build/session_world_cell_setup_test
-	build/session_world_map_test ../game
-	build/session_world_target_tile_test ../game
-	build/session_world_target_tile_test ../game --stage
+	build/session_world_map_test $(TEST_GAME_DIR)
+	build/session_world_target_tile_test $(TEST_GAME_DIR)
+	build/session_world_target_tile_test $(TEST_GAME_DIR) --stage
 	build/session_world_cell_occupancy_cases > /dev/null
 	build/session_world_bridge_cases > /dev/null
 
@@ -447,8 +448,8 @@ build/session_world_target_tile_test: build/native/src/session/world/target_tile
 
 .PHONY: session-terrain
 session-terrain: build/session_terrain_test
-	build/session_terrain_test ../game
-	build/session_terrain_test ../game --yuri C1A02MD.MAP
+	build/session_terrain_test $(TEST_GAME_DIR)
+	build/session_terrain_test $(TEST_GAME_DIR) --yuri C1A02MD.MAP
 
 build/session_terrain_test: $(SESSION_OBJECTS) build/native/src/session/real_terrain_test.o build/native/src/sim/test_inputs.o $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
@@ -492,7 +493,7 @@ build/session_mission_cases: build/native/src/session/session.o build/native/src
 
 .PHONY: combat-runtime
 combat-runtime: build/combat_runtime_regression
-	build/combat_runtime_regression ../game/game.exe
+	build/combat_runtime_regression $(TEST_GAME_DIR)/game.exe
 
 build/combat_runtime_regression: build/native/src/weapons/combat_runtime_regression.o $(COMBAT_RUNTIME_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@
@@ -502,9 +503,9 @@ build/weapons_%_cases: build/native/src/weapons/%_test.o $(COMBAT_RUNTIME_OBJECT
 
 .PHONY: weapons
 weapons: build/weapons_test build/weapons_asset_test build/weapons_lobber_asset_test
-	build/weapons_test
-	build/weapons_asset_test ../game
-	build/weapons_lobber_asset_test ../game
+	RA2_GAME_DIR=$(TEST_GAME_DIR) build/weapons_test
+	build/weapons_asset_test $(TEST_GAME_DIR)
+	build/weapons_lobber_asset_test $(TEST_GAME_DIR)
 
 build/weapons_test: build/native/src/weapons/weapons.o build/native/src/weapons/test_main.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
@@ -534,7 +535,7 @@ build/weapons_object_damage_path_test: build/native/src/weapons/object_damage_pa
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 scene: build/scene_test
-	build/scene_test ../game ../analysis/extracted/maps/2PEAKS.MAP
+	build/scene_test $(TEST_GAME_DIR) ../analysis/extracted/maps/2PEAKS.MAP
 
 build/scene_test: build/native/src/app/scene.o build/native/src/app/vehicle_art.o build/native/src/app/terrain_inputs.o build/native/src/app/test_scene.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
 	mkdir -p build
@@ -542,20 +543,20 @@ build/scene_test: build/native/src/app/scene.o build/native/src/app/vehicle_art.
 
 .PHONY: base-move
 base-move: build/base_move_test
-	build/base_move_test ../game
+	build/base_move_test $(TEST_GAME_DIR)
 
 build/base_move_test: build/native/src/app/scene.o build/native/src/app/vehicle_art.o build/native/src/app/terrain_inputs.o build/native/src/app/test_base_move.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 .PHONY: world-maps
 world-maps: build/world_maps_test
-	build/world_maps_test ../game
+	build/world_maps_test $(TEST_GAME_DIR)
 
 build/world_maps_test: build/native/src/app/terrain_inputs.o build/native/src/app/test_world_maps.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 terrain-inputs: build/terrain_inputs_test
-	build/terrain_inputs_test ../game ../analysis/extracted/maps/2PEAKS.MAP
+	build/terrain_inputs_test $(TEST_GAME_DIR) ../analysis/extracted/maps/2PEAKS.MAP
 
 build/terrain_inputs_test: build/native/src/app/terrain_inputs.o build/native/src/app/test_terrain_inputs.o build/native/src/sim/floor.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
 	mkdir -p build
@@ -579,19 +580,19 @@ human-input-check: native
 	tools/test_human_input.sh $(abspath build/ra2-native) $(FEATURE_GAME_DIR)
 
 skirmish-check: native skirmish-tests
-	build/ra2-native --game-dir ../game --skirmish --headless --frames 3
-	build/ra2-native --game-dir ../game --skirmish --headless --autoplay --frames 12000
+	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --frames 3
+	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --autoplay --frames 12000
 
 skirmish-tests: build/battle_help_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test
 	build/battle_help_test
-	build/battle_cursor_test ../game
-	build/battle_hud_test ../game
+	build/battle_cursor_test $(TEST_GAME_DIR)
+	build/battle_hud_test $(TEST_GAME_DIR)
 	build/battle_orders_test
-	build/prototype_production_test ../game
-	build/prototype_combat_test ../game
+	build/prototype_production_test $(TEST_GAME_DIR)
+	build/prototype_combat_test $(TEST_GAME_DIR)
 	build/prototype_victory_test
-	build/prototype_ai_test ../game
-	build/prototype_infantry_test ../game
+	build/prototype_ai_test $(TEST_GAME_DIR)
+	build/prototype_infantry_test $(TEST_GAME_DIR)
 
 build/battle_hud_test: build/native/src/app/test_battle_hud.o build/native/src/app/battle_hud.o $(FS_OBJECTS) $(GFX_OBJECTS) build/native/src/rules/ini_file.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
@@ -621,7 +622,7 @@ build/prototype_infantry_test: build/native/src/sim/test_prototype_infantry.o bu
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 catalog: build/catalog_test
-	build/catalog_test ../game ../analysis/extracted/maps
+	build/catalog_test $(TEST_GAME_DIR) ../analysis/extracted/maps
 
 build/catalog_test: build/native/src/render/catalog_test.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
 	mkdir -p build
@@ -724,10 +725,10 @@ build/sim_production_runtime_test: build/native/src/sim/test_production_runtime.
 
 .PHONY: sim-goal-runtime sim-goal-runtime-real sim-live-cell-setup sim-unit-visibility
 sim-goal-runtime: build/sim_goal_runtime_test
-	build/sim_goal_runtime_test ../game/game.exe
+	build/sim_goal_runtime_test $(TEST_GAME_DIR)/game.exe
 
 sim-goal-runtime-real: build/sim_goal_runtime_real_test
-	build/sim_goal_runtime_real_test ../game
+	build/sim_goal_runtime_real_test $(TEST_GAME_DIR)
 
 sim-live-cell-setup: build/sim_live_cell_setup_test
 	build/sim_live_cell_setup_test

@@ -18,8 +18,12 @@ struct TransitionFixture {
         point={static_cast<std::uint16_t>(next()),static_cast<std::uint16_t>(next())};
         tolerance=int(next()%5)-1;start=next()%5;
         for (unsigned i=0;i<6;++i) {
-            auto first=component_add(point,int(next()%9)-4,int(next()%9)-4);
-            auto second=component_add(first,int(next()%7)-3,int(next()%7)-3);
+            const int first_x=int(next()%9)-4;
+            const int first_y=int(next()%9)-4;
+            auto first=component_add(point,first_x,first_y);
+            const int second_x=int(next()%7)-3;
+            const int second_y=int(next()%7)-3;
+            auto second=component_add(first,second_x,second_y);
             if (seed%4==0 || i==3) {
                 if (seed&4) {first=component_add(point,-1,0);second=component_add(point,2,int(seed%7)-3);}
                 else {first=component_add(point,0,-1);second=component_add(point,0,2);}
