@@ -14,7 +14,7 @@ public:
     void tick(session::world::Snapshot& world, std::uint32_t frame);
     int load(std::uint32_t miner) const;
 private:
-    struct Cargo { int bails=0, credits=0; std::uint32_t next=0; bool returning=false; };
+    struct Cargo { int bails=0, credits=0; std::uint32_t next=0; bool returning=false; std::optional<ra2map::Cell> target; };
     struct Resource { std::string section; int first_overlay=-1; int growth=1, interval=1; };
     std::vector<Resource> resources_;
     // Live OverlayType index to resource index, or -1. The first resource
