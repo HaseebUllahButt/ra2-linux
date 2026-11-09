@@ -1,6 +1,7 @@
 #include "prototype_movement.h"
 #include <algorithm>
 #include <cstdint>
+#include <cmath>
 #include <cstdlib>
 #include <map>
 #include <utility>
@@ -95,6 +96,160 @@ GroupRun drive_group(sw::Snapshot& world,PrototypeMovement& movement,const std::
     run.all_arrived=pending.empty();
     return run;
 }
+
+rules::IniFile test_rules() {
+    rules::IniFile ini;
+    ini.parse(
+        "[General]\nCloseEnough=2.25\nBlockagePathDelay=60\nTrackedUphill=1.0\nTrackedDownhill=1.2\n"
+        "[AudioVisual]\nConditionYellow=50%\n"
+        "[Clear]\nFoot=100%\nTrack=100%\nWheel=100%\n"
+        "[Tiberium]\nFoot=90%\nTrack=70%\nWheel=50%\n"
+        "[Beach]\nFoot=0%\nTrack=0%\nWheel=0%\n"
+        "[MTNK]\nLocomotor={4A582741-9839-11d1-B709-00A024DDAFD1}\nSpeed=7\nROT=5\nAccelerates=false\nCrusher=yes\nStrength=300\n"
+        "[ACCEL]\nLocomotor={4A582741-9839-11d1-B709-00A024DDAFD1}\nSpeed=7\nStrength=300\n"
+        "[SLOW]\nLocomotor={4A582741-9839-11d1-B709-00A024DDAFD1}\nSpeed=7\nROT=1\nAccelerates=false\n"
+        "[E1]\nCrushable=yes\n[SHK]\nCrushable=no\n");
+    return ini;
+}
+void put(sw::Snapshot& world,std::uint32_t id,const char* type,sw::Kind kind,std::uint32_t house,int x,int y,int facing=64) {
+    place(world,id,x,y);auto& e=world.entities.back();e.type=type;e.kind=kind;e.house_id=house;e.hull_facing=facing;
+    if (kind==sw::Kind::Unit) e.maximum_hp=300,e.resolved_hp=300;
+}
+// Frames until a Unit reaches goal, or zero.
+unsigned run_to(sw::Snapshot& world,PrototypeMovement& movement,std::uint32_t id,ra2map::Cell goal,unsigned limit,PrototypeMoveResult* all=nullptr) {
+    require(movement.issue(world,id,goal,17).status==PrototypeMoveStatus::Complete,"order rejected");
+    for (std::uint32_t frame=1;frame<=limit;++frame) {
+        const auto r=movement.tick(world,frame);
+        require(r.status==PrototypeMoveStatus::Complete,"frame failed");
+        if (all) all->crushed.insert(all->crushed.end(),r.crushed.begin(),r.crushed.end());
+        for (const auto a:r.arrived) if (a==id) return frame;
+    }
+    return 0;
+}
+const sw::Entity& unit(const sw::Snapshot& w,std::uint32_t id) {
+    for (const auto& e:w.entities) if (e.id==id) return e;
+    throw std::runtime_error("missing Unit");
+}
+void original_rules_tests() {
+    const auto rules=test_rules();
+    {
+        // 004A2670: Ground[Tiberium].Track is 70%, so speed 17 becomes
+        // int(17*0.7)=11 a frame. The original drive takes 149 frames for
+        // 10 Cells at speed 11 (97 on clear ground).
+        auto world=field(30,12);PrototypeMovement movement;movement.use_rules(rules);
+        for (int x=6;x<=15;++x) world.cells.at(key(x,6)).terrain->land_type=5;
+        put(world,901,"MTNK",sw::Kind::Unit,1,5,6);
+        const auto frames=run_to(world,movement,901,{15,6},400);
+        std::cout<<"ore 10 Cells frames="<<frames<<'\n';
+        require(frames==149,"ore did not slow a tracked tank like the original");
+    }
+    {
+        // 005D4540 at or below ConditionYellow (50%): speed times 0.75, 12.
+        auto world=field(30,12);PrototypeMovement movement;movement.use_rules(rules);
+        put(world,902,"MTNK",sw::Kind::Unit,1,5,6);world.entities.back().resolved_hp=150;
+        const auto frames=run_to(world,movement,902,{15,6},400);
+        std::cout<<"damaged 10 Cells frames="<<frames<<'\n';
+        require(frames==137,"a damaged tank did not slow like the original");
+    }
+    {
+        // 004A2670 waits until the hull faces the first step exactly, and
+        // 004B8E90 turns ROT*256 of 65536 a frame. A ROT 5 tank facing east
+        // turns 180 degrees in 26 frames (the oracle: 1.2 to 1.7 s).
+        auto world=field(30,12);PrototypeMovement movement;movement.use_rules(rules);
+        put(world,903,"MTNK",sw::Kind::Unit,1,15,6,64);
+        require(movement.issue(world,903,{5,6},17).status==PrototypeMoveStatus::Complete,"reverse order failed");
+        unsigned turned=0;
+        for (std::uint32_t frame=1;frame<60;++frame) {
+            require(movement.tick(world,frame).status==PrototypeMoveStatus::Complete,"turn frame failed");
+            if (unit(world,903).position->x!=15*256+128) { turned=frame-1;break; }
+        }
+        std::cout<<"reverse turn frames="<<turned<<'\n';
+        require(turned==26 && *unit(world,903).hull_facing_raw==0xC000,"tank did not turn in place at its ROT");
+        // Without rules a tank turns at once (old behaviour) - the profile matters.
+        auto plain=field(30,12);PrototypeMovement instant;place(plain,904,15,6);
+        require(instant.issue(plain,904,{5,6},17).status==PrototypeMoveStatus::Complete &&
+                instant.tick(plain,1).status==PrototypeMoveStatus::Complete && plain.entities[0].position->x<15*256+128,
+                "a tank without rules waited to turn");
+    }
+    {
+        // 004A1000 with Accelerates (default yes): the speed fraction rises
+        // by AccelerationFactor 0.03 a frame from zero, and falls by
+        // Speed*DeaccelerationFactor inside SlowdownDistance to at least 0.3.
+        auto world=field(40,12);PrototypeMovement movement;movement.use_rules(rules);
+        put(world,905,"ACCEL",sw::Kind::Unit,1,5,6);
+        require(movement.issue(world,905,{30,6},17).status==PrototypeMoveStatus::Complete,"acceleration order failed");
+        require(movement.tick(world,1).status==PrototypeMoveStatus::Complete,"acceleration frame failed");
+        require(std::abs(movement.motion(905)->speed-0.03)<1e-9,"acceleration did not start at 0.03");
+        for (std::uint32_t frame=2;frame<=40;++frame) movement.tick(world,frame);
+        require(movement.motion(905)->speed==1.0,"acceleration did not reach full speed");
+        double low=1.0;unsigned frames=0;
+        for (std::uint32_t frame=41;frame<=600 && movement.moving(905);++frame) {
+            movement.tick(world,frame);frames=frame;
+            if (movement.motion(905)->stepping) low=std::min(low,movement.motion(905)->speed);
+        }
+        std::cout<<"accelerating 25 Cells frames="<<frames<<" lowest speed="<<low<<'\n';
+        require(!movement.moving(905) && std::abs(low-0.30000001192092896)<1e-9,"deceleration did not stop at 0.3");
+    }
+    {
+        // 00705160: a Crusher kills enemy crushable Infantry in the Cell it
+        // enters. A friendly or a Crushable=no soldier still blocks.
+        auto world=field(30,12);PrototypeMovement movement;movement.use_rules(rules);
+        put(world,906,"MTNK",sw::Kind::Unit,1,5,6);
+        put(world,907,"E1",sw::Kind::Infantry,2,8,6);
+        PrototypeMoveResult all;
+        const auto frames=run_to(world,movement,906,{10,6},200,&all);
+        require(frames && all.crushed.size()==1 && all.crushed[0]==907 &&
+                unit(world,907).lifetime==sw::Lifetime::Destroyed && same_cell(*unit(world,906).cell,{10,6}) &&
+                world.cells.at(key(8,6)).heads->ground_head==0,"tank did not crush enemy infantry on its path");
+        auto spared=field(30,12);PrototypeMovement other;other.use_rules(rules);
+        put(spared,908,"MTNK",sw::Kind::Unit,1,5,6);
+        put(spared,909,"E1",sw::Kind::Infantry,1,8,6);
+        put(spared,910,"SHK",sw::Kind::Infantry,2,8,5);put(spared,911,"SHK",sw::Kind::Infantry,2,8,7);
+        PrototypeMoveResult none;
+        run_to(spared,other,908,{10,6},300,&none);
+        require(none.crushed.empty() && unit(spared,909).lifetime==sw::Lifetime::Placed &&
+                unit(spared,910).lifetime==sw::Lifetime::Placed,"tank crushed a friend or a Crushable=no soldier");
+    }
+    {
+        // Ground cost zero (Beach for Track) cannot be entered.
+        auto world=field(30,12);PrototypeMovement movement;movement.use_rules(rules);
+        for (int y=1;y<=12;++y) if (y!=2) world.cells.at(key(10,y)).terrain->land_type=6;
+        put(world,912,"MTNK",sw::Kind::Unit,1,5,6);
+        require(run_to(world,movement,912,{15,6},400),"tank found no way around the beach");
+        // It crossed at row 2 only.
+        require(same_cell(*unit(world,912).cell,{15,6}),"tank did not reach its goal past the beach");
+    }
+    {
+        // Two tanks drive into the same Cell from both sides. The first
+        // claims both Cells of its step; the second waits and then stops
+        // short (CloseEnough). They never overlap: the old code let both
+        // start and left one on the shared Cell edge.
+        auto world=field(30,12);PrototypeMovement movement;
+        place(world,913,5,6);place(world,914,7,6);
+        const auto run=drive_group(world,movement,{{913,{6,6}},{914,{6,6}}},17,200);
+        std::cout<<"same goal closest="<<run.closest<<'\n';
+        require(run.all_arrived && run.closest>=256,"two tanks met on one Cell edge");
+    }
+    {
+        // BlockagePathDelay (60 frames): a tank waits behind a moving Unit
+        // that has not stalled before it plans around. The blocker turns
+        // slowly in place (ROT 1: 128 frames for half a turn) in a corridor.
+        auto world=field(30,12);PrototypeMovement movement;movement.use_rules(rules);
+        for (int x=8;x<=12;++x) world.cells.at(key(x,5)).ground_occupancy_124=1,world.cells.at(key(x,7)).ground_occupancy_124=1;
+        put(world,915,"SLOW",sw::Kind::Unit,1,8,6,192);
+        put(world,916,"SLOW",sw::Kind::Unit,1,7,6,64);
+        require(movement.issue(world,915,{12,6},17).status==PrototypeMoveStatus::Complete &&
+                movement.issue(world,916,{13,6},17).status==PrototypeMoveStatus::Complete,"blockage orders failed");
+        unsigned left=0;
+        for (std::uint32_t frame=1;frame<200;++frame) {
+            require(movement.tick(world,frame).status==PrototypeMoveStatus::Complete,"blockage frame failed");
+            if (unit(world,916).position->x!=7*256+128 || unit(world,916).position->y!=6*256+128 ||
+                unit(world,916).hull_facing.value_or(0)!=64) { left=frame;break; }
+        }
+        std::cout<<"blocked tank left after frames="<<left<<'\n';
+        require(left>60,"a tank planned around a moving blocker before BlockagePathDelay");
+    }
+}
 }
 int main() try {
     auto idle_world=fixture();PrototypeMovement idle;
@@ -162,7 +317,13 @@ int main() try {
             cancel_test.tick(canceled,0).status==PrototypeMoveStatus::Complete && canceled.entities[0].locomotor_moving==true,
             "prototype moving flag did not start");
     cancel_test.cancel(canceled,101);
-    require(!cancel_test.moving(101) && canceled.entities[0].locomotor_moving==false,"prototype cancel did not stop activity");
+    // The original drive finishes its current track after a stop: the tank
+    // ends on a Cell center, then stops.
+    require(!cancel_test.moving(101),"prototype cancel kept the order");
+    for (std::uint32_t frame=1;frame<40;++frame)
+        require(cancel_test.tick(canceled,frame).status==PrototypeMoveStatus::Complete,"canceled step failed");
+    require(canceled.entities[0].locomotor_moving==false && canceled.entities[0].position->x%256==128 &&
+            canceled.entities[0].position->y%256==128,"prototype cancel did not stop on a Cell center");
     auto obstacle=original;PrototypeMovement blocked;
     require(blocked.issue(obstacle,101,{6,2},64).status==PrototypeMoveStatus::Complete,"prototype did not choose an open nearby Cell");
     require(blocked.issue(obstacle,101,{10,2},0).status==PrototypeMoveStatus::Invalid,"unknown speed was invented");
@@ -194,7 +355,13 @@ int main() try {
         // tanks came 94 units apart. Corner waits cost a few frames.
         require(run.all_arrived && run.frames<=500 && run.closest>=181,"group of 8 was slow to reach its goals");
         require(run.worst_retreat<=1,"a group Unit drove back away from its goal");
-        for (std::uint32_t i=0;i<8;++i) require(same_cell(*world.entities[i].cell,goals[i]),"group Unit stopped away from its own goal");
+        // 004A2670: a blocked tank less than CloseEnough (2.25 Cells) from
+        // its goal ends its move there.
+        for (std::uint32_t i=0;i<8;++i) {
+            const auto c=*world.entities[i].cell;
+            const auto dx=(int(c.x)-int(goals[i].x))*256,dy=(int(c.y)-int(goals[i].y))*256;
+            require(dx*dx+dy*dy<576*576,"group Unit stopped away from its own goal");
+        }
     }
     {
         // Two tanks drive head-on along one row. Each waits or steps
@@ -255,12 +422,21 @@ int main() try {
                 "mover stopped off-center beside a held goal");
     }
     {
-        // Speed: 10 straight Cells at 17 units a frame is 2560/17, so 151
-        // frames. The old code stopped at each Cell center: 160 frames.
-        auto world=field(30,12);PrototypeMovement movement;place(world,501,5,6);
-        const auto run=drive_group(world,movement,{{501,{15,6}}},17,400);
-        std::cout<<"single tank 10 Cells frames="<<run.frames<<'\n';
-        require(run.all_arrived && run.frames==151,"a tank lost speed at Cell centers");
+        // Speed: the original drive spends 7 speed units on each track
+        // sample: 24 samples a straight Cell, 32 a diagonal one (004A1000,
+        // 004B0F20). DriveSegment over the original game.exe tables gives
+        // these frame counts for 10 Cells. The old code moved 17 world
+        // units a frame and took 151 frames (straight, speed 17).
+        struct Case { int speed;bool diagonal;unsigned frames; };
+        for (const auto& c:{Case{17,false,97},Case{15,false,110},Case{17,true,134},Case{15,true,152}}) {
+            auto world=field(30,20);PrototypeMovement movement;place(world,501,5,6);
+            if (c.diagonal) world.entities[0].hull_facing=96;
+            const ra2map::Cell goal{15,static_cast<std::uint16_t>(c.diagonal?16:6)};
+            const auto run=drive_group(world,movement,{{501,goal}},c.speed,400);
+            std::cout<<"single tank 10 Cells speed="<<c.speed<<" diagonal="<<c.diagonal<<" frames="<<run.frames<<'\n';
+            require(run.all_arrived && run.frames==c.frames,"tank speed differs from the original drive");
+        }
     }
+    original_rules_tests();
     std::cout<<"prototype routed 3 Units around obstacles in "<<frames<<" shared frames; replay and atomic rejection passed\n";
 } catch(const std::exception& e) { std::cerr<<e.what()<<'\n';return 1; }
