@@ -1,93 +1,118 @@
 #pragma once
-// Original campaign flow: the battle.ini campaign list, one loaded mission
-// map, and the step to the next mission after a win.
+// Campaign flow: lists the Allied and Soviet missions, loads one mission map
+// with its briefing text and movies, and finds the next mission after a win.
+// Data: BATTLE.INI (campaign list), MISSION.INI (briefing label per map),
+// the mission map [Basic] section (movies, next map) and the CSF string table.
 
-#include "../../text/csf.h"
+#include "../text/csf.h"
+#include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ra2::rules { class IniFile; }
 
 namespace ra2::ui {
 
-// One row of the original [Battles] list with its resolved menu text.
+enum class CampaignSide { Allied, Soviet, Training, Other };
+
+// One row of the BATTLE.INI [Battles] list.
 struct CampaignEntry {
-    int index = 0;               // Original 1-based [Battles] position.
+    int index = 0;               // 1-based position in [Battles].
     std::string id;              // Section name, e.g. "ALL1".
+    CampaignSide side = CampaignSide::Other;
     std::string scenario;        // First mission map file.
-    std::string description;     // Resolved Description text.
-    std::string final_movie;     // Finale movie after the last win.
+    std::string description;     // Description text from the CSF table.
+    std::string final_movie;     // Movie after the last win.
     int cd = 0;                  // Required CD, -1 means any CD.
-    bool debug_only = false;     // Original DebugOnly flag.
+    bool debug_only = false;     // Hidden in the shipped menu.
 };
 
-// One loaded mission: the map, its briefing text and the movies around it.
+// One mission from MISSION.INI, in file order (ALL01T.MAP ... SOV12S.MAP).
+struct MissionListing {
+    std::string scenario;        // Map file name, e.g. "ALL01T.MAP".
+    CampaignSide side = CampaignSide::Other;
+    int number = 0;              // Mission number, 1-based (ALL01 = 1).
+    std::string name;            // UIName text.
+    std::string briefing;        // Briefing text.
+};
+
+// One loaded mission map with its briefing and movies.
 struct CampaignMission {
     std::string battle_id;       // Owning campaign id, e.g. "ALL1".
-    std::string scenario;        // Map file name, e.g. "ALL01t.MAP".
-    std::string briefing;        // Resolved Briefing text.
-    std::string briefing_key;    // Raw Briefing value, e.g. "Brief:ALL01".
-    std::string intro_movie;     // Basic Intro movie.
-    std::string brief_movie;     // Basic Brief movie.
-    std::string win_movie;       // Basic Win movie.
-    std::string lose_movie;      // Basic Lose movie.
-    std::string post_score;      // Basic PostScore movie.
-    std::string next_scenario;   // Basic NextScenario.
-    std::string alt_next_scenario; // Basic AltNextScenario.
-    bool official = false;       // Basic Official flag.
-    bool end_of_game = false;    // Basic EndOfGame flag.
+    std::string scenario;        // Map file name.
+    CampaignSide side = CampaignSide::Other;
+    int number = 0;
+    std::string name;            // UIName text.
+    std::string briefing;        // Briefing text.
+    std::string intro_movie;     // Played before the briefing.
+    std::string brief_movie;     // Played during the briefing.
+    std::string action_movie;    // Played when the mission starts.
+    std::string win_movie;
+    std::string lose_movie;
+    std::string post_score;      // Played after the score screen.
+    std::string next_scenario;   // From the map; empty when the map has none.
+    std::string alt_next_scenario;
+    bool end_of_game = false;
+    std::string map_text;        // Raw map document for the world loader.
 };
 
-// Game file lookup by name. MixFileSystem::read_file has this shape, so a
-// mounted filesystem binds without a wrapper.
+// Movie names to play before a mission, in order. Empty and "<none>" names
+// are dropped.
+std::vector<std::string> movies_before(const CampaignMission& mission);
+
 using CampaignFileReader =
     std::function<std::optional<std::vector<std::uint8_t>>(std::string_view)>;
 
-// Ordered [Battles] rows of the given battle.ini document. Rows whose
-// section or Scenario value is missing are skipped, like the original
-// campaign dialog. Descriptions keep the raw value; no CSF is read here.
-std::vector<CampaignEntry> load_campaigns(const rules::IniFile& battle_ini);
+std::vector<CampaignEntry> load_campaigns(const rules::IniFile& battle_ini,
+                                          const ra2text::CsfFile& strings);
 
-// Parses one mission map document. `battle_id` marks the owning campaign.
-// The briefing text is the resolved [Basic] Briefing CSF label; the movie
-// fields copy the [Basic] Intro, Brief, Win, Lose, Action and PostScore
-// values. Throws std::runtime_error when the document has no [Basic] section.
+// Allied and Soviet missions from MISSION.INI, in original order. Training
+// and co-op maps are not listed.
+std::vector<MissionListing> list_missions(const rules::IniFile& mission_ini,
+                                          const ra2text::CsfFile& strings,
+                                          CampaignSide side);
+
+// Parses one mission map. Throws std::runtime_error without [Basic].
 CampaignMission parse_campaign_mission(const std::string& battle_id,
     const std::string& scenario, std::string_view map_text,
-    const ra2text::CsfFile& strings);
+    const rules::IniFile& mission_ini, const ra2text::CsfFile& strings);
 
-// Drives one campaign: select, load, win, next mission.
 class CampaignFlow {
 public:
-    CampaignFlow(std::vector<CampaignEntry> campaigns, ra2text::CsfFile strings,
-                 CampaignFileReader read_map);
+    CampaignFlow(std::vector<CampaignEntry> campaigns, rules::IniFile mission_ini,
+                 ra2text::CsfFile strings, CampaignFileReader read_map);
+    ~CampaignFlow();
+    CampaignFlow(CampaignFlow&&) noexcept;
+    CampaignFlow& operator=(CampaignFlow&&) noexcept;
 
     const std::vector<CampaignEntry>& campaigns() const noexcept { return campaigns_; }
 
-    // Chooses a campaign by id, case-insensitive like the original section
-    // lookup. Returns false when no campaign carries that id.
-    bool select(const std::string& id) noexcept;
+    // Picks a campaign by id (case-insensitive). False when unknown.
+    bool select(const std::string& id);
 
-    // Reads the selected campaign's current mission map and briefing.
-    // Throws std::runtime_error when no campaign is selected or the map is
-    // missing or has no [Basic] section.
+    // Loads the first map of the selected campaign. Throws std::runtime_error
+    // when nothing is selected or the map is missing.
     const CampaignMission& load_mission();
-
-    // Loaded mission of the selected campaign. Throws std::runtime_error
-    // before the first load_mission call.
     const CampaignMission& mission() const;
 
-    // On a win, moves to the next mission of the selected campaign. Returns
-    // false when the campaign has no next mission; the loaded mission stays.
-    bool advance_on_win();
+    // Name of the map that follows after a win; empty at the campaign end.
+    // Uses the map NextScenario. TODO-ORIGINAL AltNextScenario branch
+    // (original picks it by a mission flag the map script sets).
+    std::string next_scenario() const;
 
-    // True after a win on a mission without a next scenario.
+    // After a win: loads the next map. False at the campaign end (finished()
+    // becomes true and the current mission stays).
+    bool advance_on_win();
     bool finished() const noexcept { return finished_; }
 
 private:
+    CampaignMission load_map(const std::string& scenario) const;
     std::vector<CampaignEntry> campaigns_;
+    std::unique_ptr<rules::IniFile> mission_ini_;
     ra2text::CsfFile strings_;
     CampaignFileReader read_map_;
     std::optional<std::size_t> selected_;
