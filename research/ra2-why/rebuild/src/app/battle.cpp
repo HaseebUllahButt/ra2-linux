@@ -8,6 +8,7 @@
 #include "camera_scroll.h"
 #include "house_color.h"
 #include "battle_hud.h"
+#include "battle_building_tools.h"
 #include "battle_shroud.h"
 #include "battle_queue.h"
 #include "battle_score.h"
@@ -106,6 +107,8 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     sim::PrototypeMovement movement_;
     sim::PrototypeCombatRuntime combat_;
     sim::PrototypeEconomy economy_;
+    BattleBuildingTools building_tools_;
+    BuildingTool building_tool_=BuildingTool::None;
     sim::PrototypeAI ai_;
     sim::VictoryState victory_;
     sim::VictoryRules victory_rules_;
@@ -211,7 +214,7 @@ public:
          rules_(overlay_rules(overlay_rules(assets.rules(),assets.battle_rules()),assets.map_ini())),
          catalog_(p::Catalog::from(rules_,assets.art_ini(),assets.map_ini())),
          combat_(assets.rules(),assets.battle_rules(),assets.map_ini(),assets.art_ini(),
-                 (args.game_directory/"game.exe").string()),economy_(rules_),ai_(rules_),
+                 (args.game_directory/"game.exe").string()),economy_(rules_),building_tools_(rules_,assets.art_ini()),ai_(rules_),
          window_(window),scene_(scene),terrain_(terrain),geometry_(render::MapGeometry::from_ini(assets.map_ini())),
          clock_(clock),player_(world_.houses.at(0).id),enemy_(world_.houses.at(1).id),orders_(player_),cursor_(files),effects_(files),
          audio_(files,rules_,player_,rules_.read_string(world_.houses.at(0).country,"Side")=="GDI"?"Allied":"Russian",
@@ -424,6 +427,17 @@ public:
     ra2map::Cell formation_cell(ra2map::Cell goal,std::uint32_t actor) {
         return reserve_formation_cell(world_,goal,actor,manual_moves_,move_destinations_);
     }
+    const w::Entity* tool_target(BattlePoint point) const {
+        const auto cell=cell_at(point);
+        for(const auto& e:world_.entities)if(live(e) && e.house_id==player_ && e.kind==w::Kind::Structure) {
+            if(cell)if(const auto* type=catalog_.find(e.type))
+                for(const auto offset:p::original_foundation_cells(type->placement.foundation))
+                    if(int(e.cell->x)+offset.x==cell->x && int(e.cell->y)+offset.y==cell->y)return &e;
+            if(const auto at=anchor(e))
+                if(std::abs(at->x-point.x)<=24 && std::abs(at->y-point.y)<=24)return &e;
+        }
+        return nullptr;
+    }
     void input(const Input& input) {
         if (input.kind==InputKind::Quit) {quit_=true;return;}
         if (input.kind==InputKind::Focus || input.kind==InputKind::Resize) {
@@ -442,6 +456,7 @@ public:
             if (input.pressed && input.key==SDLK_ESCAPE) {
                 orders_.cancel_input();keys_.clear();
                 if(options_.visible())options_.escape();
+                else if(building_tool_!=BuildingTool::None) {building_tool_=BuildingTool::None;status("");}
                 else if (!placement_.empty()&&!help_visible_) {placement_.clear();orders_.set_placement_active(false);status("");}
                 else if(help_visible_)help_visible_=false;
                 else if(victory_.settled())quit_=true;
@@ -494,6 +509,7 @@ public:
                 refresh_hud();
                 const auto action=hud_.handle_click(input.x,input.y,hud_state_);
                 if(action.kind==HudActionKind::Build && !victory_.settled()) {
+                    building_tool_=BuildingTool::None;
                     const auto* type=catalog_.find(action.type);
                     if(!type)return;
                     const p::FactoryState* product=nullptr;
@@ -536,10 +552,31 @@ public:
                     case CameoClick::None:break;
                     }
                 } else if(input.key==SDL_BUTTON_RIGHT)return;
-                else if(action.kind==HudActionKind::Deploy && !victory_.settled())deploy_selected();
+                else if(action.kind==HudActionKind::Options) {
+                    orders_.cancel_input();keys_.clear();options_.show();
+                }
+                else if((action.kind==HudActionKind::Repair || action.kind==HudActionKind::Sell) && !victory_.settled()) {
+                    const auto tool=action.kind==HudActionKind::Repair?BuildingTool::Repair:BuildingTool::Sell;
+                    building_tool_=building_tool_==tool?BuildingTool::None:tool;
+                    placement_.clear();orders_.set_placement_active(false);orders_.cancel_input();
+                    status(building_tool_==BuildingTool::None?"":building_tool_==BuildingTool::Repair?
+                        "Choose a building to repair. Right click cancels.":"Choose a building to sell. Right click cancels.");
+                }
+                else if(action.kind==HudActionKind::Deploy && !victory_.settled()) {building_tool_=BuildingTool::None;deploy_selected();}
                 else if (action.kind==HudActionKind::Minimap) {
                     pan(action.position.x-camera_x_-BattleHud::sidebar_x/2,
                         action.position.y-camera_y_-BattleHud::command_bar_y/2);
+                }
+            }
+            return;
+        }
+        if(building_tool_!=BuildingTool::None) {
+            if(input.kind==InputKind::Button && input.pressed) {
+                if(input.key==SDL_BUTTON_RIGHT) {building_tool_=BuildingTool::None;status("");}
+                else if(input.key==SDL_BUTTON_LEFT && !victory_.settled()) {
+                    if(const auto* target=tool_target({input.x,input.y}))
+                        queue({building_tool_==BuildingTool::Repair?OrderKind::Repair:OrderKind::Sell,player_,target->id,0,{},{}});
+                    else status("Choose one of your buildings.");
                 }
             }
             return;
@@ -724,10 +761,37 @@ public:
             require(orders_.selected_ids().size()>=2,"Human input: tank box selection failed");
             checkpoint(state,"05-selected");
             human_wait_frame_=state.frame_counter;
-            test_key(SDLK_ESCAPE);human_stage_=72;break;
+            const auto button=hud_.repair_bounds();
+            test_click(button.x+4,button.y+4);human_stage_=76;break;
+        }
+        case 76: {
+            require(building_tool_==BuildingTool::Repair,"Human input: Repair button did not select repair");
+            const auto* plant=own_type(power);require(plant,"Human input: power plant vanished");
+            const auto at=anchor(*plant);require(at.has_value(),"Human input: power plant has no anchor");
+            test_click(at->x,at->y);human_stage_=77;break;
+        }
+        case 77: {
+            const auto* plant=own_type(power);require(plant && !building_tools_.repairing(plant->id),
+                "Human input: full-health repair changed the building");
+            test_click(400,400,SDL_BUTTON_RIGHT);human_stage_=78;break;
+        }
+        case 78: {
+            require(building_tool_==BuildingTool::None,"Human input: right click did not cancel repair");
+            const auto button=hud_.sell_bounds();
+            test_click(button.x+4,button.y+4);human_stage_=79;break;
+        }
+        case 79: {
+            require(building_tool_==BuildingTool::Sell,"Human input: Sell button did not select sell");
+            test_key(SDLK_ESCAPE);human_stage_=85;break;
+        }
+        case 85: {
+            require(building_tool_==BuildingTool::None && !options_.visible(),"Human input: Esc did not cancel sell");
+            human_wait_frame_=state.frame_counter;
+            const auto button=hud_.options_bounds();
+            test_click(button.x+4,button.y+4);human_stage_=72;break;
         }
         case 72:
-            require(options_.page()==OptionsPage::Options,"Human input: Esc did not show pause options");
+            require(options_.page()==OptionsPage::Options,"Human input: sidebar did not show pause options");
             require(state.frame_counter==human_wait_frame_,"Human input: options did not pause play");
             require(options_art_.has_value(),"Human input: original options art is missing");
             checkpoint(state,"04b-options");
@@ -801,18 +865,24 @@ public:
             break;
         case 11:
             if(victory_.settled()) {
+                require(victory_.result==sim::Victory::PlayerWon,"Human input: scripted player lost the match");
                 require(show_score_&&score_image_,"Human input: result screen is missing");
                 checkpoint(state,"08-result");test_key(SDLK_TAB);human_camera_=camera_x_;
                 human_wait_frame_=state.frame_counter;
                 window_.inject_for_test({InputKind::Key,0,0,camera_x_>0?SDLK_LEFT:SDLK_RIGHT,true});
                 human_stage_=12;
             } else if(state.frame_counter%90==0&&!orders_.selected_ids().empty()) {
-                const auto* target=find(world_,human_target_);
-                if(!target||!live(*target)) {
-                    target=nullptr;
-                    for(const auto& e:world_.entities)if(live(e)&&e.house_id==enemy_) {
-                        human_target_=e.id;target=&e;break;
-                    }
+                const auto* source=find(world_,orders_.selected_ids().front());
+                const w::Entity* target=nullptr;
+                auto best=std::make_pair(3,std::numeric_limits<std::int64_t>::max());
+                for(const auto& e:world_.entities)if(live(e)&&is_enemy(e.house_id)&&source&&source->position) {
+                    const auto dx=std::int64_t(e.position->x)-source->position->x;
+                    const auto dy=std::int64_t(e.position->y)-source->position->y;
+                    // Finish armed vehicles, then the factories. Do not camp
+                    // at a barracks while it makes an endless stream of troops.
+                    const int priority=e.kind==w::Kind::Unit&&fighter(e)?0:e.kind==w::Kind::Structure?1:2;
+                    const auto score=std::make_pair(priority,dx*dx+dy*dy);
+                    if(score<best){best=score;target=&e;human_target_=e.id;}
                 }
                 // Continue through window input after winning the first fight.
                 // Remaining enemies can be outside the current camera view.
@@ -843,6 +913,17 @@ public:
         if (order.kind!=OrderKind::Build && order.kind!=OrderKind::Place &&
             (!e || !live(*e) || e->house_id!=order.house)) return;
         switch (order.kind) {
+        case OrderKind::Repair:
+        case OrderKind::Sell: {
+            const auto result=building_tools_.apply(world_,order.house,order.entity,
+                order.kind==OrderKind::Repair?BuildingTool::Repair:BuildingTool::Sell);
+            if(result.sold) {
+                factories_.power_dirty[order.house]=true;
+                power_health_.erase(order.entity);
+            }
+            if(order.house==player_)status(result.message);
+            break;
+        }
         case OrderKind::Move:
             if (miner(*e)) {status("Miners harvest automatically.");break;}
             combat_.stop(world_,order.entity);attacks_.erase(order.entity);
@@ -1104,6 +1185,7 @@ public:
         }
         // A producer can die during combat. Abandon its orphaned products
         // before checking defeat; production timers use this same frame.
+        building_tools_.tick(world_,frame);
         refresh_power_damage();
         const auto after_combat=proto::tick(world_,factories_,catalog_,frame);
         if(after_combat.status!=p::Status::Done)gaps_.insert(after_combat.detail);
@@ -1123,6 +1205,7 @@ public:
                 <<" moved="<<moved<<" fired="<<fired<<" impacts="<<impacts<<" built="<<built<<'\n';
         }
         if(victory_.settled()) {
+            building_tool_=BuildingTool::None;
             status_.set(result_name(victory_.result)+". Press Esc to return.",clock_.now_ms(),true);
             show_score_=true;
             score_->clock(clock_.now_ms(),false);
@@ -1149,7 +1232,8 @@ public:
         const auto& h=house(world_,player_);
         hud_state_.cash=h.cash.value_or(0);hud_state_.power_output=h.power_output.value_or(0);
         hud_state_.power_drain=h.power_drain.value_or(0);hud_state_.selected_labels.clear();
-        hud_state_.pointer_x=pointer_x_;hud_state_.pointer_y=pointer_y_;hud_state_.can_deploy=false;
+        hud_state_.pointer_x=pointer_x_;hud_state_.pointer_y=pointer_y_;hud_state_.building_tool=building_tool_;
+        hud_state_.can_deploy=false;
         for(const auto id:orders_.selected_ids())if(const auto* e=find(world_,id))
             if(live(*e)) {
                 hud_state_.selected_labels.push_back(name(e->type)+" "+std::to_string(e->resolved_hp.value_or(0)));
@@ -1294,7 +1378,11 @@ public:
                 passable=at!=world_.cells.end()&&at->second.unit_land_speed.value_or(0)>0&&
                     at->second.cell_flag_100!=true;
             }
-            if(!placement_.empty())kind=placement_legal?CursorKind::Deploy:CursorKind::NoGo;
+            if(building_tool_!=BuildingTool::None) {
+                const auto* target=tool_target({pointer_x_,pointer_y_});
+                kind=target && building_tools_.allowed(*target,player_,building_tool_)?CursorKind::Select:CursorKind::NoGo;
+            }
+            else if(!placement_.empty())kind=placement_legal?CursorKind::Deploy:CursorKind::NoGo;
             else if(hovered && hovered->house_id==player_)kind=
                 rules_.read_string(hovered->type,"DeploysInto").empty()?CursorKind::Select:CursorKind::Deploy;
             else if(!orders_.selected_ids().empty()) {

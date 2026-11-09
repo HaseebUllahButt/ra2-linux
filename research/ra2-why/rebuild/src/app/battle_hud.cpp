@@ -172,8 +172,27 @@ render::Rectangle BattleHud::choice_bounds(const HudState& s, const std::string&
     return {};
 }
 
+render::Rectangle BattleHud::options_bounds() const {
+    const auto at = hud_side_layout(art_.soviet()).options;
+    const auto* sprite = art_.sprite("optbtn.shp");
+    return {at.x, at.y, sprite ? sprite->width : 72, sprite ? sprite->height : 26};
+}
+render::Rectangle BattleHud::repair_bounds() const {
+    const auto at = hud_side_layout(art_.soviet()).repair;
+    const auto* sprite = art_.sprite("repair.shp");
+    return {at.x, at.y, sprite ? sprite->width : 64, sprite ? sprite->height : 31};
+}
+render::Rectangle BattleHud::sell_bounds() const {
+    const auto at = hud_side_layout(art_.soviet()).sell;
+    const auto* sprite = art_.sprite("sell.shp");
+    return {at.x, at.y, sprite ? sprite->width : 64, sprite ? sprite->height : 31};
+}
+
 HudAction BattleHud::handle_click(int x, int y, const HudState& s) const {
     settle(s);
+    if (inside(x, y, options_bounds())) return {HudActionKind::Options, {}, {}};
+    if (inside(x, y, repair_bounds())) return {HudActionKind::Repair, {}, {}};
+    if (inside(x, y, sell_bounds())) return {HudActionKind::Sell, {}, {}};
     for (int t = 0; t < 4; ++t) if (inside(x, y, tab_bounds(t))) {
         if (std::any_of(s.choices.begin(), s.choices.end(), [&](const auto& c) { return tab_of(c) == t; })) {
             active_tab_ = t; top_row_ = 0;
@@ -199,7 +218,7 @@ bool BattleHud::same_panel(const HudState& s) const {
     const auto& old = panel_state_;
     return panel_valid_ && panel_tab_ == active_tab_ && panel_row_ == top_row_ && old.cash == s.cash &&
         old.power_output == s.power_output && old.power_drain == s.power_drain &&
-        old.can_deploy == s.can_deploy &&
+        old.can_deploy == s.can_deploy && old.building_tool == s.building_tool &&
         old.choices.size() == s.choices.size() &&
         std::equal(old.choices.begin(), old.choices.end(), s.choices.begin(), [](const auto& a, const auto& b) {
             return a.type == b.type && a.name == b.name && a.cost == b.cost && a.enabled == b.enabled &&
@@ -219,8 +238,8 @@ void BattleHud::draw_panel(render::Bitmap& b, const HudState& s) const {
     put("diplobtn.shp", 0, layout.diplomacy.x, layout.diplomacy.y);
     put("optbtn.shp", 0, layout.options.x, layout.options.y);
     put("side1.shp", 0, sidebar_x, 158);
-    put("repair.shp", 0, layout.repair.x, layout.repair.y);
-    put("sell.shp", 0, layout.sell.x, layout.sell.y);
+    put("repair.shp", s.building_tool == BuildingTool::Repair ? 1 : 0, layout.repair.x, layout.repair.y);
+    put("sell.shp", s.building_tool == BuildingTool::Sell ? 1 : 0, layout.sell.x, layout.sell.y);
     int count[4] = {};
     for (const auto& c : s.choices) ++count[tab_of(c)];
     for (int t = 0; t < 4; ++t) {
@@ -300,6 +319,12 @@ void BattleHud::draw_fallback_panel(render::Bitmap& b, const HudState& s) const 
     fill(b, {0, command_bar_y, sidebar_x, command_bar_height}, dark);
     tiny_text(b, sidebar_x + 50, 4, "$" + std::to_string(s.cash), ink, 110, 2);
     border(b, minimap_bounds(), edge);
+    const std::pair<render::Rectangle, const char*> buttons[] = {
+        {options_bounds(), "OPTIONS"}, {repair_bounds(), "REPAIR"}, {sell_bounds(), "SELL"}};
+    for (const auto& button : buttons) {
+        border(b, button.first, ink);
+        tiny_text(b, button.first.x + 2, button.first.y + 8, button.second, ink, button.first.width - 4);
+    }
     int count[4] = {};
     for (const auto& c : s.choices) ++count[tab_of(c)];
     const char* names[] = {"BLD", "DEF", "INF", "VEH"};
