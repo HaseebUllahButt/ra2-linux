@@ -267,9 +267,10 @@ build/session_test: $(SESSION_OBJECTS) build/native/src/session/test_main.o buil
 SESSION_WORLD_OBJECTS = build/native/src/session/world/world.o $(SESSION_OBJECTS) build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/sim/coarse_category.o build/native/src/weapons/occupant_order.o
 
 .PHONY: session-world
-session-world: build/session_world_snapshot_test build/session_world_map_test build/session_world_cell_occupancy_cases build/session_world_bridge_cases
+session-world: build/session_world_snapshot_test build/session_world_map_test build/session_world_target_tile_test build/session_world_cell_occupancy_cases build/session_world_bridge_cases
 	build/session_world_snapshot_test
 	build/session_world_map_test ../game
+	build/session_world_target_tile_test ../game
 	build/session_world_cell_occupancy_cases > /dev/null
 	build/session_world_bridge_cases > /dev/null
 
@@ -292,6 +293,9 @@ build/session_world_bridge_cases: build/native/src/session/world/bridge_footprin
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/session_world_map_test: build/native/src/session/world/real_map_case.o build/native/src/sim/test_inputs.o $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
+
+build/session_world_target_tile_test: build/native/src/session/world/target_tile_case.o $(SESSION_OBJECTS) build/native/src/sim/test_inputs.o $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 .PHONY: session-terrain
