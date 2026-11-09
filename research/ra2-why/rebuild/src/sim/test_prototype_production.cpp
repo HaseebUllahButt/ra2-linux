@@ -48,6 +48,27 @@ void destroy_actor(w::Snapshot& world,std::uint32_t id) {
     item.on_map=false; item.next=0; item.object_field_74=0; item.object_field_76=1;
 }
 
+// A product must leave on the ground in front of its building: lower on
+// the screen than every footprint Cell, so the roof art never covers it.
+void require_in_front(const w::Snapshot& world,const p::Catalog& catalog,std::uint32_t house,
+                      const std::string& building_type,const w::Entity& product) {
+    require(product.cell.has_value(),building_type+" product has no Cell");
+    const auto* facts=catalog.find(building_type);
+    require(facts,"missing rules for "+building_type);
+    int front=-1;
+    for (const auto& item:world.entities) {
+        if (item.house_id!=house || item.type!=building_type || item.lifetime!=w::Lifetime::Placed || !item.cell) continue;
+        for (const auto& offset:p::original_foundation_cells(facts->placement.foundation)) {
+            const int x=item.cell->x+offset.x,y=item.cell->y+offset.y;
+            require(x!=product.cell->x || y!=product.cell->y,building_type+" product stands on its roof");
+            front=std::max(front,x+y);
+        }
+    }
+    require(front>=0,"no placed "+building_type);
+    require(int(product.cell->x)+product.cell->y>front,
+            building_type+" product left behind the building art");
+}
+
 int count_at(const std::optional<std::map<std::int32_t,std::int32_t>>& counts,std::int32_t index) {
     require(counts.has_value(),"counter is unknown");
     const auto item=counts->find(index);
@@ -300,6 +321,7 @@ int main(int argc,char** argv) try {
     require(actor(world,infantry).kind==w::Kind::Infantry && actor(world,infantry).active==true &&
             actor(world,infantry).in_limbo==false && actor(world,infantry).cell,
             "infantry did not leave the barracks");
+    require_in_front(world,catalog,player,"GAPILE",actor(world,infantry));
     const auto foot=*actor(world,infantry).cell;
     require((*world.cells.at(std::uint32_t(foot.y)*512+foot.x).ground_occupancy_124&0x20)!=0,
             "infantry exit did not reserve its Cell");
@@ -335,6 +357,7 @@ int main(int argc,char** argv) try {
     require(actor(world,allied_miner).lifetime==w::Lifetime::Placed && actor(world,allied_miner).active==true &&
             actor(world,allied_miner).maximum_hp>0 && actor(world,allied_miner).next,
             "Allied refinery did not place its free miner");
+    require_in_front(world,catalog,player,"GAREFN",actor(world,allied_miner));
     sim::Random free_unit_random(before_free_unit);
     free_unit_random.next();
     require(world.random.table==free_unit_random.state().table && world.random.first==free_unit_random.first() &&
@@ -360,6 +383,50 @@ int main(int argc,char** argv) try {
             actor(world,tank).lifetime==w::Lifetime::Placed && actor(world,tank).resolved_hp>0 &&
             actor(world,tank).active==true && actor(world,tank).next,
             "tank did not leave the war factory");
+    require_in_front(world,catalog,player,"GAWEAP",actor(world,tank));
+    {
+        // A second tank takes the next clear Cell; it never stacks on the first.
+        auto busy=world; auto busy_factories=factories; auto local=frame;
+        const auto second=build(busy,busy_factories,catalog,player,"MTNK",local,false);
+        require_in_front(busy,catalog,player,"GAWEAP",actor(busy,second));
+        require(actor(busy,second).cell->x!=actor(busy,tank).cell->x || actor(busy,second).cell->y!=actor(busy,tank).cell->y,"second tank stacked on the first");
+    }
+    {
+        // With every front Cell blocked, the tank waits in the factory. It
+        // never falls back to a Cell behind the building art.
+        auto blocked=world; auto blocked_factories=factories; auto local=frame;
+        const auto* weap=catalog.find("GAWEAP");
+        int front=-1;
+        for (const auto& item:blocked.entities)
+            if (item.house_id==player && item.type=="GAWEAP" && item.lifetime==w::Lifetime::Placed && item.cell)
+                for (const auto& offset:p::original_foundation_cells(weap->placement.foundation))
+                    front=std::max(front,int(item.cell->x)+offset.x+int(item.cell->y)+offset.y);
+        require(front>=0,"war factory is missing");
+        std::vector<std::pair<std::uint32_t,std::uint32_t>> saved;
+        for (auto& item:blocked.cells) {
+            const int x=int(item.first%512),y=int(item.first/512);
+            if (x+y>front && item.second.ground_occupancy_124) {
+                saved.push_back({item.first,*item.second.ground_occupancy_124});
+                *item.second.ground_occupancy_124|=0x20;
+            }
+        }
+        const auto started=proto::begin_production(blocked,blocked_factories,catalog,player,"MTNK",local);
+        done(started,"begin tank with a blocked front");
+        auto* pending=factory(blocked_factories,*started.entity);
+        require(pending,"blocked tank factory is missing");
+        pending->progress=53;
+        local=std::max(local+1,pending->timer_start+std::uint64_t(pending->timer_duration));
+        const auto waiting=proto::tick(blocked,blocked_factories,catalog,local);
+        done(waiting,"tick with a blocked front");
+        require(factory(blocked_factories,*started.entity) && actor(blocked,*started.entity).lifetime==w::Lifetime::Created &&
+                waiting.detail=="waiting for a clear factory exit",
+                "tank left the factory with every front Cell blocked");
+        for (const auto& item:saved) blocked.cells.at(item.first).ground_occupancy_124=item.second;
+        done(proto::tick(blocked,blocked_factories,catalog,++local),"tick with a clear front");
+        require(!factory(blocked_factories,*started.entity),"tank did not leave after the front cleared");
+        require_in_front(blocked,catalog,player,"GAWEAP",actor(blocked,*started.entity));
+        require_prototype(blocked);
+    }
     // Low power slows production that is already running. Recalc_Power
     // 004F2CC0 calls 004B9EB0, which gives each factory a new stage rate.
     // The running stage keeps its timer; the next stage uses the new rate.
@@ -424,6 +491,8 @@ int main(int argc,char** argv) try {
     require(!factory(factories,enemy_tank) && actor(world,enemy_tank).house_id==enemy &&
             actor(world,enemy_tank).lifetime==w::Lifetime::Placed && actor(world,enemy_tank).active==true,
             "AI tank did not leave the war factory");
+    require_in_front(world,catalog,enemy,"NAWEAP",actor(world,enemy_tank));
+    require_in_front(world,catalog,enemy,"NAHAND",actor(world,enemy_infantry));
     require_prototype(world);
     std::cout<<"MP02T2 prototype deploys both Houses and produces infantry and a tank\n";
     return 0;
