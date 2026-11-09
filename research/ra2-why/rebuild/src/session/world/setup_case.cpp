@@ -181,29 +181,47 @@ int main(int argc,char** argv) {
     }
     {
         PrototypeBattleSetup options;
-        options.players={{"Player","Americans",5000,0,0,2,true},
-                         {"Enemy","Russians",5000,1,1,2,false}};
+        options.players={{"Player","Americans",10000,0,0,10,true},
+                         {"Enemy","Russians",10000,1,1,10,false}};
         const auto initial=sim::Random(42).state();
         const auto battle=prototype_battle(assets,options,initial);
         assert(battle && battle->snapshot.setup_progress==SetupProgress::PrototypeComplete);
         const auto& world=battle->snapshot;
         assert(validate(world) && world.geometry && world.cell_order && world.cell_order->size()==19900);
         assert(world.houses.size()>=4 && world.houses[0].human_controlled==true &&
-               world.houses[1].human_controlled==false && world.houses[0].cash==5000);
+               world.houses[1].human_controlled==false && world.houses[0].cash==10000);
         const auto count=[&](const std::string& type,std::uint32_t house) {
             return std::count_if(world.entities.begin(),world.entities.end(),[&](const auto& entity) {
                 return entity.type==type && entity.house_id==house && entity.lifetime==Lifetime::Placed;
             });
         };
-        assert(count("AMCV",world.houses[0].id)==1 && count("MTNK",world.houses[0].id)==2);
-        assert(count("SMCV",world.houses[1].id)==1 && count("HTNK",world.houses[1].id)==2);
+        assert(count("AMCV",world.houses[0].id)==1 && count("MTNK",world.houses[0].id)==5);
+        assert(count("SMCV",world.houses[1].id)==1 && count("HTNK",world.houses[1].id)==4);
         assert(std::count_if(world.entities.begin(),world.entities.end(),[](const auto& entity){
             return entity.kind==Kind::Terrain;
         })==206);
         assert(std::count_if(world.entities.begin(),world.entities.end(),[](const auto& entity){
             return entity.kind==Kind::Structure;
         })==25);
-        assert(world.entities.size()==206+25+5+6);
+        assert(count("E1",world.houses[0].id)>=5);
+        assert(count("E2",world.houses[1].id)==12);
+        const auto first_tank=std::find_if(world.entities.begin(),world.entities.end(),[](const auto& entity) {
+            return entity.type=="MTNK";
+        });
+        assert(first_tank!=world.entities.end() && first_tank->cell);
+        assert(std::max(std::abs(int(first_tank->cell->x)-135),
+                        std::abs(int(first_tank->cell->y)-80))==4);
+        for (const auto& entity:world.entities) if (entity.kind==Kind::Infantry) {
+            assert(entity.position && entity.cell);
+            const int x=entity.position->x%256,y=entity.position->y%256;
+            assert((x==192 && y==64) || (x==64 && y==192) || (x==192 && y==192));
+        }
+        bool shared_infantry=false;
+        for (const auto& cell:world.cells) if (cell.second.ground_occupancy_124) {
+            const auto bits=*cell.second.ground_occupancy_124&0x1c;
+            if (bits && (bits&(bits-1))) shared_infantry=true;
+        }
+        assert(shared_infantry);
         assert(world.houses[0].side_index==0 && world.houses[1].side_index==1);
         const auto player=std::find_if(world.entities.begin(),world.entities.end(),[&](const auto& entity){
             return entity.type=="AMCV" && entity.house_id==world.houses[0].id;
@@ -216,26 +234,48 @@ int main(int argc,char** argv) {
         for (const auto& entity:world.entities) if (entity.lifetime==Lifetime::Placed) {
             assert(entity.cell && entity.position && entity.next && entity.layer==Layer::Ground);
             const auto& cell=world.cells.at(std::uint32_t(entity.cell->y)*512+entity.cell->x);
-            assert(cell.heads && cell.ground_occupancy_124 && (*cell.ground_occupancy_124&0x20));
+            assert(cell.heads && cell.ground_occupancy_124 &&
+                   (*cell.ground_occupancy_124 & (entity.kind==Kind::Infantry ? 0x1c : 0x20)));
         }
         for (const auto& entity:world.entities) if (entity.type=="AMCV" || entity.type=="SMCV") {
             if (entity.house_id!=world.houses[0].id && entity.house_id!=world.houses[1].id) continue;
             assert(entity.cell && entity.hull_facing==128 && entity.hull_facing_raw==0x8000 &&
                    entity.object_field_74==1 && entity.object_field_75==1 && entity.object_field_76==0);
-            for (int dy=-1;dy<=2;++dy) for (int dx=-1;dx<=2;++dx) {
-                if (!dx && !dy) continue;
-                const auto key=std::uint32_t(int(entity.cell->y)+dy)*512+int(entity.cell->x)+dx;
-                const auto& cell=world.cells.at(key);
-                assert(cell.ground_occupancy_124==0 && cell.heads && cell.heads->ground_head==0);
-            }
+
         }
+        auto allied_only=options;
+        allied_only.players[1].country="Americans";
+        const auto allied_match=prototype_battle(assets,allied_only,initial);
+        assert(allied_match);
+        assert(std::count_if(allied_match->snapshot.entities.begin(),allied_match->snapshot.entities.end(),
+            [&](const auto& entity) { return entity.house_id==allied_match->snapshot.houses[0].id &&
+                                             entity.type=="E1"; })==5);
+        auto two_slots=options;
+        two_slots.players[0].vehicle_count=2; two_slots.players[1].vehicle_count=2;
+        const auto two_slot_match=prototype_battle(assets,two_slots,initial);
+        assert(two_slot_match);
+        for (unsigned player=0;player<2;++player) {
+            const auto owner=two_slot_match->snapshot.houses[player].id;
+            const auto& entities=two_slot_match->snapshot.entities;
+            assert(std::count_if(entities.begin(),entities.end(),[&](const auto& entity) {
+                return entity.house_id==owner && entity.type==(player ? "HTNK" : "MTNK");
+            })==1);
+            assert(std::count_if(entities.begin(),entities.end(),[&](const auto& entity) {
+                return entity.house_id==owner && entity.type==(player ? "E2" : "E1");
+            })==(player ? 1 : 2));
+        }
+        auto minimum=options;
+        minimum.players[0].vehicle_count=0; minimum.players[1].vehicle_count=0;
+        const auto small=prototype_battle(assets,minimum,initial);
+        assert(small && small->snapshot.entities.size()==206+25+5+2);
+        assert(small->snapshot.houses[0].cash==10000);
         const auto repeated=prototype_battle(assets,options,initial);
         assert(repeated && repeated->snapshot.random.table==world.random.table &&
                repeated->snapshot.random.first==world.random.first && repeated->snapshot.random.second==world.random.second);
         options.players[1].waypoint_index=0;
         assert(!prototype_battle(assets,options,initial));
         assert(initial.table==sim::Random(42).state().table && initial.first==0 && initial.second==103);
-        std::cout<<"MP02T2 prototype has two houses, six starting vehicles, and linked map actors\n";
+        std::cout<<"MP02T2 starting armies, infantry occupancy, credits, and Unit Count passed\n";
     }
     auto moved=std::move(assets);
     assert(moved.theater().resolved_metadata(131,0).present);

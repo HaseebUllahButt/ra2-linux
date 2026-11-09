@@ -128,8 +128,8 @@ struct PrototypePlayerSetup {
     std::int32_t credits=10000, color=0;
     // -1 selects the next map starting waypoint in index order.
     std::int32_t waypoint_index=-1;
-    // Number of tanks in addition to the starting MCV.
-    std::int32_t vehicle_count=2;
+    // Unit Count: cost budget slots in addition to the starting MCV.
+    std::int32_t vehicle_count=10;
     bool human=true;
 };
 struct PrototypeBattleSetup { std::vector<PrototypePlayerSetup> players; };

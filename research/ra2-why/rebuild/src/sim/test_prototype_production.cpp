@@ -267,6 +267,7 @@ int main(int argc,char** argv) try {
     {
         auto lost=world;
         auto lost_factories=factories;
+        const auto initial_infantry=count_at(lost.houses[0].infantry_owned_5440,catalog.find("E1")->heap_index);
         const auto started=proto::begin_production(lost,lost_factories,catalog,player,"E1",frame);
         done(started,"queue infantry before barracks loss");
         require(started.entity.has_value(),"queued infantry is missing");
@@ -285,7 +286,7 @@ int main(int argc,char** argv) try {
         require(actor(lost,*started.entity).lifetime==w::Lifetime::Destroyed &&
                 !factory(lost_factories,*started.entity) && !lost_factories.buildings.count(barracks_id) &&
                 *lost.houses[0].cash==cash &&
-                count_at(lost.houses[0].infantry_owned_5440,catalog.find("E1")->heap_index)==0 &&
+                count_at(lost.houses[0].infantry_owned_5440,catalog.find("E1")->heap_index)==initial_infantry &&
                 count_at(lost.houses[0].buildings_active_5460,catalog.find("GAPILE")->heap_index)==0 &&
                 lost_factories.house_factory_counts.at(player)[1]==0,
                 "barracks loss kept a product, money, or stale counters");
