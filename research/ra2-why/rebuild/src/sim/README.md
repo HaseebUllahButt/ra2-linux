@@ -1032,3 +1032,13 @@ Each vector includes progress, progress cell, all retained words and counts, out
 Compare both editions with `test_search_memory.sh base_executable expansion_executable --vectors`.
 Both preserve aggregate hash B1259F48.
 The native test also checks constructor values, prefix retention, unknown regions, and explicit buffer limits.
+
+`original_hierarchy_memory_check.py executable [--base] --vectors` adds direct prefix and tail evidence.
+It prefills all 1,500 words, three counts, and progress fields before original hierarchy searches.
+A memory hook observes which level counts the original writes.
+The checks compare every final word, count, progress field, and written-level mask.
+There are 384 searches per edition, including ten failures after a completed upper level.
+Both preserve aggregate hash 5D485D4E.
+Compare both original outputs with `test_hierarchy_memory.sh --vectors`.
+The native test checks 768 searches and twenty failed-lower-level cases across both editions.
+Original builder, route, and vector bodies execute with the existing bounded storage and usable-area adapters.

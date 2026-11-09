@@ -18,7 +18,7 @@ def endpoints(seed,cells):
     first,last,middle=available[0],available[-1],available[len(available)//2]
     return ((first,last),(last,first),(middle,middle),(first,middle))
 
-def run_search(seed,zone,source,destination):
+def run_search(seed,zone,source,destination,retained=None):
     real_map=0x8324e0 if base else 0x87f7e8; shift=4 if base else 0
     cpu.mem_write(SEARCH,bytes(0x1000)); cpu.mem_write(HEAP,bytes(20))
     r.word(HEAP+4,10000); r.word(HEAP+8,ITEMS); r.word(HEAP+16,0xffffffff)
@@ -36,6 +36,12 @@ def run_search(seed,zone,source,destination):
             neighbor=r.signed(r.signed(nodes+36+4))
             r.word(arrays+0x3000,(min(1,neighbor)<<16)|max(1,neighbor))
             r.word(SEARCH+0x78+level*24,arrays+0x3000); r.word(SEARCH+0x84+level*24,1)
+    if retained is not None:
+        words,path_counts=retained
+        assert len(words)==1500 and len(path_counts)==3
+        cpu.mem_write(SEARCH+0xbc,struct.pack('<1500H',*words))
+        cpu.mem_write(SEARCH+0xc74,struct.pack('<3I',*path_counts))
+        r.word(SEARCH+0x6c,17); r.word(SEARCH+0x70,123|(456<<16))
     r.word(START,(source%h.stride)|((source//h.stride)<<16)); r.word(END,(destination%h.stride)|((destination//h.stride)<<16))
     cpu.reg_write(UC_X86_REG_ECX,SEARCH); cpu.reg_write(UC_X86_REG_ESP,r.STACK)
     cpu.mem_write(r.STACK,struct.pack('<5I',r.STOP,START,END,zone,0))
