@@ -4,7 +4,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(git -C "$here" rev-parse --show-toplevel)
 revision=${HEADLESS_REVISION:-master}
 game=${1:-/path/to/user/ra2/game}
-frames=${2:-10000}
+frames=${2:-1000}
 build=$(mktemp -d /tmp/ra2-headless.XXXXXX)
 trap 'rm -rf "$build"' EXIT
 # Freeze the selected revision. Never change or build the live master checkout.

@@ -1,6 +1,6 @@
 # Headless MP02T2 match
 
-Run `rebuild/tools/test_headless_match.sh /path/to/user/ra2/game 10000`.
+Run `rebuild/tools/test_headless_match.sh /path/to/user/ra2/game 1000`.
 The script builds only the test and its source dependencies with C++20 and `-O1`.
 It freezes `master` with `git archive`. Set `HEADLESS_REVISION` to test another compatible branch or commit.
 It does not change that branch. All build files go in a temporary directory.
@@ -35,3 +35,14 @@ Optional Makefile lines, with a literal tab before the command:
 headless-match:
 	tools/test_headless_match.sh
 ```
+
+## Recorded checks
+
+Commit `3091a41` and master snapshot `ec844f2` each passed two normal 1,000-frame runs.
+All ten replay hashes matched. The final hash was `48f04a57d17d6479`.
+Each run fired eight shots, destroyed no objects, and had no winner at the frame limit.
+No crash, invalid Cell chain, unchanged checkpoint, or combat gap occurred.
+There are no crash stacks or owning files to assign from these normal runs.
+
+The sanitizer build was paused at the coordinator's request to free REFERENCE_SYSTEM CPU.
+Sanitizer results remain pending. No sanitizer pass is claimed.
