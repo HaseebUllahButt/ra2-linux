@@ -946,6 +946,13 @@ std::optional<bool> passes_proximity(const w::Snapshot& s,const FactorySet& f,co
     return ok;
 }
 
+std::optional<bool> legal_placement(const w::Snapshot& s,const Catalog& c,
+                                  const std::string& type,CellXY origin) {
+    const auto* t=c.find(type);
+    if (!s.geometry || !t || t->rtti!=Rtti::BuildingType) return std::nullopt;
+    return legal(s,c,*t,origin);
+}
+
 Outcome place(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint32_t house_id,
               const std::string& type,CellXY cell,std::uint64_t) {
     if (!runtime_ready(snapshot)) return fail(Status::NeedsInput,"setup is not complete");

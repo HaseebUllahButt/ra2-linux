@@ -220,6 +220,19 @@ int main(int argc,char** argv) try {
     const auto cash=*world.houses[0].cash;
     build(world,factories,catalog,player,"GAPOWR",frame,true);
     require(*world.houses[0].cash==cash-catalog.find("GAPOWR")->cost,"plant cost differs");
+    // Every live starting unit blocks the footprint, even without proximity.
+    for(const auto& unit:world.entities) if(unit.lifetime==w::Lifetime::Placed &&
+        unit.kind==w::Kind::Unit && unit.cell) {
+        const p::CellXY occupied{std::int16_t(unit.cell->x),std::int16_t(unit.cell->y)};
+        require(p::legal_placement(world,catalog,"GAPOWR",occupied)==false,
+                "preview accepted a unit under the power footprint");
+        auto blocked=world;auto blocked_factories=factories;
+        require(proto::place(blocked,blocked_factories,catalog,player,"GAPOWR",occupied,frame).status!=p::Status::Done,
+                "placement accepted a unit under the power footprint");
+        require(blocked.entities.size()==world.entities.size() &&
+                blocked_factories.factories.size()==factories.factories.size(),
+                "rejected placement consumed the completed product");
+    }
     place_building(world,factories,catalog,player,"GAPOWR",frame,base);
     done(proto::tick(world,factories,catalog,++frame),"power update");
     require(*world.houses[0].power_output>0,"plant produced no power");
