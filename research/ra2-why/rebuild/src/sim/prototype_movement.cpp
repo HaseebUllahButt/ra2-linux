@@ -58,10 +58,22 @@ RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map:
     struct Node { int f,g;std::uint32_t serial,index; };
     struct Later { bool operator()(const Node& a,const Node& b) const {return a.f!=b.f?a.f>b.f:a.serial>b.serial;} };
     constexpr int infinity=std::numeric_limits<int>::max();
-    std::vector<int> cost(512*512,infinity);std::vector<std::uint32_t> previous(512*512,0xffffffffu);
+    // Reuse the two 512*512 search arrays. Reset only the touched entries,
+    // on every return path, so each search starts from the same state.
+    struct Search {
+        std::vector<int> cost=std::vector<int>(512*512,std::numeric_limits<int>::max());
+        std::vector<std::uint32_t> previous=std::vector<std::uint32_t>(512*512,0xffffffffu);
+        std::vector<std::uint32_t> touched;
+    };
+    static thread_local Search search;
+    struct Reset {
+        Search& s;
+        ~Reset() { for (const auto i:s.touched) {s.cost[i]=std::numeric_limits<int>::max();s.previous[i]=0xffffffffu;} s.touched.clear(); }
+    } reset{search};
+    auto& cost=search.cost;auto& previous=search.previous;auto& touched=search.touched;
     std::priority_queue<Node,std::vector<Node>,Later> open;std::uint32_t serial=0;
     const auto heuristic=[&](int x,int y) {const int a=std::abs(x-int(goal.x)),b=std::abs(y-int(goal.y));return 10*std::max(a,b)+4*std::min(a,b);};
-    const auto source=key(start),target=key(goal);cost[source]=0;open.push({heuristic(start.x,start.y),0,serial++,source});
+    const auto source=key(start),target=key(goal);cost[source]=0;touched.push_back(source);open.push({heuristic(start.x,start.y),0,serial++,source});
     while (!open.empty()) {
         const auto node=open.top();open.pop();if (node.g!=cost[node.index]) continue;
         if (node.index==target) {
@@ -87,6 +99,7 @@ RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map:
             }
             const auto index=key(next);const int next_cost=node.g+(d%2?14:10);
             if (next_cost>=cost[index]) continue;
+            if (cost[index]==infinity) touched.push_back(index);
             cost[index]=next_cost;previous[index]=node.index;open.push({next_cost+heuristic(nx,ny),next_cost,serial++,index});
         }
     }
@@ -172,7 +185,24 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
         last_frame_=frame;
         return {PrototypeMoveStatus::Complete,{},{},{},{}};
     }
-    auto candidate=world;auto moves=moves_;PrototypeMoveResult result;result.status=PrototypeMoveStatus::Complete;
+    // Edit the world in place. Keep the prior Entities and each Cell before
+    // its first transfer, and restore them if any step fails. This replaces
+    // a full Snapshot copy with the same all-or-nothing result.
+    struct Journal {
+        World& world; std::vector<session::world::Entity> entities; std::vector<std::pair<std::uint32_t,session::world::CellState>> cells;
+        bool keep=false;
+        void cell(std::uint32_t key) {
+            for (const auto& saved:cells) if (saved.first==key) return;
+            const auto found=world.cells.find(key);
+            if (found!=world.cells.end()) cells.emplace_back(key,found->second);
+        }
+        ~Journal() {
+            if (keep) return;
+            world.entities=std::move(entities);
+            for (auto it=cells.rbegin();it!=cells.rend();++it) world.cells.find(it->first)->second=std::move(it->second);
+        }
+    } journal{world,world.entities,{}};
+    auto& candidate=world;auto moves=moves_;PrototypeMoveResult result;result.status=PrototypeMoveStatus::Complete;
     for (auto it=moves.begin();it!=moves.end();) {
         const auto id=it->first;auto& movement=it->second;auto* actor=find_unit(candidate,id);
         if (!actor || actor->lifetime==session::world::Lifetime::Destroyed || (actor->resolved_hp && *actor->resolved_hp<=0)) {
@@ -215,6 +245,7 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
             const auto step=open_cell(candidate,entered,id);
             if (!step) return fail(PrototypeMoveStatus::NeedsInput,"prototype crossed Cell is unresolved");
             if (!*step) {actor->locomotor_moving=false;result.blocked.push_back(id);++it;continue;}
+            journal.cell(key(*actor->cell));journal.cell(key(entered));
             if (const auto error=transfer(candidate,id,*actor->cell,entered)) return fail(PrototypeMoveStatus::NeedsInput,*error);
             actor=find_unit(candidate,id);actor->cell=entered;
         }
@@ -227,6 +258,6 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
         if (next.x==desired.x && next.y==desired.y && next.z==desired.z) movement.path.erase(movement.path.begin());
         if (movement.path.empty()) {actor->locomotor_moving=false;result.arrived.push_back(id);it=moves.erase(it);} else ++it;
     }
-    world=std::move(candidate);moves_=std::move(moves);last_frame_=frame;return result;
+    journal.keep=true;moves_=std::move(moves);last_frame_=frame;return result;
 }
 }
