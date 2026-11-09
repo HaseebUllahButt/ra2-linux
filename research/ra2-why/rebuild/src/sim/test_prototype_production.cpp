@@ -1,4 +1,5 @@
 #include "prototype_production.h"
+#include "prototype_tech.h"
 #include "build_time.h"
 #include "sim.h"
 #include "session/world/setup.h"
@@ -364,6 +365,38 @@ int main(int argc,char** argv) try {
             world.random.second==free_unit_random.second() && *world.houses[0].cash==cash_before_free_unit,
             "free miner changed cash or used a different random stream");
     done(proto::tick(world,factories,catalog,++frame),"refinery power update");
+    // QA3: construct and place each country variant through the real adapter.
+    for (const auto& variant:std::vector<std::pair<std::string,std::string>>{
+            {"Americans","AMRADR"},{"British","GAAIRC"}}) {
+        auto radar_world=world; auto radar_factories=factories; auto local=frame;
+        auto& owner=radar_world.houses[0];
+        owner.country=variant.first;
+        const auto country=std::find(catalog.countries.begin(),catalog.countries.end(),variant.first);
+        require(country!=catalog.countries.end(),"missing radar country");
+        owner.country_index=std::int32_t(country-catalog.countries.begin());
+        require(!sim::tech::radar_online(assets.rules(),radar_world,player),"radar online before construction");
+        const auto radar=build(radar_world,radar_factories,catalog,player,variant.second,local,true);
+        require(actor(radar_world,radar).lifetime!=w::Lifetime::Placed,"ready radar already placed");
+        const auto origin=place_building(radar_world,radar_factories,catalog,player,variant.second,local,base);
+        done(proto::tick(radar_world,radar_factories,catalog,++local),"radar power update");
+        const auto& building=actor(radar_world,radar);
+        require(building.lifetime==w::Lifetime::Placed && building.active==true && building.in_limbo==false,
+                "radar placement did not activate building");
+        require(!factory(radar_factories,radar),"radar placement kept completed product");
+        for (const auto& offset:p::original_foundation_cells(catalog.find(variant.second)->placement.foundation))
+            require(radar_world.cells.at(std::uint32_t(origin.y+offset.y)*512+origin.x+offset.x).heads->ground_head==radar,
+                    "radar foundation not linked");
+        require(*radar_world.houses[0].power_output>=*radar_world.houses[0].power_drain,"radar lacks power");
+        require(sim::tech::radar_online(assets.rules(),radar_world,player),variant.second+" powered radar offline");
+        require(radar_factories.buildings.at(radar).primary,"radar is not the primary aircraft factory");
+        require(count_at(radar_world.houses[0].buildings_active_5460,catalog.find(variant.second)->heap_index)==1,
+                "placed radar has no active building count");
+        require(*radar_world.houses[0].power_drain==*world.houses[0].power_drain+catalog.find(variant.second)->power_drain,
+                "radar power drain differs");
+        radar_world.houses[0].power_output=0;
+        require(!sim::tech::radar_online(assets.rules(),radar_world,player),"radar stayed online without power");
+        require_prototype(radar_world);
+    }
     // A second refinery takes the same frames as the first when power is
     // enough: build time depends on cost, power, and factory count only.
     {
