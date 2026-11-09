@@ -243,6 +243,18 @@ int main() try {
                 "repeat order to a held goal moved a Unit that was already beside it");
     }
     {
+        // The mover has entered the Cell beside a held goal, but has
+        // not reached its center. A repeated order must center it.
+        auto world=field(30,12);PrototypeMovement movement;
+        place(world,801,20,6);place(world,802,19,6);
+        world.entities[1].position->x=19*256+250;
+        require(movement.issue(world,802,{20,6},17).status==PrototypeMoveStatus::Complete,"near-goal order failed");
+        for(unsigned frame=0;frame<30 && movement.active_count();++frame)
+            require(movement.tick(world,frame).status==PrototypeMoveStatus::Complete,"near-goal tick failed");
+        require(!movement.active_count() && world.entities[1].position->x==19*256+128,
+                "mover stopped off-center beside a held goal");
+    }
+    {
         // Speed: 10 straight Cells at 17 units a frame is 2560/17, so 151
         // frames. The old code stopped at each Cell center: 160 frames.
         auto world=field(30,12);PrototypeMovement movement;place(world,501,5,6);

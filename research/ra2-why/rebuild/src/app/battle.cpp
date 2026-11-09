@@ -1,3 +1,4 @@
+#include "battle_formation.h"
 #include "battle.h"
 #include "camera_scroll.h"
 #include "house_color.h"
@@ -294,22 +295,8 @@ public:
     void deploy_selected() {
         for (const auto id:orders_.selected_ids()) queue({OrderKind::Deploy,player_,id,0,{},{}});
     }
-    ra2map::Cell formation_cell(ra2map::Cell goal) {
-        // TODO-ORIGINAL: reserve separate group destinations, then retry
-        // temporary obstructions. Original formation planning remains separate.
-        for(int r=0;r<=8;++r)for(int dy=-r;dy<=r;++dy)for(int dx=-r;dx<=r;++dx) {
-            if(std::max(std::abs(dx),std::abs(dy))!=r)continue;
-            const int x=int(goal.x)+dx,y=int(goal.y)+dy;
-            if(x<0||y<0||x>=512||y>=512)continue;
-            const auto key=std::uint32_t(y)*512+x;
-            const auto at=world_.cells.find(key);
-            if(at==world_.cells.end()||move_destinations_.count(key))continue;
-            const auto& c=at->second;
-            if(!c.heads||c.heads->ground_head||c.ground_occupancy_124!=0||c.unit_land_speed.value_or(0)<=0)continue;
-            move_destinations_.insert(key);
-            return {std::uint16_t(x),std::uint16_t(y)};
-        }
-        return goal;
+    ra2map::Cell formation_cell(ra2map::Cell goal,std::uint32_t actor) {
+        return reserve_formation_cell(world_,goal,actor,manual_moves_,move_destinations_);
     }
     void input(const Input& input) {
         if (input.kind==InputKind::Quit) {quit_=true;return;}
@@ -637,7 +624,7 @@ public:
             if (miner(*e)) {status("Miners harvest automatically.");break;}
             combat_.stop(world_,order.entity);attacks_.erase(order.entity);
             {
-                const auto goal=formation_cell(order.cell);
+                const auto goal=formation_cell(order.cell,order.entity);
                 const auto move=movement_.issue(world_,order.entity,goal,
                     sim::original_rule_speed(rules_.read_integer(e->type,"Speed",4)));
                 if(move.status==sim::PrototypeMoveStatus::Complete)manual_moves_[order.entity]=goal;

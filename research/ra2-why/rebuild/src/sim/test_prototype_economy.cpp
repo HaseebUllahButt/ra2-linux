@@ -43,6 +43,17 @@ int main(int argc,char** argv) {
         assert(teleported==(std::string(type)=="CMIN"));
         assert(first==rules.read_integer(type,"Storage")*rules.read_integer(overlay==gem?"Cruentus":"Riparius","Value"));
     }
+    for(auto type:{"CMIN","HARV"}) for(int ore_y:{4,5}) {
+        auto nearby=fixture(type,-1);
+        nearby.cells[4*512+11].terrain->overlay_type_index=ore;
+        sim::PrototypeEconomy economy(rules);
+        economy.tick(nearby,0); // Choose the distant, initially sole field.
+        nearby.cells[ore_y*512+4].terrain->overlay_type_index=ore;
+        for(unsigned frame=1;frame<100 && !economy.load(1);++frame) economy.tick(nearby,frame);
+        assert(economy.load(1)==1);
+        assert(nearby.entities[0].cell->x==4 && nearby.entities[0].cell->y==ore_y);
+        assert(nearby.cells[4*512+11].overlay_data_11e==11);
+    }
     auto destroyed=fixture("HARV",105);destroyed.entities[0].resolved_hp=0;
     sim::PrototypeEconomy dead(rules);dead.tick(destroyed,0);assert(dead.load(1)==0);
     auto incomplete=fixture("CMIN",105);incomplete.setup_progress=sw::SetupProgress::Unknown;

@@ -346,6 +346,12 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
             if (revised.status==PrototypeMoveStatus::NeedsInput || revised.status==PrototypeMoveStatus::Invalid) return fail(revised.status,revised.detail);
             if (revised.status==PrototypeMoveStatus::Complete) movement.path=revised.path;
         }
+        // A blocked goal can resolve to the current Cell after entry but
+        // before its center. Finish the step before releasing the route.
+        if (movement.path.empty() &&
+            (actor->position->x!=int(actor->cell->x)*256+128 ||
+             actor->position->y!=int(actor->cell->y)*256+128))
+            movement.path.push_back(*actor->cell);
         if (movement.path.empty()) { finish(id,actor);it=moves.erase(it);continue; }
         // Wait behind a Unit that still moves. Do not plan a detour around
         // it, as that sends a group sideways and back. Plan again when the

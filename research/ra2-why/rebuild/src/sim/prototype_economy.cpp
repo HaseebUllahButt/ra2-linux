@@ -1,4 +1,5 @@
 #include "prototype_economy.h"
+#include "drive.h"
 #include "../loop/profile.h"
 #include <algorithm>
 #include <cmath>
@@ -90,6 +91,25 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
     std::sort(miners.begin(),miners.end(),[](auto a,auto b){return a->id<b->id;});
     for(auto* miner:miners) {
         auto& e=*miner;live.insert(e.id);auto& bag=cargo_[e.id];
+        // Ore can grow, or another miner can leave it, after this route
+        // starts. Harvest usable ore on the way instead of passing it.
+        const auto under=w.cells.find(key(*e.cell));
+        if(movement_.moving(e.id) && !bag.returning && under!=w.cells.end() && resource(under->second)>=0)
+            movement_.cancel(w,e.id);
+        if(movement_.moving(e.id) && !bag.returning) {
+            // Reconsider an adjacent field even when it is beside the route.
+            std::optional<ra2map::Cell> nearby;int best_distance=3;
+            for(int dy=-1;dy<=1;++dy) for(int dx=-1;dx<=1;++dx) {
+                const int x=int(e.cell->x)+dx,y=int(e.cell->y)+dy;
+                if(x<0 || y<0 || x>=512 || y>=512) continue;
+                const ra2map::Cell cell{std::uint16_t(x),std::uint16_t(y)};
+                const auto at=w.cells.find(key(cell));const int d=dx*dx+dy*dy;
+                if(d<best_distance && at!=w.cells.end() && open(at->second) && resource(at->second)>=0) {
+                    nearby=cell;best_distance=d;
+                }
+            }
+            if(nearby) movement_.issue(w,e.id,*nearby,original_rule_speed(rules_.read_integer(e.type,"Speed",4)));
+        }
         if(movement_.moving(e.id) || frame<bag.next) continue;
         sw::Entity* refinery=nullptr;int best=std::numeric_limits<int>::max();
         for(auto& b:w.entities) if(alive(b) && b.kind==sw::Kind::Structure && b.house_id==e.house_id && (b.type=="GAREFN" || b.type=="NAREFN")) {
@@ -118,7 +138,7 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
                     i->second.heads->ground_head=e.id;i->second.ground_occupancy_124=32;
                     e.cell=target;e.position=Coord{x*256+128,y*256+128,*i->second.terrain->floor_world_height};
                     bag.next=frame+1;dx=2;dy=2;
-                } else movement_.issue(w,e.id,target,std::max(1,rules_.read_integer(e.type,"Speed",4))*4);
+                } else movement_.issue(w,e.id,target,original_rule_speed(rules_.read_integer(e.type,"Speed",4)));
             }
             continue;
         }
@@ -139,7 +159,7 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
         });
         std::sort(fields.begin(),fields.end(),[&](auto a,auto b){int da=distance(*e.cell,coord(a)),db=distance(*e.cell,coord(b));return da!=db?da<db:a<b;});
         bool found=false;
-        for(auto k:fields) if(movement_.issue(w,e.id,coord(k),std::max(1,rules_.read_integer(e.type,"Speed",4))*4).status==PrototypeMoveStatus::Complete) {found=true;break;}
+        for(auto k:fields) if(movement_.issue(w,e.id,coord(k),original_rule_speed(rules_.read_integer(e.type,"Speed",4))).status==PrototypeMoveStatus::Complete) {found=true;break;}
         if(!found && bag.bails) bag.returning=true;
     }
     for(auto i=cargo_.begin();i!=cargo_.end();) if(!live.count(i->first)) {movement_.cancel(w,i->first);i=cargo_.erase(i);} else ++i;
