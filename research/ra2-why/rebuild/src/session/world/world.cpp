@@ -398,7 +398,8 @@ bool undo_check() {
 }
 Undo::Undo(Snapshot& snapshot):snapshot_(snapshot),outer_(active_undo) {
     auto cells=std::move(snapshot_.cells);
-    backup_=snapshot_;
+    try { backup_=snapshot_; }
+    catch (...) { snapshot_.cells=std::move(cells); throw; }
     snapshot_.cells=std::move(cells);
     if (undo_check()) check_=snapshot_;
     active_undo=this;
@@ -418,6 +419,7 @@ void Undo::restore() {
 }
 void Undo::save_cell(const Snapshot& snapshot, std::uint32_t key) {
     for (auto* undo=active_undo;undo;undo=undo->outer_) {
+        if (&undo->snapshot_!=&snapshot) continue; // An Undo restores only its own Snapshot.
         if (std::any_of(undo->cells_.begin(),undo->cells_.end(),[&](const auto& item){return item.first==key;})) continue;
         const auto found=snapshot.cells.find(key);
         if (found!=snapshot.cells.end()) undo->cells_.emplace_back(key,found->second);

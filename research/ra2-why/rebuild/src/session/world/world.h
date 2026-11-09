@@ -165,7 +165,8 @@ struct Snapshot {
 // It backs up every member except the Cells. Code that writes a Cell while an
 // Undo is active calls Undo::save_cell first. commit() keeps the edits; else
 // the destructor restores the Snapshot, also when an exception leaves.
-// Undos nest: save_cell records the Cell in every active Undo.
+// Undos nest: save_cell records the Cell in every active Undo of the same
+// Snapshot.
 // RA2_UNDO_CHECK=1 also keeps a full copy and aborts if a restore differs.
 class Undo {
 public:
