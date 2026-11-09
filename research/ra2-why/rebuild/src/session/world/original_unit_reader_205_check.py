@@ -10,6 +10,7 @@ separate supplied caches for installed AMCV rules and MCV art records.
 In connected-real-integer mode, the original integer reader uses both caches.
 In connected-real-float mode, the original float reader uses both caches.
 The fixture supplies its restricted float scanner and percent search.
+In connected-real-speed mode, the original SpeedType reader also runs.
 Other INI, formatting, enumeration, allocation, and asset services are supplied.
 Mode rules and later loading remain omitted.
 """
@@ -22,14 +23,15 @@ from itertools import product
 from unicorn import UC_HOOK_CODE,UC_HOOK_MEM_READ,UC_HOOK_MEM_WRITE
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EIP,UC_X86_REG_ESP
 
-if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--connected','--connected-real-bool','--connected-real-art','--connected-real-integer','--connected-real-float')):
-    raise SystemExit('usage: original_unit_reader_205_check.py game.exe unit_flags_case real_map_case game_dir [--connected|--connected-real-bool|--connected-real-art|--connected-real-integer|--connected-real-float]')
+if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--connected','--connected-real-bool','--connected-real-art','--connected-real-integer','--connected-real-float','--connected-real-speed')):
+    raise SystemExit('usage: original_unit_reader_205_check.py game.exe unit_flags_case real_map_case game_dir [--connected|--connected-real-bool|--connected-real-art|--connected-real-integer|--connected-real-float|--connected-real-speed]')
 executable,native,fixture,game=sys.argv[1:5]
 connected=len(sys.argv)==6
-real_bool=connected and sys.argv[5] in ('--connected-real-bool','--connected-real-art','--connected-real-integer','--connected-real-float')
-real_art=connected and sys.argv[5] in ('--connected-real-art','--connected-real-integer','--connected-real-float')
-real_integer=connected and sys.argv[5] in ('--connected-real-integer','--connected-real-float')
-real_float=connected and sys.argv[5]=='--connected-real-float'
+real_bool=connected and sys.argv[5] in ('--connected-real-bool','--connected-real-art','--connected-real-integer','--connected-real-float','--connected-real-speed')
+real_art=connected and sys.argv[5] in ('--connected-real-art','--connected-real-integer','--connected-real-float','--connected-real-speed')
+real_integer=connected and sys.argv[5] in ('--connected-real-integer','--connected-real-float','--connected-real-speed')
+real_float=connected and sys.argv[5] in ('--connected-real-float','--connected-real-speed')
+real_speed=connected and sys.argv[5]=='--connected-real-speed'
 sys.argv=[sys.argv[0],executable,native,fixture,game]
 if connected:
     techno=runpy.run_path(os.path.join(os.path.dirname(__file__),'original_techno_reader_205_check.py'))
@@ -59,6 +61,7 @@ integer_pending={}
 integer_checked=set()
 float_entries=[]
 float_conversions=[]
+speed_entries=[]
 
 def trace_write(cpu,access,address,size,value,user):
     if active[0] and address<=m.TYPE+0x205<address+size:
@@ -104,6 +107,11 @@ def trace_code(cpu,address,size,user):
             integer_checked.add(key)
         if address in (0x70ab40,0x6daf60,0x5d7810,0x4107e0): chain_calls.append(address)
         if address==0x6daf60: calls['parent']+=1
+        if real_speed and mode==3 and address==0x46c400:
+            section=bytes(cpu.mem_read(m.argument(0),64)).split(b'\0',1)[0].decode('ascii')
+            key=bytes(cpu.mem_read(m.argument(1),64)).split(b'\0',1)[0].decode('ascii')
+            assert cpu.reg_read(UC_X86_REG_ECX)==0x100b000 and section=='AMCV' and key=='SpeedType'
+            speed_entries.append((section,key,m.argument(2)))
         if real_bool and address==0x50f410:
             section=bytes(cpu.mem_read(m.argument(0),64)).split(b'\0',1)[0].decode('ascii')
             incoming=cpu.reg_read(UC_X86_REG_ECX)
@@ -228,6 +236,7 @@ if real_bool:
         string_prologue=bytes(hash_cpu.mem_read(0x50e9a0,3))
         integer_prologue=bytes(hash_cpu.mem_read(0x50d7f0,3))
         float_prologue=bytes(hash_cpu.mem_read(0x50e3a0,7))
+        speed_prologue=bytes(hash_cpu.mem_read(0x46c400,3))
 for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
     m.cpu.mem_write(m.TYPE,constructor)
     m.cpu.mem_write(m.TYPE+0x205,bytes([initial]))
@@ -249,6 +258,9 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
             if real_float:
                 m.cpu.mem_write(0x50e3a0,float_prologue); m.callbacks.pop(0x50e3a0,None)
                 m.cpu.ctl_remove_cache(0x50e3a0,0x50e3a7)
+            if real_speed:
+                m.cpu.mem_write(0x46c400,speed_prologue); m.callbacks.pop(0x46c400,None)
+                m.cpu.ctl_remove_cache(0x46c400,0x46c403)
         else:
             m.word(0x100b000+0x24,0)
             m.bind(0x50f410,12,base['boolean'])
@@ -260,6 +272,8 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
                 m.bind(0x50e3a0,16,lambda:None)
                 m.cpu.mem_write(0x50e3a0,b'\xdd\x44\x24\x0c\xc2\x10\x00')
                 m.cpu.ctl_remove_cache(0x50e3a0,0x50e3a7)
+            if real_speed:
+                m.bind(0x46c400,12,base['integer']); m.cpu.ctl_remove_cache(0x46c400,0x46c403)
         m.cpu.ctl_remove_cache(0x50f410,0x50f413)
     calls.update(parent=0,pair=0,format=0,compare=0)
     chain_calls.clear()
@@ -271,6 +285,7 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
     integer_checked.clear()
     float_entries.clear()
     float_conversions.clear()
+    speed_entries.clear()
     m.cpu.reg_write(UC_X86_REG_ECX,m.TYPE); m.cpu.reg_write(UC_X86_REG_ESP,0x103f000)
     m.cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,0x100b000))
     writes.clear(); active[0]=True
@@ -295,6 +310,10 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
             assert struct.unpack('<d',bytes(m.cpu.mem_read(m.TYPE+0x340,8)))[0]==3.5
             assert ('AMCV','AccelerationFactor') in float_entries
             assert bytes(m.cpu.mem_read(m.TYPE+0x2d8,8))==constructor[0x2d8:0x2e0]
+        if real_speed:
+            # TechnoType reads first; UnitType then applies the Crusher default.
+            assert speed_entries==[('AMCV','SpeedType',0xffffffff),('AMCV','SpeedType',1)]
+            assert 'SpeedType' not in raw_rules
     assert calls['parent']==1 and calls['pair']>=1 and calls['format']>=6 and calls['compare']>=1
     if connected: assert chain_calls==[0x70ab40,0x6daf60,0x5d7810,0x4107e0]
 parent_ok[0]=False
@@ -313,4 +332,4 @@ assert not writes and m.cpu.mem_read(m.TYPE+0x205,1)==b'\x01'
 assert calls=={'parent':1,'pair':0,'format':0,'compare':0}
 if connected: assert chain_calls==[0x70ab40,0x6daf60,0x5d7810,0x4107e0]
 print('base x86 %sreader chain preserves supplied Type +205 in %d checked cases'%
-      ('connected real-float ' if real_float else 'connected real-integer ' if real_integer else 'connected real-art ' if real_art else 'connected real-boolean ' if real_bool else 'connected ' if connected else 'UnitType ',9 if connected else 7))
+      ('connected real-speed ' if real_speed else 'connected real-float ' if real_float else 'connected real-integer ' if real_integer else 'connected real-art ' if real_art else 'connected real-boolean ' if real_bool else 'connected ' if connected else 'UnitType ',9 if connected else 7))
