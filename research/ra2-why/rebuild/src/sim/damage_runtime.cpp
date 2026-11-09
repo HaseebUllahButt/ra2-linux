@@ -866,10 +866,14 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
         }
         try {
             const auto weapon=prototype_target_weapon(base_,map_,art_,world,*source,*target);
-            const auto verse=weapon?prototype_verse(base_,map_,*weapon,*target):std::optional<double>{};
-            if (!weapon || !verse || !std::isfinite(*verse) || *verse<=0) {
+            std::optional<double> verse;
+            if (weapon) verse=prototype_verse(base_,map_,*weapon,*target);
+            // One checked read: GCC 13 reports the optional as maybe unset
+            // when it is read again in the nested test.
+            const bool resolved=verse.has_value() && std::isfinite(verse.value_or(0.0));
+            if (!weapon || !resolved || verse.value_or(0.0)<=0) {
                 if ((!weapon && !prototype_weapon(base_,map_,art_,*source)) ||
-                    (weapon && (!verse || !std::isfinite(*verse))))
+                    (weapon && !resolved))
                     report.unresolved.push_back("weapon or target armor is unresolved");
                 source->target_id=0;it=orders_.erase(it);continue;
             }
