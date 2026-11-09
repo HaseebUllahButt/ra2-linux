@@ -178,6 +178,7 @@ def placement_case():
     ox, oy = rng.randrange(0, 90), rng.randrange(0, 90)
     if r() < 0.02: ox, oy = 0, 0
     if r() < 0.1: ox = rng.randrange(506, 512)   # Footprints that cross the 512 row width alias.
+    if r() < 0.1: ox, oy = 512+rng.randrange(30, 50), rng.randrange(30, 50)   # Whole footprint in the alias area.
     cells = []
     for dx, dy in [(x, y) for y in range(7) for x in range(7)]:
         x, y = ox+dx, oy+dy

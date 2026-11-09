@@ -240,6 +240,31 @@ Placement original_legal_placement(const PlacementMap& map,CellXY origin,const P
     return Placement::Legal;
 }
 
+std::optional<bool> original_passes_proximity(const ProximityInputs& in) {
+    if (in.house_index!=in.player_index || in.editor_mode || !in.pending || !in.building_type) return true;
+    if (in.foundation<0 || in.foundation>=22) return std::nullopt;
+    static const int bounds[22][2]={{1,1},{2,1},{1,2},{2,2},{2,3},{3,2},{3,3},{3,5},{4,2},{3,3},{1,3},{3,1},{4,3},{1,4},
+        {1,5},{2,6},{2,5},{5,3},{4,4},{3,4},{6,4},{0,0}};               // 00458930/00458940 table 007CFC70.
+    const int width=bounds[in.foundation][0], height=bounds[in.foundation][1];
+    const int adj=in.adjacent+1;
+    bool ok=false;
+    for (int x=in.cell.x-adj;x<in.cell.x-adj+width+2*adj;++x)
+        for (int y=in.cell.y-adj;y<in.cell.y-adj+height+2*adj;++y) {
+            const std::int16_t sx=std::int16_t(x), sy=std::int16_t(y);
+            if (sx>=in.cell.x && sx<in.cell.x+width && sy>=in.cell.y && sy<in.cell.y+height) continue;
+            if (!in.object_scan) continue;                                  // 004717B0 returns null.
+            const std::int32_t index=std::int32_t(sy)*0x200+sx;
+            if (index<0 || index>0x3FFFF) continue;                          // Fallback Cell: empty chain.
+            const auto it=in.buildings.find(packed_cell({std::int16_t(index&0x1FF),std::int16_t(index>>9)}));
+            if (it==in.buildings.end() || !it->second) continue;
+            const auto& b=*it->second;
+            if (b.owner_index==in.house_index && b.base_normal) ok=true;
+            if (!in.build_off_ally) return std::nullopt;
+            if (*in.build_off_ally && b.allied && b.eligible_ally) ok=true;
+        }
+    return ok;
+}
+
 bool original_deploy_without_offset(bool sensor_array,bool tick_tank,bool icbm,bool artillery) {
     return sensor_array || tick_tank || icbm || artillery;                      // 0045EC50.
 }
@@ -479,7 +504,9 @@ const TypeFacts* facts_of(const Catalog& c,const w::Entity& e) {
     return nullptr;
 }
 bool runtime_ready(const w::Snapshot& s) {
-    return s.setup_progress==w::SetupProgress::Complete && !s.pending_cell_setup && s.geometry;
+    // PLAYABLE PROTOTYPE: deploy/build/place are approximate, so they accept only
+    // the prototype setup. Eligibility and placement checks stay exact.
+    return s.setup_progress==w::SetupProgress::PrototypeComplete && !s.pending_cell_setup && s.geometry;
 }
 std::optional<std::uint32_t> next_id(const w::Snapshot& s) {
     std::uint32_t largest=0;
@@ -753,7 +780,7 @@ bool link(w::Snapshot& s,std::uint32_t key,std::uint32_t object,bool building) {
     return true;
 }
 // Foot Mark up/down: chain link plus the Unit ground occupancy bit 20 (00707980/007079E0).
-bool mark_unit(w::Snapshot& s,w::Entity& u,bool down) {
+bool mark_unit(w::Snapshot& s,w::Entity& u,bool down,const EffectHooks& hooks) {
     if (!u.cell || u.layer!=w::Layer::Ground) return false;
     const auto key=cell_key({std::int16_t(u.cell->x),std::int16_t(u.cell->y)}); if (!key) return false;
     auto it=s.cells.find(*key); if (it==s.cells.end() || !it->second.ground_occupancy_124) return false;
@@ -761,7 +788,7 @@ bool mark_unit(w::Snapshot& s,w::Entity& u,bool down) {
     auto& bits=*s.cells.at(*key).ground_occupancy_124;
     bits=down?(bits|0x20u):(bits&~0x20u);
     entity_of(s,u.id)->object_field_74=down?1:0;
-    return true;
+    return hooks.unit_mark && hooks.unit_mark(s,u.id,down);
 }
 std::optional<bool> legal(const w::Snapshot& s,const Catalog& c,const TypeFacts& t,CellXY origin) {
     std::vector<CellXY> region=footprint(origin,t.placement.foundation);
@@ -771,7 +798,7 @@ std::optional<bool> legal(const w::Snapshot& s,const Catalog& c,const TypeFacts&
     return std::nullopt;
 }
 // BuildingClass::Unlimbo 0043D3A0 effects that production depends on.
-Outcome unlimbo_building(w::Snapshot& s,FactorySet& f,const Catalog& c,std::uint32_t id,CellXY origin) {
+Outcome unlimbo_building(w::Snapshot& s,FactorySet& f,const Catalog& c,std::uint32_t id,CellXY origin,const EffectHooks& hooks) {
     auto* b=entity_of(s,id); if (!b) return fail(Status::NeedsInput,"building missing");
     const auto* t=facts_of(c,*b); if (!t) return fail(Status::NeedsInput,"building type missing");
     if (t->factory==Rtti::AircraftType || t->placement.to_overlay || t->wall)
@@ -807,11 +834,13 @@ Outcome unlimbo_building(w::Snapshot& s,FactorySet& f,const Catalog& c,std::uint
         const auto kind=count_kind(probe); if (kind>=0) ++counts[std::size_t(kind)];
     }
     f.power_dirty[h->id]=true;                                             // 0043D784.
+    if (!hooks.building_unlimbo || !hooks.building_unlimbo(s,id)) return fail(Status::NeedsInput,"Building Unlimbo effects unresolved");
     return Outcome{Status::Done,{},id,{}};
 }
 }
 
-Outcome deploy(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint32_t unit_id,std::optional<bool> can_deploy) {
+Outcome deploy(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint32_t unit_id,std::optional<bool> can_deploy,
+              const EffectHooks& hooks) {
     if (!runtime_ready(snapshot)) return fail(Status::NeedsInput,"setup is not complete");
     auto s=snapshot; auto f=factories;
     auto* u=entity_of(s,unit_id);
@@ -828,16 +857,16 @@ Outcome deploy(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std:
     if (!u->cell || !u->hull_facing_raw || !u->resolved_hp || !u->maximum_hp || *u->maximum_hp<=0)
         return fail(Status::NeedsInput,"unit cell, facing or health unresolved");
     if (!f.flags.session_type || !h->human_controlled) return fail(Status::NeedsInput,"session or house control unresolved");
-    if (bt->construction_yard && *f.flags.session_type!=0 && !*h->human_controlled)
-        return fail(Status::Unsupported,"computer base planning 004EF5A0 uses RNG and is not recovered");
+    // TODO-ORIGINAL 004EF5A0: a computer house runs base planning here, with RNG draws.
+    // The prototype skips it so the skirmish AI can deploy.
     // 006FE02F: Mark up and clear locomotor bits, then test the deploy cell.
-    if (!mark_unit(s,*entity_of(s,unit_id),false)) return fail(Status::NeedsInput,"unit occupancy unresolved");
+    if (!mark_unit(s,*entity_of(s,unit_id),false,hooks)) return fail(Status::NeedsInput,"unit occupancy unresolved");
     u=entity_of(s,unit_id);
     CellXY cell{std::int16_t(u->cell->x),std::int16_t(u->cell->y)};
     if (!original_deploy_without_offset(bt->sensor_array,bt->tick_tank,bt->icbm,bt->artillery)) { --cell.x; --cell.y; } // 00851A8C.
     const auto ok=legal(s,c,*bt,cell);
     if (!ok) return fail(Status::NeedsInput,"deploy cells unresolved");
-    if (!mark_unit(s,*entity_of(s,unit_id),true)) return fail(Status::NeedsInput,"unit occupancy unresolved");
+    if (!mark_unit(s,*entity_of(s,unit_id),true,hooks)) return fail(Status::NeedsInput,"unit occupancy unresolved");
     if (!*ok) {                                                            // 006FE0C9: Mark down again.
         snapshot=std::move(s); factories=std::move(f);
         return fail(Status::Rejected,"cannot deploy here");
@@ -846,17 +875,23 @@ Outcome deploy(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std:
     const auto want=original_deploy_facing(bt->sensor_array,bt->tick_tank,bt->icbm,bt->artillery);
     const auto have=std::uint8_t(((*u->hull_facing_raw>>7)+1)>>1);
     if (have!=want) {                                                      // 006FE16B: turn first.
-        snapshot=std::move(s); factories=std::move(f);
-        Outcome o=fail(Status::NeedsTurn,"turn to the deploy facing, then deploy again"); o.value=want; return o;
+        if (!hooks.turn) {
+            snapshot=std::move(s); factories=std::move(f);
+            Outcome o=fail(Status::NeedsTurn,"turn to the deploy facing, then deploy again"); o.value=want; return o;
+        }
+        // TODO-ORIGINAL 006FE16B: the original turns over several frames, then retries.
+        if (!hooks.turn(s,unit_id,want)) return fail(Status::NeedsInput,"turn hook failed");
+        u=entity_of(s,unit_id);
     }
-    if (!mark_unit(s,*entity_of(s,unit_id),false)) return fail(Status::NeedsInput,"unit occupancy unresolved");
+    if (!mark_unit(s,*entity_of(s,unit_id),false,hooks)) return fail(Status::NeedsInput,"unit occupancy unresolved");
     const auto owner=u->house_id;
     const auto id=create_object(s,*bt,owner,w::Kind::Structure);           // 00438CE0, RNG at 006C12AA.
     if (!id) return fail(Status::NeedsInput,"no entity id");
+    if (!hooks.constructor || !hooks.constructor(s,*id)) return fail(Status::NeedsInput,"constructor fields unresolved");
     h=house_of(s,owner);
     if (!tracking_add(*h,*bt)) return fail(Status::NeedsInput,"owned building counter unresolved"); // 0043F840 -> 004EA970.
     f.buildings[*id]=BuildingState{};
-    auto placed=unlimbo_building(s,f,c,*id,cell);
+    auto placed=unlimbo_building(s,f,c,*id,cell,hooks);
     if (placed.status!=Status::Done) return placed;
     // 006FE33D: Health = ftol(unit health ratio * building Strength), minimum one.
     u=entity_of(s,unit_id); auto* b=entity_of(s,*id);
@@ -868,12 +903,13 @@ Outcome deploy(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std:
     if (!counter_add(h->units_owned_5430,ut->heap_index,-1)) return fail(Status::NeedsInput,"owned unit counter unresolved");
     if (h->unit_count) --*h->unit_count;
     if (h->unit_type_counts) (*h->unit_type_counts)[ut->heap_index]-=1;
+    if (!hooks.unit_removal || !hooks.unit_removal(s,unit_id)) return fail(Status::NeedsInput,"Unit removal callbacks unresolved");
     snapshot=std::move(s); factories=std::move(f);
     Outcome o; o.status=Status::Done; o.entity=id; return o;
 }
 
 Outcome begin_production(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint32_t house_id,
-                         const std::string& type,std::uint64_t frame) {
+                         const std::string& type,std::uint64_t frame,const EffectHooks& hooks) {
     if (!runtime_ready(snapshot)) return fail(Status::NeedsInput,"setup is not complete");
     auto s=snapshot; auto f=factories;
     const auto* t=c.find(type); if (!t) return fail(Status::Rejected,"unknown type");
@@ -898,6 +934,7 @@ Outcome begin_production(w::Snapshot& snapshot,FactorySet& factories,const Catal
             t->rtti==Rtti::InfantryType?w::Kind::Infantry:w::Kind::Aircraft;
         const auto cost=cost_of(c,*t,*h); if (!cost) return fail(Status::NeedsInput,"cost unresolved");
         const auto id=create_object(s,*t,house_id,kind); if (!id) return fail(Status::NeedsInput,"no entity id");
+        if (!hooks.constructor || !hooks.constructor(s,*id)) return fail(Status::NeedsInput,"constructor fields unresolved");
         h=house_of(s,house_id);
         if (!tracking_add(*h,*t)) return fail(Status::NeedsInput,"owned counter unresolved");
         if (kind==w::Kind::Unit && h->unit_count && h->unit_type_counts) { ++*h->unit_count; ++(*h->unit_type_counts)[t->heap_index]; }
@@ -922,32 +959,31 @@ std::optional<bool> passes_proximity(const w::Snapshot& s,const FactorySet& f,co
     const auto* t=c.find(type); const auto* h=house_of(s,house_id);
     if (!t || !h || !h->original_index || !f.flags.player_house) return std::nullopt;
     const auto* player=house_of(s,*f.flags.player_house); if (!player || !player->original_index) return std::nullopt;
-    if (*h->original_index!=*player->original_index || t->rtti!=Rtti::BuildingType) return true; // 004991D0 early exits.
-    if (t->placement.foundation<0 || t->placement.foundation>=22) return std::nullopt;
-    const auto [width,height]=kFoundationBounds[std::size_t(t->placement.foundation)];
+    ProximityInputs in; in.house_index=*h->original_index; in.player_index=*player->original_index;
+    in.building_type=t->rtti==Rtti::BuildingType; in.foundation=t->placement.foundation; in.adjacent=t->adjacent;
+    in.cell=cell; in.build_off_ally=f.flags.build_off_ally;
     const int adj=t->adjacent+1;
-    bool ok=false;
-    for (int x=cell.x-adj;x<cell.x-adj+width+2*adj;++x)
-        for (int y=cell.y-adj;y<cell.y-adj+height+2*adj;++y) {
-            if (x>=cell.x && x<cell.x+width && y>=cell.y && y<cell.y+height) continue;
-            const auto key=cell_key({std::int16_t(x),std::int16_t(y)}); if (!key) continue;
-            const auto it=s.cells.find(*key);
-            if (it==s.cells.end()) continue;                               // Fallback cell has no building.
-            const auto chain=ground_chain(s,it->second); if (!chain) return std::nullopt;
-            const w::Entity* building=nullptr;                             // 004717B0 first Building.
-            for (const auto* e:*chain) if (e->kind==w::Kind::Structure) { building=e; break; }
-            if (!building) continue;
-            const auto* owner=house_of(s,building->house_id); const auto* bt=facts_of(c,*building);
+    for (int x=cell.x-adj-1;x<cell.x+adj+8;++x) for (int y=cell.y-adj-1;y<cell.y+adj+8;++y) {
+        const auto key=cell_key({std::int16_t(x),std::int16_t(y)}); if (!key) continue;
+        const auto it=s.cells.find(*key); if (it==s.cells.end()) continue;
+        const auto chain=ground_chain(s,it->second); if (!chain) return std::nullopt;
+        std::optional<ProximityBuilding> first;
+        for (const auto* e:*chain) if (e->kind==w::Kind::Structure) {
+            const auto* owner=house_of(s,e->house_id); const auto* bt=facts_of(c,*e);
             if (!owner || !owner->original_index || !bt) return std::nullopt;
-            if (*owner->original_index==*h->original_index && bt->base_normal) ok=true;
-            if (!f.flags.build_off_ally) return std::nullopt;
-            if (*f.flags.build_off_ally && bt->eligible_ally && owner->id!=h->id) return std::nullopt; // Alliance mask +5674 not modeled.
+            ProximityBuilding b; b.owner_index=*owner->original_index; b.base_normal=bt->base_normal;
+            b.eligible_ally=bt->eligible_ally;
+            if (owner->id==h->id) b.allied=true;
+            else if (f.flags.build_off_ally && *f.flags.build_off_ally && bt->eligible_ally) return std::nullopt; // Ally mask +5674 not held.
+            first=b; break;
         }
-    return ok;
+        in.buildings[packed_cell({std::int16_t(x),std::int16_t(y)})]=first;
+    }
+    return original_passes_proximity(in);
 }
 
 Outcome place(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint32_t house_id,
-              const std::string& type,CellXY cell,std::uint64_t) {
+              const std::string& type,CellXY cell,std::uint64_t,const EffectHooks& hooks) {
     if (!runtime_ready(snapshot)) return fail(Status::NeedsInput,"setup is not complete");
     auto s=snapshot; auto f=factories;
     const auto* t=c.find(type); if (!t || t->rtti!=Rtti::BuildingType) return fail(Status::Rejected,"not a building type");
@@ -958,7 +994,7 @@ Outcome place(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::
     const auto builder=who_can_build(s,f,c,*t,*h,false,false);             // 005D4500(0,0).
     if (!builder) return fail(Status::NeedsInput,"builder unresolved");
     if (!*builder) return fail(Status::Rejected,"no builder");
-    auto placed=unlimbo_building(s,f,c,object,cell);
+    auto placed=unlimbo_building(s,f,c,object,cell,hooks);
     if (placed.status==Status::Rejected) return placed;                    // EVA only; nothing changes.
     if (placed.status!=Status::Done) return placed;
     factory=factory_in_slot(f,house_id,slot_of(*t));                       // Factory::Completed 004B9970.
@@ -968,7 +1004,7 @@ Outcome place(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::
     Outcome o; o.status=Status::Done; o.entity=object; return o;
 }
 
-Outcome tick(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint64_t frame) {
+Outcome tick(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint64_t frame,const EffectHooks& hooks) {
     if (!runtime_ready(snapshot)) return fail(Status::NeedsInput,"setup is not complete");
     auto s=snapshot; auto f=factories;
     // House::AI 004E41B4 -> Recalc_Power 004F2CC0 for skirmish sessions.
@@ -1004,7 +1040,99 @@ Outcome tick(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::u
         *h->cash-=installment; factory.balance-=installment;
         if (factory.progress==54) factory.suspended=true;
     }
+    // Completed Units and Infantry leave through the exit hook.
+    // TODO-ORIGINAL 004E6950/00440520: the sidebar sends PLACE with cell -1 on a later frame.
+    for (auto& factory:f.factories) {
+        if (!factory.object || factory.progress!=54 || !hooks.exit_object) continue;
+        const auto* t=c.find(factory.object_type);
+        if (!t || t->rtti==Rtti::BuildingType || t->rtti==Rtti::AircraftType) continue;
+        const auto* h=house_of(s,factory.house_id); if (!h) continue;
+        const auto builder=who_can_build(s,f,c,*t,*h,false,false);
+        if (!builder || !*builder) continue;                               // Waits until a factory exists.
+        const auto object=factory.object;
+        if (!hooks.exit_object(s,object,(*builder)->id)) continue;         // Blocked exit: try next frame.
+        auto* house=house_of(s,factory.house_id);
+        switch (t->rtti) {                                                 // House::Just_Built 004E6F10.
+        case Rtti::UnitType: counter_add(house->units_ever_54b0,t->heap_index,1); break;
+        case Rtti::InfantryType: counter_add(house->infantry_ever_54c0,t->heap_index,1); break;
+        default: break;
+        }
+        factory.object=0; factory.object_type.clear(); factory.suspended=true; factory.progress=0; factory.interval=0; // 004B9970.
+    }
     snapshot=std::move(s); factories=std::move(f);
     return Outcome{Status::Done,{},{},{}};
+}
+}
+
+// ===========================================================================
+// PLAYABLE PROTOTYPE hooks. None of these is original behavior.
+namespace ra2::sim::production {
+EffectHooks prototype_hooks() {
+    EffectHooks h;
+    // TODO-ORIGINAL 004C2E60 Foot Mark and 00472540 Cell setup, visibility reveal.
+    h.unit_mark=[](w::Snapshot&,std::uint32_t,bool){ return true; };
+    // TODO-ORIGINAL 00438CE0 BuildingClass / 006FA400 UnitClass / Infantry constructor fields.
+    h.constructor=[](w::Snapshot&,std::uint32_t){ return true; };
+    // TODO-ORIGINAL 0043D3A0 BuildingClass::Unlimbo: bibs, anims, radar, ProduceCash, sight.
+    h.building_unlimbo=[](w::Snapshot&,std::uint32_t){ return true; };
+    // TODO-ORIGINAL Unit Limbo 004ED440 and destructor: teams, triggers, selection, passengers.
+    h.unit_removal=[](w::Snapshot&,std::uint32_t){ return true; };
+    // TODO-ORIGINAL 006FE16B: original turns with the locomotor over several frames.
+    h.turn=[](w::Snapshot& s,std::uint32_t id,std::uint8_t facing) {
+        auto* u=entity_of(s,id); if (!u) return false;
+        u->hull_facing_raw=std::uint16_t(facing<<8); u->hull_facing=facing; return true;
+    };
+    // TODO-ORIGINAL 00440520 Exit_Object: doors, exit cell, RNG, drive-out mission.
+    // Prototype: first free allocated Cell in a ring around the factory, starting below it.
+    h.exit_object=[](w::Snapshot& s,std::uint32_t object,std::uint32_t factory) {
+        auto* b=entity_of(s,factory); auto* o=entity_of(s,object);
+        if (!b || !o || !b->cell) return false;
+        // Footprint size from the chain: count cells this building heads or links is costly,
+        // so use a 6x6 search box anchored at the building origin.
+        const int ox=b->cell->x, oy=b->cell->y;
+        for (int ring=0;ring<4;++ring)
+            for (int y=oy-1-ring;y<=oy+5+ring;++y) for (int x=ox-1-ring;x<=ox+5+ring;++x) {
+                if (ring>0 && y>oy-1-ring+0 && y<oy+5+ring && x>ox-1-ring && x<ox+5+ring) continue;
+                const auto key=cell_key({std::int16_t(x),std::int16_t(y)}); if (!key) continue;
+                auto it=s.cells.find(*key);
+                if (it==s.cells.end() || !it->second.heads || !it->second.ground_occupancy_124 || !it->second.terrain) continue;
+                auto& cell=it->second;
+                if (cell.heads->ground_head || (*cell.ground_occupancy_124&0x3F)) continue;
+                if (!cell.terrain->land_type || (*cell.terrain->land_type!=0 && *cell.terrain->land_type!=1)) continue;
+                if (cell.terrain->ramp_index.value_or(1)!=0) continue;
+                o=entity_of(s,object);
+                o->next=cell.heads->ground_head; cell.heads->ground_head=object;
+                if (o->kind==w::Kind::Infantry) { *cell.ground_occupancy_124|=0x4u; o->hull_facing_raw=0x8000; } // Subcell 2.
+                else { *cell.ground_occupancy_124|=0x20u; o->hull_facing_raw=0x8000; o->turret_facing_raw=0x8000; }
+                o->lifetime=w::Lifetime::Placed; o->cell=ra2map::Cell{std::uint16_t(x),std::uint16_t(y)};
+                o->layer=w::Layer::Ground; o->on_map=true; o->object_field_74=1; o->object_field_76=0;
+                o->locomotor_moving=false; o->mission=5;                    // Guard.
+                o->position=sim::Coord{x*256+128,y*256+128,cell.terrain->floor_world_height.value_or(0)};
+                return true;
+            }
+        return false;
+    };
+    return h;
+}
+}
+
+namespace ra2::sim::production {
+std::optional<CellXY> prototype_find_placement(const w::Snapshot& s,const FactorySet& f,const Catalog& c,
+                                               std::uint32_t house_id,const std::string& type,CellXY anchor,int radius) {
+    // TODO-ORIGINAL 004E9660/004EF890 AI base planning. Prototype: nearest legal
+    // cell in square rings around the anchor that passes the player proximity rule.
+    const auto* t=c.find(type); const auto* h=house_of(s,house_id);
+    if (!t || !h || t->rtti!=Rtti::BuildingType || !h->original_index) return std::nullopt;
+    FactorySet as_player=f; as_player.flags.player_house=house_id;
+    for (int ring=0;ring<=radius;++ring)
+        for (int dy=-ring;dy<=ring;++dy) for (int dx=-ring;dx<=ring;++dx) {
+            if (std::max(std::abs(dx),std::abs(dy))!=ring) continue;
+            const CellXY cell{std::int16_t(anchor.x+dx),std::int16_t(anchor.y+dy)};
+            const auto ok=legal(s,c,*t,cell);
+            if (!ok || !*ok) continue;
+            const auto near=passes_proximity(s,as_player,c,house_id,type,cell);
+            if (near && *near) return cell;
+        }
+    return std::nullopt;
 }
 }

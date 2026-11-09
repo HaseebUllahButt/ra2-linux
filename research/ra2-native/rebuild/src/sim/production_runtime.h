@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <functional>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -134,6 +135,25 @@ std::uint32_t packed_cell(CellXY);
 Placement original_clear_to_build(const PlacementMap&, CellXY, const PlacementBuilding&);
 // 0045D880 then 006DE0E0 for a BuildingType.
 Placement original_legal_placement(const PlacementMap&, CellXY origin, const PlacementBuilding&);
+// DisplayClass::Passes_Proximity_Check 004991D0 with resolved Cell contents.
+struct ProximityBuilding {
+    std::int32_t owner_index=0;          // Owner House +30.
+    bool base_normal=true, eligible_ally=false; // Type +1203 / +1204.
+    bool allied=false;                   // 004E5540(owner -> placing house).
+};
+struct ProximityInputs {
+    std::int32_t house_index=0, player_index=0; // Argument and PlayerPtr +30.
+    bool editor_mode=false;              // 00A40D13.
+    bool pending=true;                   // Argument 3 nonzero.
+    bool building_type=true;             // Pending type RTTI is 7.
+    std::int32_t foundation=0, adjacent=0;
+    CellXY cell;
+    std::optional<bool> build_off_ally;  // 00A3D2C4.
+    // First Building in each canonical Cell chain (004717B0). Missing keys use the empty fallback.
+    std::map<std::uint32_t,std::optional<ProximityBuilding>> buildings;
+    bool object_scan=true;               // 00A40958.
+};
+std::optional<bool> original_passes_proximity(const ProximityInputs&);
 // 0045EC50/0045EC90 deploy helpers: true when the cell is not offset by 00851A8C.
 bool original_deploy_without_offset(bool sensor_array, bool tick_tank, bool icbm, bool artillery);
 std::uint8_t original_deploy_facing(bool sensor_array, bool tick_tank, bool icbm, bool artillery);
@@ -225,23 +245,53 @@ struct Outcome {
     std::optional<std::int32_t> value;
 };
 
-// Every command copies Snapshot and FactorySet, then publishes both only on Done.
+// Original effects not yet proven against x86. A command that reaches one
+// calls the hook. A missing or failed hook returns NeedsInput and the command
+// publishes nothing.
+struct EffectHooks {
+    // Foot Mark up/down after the chain and bit 0x20 writes: Cell setup and visibility.
+    std::function<bool(session::world::Snapshot&,std::uint32_t unit,bool down)> unit_mark;
+    // Constructor fields of a new object beyond id, RNG word, owner, type and limbo state.
+    std::function<bool(session::world::Snapshot&,std::uint32_t entity)> constructor;
+    // BuildingClass::Unlimbo 0043D3A0 effects beyond links, counters, drain and factory count.
+    std::function<bool(session::world::Snapshot&,std::uint32_t building)> building_unlimbo;
+    // Unit Limbo and delete callbacks beyond lifetime and counters.
+    std::function<bool(session::world::Snapshot&,std::uint32_t unit)> unit_removal;
+    // Optional: turn a Unit to the deploy facing now. Without it deploy returns NeedsTurn
+    // and the movement owner must turn the Unit (locomotor Do_Turn at 006FE16B).
+    std::function<bool(session::world::Snapshot&,std::uint32_t unit,std::uint8_t facing)> turn;
+    // Optional: move a completed Unit or Infantry out of its factory. Without it the
+    // object waits in the factory. Original: House::Place_Object 004E6950 cell -1 path
+    // and BuildingClass::Exit_Object 00440520.
+    std::function<bool(session::world::Snapshot&,std::uint32_t object,std::uint32_t factory_building)> exit_object;
+};
+// PLAYABLE PROTOTYPE. Placeholder hooks so a skirmish can run before the
+// original effects are recovered. Each hook is marked TODO-ORIGINAL in the source.
+EffectHooks prototype_hooks();
+
+// Every command copies Snapshot and FactorySet, then publishes both only on success.
 // UnitClass::Try_To_Deploy 006FDFC0 for a resolved, stationary Unit.
 // can_deploy is the resolved result of the Unit's virtual +2E8 (006CD340),
 // whose tube-cell and locomotor branches are not recovered here.
-Outcome deploy(session::world::Snapshot&,FactorySet&,const Catalog&,std::uint32_t unit_id,std::optional<bool> can_deploy);
+Outcome deploy(session::world::Snapshot&,FactorySet&,const Catalog&,std::uint32_t unit_id,std::optional<bool> can_deploy,
+    const EffectHooks&);
 // Sidebar eligibility, House::Can_Build(type,false,true) for every type.
 std::vector<std::pair<std::string,CanBuild>> options(const session::world::Snapshot&,const FactorySet&,
     const Catalog&,std::uint32_t house_id);
 // Event PRODUCE: House::Begin_Production 004E5E30.
 Outcome begin_production(session::world::Snapshot&,FactorySet&,const Catalog&,std::uint32_t house_id,
-    const std::string& type,std::uint64_t frame);
+    const std::string& type,std::uint64_t frame,const EffectHooks&);
 // DisplayClass::Passes_Proximity_Check 004991D0; the UI calls it before PLACE.
 std::optional<bool> passes_proximity(const session::world::Snapshot&,const FactorySet&,const Catalog&,
     std::uint32_t house_id,const std::string& type,CellXY);
 // Event PLACE with a cell: House::Place_Object 004E6950 building path.
 Outcome place(session::world::Snapshot&,FactorySet&,const Catalog&,std::uint32_t house_id,
-    const std::string& type,CellXY,std::uint64_t frame);
+    const std::string& type,CellXY,std::uint64_t frame,const EffectHooks&);
 // Logic before events: House::AI power recalculation 004F2CC0, then FactoryClass::AI 004B9300.
-Outcome tick(session::world::Snapshot&,FactorySet&,const Catalog&,std::uint64_t frame);
+// Completed Units and Infantry then leave through hooks.exit_object.
+Outcome tick(session::world::Snapshot&,FactorySet&,const Catalog&,std::uint64_t frame,const EffectHooks&);
+// PLAYABLE PROTOTYPE for computer houses: nearest legal and adjacent origin
+// around an anchor. TODO-ORIGINAL 004E9660/004EF890 AI base planning.
+std::optional<CellXY> prototype_find_placement(const session::world::Snapshot&,const FactorySet&,const Catalog&,
+    std::uint32_t house_id,const std::string& type,CellXY anchor,int radius);
 }

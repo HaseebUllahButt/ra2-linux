@@ -1,5 +1,7 @@
-// Connected production run on real base rules: AMCV deploy, power plant,
-// barracks and infantry production on a resolved flat test map.
+// EXPERIMENTAL connected production run on real base rules: AMCV deploy,
+// power plant, barracks and infantry production on a resolved flat test map.
+// The effect hooks below are test stubs, not original behavior. This fixture
+// checks native consistency only; it is not an x86 comparison.
 #include "production_runtime.h"
 #include "../session/world/world.h"
 #include <iostream>
@@ -20,7 +22,7 @@ void expect(const Outcome& o,Status s,const std::string& what) {
 }
 w::Snapshot world(const Catalog& c,std::uint16_t facing) {
     w::Snapshot s;
-    s.setup_progress=w::SetupProgress::Complete;
+    s.setup_progress=w::SetupProgress::PrototypeComplete;
     s.geometry=ra2::session::PlacementGeometry{100,100,{2,2,96,90}};
     s.tube_vector_count=0;
     s.random=ra2::sim::Random(12345).state();
@@ -54,6 +56,22 @@ FactorySet flags() {
     f.house_factory_counts[1]={0,0,0,0,0,0}; f.power_blackout_idle[1]=true;
     return f;
 }
+EffectHooks stub_hooks() {
+    EffectHooks h=prototype_hooks(); h.turn=nullptr;  // Keep NeedsTurn visible in the checks below.
+    return h;
+}
+[[maybe_unused]] EffectHooks unused_hooks() {
+    EffectHooks h;
+    h.unit_mark=[](w::Snapshot&,std::uint32_t,bool){ return true; };
+    h.constructor=[](w::Snapshot&,std::uint32_t){ return true; };
+    h.building_unlimbo=[](w::Snapshot&,std::uint32_t){ return true; };
+    h.unit_removal=[](w::Snapshot&,std::uint32_t){ return true; };
+    return h;
+}
+const EffectHooks hooks=stub_hooks();
+bool legal_spot(const w::Snapshot& s,const FactorySet& f,const Catalog& c,CellXY cell) {
+    return passes_proximity(s,f,c,1,"GAPOWR",cell)==true;
+}
 CanBuild option(const std::vector<std::pair<std::string,CanBuild>>& list,const std::string& id) {
     for (const auto& [n,r]:list) if (n==id) return r;
     throw std::runtime_error("missing option "+id);
@@ -61,13 +79,13 @@ CanBuild option(const std::vector<std::pair<std::string,CanBuild>>& list,const s
 // Run tick() until the factory for type completes; returns frames used.
 std::uint64_t produce(w::Snapshot& s,FactorySet& f,const Catalog& c,const std::string& type,std::uint64_t& frame) {
     const auto cash=*s.houses[0].cash;
-    const auto start=begin_production(s,f,c,1,type,frame);
+    const auto start=begin_production(s,f,c,1,type,frame,hooks);
     expect(start,Status::Done,"begin "+type);
     std::uint64_t used=0;
     for (;;) {
-        ++frame; ++used; expect(tick(s,f,c,frame),Status::Done,"tick");
-        bool done=false;
-        for (const auto& x:f.factories) if (x.object_type==type && x.progress==54) done=true;
+        ++frame; ++used; expect(tick(s,f,c,frame,hooks),Status::Done,"tick");
+        bool done=true;
+        for (const auto& x:f.factories) if (x.object==*start.entity && x.progress!=54) done=false;
         if (done) break;
         if (used>20000) throw std::runtime_error("factory did not finish "+type);
     }
@@ -87,7 +105,7 @@ int main(int argc,char** argv) try {
     // Wrong facing: the original asks the unit to turn first; occupancy order may change.
     {
         auto s=world(c,0x4000); auto f=flags();
-        const auto o=deploy(s,f,c,2,true);
+        const auto o=deploy(s,f,c,2,true,hooks);
         expect(o,Status::NeedsTurn,"deploy facing"); require(o.value==0x80,"deploy facing 0x80");
         require(s.cells.at(90*512+90).heads->ground_head==2 && (*s.cells.at(90*512+90).ground_occupancy_124&0x120)==0x120,"unit stays marked");
     }
@@ -98,13 +116,20 @@ int main(int argc,char** argv) try {
         tree.cell=ra2map::Cell{91,91}; tree.position=ra2::sim::Coord{}; tree.layer=w::Layer::Ground;
         s.entities.push_back(tree); s.creation_order.push_back({w::CreatedKind::Entity,3});
         s.cells.at(91*512+91).heads->ground_head=3;
-        expect(deploy(s,f,c,2,true),Status::Rejected,"deploy onto a tree");
+        expect(deploy(s,f,c,2,true,hooks),Status::Rejected,"deploy onto a tree");
         require(s.entities[1].lifetime==w::Lifetime::Placed,"unit kept after a failed deploy");
+    }
+    {
+        // Without hooks nothing is published.
+        auto s=world(c,0x8000); auto f=flags(); const auto copy=s;
+        expect(deploy(s,f,c,2,true,EffectHooks{}),Status::NeedsInput,"deploy without hooks");
+        require(s.random.first==copy.random.first && s.entities.size()==copy.entities.size() &&
+                s.cells.at(90*512+90).heads->ground_head==2 && f.factories.empty(),"no change without hooks");
     }
     auto s=world(c,0x8000); auto f=flags();
     const auto before=s.random;
     require(option(options(s,f,c,1),"GAPOWR")==CanBuild::Cannot,"no power plant before the yard");
-    const auto d=deploy(s,f,c,2,true);
+    const auto d=deploy(s,f,c,2,true,hooks);
     expect(d,Status::Done,"deploy AMCV");
     const auto* yard=[&]{ for (const auto& e:s.entities) if (e.id==*d.entity) return &e; return (const w::Entity*)nullptr; }();
     require(yard && yard->type=="GACNST" && yard->cell->x==89 && yard->cell->y==89,"yard at unit cell minus one");
@@ -116,30 +141,63 @@ int main(int argc,char** argv) try {
     require((*s.houses[0].buildings_active_5460)[c.find("GACNST")->heap_index]==1,"yard active");
     std::cout<<"AMCV deployed into GACNST at (89,89)\n";
     std::uint64_t frame=0;
-    expect(tick(s,f,c,++frame),Status::Done,"tick after deploy");
+    expect(tick(s,f,c,++frame,hooks),Status::Done,"tick after deploy");
     const auto opts=options(s,f,c,1);
     require(option(opts,"GAPOWR")==CanBuild::Can,"power plant buildable");
     require(option(opts,"GAPILE")==CanBuild::Cannot,"barracks needs power");
     require(option(opts,"E1")==CanBuild::Cannot,"infantry needs barracks");
     produce(s,f,c,"GAPOWR",frame);
     require(*s.houses[0].cash==10000-800,"power plant cost paid");
-    expect(begin_production(s,f,c,1,"GAPOWR",frame),Status::Rejected,"no second building while one waits");
+    expect(begin_production(s,f,c,1,"GAPOWR",frame,hooks),Status::Rejected,"no second building while one waits");
     // Placement: far away fails proximity; next to the yard passes.
     require(passes_proximity(s,f,c,1,"GAPOWR",{115,115})==false,"far cell fails proximity");
     require(passes_proximity(s,f,c,1,"GAPOWR",{93,89})==true,"adjacent cell passes proximity");
-    expect(place(s,f,c,1,"GAPOWR",{90,90},frame),Status::Rejected,"cannot place on the yard");
-    expect(place(s,f,c,1,"GAPOWR",{93,89},frame),Status::Done,"place power plant");
-    expect(tick(s,f,c,++frame),Status::Done,"power tick");
+    expect(place(s,f,c,1,"GAPOWR",{90,90},frame,hooks),Status::Rejected,"cannot place on the yard");
+    expect(place(s,f,c,1,"GAPOWR",{93,89},frame,hooks),Status::Done,"place power plant");
+    expect(tick(s,f,c,++frame,hooks),Status::Done,"power tick");
     require(*s.houses[0].power_output==200 && *s.houses[0].power_drain==0,"power recalculated");
     require(option(options(s,f,c,1),"GAPILE")==CanBuild::Can,"barracks after power");
     produce(s,f,c,"GAPILE",frame);
     require(passes_proximity(s,f,c,1,"GAPILE",{89,93})==true,"barracks next to yard");
-    expect(place(s,f,c,1,"GAPILE",{89,93},frame),Status::Done,"place barracks");
-    expect(tick(s,f,c,++frame),Status::Done,"power tick 2");
+    expect(place(s,f,c,1,"GAPILE",{89,93},frame,hooks),Status::Done,"place barracks");
+    expect(tick(s,f,c,++frame,hooks),Status::Done,"power tick 2");
     require(*s.houses[0].power_drain==10,"barracks drain");
     require(option(options(s,f,c,1),"E1")==CanBuild::Can,"GI buildable");
     produce(s,f,c,"E1",frame);
+    {
+        const w::Entity* gi=nullptr; for (const auto& e:s.entities) if (e.type=="E1") gi=&e;
+        require(gi && gi->lifetime==w::Lifetime::Placed && gi->cell,"GI left the barracks (prototype exit)");
+        std::cout<<"E1 exited at ("<<gi->cell->x<<","<<gi->cell->y<<")\n";
+        require((*s.houses[0].infantry_ever_54c0)[c.find("E1")->heap_index]==1,"Just_Built counter");
+    }
+    // Refinery, war factory and a tank.
+    produce(s,f,c,"GAREFN",frame);
+    require(passes_proximity(s,f,c,1,"GAREFN",{85,89})==true,"refinery next to yard");
+    expect(place(s,f,c,1,"GAREFN",{85,89},frame,hooks),Status::Done,"place refinery");
+    expect(tick(s,f,c,++frame,hooks),Status::Done,"power tick 3");
+    require(option(options(s,f,c,1),"GAWEAP")==CanBuild::Can,"war factory buildable");
+    produce(s,f,c,"GAWEAP",frame);
+    require(passes_proximity(s,f,c,1,"GAWEAP",{95,89})==true,"war factory next to power plant");
+    expect(place(s,f,c,1,"GAWEAP",{95,89},frame,hooks),Status::Done,"place war factory");
+    expect(tick(s,f,c,++frame,hooks),Status::Done,"power tick 4");
+    require(option(options(s,f,c,1),"MTNK")==CanBuild::Can,"tank buildable");
+    produce(s,f,c,"MTNK",frame);
+    {
+        const w::Entity* tank=nullptr; for (const auto& e:s.entities) if (e.type=="MTNK") tank=&e;
+        require(tank && tank->lifetime==w::Lifetime::Placed,"tank left the war factory (prototype exit)");
+        std::cout<<"MTNK exited at ("<<tank->cell->x<<","<<tank->cell->y<<"), power "<<*s.houses[0].power_output<<"/"<<*s.houses[0].power_drain<<"\n";
+    }
+    {
+        const auto spot=prototype_find_placement(s,f,c,1,"GAPOWR",{90,90},10);
+        require(spot && legal_spot(s,f,c,*spot),"prototype placement finder");
+        std::cout<<"finder picked ("<<spot->x<<","<<spot->y<<") for GAPOWR\n";
+    }
+    // Turn hook: wrong facing deploys at once in the prototype.
+    {
+        auto t=world(c,0x4000); auto g=flags();
+        expect(deploy(t,g,c,2,true,prototype_hooks()),Status::Done,"prototype turn then deploy");
+    }
     std::cout<<"cash left "<<*s.houses[0].cash<<", frame "<<frame<<'\n';
     require(w::validate(s),"snapshot stays valid");
-    std::cout<<"Connected production run: "<<checks<<" checks passed\n";
+    std::cout<<"EXPERIMENTAL connected production run (stub hooks, native checks only): "<<checks<<" checks passed\n";
 } catch (const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
