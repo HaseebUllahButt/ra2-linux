@@ -94,6 +94,7 @@ struct Entity {
     std::optional<bool> veteran_firepower, elite_firepower, veteran_rof, elite_rof;
     std::optional<std::uint16_t> turret_facing_raw;
     std::optional<std::int32_t> burst_index;
+    std::optional<std::int32_t> techno_field_13c, techno_field_140, techno_field_144;
 };
 struct CellState {
     std::optional<bool> allocated; // The original allocated Cell, not the fallback receiver.
@@ -151,6 +152,7 @@ struct Snapshot {
     std::optional<StartPoint> fallback_cell_coordinate;
     std::optional<std::int32_t> fallback_overlay_index;
     std::optional<std::uint8_t> fallback_overlay_data;
+    std::optional<std::int32_t> rules_field_94;
 };
 enum class PlacementResult { Placed, Blocked, Unresolved };
 // Checks every head and shared next chain. Invalid and cyclic snapshots fail.
