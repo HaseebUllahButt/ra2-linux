@@ -205,7 +205,7 @@ Outcome abandon_orphans(w::Snapshot& world,FactorySet& factories,const Catalog& 
             item->object_field_74=0; item->object_field_76=1; item->target_id=0;
         }
         factory.object=0; factory.object_type.clear(); factory.progress=0;
-        factory.interval=0; factory.balance=0; factory.suspended=true;
+        factory.interval=0; factory.timer_duration=0; factory.balance=0; factory.suspended=true;
     }
     return {Status::Done,{},{},{}};
 }
@@ -344,7 +344,7 @@ Outcome discharge(w::Snapshot& world,FactorySet& factories,const Catalog& catalo
         }
         result.entity=item->id;
         factory.object=0; factory.object_type.clear(); factory.suspended=true;
-        factory.progress=0; factory.interval=0; factory.balance=0;
+        factory.progress=0; factory.interval=0; factory.timer_duration=0; factory.balance=0;
     }
     return result;
 }
@@ -525,7 +525,7 @@ Outcome tick(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,std
             else waiting_for_exit=true;
         }
         if (!factory.suspended && factory.progress<54 &&
-            (frame<factory.timer_start || frame-factory.timer_start>=std::uint64_t(std::max(factory.interval,0)))) needed=true;
+            (frame<factory.timer_start || frame-factory.timer_start>=std::uint64_t(std::max(factory.timer_duration,0)))) needed=true;
     }
     if (!needed) return {Status::Done,waiting_for_exit ? "waiting for a clear factory exit" : "",{}, {}};
     return transaction(world,factories,[&](w::Snapshot& candidate,FactorySet& next) {

@@ -191,8 +191,9 @@ struct FactoryState {
     std::string object_type;
     std::int32_t progress=0;             // +24.
     std::int32_t balance=0;              // +5C.
-    std::int32_t interval=0;             // +34.
+    std::int32_t interval=0;             // +34 stage rate; 004B9EB0 updates it after Recalc_Power.
     std::uint64_t timer_start=0;         // +28.
+    std::int32_t timer_duration=0;       // +30 current stage timer; each stage reloads it from +34.
     bool suspended=true;                 // +6C.
 };
 struct SessionFlags {

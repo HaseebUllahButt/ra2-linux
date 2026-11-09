@@ -916,14 +916,15 @@ Outcome begin_production(w::Snapshot& snapshot,FactorySet& factories,const Catal
         if (kind==w::Kind::Structure) f.buildings[*id]=BuildingState{};
         factory=factory_in_slot(f,house_id,slot);
         factory->object=*id; factory->object_type=t->id; factory->progress=0; factory->balance=*cost;
-        factory->suspended=true; factory->interval=0; factory->timer_start=frame;
+        factory->suspended=true; factory->interval=0; factory->timer_duration=0; factory->timer_start=frame;
     }
     // Factory::Start 004B9670.
     if (factory->progress==54) return fail(Status::Rejected,"production already complete");
     const auto frames=build_frames(c,f,*t,*house_of(s,house_id));
     if (!frames) return fail(Status::NeedsInput,"build time inputs unresolved");
     factory->suspended=false;
-    factory->interval=factory_stage_frames(*frames);
+    factory->interval=factory_stage_frames(*frames);                       // 004B9670 writes +34 and +30.
+    factory->timer_duration=factory->interval;
     factory->timer_start=frame;
     undo.commit(); factories=std::move(f);
     Outcome o; o.status=Status::Done; o.entity=factory_in_slot(factories,house_id,slot)->object; o.value=*frames; return o;
@@ -1008,6 +1009,7 @@ Outcome place(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::
     if (placed.status!=Status::Done) return placed;
     factory=factory_in_slot(f,house_id,slot_of(*t));                       // Factory::Completed 004B9970.
     factory->object=0; factory->object_type.clear(); factory->suspended=true; factory->progress=0; factory->interval=0;
+    factory->timer_duration=0;
     // House::Just_Built 004E6F10 is reached for buildings from the construction mission, not here.
     undo.commit(); factories=std::move(f);
     Outcome o; o.status=Status::Done; o.entity=object; return o;
@@ -1041,14 +1043,29 @@ Outcome tick(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::u
         }
         if (!idle->second) output=0;
         h->power_output=output; h->power_drain=drain; dirty=false;
+        // 004F2CC0 then calls 004B9EB0: every factory of this House takes a
+        // new stage rate from the new power. The running stage timer (+30)
+        // keeps its duration; the next stage reloads it from the rate.
+        for (auto& factory:f.factories) {
+            if (factory.house_id!=id) continue;
+            int rate=0;
+            if (factory.object) {
+                const auto* t=c.find(factory.object_type);
+                if (!t) return fail(Status::NeedsInput,"factory object type unresolved");
+                const auto frames=build_frames(c,f,*t,*h);
+                if (!frames) return fail(Status::NeedsInput,"build time inputs unresolved");
+                rate=*frames;
+            }
+            factory.interval=factory_stage_frames(rate);
+        }
     }
     // FactoryClass::AI 004B9300 in global factory order, cash only.
     for (auto& factory:f.factories) {
         if (factory.suspended || !factory.object || factory.progress==54) continue;
         if (frame<factory.timer_start) return fail(Status::NeedsInput,"factory timer after frame");
-        if (frame-factory.timer_start<std::uint64_t(factory.interval)) continue;
+        if (frame-factory.timer_start<std::uint64_t(std::max(factory.timer_duration,0))) continue;
         auto* h=house_of(s,factory.house_id); if (!h || !h->cash) return fail(Status::NeedsInput,"house cash unresolved");
-        ++factory.progress; factory.timer_start=frame;
+        ++factory.progress; factory.timer_start=frame; factory.timer_duration=factory.interval; // StageClass reload.
         const int divisor=54-factory.progress;
         const int installment=std::min(factory.balance,divisor?factory.balance/divisor:factory.balance);
         if (installment>*h->cash) { --factory.progress; continue; }
