@@ -33,12 +33,12 @@ const app::OptionsButtonView* find(const std::vector<app::OptionsButtonView>& v,
     auto it=std::find_if(v.begin(),v.end(),[&](const auto& b){return b.id==id;});
     return it==v.end()?nullptr:&*it;
 }
-void click(app::BattleOptions& m,const app::OptionsButtonView& b,OptionsEvent want,const char* what) {
+void click(app::OptionsMenu& m,const app::OptionsButtonView& b,OptionsEvent want,const char* what) {
     m.pointer_down(b.bounds.x+5,b.bounds.y+5);
     check(m.pointer_up(b.bounds.x+5,b.bounds.y+5)==want,what);
 }
 void state_checks() {
-    app::BattleOptions m(options_dialog(),confirm_dialog(),"Quit");
+    app::OptionsMenu m(options_dialog(),confirm_dialog(),"Quit");
     check(!m.visible() && m.buttons().empty(),"menu starts closed");
     check(m.activate(OptionsButton::ResumeMission)==OptionsEvent::None,"closed menu ignores buttons");
     m.show();
@@ -95,12 +95,12 @@ void state_checks() {
     m.show();
     click(m,*find(m.buttons(),OptionsButton::ResumeMission),OptionsEvent::Resume,"resume button");
     // Drawing a closed menu or a wrong frame size changes nothing.
-    app::BattleOptionsArt none;
+    app::OptionsMenuArt none;
     render::Bitmap small{10,10,render::Bytes(400,7)};
-    m.show(); app::draw_battle_options(small,m,none);
+    m.show(); app::draw_options_menu(small,m,none);
     check(small.rgba==render::Bytes(400,7),"wrong size is ignored");
     render::Bitmap bad{1024,768,render::Bytes(3,7)};
-    app::draw_battle_options(bad,m,none);
+    app::draw_options_menu(bad,m,none);
     check(bad.rgba==render::Bytes(3,7),"short buffer is ignored");
 }
 void original_checks(const std::string& dir) {
@@ -111,7 +111,7 @@ void original_checks(const std::string& dir) {
     files.bootstrap(fs::GameVariant::RedAlert2); files.mount(app::side_archive(false));
     auto csf=files.read_file("RA2.CSF"); check(csf.has_value(),"RA2.CSF");
     ra2text::CsfFile strings; strings.parse(csf->data(),csf->size());
-    auto m=app::BattleOptions::load(exe,strings);
+    auto m=app::OptionsMenu::load(exe,strings);
     m.show();
     auto v=m.buttons();
     check(v.size()==6,"original dialog 181 buttons");
@@ -121,9 +121,9 @@ void original_checks(const std::string& dir) {
     check(find(m.buttons(),OptionsButton::Leave)->label=="Quit","original GUI:Leave label");
     check(m.prompt()=="What would you like to do?","original GUI:AskAbortMission");
     m.escape();
-    const auto art=app::BattleOptionsArt::load(files);
+    const auto art=app::OptionsMenuArt::load(files);
     render::Bitmap f{1024,768,render::Bytes(1024*768*4,0)};
-    app::draw_battle_options(f,m,art);
+    app::draw_options_menu(f,m,art);
     auto px=[&](int x,int y){return &f.rgba[(std::size_t(y)*1024+x)*4];};
     check(px(400,300)[2]>px(400,300)[0],"blue Allied background");
     // Game Controls is disabled until wired, so its caption is dark blue.

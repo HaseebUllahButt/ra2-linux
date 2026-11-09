@@ -4,7 +4,7 @@
 
 namespace ra2::app {
 namespace {
-constexpr int sidebar_x=BattleOptions::width-168;
+constexpr int sidebar_x=OptionsMenu::width-168;
 // Matched against the original 1024x768 Esc screen: SIDEBTTN.SHP cells are
 // 125x25, start 20 pixels into the sidebar and 227 pixels down, and step 25.
 // The last button sits on SIDE3.SHP, which starts at 727.
@@ -39,7 +39,7 @@ bool inside(ui::Rect r,int x,int y) noexcept {
 }
 }
 
-BattleOptions::BattleOptions(const ui::Dialog& options, const ui::Dialog& confirm, std::string leave_label) {
+OptionsMenu::OptionsMenu(const ui::Dialog& options, const ui::Dialog& confirm, std::string leave_label) {
     for(const auto& c:options.controls) {
         if(c.class_id==128 && known(c.id)) options_.push_back({OptionsButton(c.id),row_of(c),c.label});
         if(c.id==1684) heading_=c.label;
@@ -54,20 +54,20 @@ BattleOptions::BattleOptions(const ui::Dialog& options, const ui::Dialog& confir
     }
 }
 
-void BattleOptions::show() noexcept { page_=OptionsPage::Options; hovered_.reset(); held_.reset(); }
+void OptionsMenu::show() noexcept { page_=OptionsPage::Options; hovered_.reset(); held_.reset(); }
 
-OptionsEvent BattleOptions::escape() noexcept {
+OptionsEvent OptionsMenu::escape() noexcept {
     held_.reset();
     if(page_==OptionsPage::ConfirmAbort) { page_=OptionsPage::Options; return OptionsEvent::None; }
     if(page_==OptionsPage::Options) { page_=OptionsPage::Closed; return OptionsEvent::Resume; }
     return OptionsEvent::None;
 }
 
-const std::vector<BattleOptions::Slot>& BattleOptions::slots() const noexcept {
+const std::vector<OptionsMenu::Slot>& OptionsMenu::slots() const noexcept {
     return page_==OptionsPage::ConfirmAbort?confirm_:options_;
 }
 
-OptionsEvent BattleOptions::activate(OptionsButton id) noexcept {
+OptionsEvent OptionsMenu::activate(OptionsButton id) noexcept {
     if(page_==OptionsPage::Closed || !enabled(id)) return OptionsEvent::None;
     const auto& list=slots();
     if(std::none_of(list.begin(),list.end(),[&](const Slot& s){return s.id==id;})) return OptionsEvent::None;
@@ -84,26 +84,26 @@ OptionsEvent BattleOptions::activate(OptionsButton id) noexcept {
     return OptionsEvent::None;
 }
 
-std::optional<OptionsButton> BattleOptions::hit(int x,int y) const noexcept {
+std::optional<OptionsButton> OptionsMenu::hit(int x,int y) const noexcept {
     if(page_==OptionsPage::Closed) return std::nullopt;
     for(const auto& s:slots()) if(enabled(s.id) && inside(rect(s.row),x,y)) return s.id;
     return std::nullopt;
 }
-void BattleOptions::pointer_move(int x,int y) noexcept { hovered_=hit(x,y); }
-void BattleOptions::pointer_down(int x,int y) noexcept { hovered_=held_=hit(x,y); }
-OptionsEvent BattleOptions::pointer_up(int x,int y) noexcept {
+void OptionsMenu::pointer_move(int x,int y) noexcept { hovered_=hit(x,y); }
+void OptionsMenu::pointer_down(int x,int y) noexcept { hovered_=held_=hit(x,y); }
+OptionsEvent OptionsMenu::pointer_up(int x,int y) noexcept {
     const auto held=held_; held_.reset(); hovered_=hit(x,y);
     if(!held || held!=hovered_) return OptionsEvent::None;
     return activate(*held);
 }
-void BattleOptions::set_enabled(OptionsButton id,bool on) noexcept {
+void OptionsMenu::set_enabled(OptionsButton id,bool on) noexcept {
     enabled_[index(id)]=on;
     if(!on && hovered_==id) hovered_.reset();
     if(!on && held_==id) held_.reset();
 }
-bool BattleOptions::enabled(OptionsButton id) const noexcept { return enabled_[index(id)]; }
+bool OptionsMenu::enabled(OptionsButton id) const noexcept { return enabled_[index(id)]; }
 
-std::vector<OptionsButtonView> BattleOptions::buttons() const {
+std::vector<OptionsButtonView> OptionsMenu::buttons() const {
     std::vector<OptionsButtonView> out;
     if(page_==OptionsPage::Closed) return out;
     for(const auto& s:slots()) {

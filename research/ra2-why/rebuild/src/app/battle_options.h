@@ -29,13 +29,13 @@ struct OptionsButtonView {
 };
 
 // Menu state and input. It owns no art, so tests can use it without game files.
-class BattleOptions {
+class OptionsMenu {
 public:
     static constexpr int width=1024, height=768;
-    BattleOptions()=default;
+    OptionsMenu()=default;
     // Labels come from the dialogs. leave_label is CSF GUI:Leave.
-    BattleOptions(const ui::Dialog& options, const ui::Dialog& confirm, std::string leave_label);
-    static BattleOptions load(const std::vector<std::uint8_t>& exe, const ra2text::CsfFile& strings);
+    OptionsMenu(const ui::Dialog& options, const ui::Dialog& confirm, std::string leave_label);
+    static OptionsMenu load(const std::vector<std::uint8_t>& exe, const ra2text::CsfFile& strings);
 
     OptionsPage page() const noexcept { return page_; }
     bool visible() const noexcept { return page_!=OptionsPage::Closed; }
@@ -66,14 +66,14 @@ private:
 };
 
 // Original art for the menu. Mount the side archive before load.
-struct BattleOptionsArt {
+struct OptionsMenuArt {
     gfx::RgbaImage background, credits, top, radar, side1, side2, side3, addon, spacer, left_cap, end_cap;
     std::array<gfx::RgbaImage,3> button; // Normal, hover, pressed.
     ui::GameFont font;
-    static BattleOptionsArt load(const fs::MixFileSystem& files);
+    static OptionsMenuArt load(const fs::MixFileSystem& files);
 };
 // Base 0x0051A330: Allied houses use SIDEC01.MIX, Soviet houses SIDEC02.MIX.
 const char* side_archive(bool soviet) noexcept;
 // Draws the full 1024x768 menu over frame. Other frame sizes are left unchanged.
-void draw_battle_options(render::Bitmap& frame, const BattleOptions& menu, const BattleOptionsArt& art);
+void draw_options_menu(render::Bitmap& frame, const OptionsMenu& menu, const OptionsMenuArt& art);
 }

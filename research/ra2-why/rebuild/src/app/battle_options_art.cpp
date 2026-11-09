@@ -38,14 +38,14 @@ void text(render::Bitmap& dst, const ui::GameFont& font, const std::string& s, i
 
 const char* side_archive(bool soviet) noexcept { return soviet?"SIDEC02.MIX":"SIDEC01.MIX"; }
 
-BattleOptions BattleOptions::load(const std::vector<std::uint8_t>& exe, const ra2text::CsfFile& strings) {
+OptionsMenu OptionsMenu::load(const std::vector<std::uint8_t>& exe, const ra2text::CsfFile& strings) {
     const auto* leave=strings.find("GUI:Leave");
     if(!leave) throw std::runtime_error("Missing UI text: GUI:Leave");
-    return BattleOptions(ui::load_dialog_resource(exe,181,strings),ui::load_dialog_resource(exe,182,strings),leave->text);
+    return OptionsMenu(ui::load_dialog_resource(exe,181,strings),ui::load_dialog_resource(exe,182,strings),leave->text);
 }
 
-BattleOptionsArt BattleOptionsArt::load(const fs::MixFileSystem& files) {
-    BattleOptionsArt a;
+OptionsMenuArt OptionsMenuArt::load(const fs::MixFileSystem& files) {
+    OptionsMenuArt a;
     // Positions and palettes were matched pixel by pixel against the original
     // 1024x768 Esc screen (mean color error 0-5 per piece).
     const auto ui=gfx::Palette::from_bytes(required(files,"UIBKGD.PAL"));
@@ -68,14 +68,14 @@ BattleOptionsArt BattleOptionsArt::load(const fs::MixFileSystem& files) {
     return a;
 }
 
-void draw_battle_options(render::Bitmap& f, const BattleOptions& menu, const BattleOptionsArt& art) {
-    if(!menu.visible() || f.width!=BattleOptions::width || f.height!=BattleOptions::height ||
+void draw_options_menu(render::Bitmap& f, const OptionsMenu& menu, const OptionsMenuArt& art) {
+    if(!menu.visible() || f.width!=OptionsMenu::width || f.height!=OptionsMenu::height ||
        f.rgba.size()<std::size_t(f.width)*f.height*4) return;
     blit(f,art.background,0,0);
     blit(f,art.spacer,0,736);
     blit(f,art.left_cap,800,736);
     blit(f,art.end_cap,828,736);
-    const int x=BattleOptions::width-168;
+    const int x=OptionsMenu::width-168;
     blit(f,art.credits,x,0);
     blit(f,art.top,x,16);
     blit(f,art.radar,x,48);
