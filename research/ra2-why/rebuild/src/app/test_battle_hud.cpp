@@ -218,6 +218,12 @@ int main(int argc, char** argv) {
         auto short_row=frame(); hud.draw(short_row,st);
         assert(ink_count(short_row,{808,649,212,11})>0);
         assert(ink_count(short_row,{808,661,212,11})==0);
+        st.status="CAN T BUILD HERE.";
+        auto without_apostrophe=frame();hud.draw(without_apostrophe,st);
+        st.status="CAN'T BUILD HERE.";
+        auto with_apostrophe=frame();hud.draw(with_apostrophe,st);
+        assert(ink_count(without_apostrophe,{832,650,6,10})==0);
+        assert(ink_count(with_apostrophe,{832,650,6,10})>0);
     }
     if (argc > 1) {
         fs::MixFileSystem files(argv[1]);

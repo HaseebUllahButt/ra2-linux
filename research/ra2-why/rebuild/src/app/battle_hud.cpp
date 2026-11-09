@@ -39,7 +39,7 @@ void border(render::Bitmap& b, Rectangle r, Color c) {
 // TODO-ORIGINAL: replace the embedded 3x5 font with original game typography.
 void text(render::Bitmap& b, int x, int y, const std::string& s, Color c, int limit,
           int scale=2) {
-    const std::string chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$:/-?.";
+    const std::string chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$:/-?.'";
     const char* glyphs[]={"010101111101101","110101110101110","011100100100011",
         "110101101101110","111100110100111","111100110100100","011100101101011",
         "101101111101101","111010010010111","001001001101010","101101110101101",
@@ -50,7 +50,7 @@ void text(render::Bitmap& b, int x, int y, const std::string& s, Color c, int li
         "010110010010111","110001010100111","110001010001110","101101111001001",
         "111100110001110","011100111101111","111001010010010","111101111101111",
         "111101111001110","011110010011110","000010000010000","001001010100100",
-        "000000111000000","110001010000010","000000000000010"};
+        "000000111000000","110001010000010","000000000000010","010010000000000"};
     int end=x+limit;
     for (unsigned char raw:s) {
         if (x+3*scale>end) break;
