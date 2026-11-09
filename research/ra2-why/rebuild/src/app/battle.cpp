@@ -148,7 +148,8 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     int human_camera_=0;
     int human_cash_before_=0,human_hold_cash_=0,human_hold_progress_=0;
     std::uint32_t human_product_=0;
-    std::uint32_t ai_opening_=3500;
+    bool ai_opening_check_=std::getenv("RA2_AI_OPENING_CHECK")!=nullptr;
+    std::optional<std::uint32_t> first_ai_shot_;
     ui::Opponent difficulty_=ui::Opponent::Easy;
     std::uint32_t autoplay_unit_=0;
     std::uint64_t input_frame_=0;
@@ -185,10 +186,6 @@ public:
         ai_=sim::PrototypeAI(rules_,&ai_ini,ai_difficulty);
         if(!ai_.uses_ai_ini())throw std::runtime_error("Base AI.INI has no usable team triggers");
         std::cout<<"Computer policy: base AI.INI triggers="<<ai_.trigger_count()<<" difficulty="<<int(ai_difficulty)<<'\n';
-        const auto delays=rules_.read_list("General","TeamDelays");
-        const auto index=difficulty_==ui::Opponent::Hard?0u:difficulty_==ui::Opponent::Medium?1u:2u;
-        if(delays.size()>index)ai_opening_=std::uint32_t(std::max(0,rules::IniFile::integer_value(delays[index]).value_or(3500)));
-        ai_opening_=std::max(ai_opening_,std::uint32_t(std::max(0.0,rules_.read_double("General","AttackDelay",.5))*900));
         const auto initialized=proto::initialize(world_,factories_,catalog_,player_);
         if (initialized.status!=p::Status::Done) throw std::runtime_error(initialized.detail);
         refresh_power_damage();
@@ -801,7 +798,7 @@ public:
                 break;
             }
         }
-        if (frame==1) {
+        if (frame==1 && !ai_opening_check_) {
             for (const auto& e:world_.entities) if (e.house_id==player_&&fighter(e)) {
                 autoplay_unit_=e.id;autoplay_start_=e.position;center(e);
                 const auto a=anchor(e);
@@ -831,10 +828,12 @@ public:
         const bool allied=house(world_,player_).side_index.value_or(0)==0;
         // TODO-ORIGINAL: A deterministic native player for app regression.
         // It uses the same production and attack commands as the interface.
-        const std::vector<std::string> plan=allied?
+        const std::vector<std::string> plan=ai_opening_check_?
+            std::vector<std::string>{"GAPOWR","GAREFN","GAPILE"}:allied?
             std::vector<std::string>{"GAPOWR","GAPILE","GAREFN","GAWEAP"}:
             std::vector<std::string>{"NAPOWR","NAHAND","NAREFN","NAWEAP"};
         for(const auto& type:plan) if(!has(type)) {queue({OrderKind::Build,player_,0,0,type,{}});break;}
+        if(ai_opening_check_)return;
         std::size_t foot=0;
         for(const auto& e:world_.entities) if(e.house_id==player_&&live(e)&&e.kind==w::Kind::Infantry)++foot;
         if(foot<6)queue({OrderKind::Build,player_,0,0,allied?"E1":"E2",{}});
@@ -869,11 +868,6 @@ public:
         run_build_queue(frame);
         if(args_.autoplay)autoplay(frame);
         auto enemy_commands=ai_.tick(world_,enemy_,player_,std::int32_t(frame));
-        // TODO-ORIGINAL: TeamDelays uses Hard/Normal/Easy registry order.
-        // Offensive team orders wait for that opening before attacking.
-        enemy_commands.erase(std::remove_if(enemy_commands.begin(),enemy_commands.end(),[&](const auto& order) {
-            return order.kind==OrderKind::Attack && frame<ai_opening_;
-        }),enemy_commands.end());
         ai_orders+=enemy_commands.size();
         pending_.insert(pending_.end(),enemy_commands.begin(),enemy_commands.end());
         auto commands=std::move(pending_);pending_.clear();
@@ -901,6 +895,17 @@ public:
         score_->combat(fighting.events);
         effects_.observe(world_,combat_.projectiles(),frame,effect_project(),&fighting.events,&rules_);
         for(const auto& event:fighting.events) {
+            if(ai_opening_check_ && !first_ai_shot_ && event.kind==sim::PrototypeCombatEventKind::Shot &&
+                event.source_house==enemy_ && event.target_house==player_) {
+                first_ai_shot_=frame;
+                std::cout<<"AI_OPENING difficulty="<<std::getenv("RA2_AI_OPENING_CHECK")
+                    <<" speed="<<frame_delay_ticks(args_)<<" first_shot="<<frame
+                    <<" source="<<event.source_type<<" target="<<event.target_type
+                    <<" range_cells="<<rules_.read_double(event.weapon,"Range",0)
+                    <<" dx="<<event.source_position.x-event.target_position.x
+                    <<" dy="<<event.source_position.y-event.target_position.y<<'\n';
+                state.running=false;
+            }
             const auto* type=catalog_.find(event.target_type);
             const bool building=type&&type->rtti==p::Rtti::BuildingType;
             const auto warning=attack_warning(event,player_,name(event.target_type),name(event.source_type),building);
@@ -1136,6 +1141,10 @@ public:
                     <<e.resolved_hp.value_or(0)<<" cell="<<e.cell->x<<','<<e.cell->y
                     <<" moving="<<movement_.moving(e.id)<<" attack="
                     <<(attacks_.count(e.id)?attacks_.at(e.id):0)<<'\n';
+        if(ai_opening_check_) {
+            if(!first_ai_shot_)throw std::runtime_error("AI opening check found no enemy shot");
+            return;
+        }
         if(args_.human_input_check && human_stage_<13)
             throw std::runtime_error("Human input check did not reach result and menu; stage="+std::to_string(human_stage_));
         if(args_.autoplay && (!autoplay_deployed_||!autoplay_moved_||!moved||!fired||!impacts||!built||!infantry||
@@ -1144,7 +1153,18 @@ public:
 };
 }
 
-int run_prototype_battle(const BattleOptions& args) {
+int run_prototype_battle(const BattleOptions& requested) {
+    auto args=requested;
+    // A stationary normal opening for timing checks; normal matches use saved setup.
+    if(const char* probe=std::getenv("RA2_AI_OPENING_CHECK")) {
+        const std::string level=probe;
+        if(level!="easy" && level!="medium" && level!="brutal")throw std::runtime_error("Unknown opening difficulty");
+        args.setup.country="Americans";args.setup.unit_count=10;
+        for(auto& slot:args.setup.opponents)slot.opponent=ui::Opponent::Closed;
+        args.setup.opponents[0].opponent=level=="easy"?ui::Opponent::Easy:level=="medium"?ui::Opponent::Medium:ui::Opponent::Hard;
+        if(const auto* speed=std::getenv("RA2_AI_OPENING_SPEED"))args.setup.game_speed=std::stoi(speed);
+        if(!args.headless || !args.autoplay)throw std::runtime_error("Opening check needs headless autoplay");
+    }
     auto assets=w::BaseBattleAssets::load(args.game_directory,args.map);
     // Merge the rules while the world is set up. Both only read the loaded
     // rules; overlay_rules keeps the result for the Battle's own request.

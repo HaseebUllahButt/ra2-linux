@@ -251,6 +251,7 @@ struct PrototypeAI::Context {
     std::optional<std::int32_t> side;
     Actors actors, buildings, enemies;
     std::int64_t cash = 0;
+    bool enemy_available = false;
     std::map<std::uint32_t, const WorldEntity*> own; // live own actors by ID
     std::map<std::uint32_t, const WorldEntity*> targets; // live legal enemy targets
 
@@ -300,6 +301,7 @@ PrototypeAI::PrototypeAI(const rules::IniFile& base_rules, const rules::IniFile*
         team.script = ai.read_string(id, "Script");
         team.max = ai.read_integer(id, "Max", 1);
         team.tech_level = ai.read_integer(id, "TechLevel");
+        team.priority = ai.read_integer(id, "Priority", 5);
         team.base_defense = ai.read_bool(id, "IsBaseDefense");
         team_types_.push_back(std::move(team));
     }
@@ -346,6 +348,11 @@ void PrototypeAI::reset() noexcept {
     seed_ = 1;
 }
 
+std::int32_t PrototypeAI::first_team_frame(const rules::IniFile& rules, Difficulty difficulty,
+                                           std::int32_t house_index) {
+    return std::max(0, by_difficulty(rules, "TeamDelays", difficulty, 2000)) + std::max(0, house_index) * 0xaf;
+}
+
 std::optional<double> PrototypeAI::trigger_weight(const std::string& id) const {
     for (std::size_t i = 0; i < triggers_.size(); ++i) if (triggers_[i].id == id) return weights_[i];
     return {};
@@ -367,10 +374,26 @@ std::uint32_t PrototypeAI::random(std::uint32_t low, std::uint32_t high) {
 
 bool PrototypeAI::condition(const Context& context, const Trigger& trigger) const {
     const auto& object = trigger.condition_object;
+    // Base 0041C990: without a selected enemy, only unconditional and
+    // own-house count conditions can qualify for defense creation.
+    if (!context.enemy_available && trigger.condition != -1 && trigger.condition != 1) return false;
     switch (trigger.condition) {
     case -1: return true;
     case 0: return !object.empty() && compare(context.count(context.player.id, object), trigger.number, trigger.comparator);
     case 1: return !object.empty() && compare(context.count(context.computer.id, object), trigger.number, trigger.comparator);
+    case 2: case 3: {
+        // Base 0041C990: yellow uses a reserve below 100; red below zero.
+        std::int64_t output = 0, drain = 0;
+        for (const auto& entity : context.world.entities) {
+            if (entity.house_id != context.player.id || entity.kind != WorldKind::Structure || !live(entity)) continue;
+            const auto power = rules_.read_integer(entity.type, "Power");
+            if (power > 0) output += power;
+            else drain -= static_cast<std::int64_t>(power);
+        }
+        output = context.player.power_output.value_or(static_cast<std::int32_t>(output));
+        drain = context.player.power_drain.value_or(static_cast<std::int32_t>(drain));
+        return output - drain < (trigger.condition == 2 ? 100 : 0);
+    }
     case 4: return compare(context.player.cash.value_or(0), trigger.number, trigger.comparator);
     case 7: {
         if (object.empty()) return false;
@@ -381,8 +404,7 @@ bool PrototypeAI::condition(const Context& context, const Trigger& trigger) cons
                 total += context.count(house.id, object);
         return compare(total, trigger.number, trigger.comparator);
     }
-    // TODO-ORIGINAL: 2/3 enemy power state and 5/6 super weapon charge have no
-    // runtime state in the native match yet, so they never match.
+    // TODO-ORIGINAL: 5/6 super weapon charge still needs its live timer state.
     default: return false;
     }
 }
@@ -391,13 +413,25 @@ void PrototypeAI::select_team(const Context& context) {
     const auto cap = by_difficulty(rules_, "TotalAITeamCap", difficulty_, 30);
     const auto max_defense = by_difficulty(rules_, "MaximumAIDefensiveTeams", difficulty_, 2);
     const auto total = static_cast<std::int32_t>(teams_.size());
-    const auto defensive = static_cast<std::int32_t>(std::count_if(teams_.begin(), teams_.end(),
+    auto defensive = static_cast<std::int32_t>(std::count_if(teams_.begin(), teams_.end(),
         [&](const Team& team) { return team_types_[team.type].base_defense; }));
-    // Shape of the recovered team picker (HouseAI 006F0AB0 in the YR map;
-    // base RA2 address is not named yet). At the cap the original disbands one
-    // defensive team. TODO-ORIGINAL: this prototype waits instead.
-    if (total >= cap) return;
-    const bool enough_defense = max_defense < defensive;
+    // Base 006BED50: at the cap, release the least-priority defense team
+    // if defense teams occupy at least half the team's slots.
+    bool enough_defense = max_defense < defensive;
+    if (total >= cap) {
+        if (defensive < total / 2) return;
+        auto release = teams_.end();
+        for (auto it = teams_.begin(); it != teams_.end(); ++it)
+            if (team_types_[it->type].base_defense &&
+                (release == teams_.end() || team_types_[it->type].priority < team_types_[release->type].priority))
+                release = it;
+        if (release == teams_.end()) return;
+        teams_.erase(release);
+        --defensive;
+        enough_defense = true;
+    }
+    const bool need_defense = rules_.read_bool("General", "UseMinDefenseRule") &&
+        defensive < by_difficulty(rules_, "MinimumAIDefensiveTeams", difficulty_, 0);
     const auto type_index = [&](const std::string& id) {
         for (std::size_t i = 0; i < team_types_.size(); ++i) if (team_types_[i].id == id) return i;
         return team_types_.size();
@@ -405,7 +439,8 @@ void PrototypeAI::select_team(const Context& context) {
     const auto team_ready = [&](std::size_t type) {
         const auto& team = team_types_[type];
         const auto existing = std::count_if(teams_.begin(), teams_.end(), [&](const Team& t) { return t.type == type; });
-        if (existing >= team.max) return false;
+        // Base 0041C990 and 004F35F0: negative Max means no limit.
+        if (team.max >= 0 && existing >= team.max) return false;
         const auto force = std::find_if(task_forces_.begin(), task_forces_.end(),
             [&](const TaskForce& f) { return f.id == team.task_force; });
         if (force == task_forces_.end()) return false;
@@ -429,12 +464,19 @@ void PrototypeAI::select_team(const Context& context) {
         const auto& trigger = triggers_[i];
         const bool enabled = difficulty_ == Difficulty::Easy ? trigger.easy :
             difficulty_ == Difficulty::Normal ? trigger.normal : trigger.hard;
-        if (!trigger.skirmish || !enabled || (trigger.base_defense && enough_defense)) continue;
+        if (!trigger.skirmish || !enabled) continue;
         if (!equal_name(trigger.house, "<all>") && !equal_name(trigger.house, context.computer.country)) continue;
         if (trigger.side != 0 && (!context.side || *context.side + 1 != trigger.side)) continue;
         if (trigger.tech_level > context.computer.tech_level.value_or(10)) continue;
         const auto first = type_index(trigger.team1);
         if (first == team_types_.size() || !team_ready(first) || !condition(context, trigger)) continue;
+        const auto second = trigger.team2.empty() ? team_types_.size() : type_index(trigger.team2);
+        // Base 0041C990 checks both teams before the weighted selection.
+        // A mixed pair counts as offensive, regardless of the trigger flag.
+        if (second != team_types_.size() && !team_ready(second)) continue;
+        const bool defense = team_types_[first].base_defense &&
+            (second == team_types_.size() || team_types_[second].base_defense);
+        if (((need_defense || !context.enemy_available) && !defense) || (enough_defense && defense)) continue;
         // Weight 5000 marks urgent triggers. Once one matches, only those count.
         const auto weight = static_cast<std::int64_t>(weights_[i]);
         if (weight == 5000 && !exclusive) { exclusive = true; choices.clear(); sum = 0; }
@@ -660,7 +702,11 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
     if (computer_house_ != computer_house_id || player_house_ != player_house_id ||
         (last_frame_ && game_frame < *last_frame_)) reset();
     if (last_frame_ == game_frame) return result;
-    if (computer_house_ != computer_house_id) seed_ = 0x9e3779b9u ^ computer_house_id;
+    if (computer_house_ != computer_house_id) {
+        seed_ = 0x9e3779b9u ^ computer_house_id;
+        // The house timer runs from game start, not from the first AI tick.
+        next_team_ = first_team_frame(rules_, difficulty_, computer->original_index.value_or(0));
+    }
     computer_house_ = computer_house_id;
     player_house_ = player_house_id;
     last_frame_ = game_frame;
@@ -674,7 +720,7 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
     if (team_due) next_team_ = static_cast<std::int64_t>(game_frame) +
         std::max(1, by_difficulty(rules_, "TeamDelays", difficulty_, 2000));
 
-    Context context{world, *computer, *player, game_frame, side_index(rules_, *computer), {}, {}, {}, 0, {}, {}};
+    Context context{world, *computer, *player, game_frame, side_index(rules_, *computer), {}, {}, {}, 0, false, {}, {}};
     auto& actors = context.actors;
     auto& buildings = context.buildings;
     auto& enemies = context.enemies;
@@ -691,6 +737,22 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
             context.targets[entity.id] = &entity;
         }
     }
+    // Base 004E8990 chooses an enemy from base centres; 006BED50 passes
+    // no enemy to 0041C990 until that selection succeeds. A deployed base
+    // supplies the centre in this adapter. Damage records also select an enemy
+    // through 004EEBA0, even if its construction yard is gone.
+    // TODO-ORIGINAL: the reference shows no attack in 38 minutes against a
+    // player who only deploys the yard. The cause is unknown. 004E8990 and
+    // 004EEBA0 can select that player as enemy: they check no structures.
+    // Look in 0041C990, team filling or the team scripts.
+    context.enemy_available = std::any_of(enemies.begin(), enemies.end(),
+        [](const WorldEntity* e) { return e->kind == WorldKind::Structure; });
+    if (computer->attacker_damage_records)
+        for (const auto& [id, damage] : *computer->attacker_damage_records)
+            if (id == player_house_id && damage > 0) context.enemy_available = true;
+    if (computer->selected_enemy_index && player->original_index &&
+        *computer->selected_enemy_index == *player->original_index && *computer->selected_enemy_index >= 0)
+        context.enemy_available = true;
     const auto by_id = [](const WorldEntity* a, const WorldEntity* b) { return a->id < b->id; };
     std::sort(actors.begin(), actors.end(), by_id);
     std::sort(buildings.begin(), buildings.end(), by_id);
@@ -720,16 +782,18 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
             const auto& side = context.side;
             std::int64_t power = 0;
             for (const WorldEntity* building : buildings) power += rules_.read_integer(building->type, "Power");
-            // TODO-ORIGINAL: Build one power plant, refinery, barracks and war
-            // factory. Replace lost buildings and add power when consumption wins.
-            for (const char* role : {"BuildPower", "BuildRefinery", "BuildBarracks", "BuildWeapons"}) {
+            // Base 004EF890 seeds the plan with the yard and power, then
+            // orders barracks before other prerequisite-ready candidates.
+            // TODO-ORIGINAL: repeated refineries and defense nodes in that plan.
+            for (const char* role : {"BuildPower", "BuildBarracks", "BuildRefinery", "BuildWeapons"}) {
                 const auto types = rules_.read_list("AI", role);
                 const bool have = std::any_of(types.begin(), types.end(),
                     [&](const auto& type) { return owns(buildings, type); });
                 if (have && !(equal_name(role, "BuildPower") && power < 0)) continue;
                 for (const auto& type : types) {
                     const auto* planning_side = rules_.find(type, "AIBasePlanningSide");
-                    if (planning_side && (!side || rules_.read_integer(type, "AIBasePlanningSide", -1) != *side)) continue;
+                    if (planning_side && rules_.read_integer(type, "AIBasePlanningSide", -1) != -1 &&
+                        (!side || rules_.read_integer(type, "AIBasePlanningSide") != *side)) continue;
                     if (!registered(rules_, "BuildingTypes", type) ||
                         !buildable(rules_, *computer, actors, buildings, type, cash)) continue;
                     result.push_back(order(skirmish::OrderKind::Build, computer_house_id, *construction, type));
@@ -737,6 +801,25 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
                     break;
                 }
                 if (!result.empty() && result.back().kind == skirmish::OrderKind::Build) break;
+            }
+        }
+        // Base 004EF890 filters the complete BuildingTypes registry through
+        // AIBuildThis, side and tech gates. Keep advancing beyond the opening.
+        if (teams_on && (result.empty() || result.back().kind != skirmish::OrderKind::Build)) {
+            if (const auto* construction = factory(rules_, buildings, "BuildingType")) {
+                if (const auto* registry = rules_.find_section("BuildingTypes"))
+                    for (const auto& entry : registry->entries) {
+                        const auto& type = entry.value;
+                        if (owns(buildings, type) || !rules_.read_bool(type, "AIBuildThis", true) ||
+                            equal_name(type, "GAPLUG")) continue;
+                        const auto* planning_side = rules_.find(type, "AIBasePlanningSide");
+                        if (planning_side && rules_.read_integer(type, "AIBasePlanningSide", -1) != -1 &&
+                            (!context.side || rules_.read_integer(type, "AIBasePlanningSide") != *context.side)) continue;
+                        if (!buildable(rules_, *computer, actors, buildings, type, cash)) continue;
+                        result.push_back(order(skirmish::OrderKind::Build, computer_house_id, *construction, type));
+                        cash -= rules_.read_integer(type, "Cost");
+                        break;
+                    }
             }
         }
         if (teams_on) fill_teams(context, &result);
