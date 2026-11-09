@@ -109,6 +109,7 @@ struct CellState {
     std::optional<std::int32_t> wall_owner;
     std::optional<std::uint8_t> overlay_data_11e;
     std::optional<std::uint32_t> cell_flags_140;
+    std::optional<bool> cell_flag_80;
 };
 // An owning snapshot. IDs use zero as null. Original creation order does not
 // depend on the storage order of houses and entities. The shared next field is
@@ -173,6 +174,9 @@ public:
     sim::CellSetupResult complete_pending_cell_setup(const sim::CellSetupStatic& guard,
         const sim::TheaterInputs& theater, std::uint8_t cliff,
         const std::map<std::int32_t,float>& land_wheels);
+    // Base Battle 005B7F01 clears four per-house type counter arrays.
+    // Unknown arrays block the update and leave the snapshot unchanged.
+    bool finish_battle_house_updates(std::uint32_t house_id);
     const Snapshot& snapshot() const noexcept { return snapshot_; }
 private:
     std::optional<std::uint32_t> next_id() const;
