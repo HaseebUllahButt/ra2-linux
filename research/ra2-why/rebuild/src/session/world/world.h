@@ -107,6 +107,14 @@ struct CellState {
     std::optional<bool> allocated; // The original allocated Cell, not the fallback receiver.
     // Empty optional means occupancy is unresolved, not an empty cell.
     std::optional<weapons::CellContentHeads> heads;
+    // The Cell +140 flags sit together near the front: validate() reads
+    // them for every Cell, so they share cache lines with heads and terrain.
+    std::optional<std::uint32_t> cell_flags_140;
+    std::optional<bool> cell_flag_80;
+    std::optional<bool> cell_flag_100;   // Base Cell +140 bit 100.
+    std::optional<bool> cell_flag_200;   // Separate Cell +140 bit 200.
+    std::optional<bool> cell_flag_20000;
+    std::optional<bool> cell_flag_40000; // Base Cell +140 bit 40000.
     std::optional<sim::TerrainCell> terrain;
     std::optional<sim::CoarseOverlayState> overlay;
     std::optional<float> land_wheel;
@@ -114,12 +122,8 @@ struct CellState {
     std::optional<std::uint8_t> coarse_category, neighbor_count; // Base Cell +122.
     std::optional<std::uint8_t> cell_field_11d, coarse_cache_height, hierarchy_cache_height;
     std::optional<std::vector<std::uint8_t>> coarse_category_writes;
-    std::optional<bool> cell_flag_20000;
     // Base 004710B5 initializes this field. Unit entry 00703087 reads its bits.
     std::optional<std::uint32_t> ground_occupancy_124;
-    std::optional<bool> cell_flag_100;   // Base Cell +140 bit 100.
-    std::optional<bool> cell_flag_40000; // Base Cell +140 bit 40000.
-    std::optional<bool> cell_flag_200;   // Separate Cell +140 bit 200.
     std::optional<float> unit_land_speed; // Resolved original locomotor land-table value.
     // Base Cell +54/+58 and signed +116. Constructors set -1, but later
     // state is not proved. Only +116 is known to index the TubeClass vector.
@@ -128,8 +132,6 @@ struct CellState {
     std::optional<std::uint32_t> bridge_occupancy_128;
     std::optional<std::int32_t> wall_owner;
     std::optional<std::uint8_t> overlay_data_11e;
-    std::optional<std::uint32_t> cell_flags_140;
-    std::optional<bool> cell_flag_80;
     std::optional<std::uint8_t> cell_field_12c;
 };
 // An owning snapshot. IDs use zero as null. Original creation order does not
