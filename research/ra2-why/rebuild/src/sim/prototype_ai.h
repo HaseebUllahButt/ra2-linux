@@ -59,7 +59,7 @@ public:
     struct ScriptStep { std::int32_t action = 0, argument = 0; };
     struct TeamType {
         std::string id, task_force, script;
-        std::int32_t max = 1, tech_level = 0;
+        std::int32_t max = 1, tech_level = 0, priority = 5;
         bool base_defense = false;
     };
     struct Trigger {

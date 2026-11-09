@@ -241,8 +241,18 @@ sw::Kind kind_of(const IniFile& rules, const std::string& type) {
         listed(rules, "AircraftTypes", type) ? sw::Kind::Aircraft : sw::Kind::Unit;
 }
 
-void check_base_teams(const IniFile& rules, const IniFile& ai, const Faction& faction, const char* enemy_country,
+void check_base_teams(const IniFile& installed_rules, const IniFile& ai, const Faction& faction, const char* enemy_country,
                       const Faction& enemy, PrototypeAI::Difficulty level, const char* side) {
+    // Exercise all authored offensive triggers independently of the defense
+    // opening, which check_original_trigger_gates tests with its real gate.
+    std::ostringstream text;
+    for (const auto& section : installed_rules.sections()) {
+        text << '[' << section.name << "]\n";
+        for (const auto& entry : section.entries)
+            text << entry.key << '=' << (entry.key == "UseMinDefenseRule" ? "no" : entry.value) << '\n';
+    }
+    IniFile rules;
+    rules.parse(text.str());
     sw::Snapshot world;
     world.houses = {house(computer, faction.country, false), house(player, enemy_country, true)};
     world.entities.push_back(actor(rules, 10, computer, faction.yard, sw::Kind::Structure, {10, 10}));
@@ -352,6 +362,103 @@ void check_team_leader() {
     const auto orders = policy.tick(world, computer, player, 0);
     require(orders.size() == 2 && orders[0].target == 21 && orders[1].target == 21,
         "Team target search did not use the highest LeadershipRating");
+}
+
+void check_original_trigger_gates() {
+    const auto rules = parse(
+        "[General]\nTeamDelays=90,90,90\nUseMinDefenseRule=yes\n"
+        "MinimumAIDefensiveTeams=1,1,1\nMaximumAIDefensiveTeams=0,0,0\n"
+        "[InfantryTypes]\n0=GI\n[VehicleTypes]\n0=TANK\n");
+    const std::string records =
+        "[TaskForces]\n0=TF\n1=TF2\n[TF]\n0=1,GI\n[TF2]\n0=1,TANK\n"
+        "[ScriptTypes]\n0=S\n[S]\n0=0,2\n[TeamTypes]\n0=T\n1=T2\n";
+    const auto trigger = [](const char* second) {
+        return std::string("[AITriggerTypes]\nTR=Attack,T,<all>,0,-1,<none>,0,50,1,100,1,0,0,0,") +
+            second + ",1,1,1\n";
+    };
+    sw::Snapshot world;
+    world.houses = {house(computer, "Local", false), house(player, "Enemy", true)};
+    world.entities = {actor(rules, 10, computer, "GI", sw::Kind::Infantry, {10,10}),
+        actor(rules, 11, computer, "GI", sw::Kind::Infantry, {10,11}),
+        actor(rules, 20, player, "BASE", sw::Kind::Structure, {40,40})};
+    // 0041C990: the minimum defense rule rejects offense before weighted choice.
+    const auto offense = parse(records + "[T]\nTaskForce=TF\nScript=S\nMax=5\n" + trigger("<none>"));
+    PrototypeAI offensive(rules, &offense);
+    offensive.tick(world, computer, player, 0);
+    require(offensive.teams().empty(), "Attack team bypassed the minimum defense rule");
+    const auto no_min_rules = parse("[InfantryTypes]\n0=GI\n");
+    auto idle_world = world;
+    idle_world.entities.pop_back();
+    PrototypeAI idle(no_min_rules, &offense);
+    idle.tick(idle_world, computer, player, 0);
+    require(idle.teams().empty(), "AI formed an attack team before the player deployed a base");
+    idle_world.entities.push_back(world.entities.back());
+    idle.tick(idle_world, computer, player, 2000);
+    require(idle.teams().size() == 1, "Player base did not enable enemy-dependent team creation");
+    // 0041C990: both task forces must be available, even if the first is defense.
+    const auto paired = parse(records +
+        "[T]\nTaskForce=TF\nScript=S\nMax=5\nIsBaseDefense=yes\n"
+        "[T2]\nTaskForce=TF2\nScript=S\nMax=5\nIsBaseDefense=yes\n" + trigger("T2"));
+    PrototypeAI pair(rules, &paired);
+    pair.tick(world, computer, player, 0);
+    require(pair.teams().empty(), "Trigger created only the available half of a team pair");
+    // Defense comes from TeamType, rather than the trigger's field 13.
+    const auto defense = parse(records +
+        "[T]\nTaskForce=TF\nScript=S\nMax=5\nIsBaseDefense=yes\n" + trigger("<none>"));
+    PrototypeAI defensive(rules, &defense);
+    defensive.tick(world, computer, player, 0);
+    defensive.tick(world, computer, player, 90);
+    require(defensive.teams().size() == 1, "Defense limit used the trigger flag instead of the team flag");
+    // A negative Max is unlimited in 0041C990.
+    const auto unlimited = parse(records +
+        "[T]\nTaskForce=TF\nScript=S\nMax=-1\nIsBaseDefense=yes\n" + trigger("<none>"));
+    PrototypeAI no_limit(rules, &unlimited);
+    no_limit.tick(world, computer, player, 0);
+    require(no_limit.teams().size() == 1, "Negative team Max prevented all creation");
+}
+
+void check_enemy_power_triggers() {
+    const auto rules = parse("[InfantryTypes]\n0=GI\n");
+    sw::Snapshot world;
+    world.houses = {house(computer, "Local", false), house(player, "Enemy", true)};
+    world.houses[1].power_drain = 100;
+    world.entities = {actor(rules, 10, computer, "GI", sw::Kind::Infantry, {10,10}),
+        actor(rules, 20, player, "BASE", sw::Kind::Structure, {40,40})};
+    for (const auto condition : {2, 3}) {
+        const auto ai = parse(
+            "[TaskForces]\n0=TF\n[TF]\n0=1,GI\n[TeamTypes]\n0=T\n[T]\nTaskForce=TF\nScript=S\n"
+            "[ScriptTypes]\n0=S\n[S]\n0=0,2\n[AITriggerTypes]\nTR=Power,T,<all>,0," +
+            std::to_string(condition) + ",<none>,0,50,1,100,1,0,0,0,<none>,1,1,1\n");
+        for (const auto reserve : {-1, 0, 99, 100}) {
+            world.houses[1].power_output = 100 + reserve;
+            PrototypeAI policy(rules, &ai);
+            policy.tick(world, computer, player, 0);
+            require(!policy.teams().empty() == (reserve < (condition == 2 ? 100 : 0)),
+                "Enemy power trigger used the wrong reserve threshold");
+        }
+    }
+}
+
+void check_defense_cap_release() {
+    const auto rules = parse(
+        "[General]\nTotalAITeamCap=1,1,1\nTeamDelays=90,90,90\n[InfantryTypes]\n0=GI\n");
+    const auto ai = parse(
+        "[TaskForces]\n0=TF\n[TF]\n0=1,GI\n[ScriptTypes]\n0=S\n[S]\n0=0,2\n"
+        "[TeamTypes]\n0=DEF\n1=ATT\n[DEF]\nTaskForce=TF\nScript=S\nIsBaseDefense=yes\nPriority=1\n"
+        "[ATT]\nTaskForce=TF\nScript=S\nPriority=10\n"
+        "[AITriggerTypes]\nD=Defense,DEF,<all>,0,-1,<none>,0,5000,1,5000,1,0,0,0,<none>,1,1,1\n"
+        "A=Attack,ATT,<all>,0,-1,<none>,0,1,1,100,1,0,0,0,<none>,1,1,1\n");
+    sw::Snapshot world;
+    world.houses = {house(computer, "Local", false), house(player, "Enemy", true)};
+    world.entities = {actor(rules, 10, computer, "GI", sw::Kind::Infantry, {10,10}),
+        actor(rules, 20, player, "BASE", sw::Kind::Structure, {40,40})};
+    PrototypeAI policy(rules, &ai);
+    policy.tick(world, computer, player, 0);
+    require(policy.teams().size() == 1 && policy.teams()[0].team_type == "DEF", "Defense setup failed");
+    policy.tick(world, computer, player, 90);
+    require(policy.teams().size() == 1 && policy.teams()[0].team_type == "ATT" &&
+        policy.teams()[0].members == std::vector<std::uint32_t>{10},
+        "Team cap did not release defense members for an attack team");
 }
 
 void check_team_policy() {
@@ -497,6 +604,9 @@ int main(int argc, char** argv) try {
         check_base_teams(rules, ai, soviet, "Americans", allied, level, "2");
     }
     check_team_leader();
+    check_original_trigger_gates();
+    check_enemy_power_triggers();
+    check_defense_cap_release();
     check_team_policy();
     std::cout << "Prototype AI spot checks passed: both base factions, rule filters, deterministic clocks and targets, base AI.INI teams.\n";
     return 0;
