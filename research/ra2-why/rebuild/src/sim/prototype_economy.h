@@ -15,13 +15,14 @@ public:
     int load(std::uint32_t miner) const;
 private:
     struct Cargo { int bails=0, credits=0; std::uint32_t next=0; bool returning=false; };
-    struct Resource { std::string section; int first_overlay=-1; };
+    struct Resource { std::string section; int first_overlay=-1; int growth=1, interval=1; };
     std::vector<Resource> resources_;
     std::map<int,int> overlay_resources_;
     rules::IniFile rules_;
     PrototypeMovement movement_;
     std::map<std::uint32_t,Cargo> cargo_;
     std::optional<std::uint32_t> last_;
+    bool grows_=true, spreads_=true; // General TiberiumGrows and TiberiumSpreads.
     int resource(const session::world::CellState&) const;
 };
 }

@@ -1,4 +1,5 @@
 #include "prototype_ai.h"
+#include "../loop/profile.h"
 
 #include <algorithm>
 #include <array>
@@ -158,6 +159,7 @@ void PrototypeAI::reset() noexcept {
 
 std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& world,
     std::uint32_t computer_house_id, std::uint32_t player_house_id, std::int32_t game_frame) {
+    loop::profile::Scope probe(loop::profile::Phase::AI);
     std::vector<skirmish::Order> result;
     if (world.edition != session::world::Edition::Base || world.pending_cell_setup || game_frame < 0 ||
         computer_house_id == 0 || player_house_id == 0 || computer_house_id == player_house_id) return result;

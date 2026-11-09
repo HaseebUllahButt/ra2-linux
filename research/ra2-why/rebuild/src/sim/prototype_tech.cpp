@@ -1,5 +1,8 @@
 #include "prototype_tech.h"
+#include "../loop/profile.h"
 #include "production_runtime.h"
+#include "session/world/world_hash.h"
+#include <cstdio>
 #include <algorithm>
 #include <limits>
 
@@ -54,7 +57,12 @@ std::string side_of(const rules::IniFile& r,const w::Snapshot& s,unsigned id) {
 }
 BuildList buildable_types(const rules::IniFile& r,const w::Snapshot& s,unsigned id) {
     BuildList out; const auto* h=house(s,id); if(!h) return out;
-    const auto c=p::Catalog::from(r,{},{});
+    // The catalog depends only on this rules document. Build it once per
+    // document revision instead of once per call.
+    struct CatalogCache { std::uint64_t revision=0; std::optional<p::Catalog> catalog; };
+    static thread_local CatalogCache cache;
+    if(!cache.catalog || cache.revision!=r.revision()) { cache.catalog=p::Catalog::from(r,{},{}); cache.revision=r.revision(); }
+    const auto& c=*cache.catalog;
     p::CanBuildHouse in;
     in.tech_level=h->tech_level.value_or(10);
     in.country=h->country_index;
@@ -102,7 +110,18 @@ bool can_build(const rules::IniFile& r,const w::Snapshot& s,unsigned id,const st
     return false;
 }
 void update(const rules::IniFile& r,w::Snapshot& s) {
-    for(auto& h:s.houses) { const auto p=recount(r,s,h.id); h.power_output=p.output; h.power_drain=p.drain; }
+    {
+        loop::profile::Scope probe(loop::profile::Phase::Tech);
+        for(auto& h:s.houses) { const auto p=recount(r,s,h.id); h.power_output=p.output; h.power_drain=p.drain; }
+    }
+    // Benchmark proof: the match calls this once per game frame. Print a
+    // world hash every 100 calls so two builds can be compared.
+    if(loop::profile::enabled()) {
+        const loop::profile::Exclude probe_only;
+        static std::uint64_t calls=0;
+        if(++calls%100==0) std::fprintf(stderr,"RA2_BENCH world call=%llu hash=%016llx\n",
+            static_cast<unsigned long long>(calls),static_cast<unsigned long long>(w::world_hash(s)));
+    }
 }
 bool radar_online(const rules::IniFile& r,const w::Snapshot& s,unsigned id) {
     if(house_power(r,s,id).low()) return false;

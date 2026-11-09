@@ -161,6 +161,30 @@ struct Snapshot {
     std::optional<std::uint8_t> fallback_overlay_data;
     std::optional<std::int32_t> rules_field_94;
 };
+// Undo for a command that edits a Snapshot in place instead of a full copy.
+// It backs up every member except the Cells. Code that writes a Cell while an
+// Undo is active calls Undo::save_cell first. commit() keeps the edits; else
+// the destructor restores the Snapshot, also when an exception leaves.
+// Undos nest: save_cell records the Cell in every active Undo of the same
+// Snapshot.
+// RA2_UNDO_CHECK=1 also keeps a full copy and aborts if a restore differs.
+class Undo {
+public:
+    explicit Undo(Snapshot& snapshot);
+    ~Undo();
+    Undo(const Undo&) = delete;
+    Undo& operator=(const Undo&) = delete;
+    void commit() noexcept { committed_=true; }
+    static void save_cell(const Snapshot& snapshot, std::uint32_t key);
+private:
+    void restore();
+    Snapshot& snapshot_;
+    Snapshot backup_; // Every member except the Cells.
+    std::vector<std::pair<std::uint32_t,CellState>> cells_;
+    std::optional<Snapshot> check_;
+    Undo* outer_;
+    bool committed_=false;
+};
 enum class PlacementResult { Placed, Blocked, Unresolved };
 // Checks every head and shared next chain. Invalid and cyclic snapshots fail.
 bool validate(const Snapshot& snapshot);

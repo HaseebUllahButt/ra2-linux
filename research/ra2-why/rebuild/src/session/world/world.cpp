@@ -1,5 +1,9 @@
 #include "world.h"
 #include "sim/floor.h"
+#include "world_hash.h"
+#include <cstdio>
+#include <cstdlib>
+#include <algorithm>
 #include <map>
 #include <limits>
 #include <set>
@@ -385,6 +389,42 @@ bool Stage::finish_battle_house(std::uint32_t house_id,std::int32_t remaining_bu
     return true;
 }
 
+namespace {
+thread_local Undo* active_undo=nullptr;
+bool undo_check() {
+    static const bool enabled=[]{ const char* v=std::getenv("RA2_UNDO_CHECK"); return v && *v && *v!='0'; }();
+    return enabled;
+}
+}
+Undo::Undo(Snapshot& snapshot):snapshot_(snapshot),outer_(active_undo) {
+    auto cells=std::move(snapshot_.cells);
+    try { backup_=snapshot_; }
+    catch (...) { snapshot_.cells=std::move(cells); throw; }
+    snapshot_.cells=std::move(cells);
+    if (undo_check()) check_=snapshot_;
+    active_undo=this;
+}
+Undo::~Undo() {
+    active_undo=outer_;
+    if (!committed_) restore();
+}
+void Undo::restore() {
+    for (auto it=cells_.rbegin();it!=cells_.rend();++it) snapshot_.cells[it->first]=std::move(it->second);
+    backup_.cells=std::move(snapshot_.cells);
+    snapshot_=std::move(backup_);
+    if (check_ && world_hash(snapshot_)!=world_hash(*check_)) {
+        std::fprintf(stderr,"RA2_UNDO_CHECK: restored world differs from its full copy\n");
+        std::abort();
+    }
+}
+void Undo::save_cell(const Snapshot& snapshot, std::uint32_t key) {
+    for (auto* undo=active_undo;undo;undo=undo->outer_) {
+        if (&undo->snapshot_!=&snapshot) continue; // An Undo restores only its own Snapshot.
+        if (std::any_of(undo->cells_.begin(),undo->cells_.end(),[&](const auto& item){return item.first==key;})) continue;
+        const auto found=snapshot.cells.find(key);
+        if (found!=snapshot.cells.end()) undo->cells_.emplace_back(key,found->second);
+    }
+}
 bool validate(const Snapshot& snapshot) {
     if (snapshot.edition!=Edition::Base && snapshot.edition!=Edition::Yuri) return false;
     if (snapshot.setup_progress!=SetupProgress::Unknown && snapshot.setup_progress!=SetupProgress::PackedMapRead &&
@@ -392,14 +432,6 @@ bool validate(const Snapshot& snapshot) {
         snapshot.setup_progress!=SetupProgress::OverlayDataRead &&
         snapshot.setup_progress!=SetupProgress::ReadyForInitialUnits &&
         snapshot.setup_progress!=SetupProgress::PrototypeComplete) return false;
-    if (snapshot.cell_order) {
-        std::set<std::uint32_t> seen;
-        for (const auto key:*snapshot.cell_order) {
-            const auto found=snapshot.cells.find(key);
-            if (found==snapshot.cells.end() || !found->second.allocated || !*found->second.allocated ||
-                !seen.insert(key).second) return false;
-        }
-    }
     if (snapshot.pending_setup_cell && (!snapshot.pending_cell_setup ||
         *snapshot.pending_setup_cell>=512u*512u || !snapshot.cells.count(*snapshot.pending_setup_cell))) return false;
     try { (void)sim::Random(snapshot.random); } catch (...) { return false; }
@@ -448,8 +480,14 @@ bool validate(const Snapshot& snapshot) {
         }
         complete.insert(chain.begin(),chain.end());
     }
+    // Every check is a pure test, so their order does not change the result.
+    // The Cell order check below reads one flag per packed Cell:
+    // 1 is allocated, 2 is already listed.
+    std::vector<std::uint8_t> allocated;
+    if (snapshot.cell_order) allocated.assign(512u*512u,0);
     for (const auto& item:snapshot.cells) {
         const auto& cell=item.second;
+        if (!allocated.empty() && item.first<512u*512u && cell.allocated && *cell.allocated) allocated[item.first]=1;
         if (cell.cell_flags_140) {
             const auto same=[&](const std::optional<bool>& field,std::uint32_t bit) {
                 return !field || *field==bool(*cell.cell_flags_140 & bit);
@@ -467,6 +505,13 @@ bool validate(const Snapshot& snapshot) {
             for (const auto head:{item.second.heads->ground_head,item.second.heads->bridge_head})
                 if (head && (!entities.count(head) || entities.at(head)->lifetime!=Lifetime::Placed)) return false;
     }
+    // A listed key at or above 512*512 cannot be an allocated Cell here: the
+    // Cell loop above already rejects such a key in the Cell map.
+    if (snapshot.cell_order)
+        for (const auto key:*snapshot.cell_order) {
+            if (key>=512u*512u || allocated[key]!=1) return false;
+            allocated[key]=2;
+        }
     return true;
 }
 std::optional<sim::CoarseCategoryInputs> coarse_inputs(const Snapshot& snapshot, std::uint32_t cell) {

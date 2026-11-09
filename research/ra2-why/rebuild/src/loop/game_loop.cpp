@@ -1,4 +1,5 @@
 #include "game_loop.h"
+#include "profile.h"
 
 #include <algorithm>
 #include <chrono>
@@ -118,6 +119,7 @@ void GameLoop::service() {
 
 void GameLoop::update() {
     ++ticks_.update;
+    profile::Timer timer(profile::Phase::Update);
     if (hooks_.update) hooks_.update(state_);
 }
 
@@ -142,11 +144,17 @@ void GameLoop::dispatch() {
 
 void GameLoop::present() {
     ++ticks_.present;
-    renderer_.present(state_);
+    {
+        profile::Timer timer(profile::Phase::Present);
+        renderer_.present(state_);
+    }
+    if (profile::enabled()) profile::instance().first_present();
 }
 
 void GameLoop::pace() {
     ++ticks_.pace;
+    // The benchmark measures work, not the frame limiter.
+    if (profile::enabled()) return;
     if (local_session()) {
         const auto start_tick = frame_start_ms_ >> 4; // 0x006C8C40
         while (state_.running) {

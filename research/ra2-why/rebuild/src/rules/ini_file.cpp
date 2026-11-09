@@ -1,5 +1,7 @@
 #include "ini_file.h"
 
+#include <atomic>
+
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -17,6 +19,11 @@ std::string_view IniFile::trim(std::string_view value) noexcept {
     while (!value.empty() && static_cast<unsigned char>(value.back()) <= 0x20)
         value.remove_suffix(1);
     return value;
+}
+
+std::uint64_t IniFile::Revision::next() noexcept {
+    static std::atomic<std::uint64_t> counter{0};
+    return ++counter;
 }
 
 IniFile IniFile::from_file(const std::string& path) {

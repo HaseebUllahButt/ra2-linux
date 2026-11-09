@@ -41,6 +41,11 @@ public:
     void parse(std::istream& input);
     void parse(std::string_view text);
 
+    // A process-unique number for this object's current content. It changes
+    // on every parse, copy, move or assignment, so callers can cache values
+    // derived from one document version.
+    std::uint64_t revision() const noexcept { return revision_.value; }
+
     const std::vector<Section>& sections() const noexcept { return sections_; }
     const Statistics& statistics() const noexcept { return statistics_; }
     std::size_t section_count() const noexcept { return sections_.size(); }
@@ -70,11 +75,21 @@ public:
     static std::vector<std::string> split_list(std::string_view value);
 
 private:
+    struct Revision {
+        static std::uint64_t next() noexcept;
+        std::uint64_t value = next();
+        Revision() = default;
+        Revision(const Revision&) noexcept : value(next()) {}
+        Revision(Revision&& other) noexcept : value(next()) { other.value = next(); }
+        Revision& operator=(const Revision&) noexcept { value = next(); return *this; }
+        Revision& operator=(Revision&& other) noexcept { value = next(); other.value = next(); return *this; }
+    };
     void parse_into(std::istream& input);
     std::vector<Section> sections_;
     std::unordered_map<std::string, std::size_t> section_index_;
     std::vector<std::unordered_map<std::string, std::size_t>> entry_index_;
     Statistics statistics_;
+    Revision revision_;
 };
 
 } // namespace ra2::rules

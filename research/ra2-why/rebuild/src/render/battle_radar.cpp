@@ -1,4 +1,5 @@
 #include "battle_radar.h"
+#include "../loop/profile.h"
 #include <algorithm>
 #include <cmath>
 
@@ -54,6 +55,7 @@ std::optional<ra2map::Cell> click_battle_radar(const session::world::Snapshot& w
 }
 Bitmap draw_battle_radar(const session::world::Snapshot& w, TheaterArt& art,
     const RadarView& v, const RadarStyle& style, bool powered) {
+    loop::profile::Timer probe(loop::profile::Phase::Radar);
     if (!powered) return {};
     if (!valid(v)) throw RenderError("Invalid battle radar bounds");
     Bitmap image{v.width, v.height, Bytes(std::size_t(v.width) * v.height * 4, 0)};

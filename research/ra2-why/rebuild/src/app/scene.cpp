@@ -1,4 +1,5 @@
 #include "scene.h"
+#include "../loop/profile.h"
 #include "../sim/floor.h"
 
 #include <algorithm>
@@ -120,6 +121,7 @@ actors::ScreenPoint Scene::map_anchor(const sim::Entity& entity) const {
 
 SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& state,
                          render::Rectangle viewport) {
+    loop::profile::Timer probe(loop::profile::Phase::Scene);
     valid_image(terrain);
     if (viewport.x < 0 || viewport.y < 0 || viewport.width <= 0 || viewport.height <= 0 ||
         viewport.width > 8192 || viewport.height > 8192 ||

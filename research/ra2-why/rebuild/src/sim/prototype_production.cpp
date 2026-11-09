@@ -1,4 +1,5 @@
 #include "prototype_production.h"
+#include "../loop/profile.h"
 #include "session/world/world.h"
 #include <algorithm>
 #include <limits>
@@ -30,15 +31,17 @@ w::House* house(w::Snapshot& world,std::uint32_t id) {
 // uses a private candidate with prototype inputs, then restores the marker.
 template<class F>
 Outcome transaction(w::Snapshot& world,FactorySet& factories,F&& callback) {
+    loop::profile::Scope probe(loop::profile::Phase::Production);
     if (!ready(world)) return fail(Status::NeedsInput,"prototype setup is not complete");
-    auto candidate=world;
+    // Edit the live world; the Undo restores it unless the command commits.
+    w::Undo undo(world);
     auto next_factories=factories;
-    candidate.setup_progress=w::SetupProgress::Complete;
-    auto result=callback(candidate,next_factories);
+    world.setup_progress=w::SetupProgress::Complete;
+    auto result=callback(world,next_factories);
     if (result.status!=Status::Done) return result;
-    candidate.setup_progress=w::SetupProgress::PrototypeComplete;
-    if (!w::validate(candidate)) return fail(Status::NeedsInput,"prototype result has invalid links");
-    world=std::move(candidate);
+    world.setup_progress=w::SetupProgress::PrototypeComplete;
+    if (!w::validate(world)) return fail(Status::NeedsInput,"prototype result has invalid links");
+    undo.commit();
     factories=std::move(next_factories);
     return result;
 }
@@ -243,6 +246,7 @@ bool place_exit_actor(w::Snapshot& world,w::Entity& item,ra2map::Cell cell) {
         !found->second.terrain || !found->second.terrain->floor_world_height) return false;
     auto& target=found->second;
     if (target.heads->ground_head || *target.ground_occupancy_124) return false;
+    w::Undo::save_cell(world,found->first);
     item.cell=cell; item.layer=w::Layer::Ground; item.lifetime=w::Lifetime::Placed;
     item.position=sim::Coord{int(cell.x)*256+128,int(cell.y)*256+128,*target.terrain->floor_world_height};
     item.next=target.heads->ground_head;
@@ -441,6 +445,7 @@ Outcome place(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,st
 }
 
 Outcome tick(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,std::uint64_t frame) {
+    loop::profile::Scope probe(loop::profile::Phase::Production);
     if (!ready(world)) return fail(Status::NeedsInput,"prototype setup is not complete");
     bool needed=false,waiting_for_exit=false;
     for (const auto& item:factories.power_dirty) if (item.second) { needed=true; break; }
