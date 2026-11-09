@@ -102,6 +102,14 @@ YuriGattling read_gattling(const rules::IniFile& rules, const char* type) {
     result.elite_stages = read_stages(rules, type, true);
     result.rate_up = rules.read_integer(type, "RateUp", 1);
     result.rate_down = rules.read_integer(type, "RateDown", 50);
+    // Stage1..3 and EliteStage1..3 are rules keys (timer values).
+    for (std::size_t i = 0; i < 3; ++i) {
+        const auto n = std::to_string(i + 1);
+        result.stage_values[i] = rules.read_integer(type, ("Stage" + n).c_str(),
+                                                    result.stage_values[i]);
+        result.elite_stage_values[i] = rules.read_integer(
+            type, ("EliteStage" + n).c_str(), result.elite_stage_values[i]);
+    }
     return result;
 }
 
@@ -152,7 +160,7 @@ YuriTechno read_techno(const rules::IniFile& rules, const rules::IniFile& art,
 std::vector<std::int32_t> read_int_list(const rules::IniFile& rules,
                                         const char* key) {
     std::vector<std::int32_t> result;
-    for (const auto& item : rules.read_list("General", key))
+    for (const auto& item : rules.read_list("CombatDamage", key))
         result.push_back(rules::IniFile::integer_value(item).value_or(0));
     return result;
 }
@@ -201,22 +209,20 @@ void GattlingState::tick(bool firing, bool elite) {
     const auto& values = elite ? rules_->elite_stage_values : rules_->stage_values;
     const auto stages = static_cast<std::int32_t>(rules_->stages.size());
     if (stages == 0) return;
+    const auto last = values[values.size() - 1];
     if (firing) {
-        // 0070DE70: the value climbs by RateUp under the stage threshold.
-        const auto threshold = values[static_cast<std::size_t>(stage_)];
-        if (value_ < threshold) value_ += rules_->rate_up;
-        // Crossing the threshold selects the next stage weapon pair.
-        if (stage_ < stages - 1 && value_ >= values[static_cast<std::size_t>(stage_)]) {
-            ++stage_;
-            value_ = 0;
-        }
+        // TODO-ORIGINAL 0070DE70 GattlingRateUp: climb by RateUp, clamp to the
+        // last Stage= value.
+        value_ = std::min(value_ + rules_->rate_up, last);
     } else {
-        // 0070E000: the value cools by RateDown and drops a stage when the
-        // value falls below its threshold.
-        value_ -= rules_->rate_down;
-        if (value_ < 0) value_ = 0;
-        if (stage_ > 0 && value_ < values[static_cast<std::size_t>(stage_)]) --stage_;
+        // TODO-ORIGINAL 0070E000 GattlingRateDown: RateDown=0 drops at once.
+        value_ = rules_->rate_down <= 0 ? 0 : std::max(value_ - rules_->rate_down, 0);
     }
+    // The stage is the count of Stage1..Stage(n-1) thresholds reached.
+    std::int32_t stage = 0;
+    for (std::size_t i = 0; i + 1 < values.size(); ++i)
+        if (value_ >= values[i]) stage = static_cast<std::int32_t>(i) + 1;
+    stage_ = std::min(stage, stages - 1);
 }
 
 std::int32_t GattlingState::weapon_number(bool air_target) const {
@@ -252,7 +258,8 @@ bool MindController::capture(std::uint32_t target, std::uint32_t original_owner)
     if (target == 0 || controls(target)) return false;
     // 00471D40: a full controller releases its links before the new capture.
     if (full() && !infinite_) free_all();
-    if (full()) return false; // A Mastermind at its limit only overloads.
+    // An infinite controller (Mastermind) keeps capturing past its limit and
+    // takes overload damage instead.
     nodes_.push_back({target, original_owner});
     return true;
 }
@@ -354,9 +361,13 @@ const char* guardian_gi_weapon(bool deployed, const std::string& primary,
 }
 
 bool robot_tank_needs_center(const YuriTechno& tank, const YuriTechno& center) {
-    return tank.kind == YuriTechno::Kind::Unit &&
-           center.kind == YuriTechno::Kind::Building &&
-           equal_ignore_case(center.name, "GAROBO");
+    // ROBO has Prerequisite=GAWEAP,GAROBO in rulesmd.ini.
+    if (tank.kind != YuriTechno::Kind::Unit ||
+        center.kind != YuriTechno::Kind::Building)
+        return false;
+    for (const auto& item : rules::IniFile::split_list(tank.prerequisite))
+        if (equal_ignore_case(item, center.name)) return true;
+    return false;
 }
 
 bool robot_tank_immune_to_psionics(const YuriTechno& tank) {
@@ -430,22 +441,22 @@ PrototypeYuriRules PrototypeYuriRules::load(const rules::IniFile& rules_md,
     result.super_mind_control = read_mind_control(rules_md, "SuperMindControl");
     result.multi_tank_control = read_mind_control(rules_md, "MultipleMindControlTank");
     result.multi_tower_control = read_mind_control(rules_md, "MultipleMindControlTower");
-    result.drain_delay = rules_md.read_integer("General", "DrainMoneyFrameDelay", 0);
-    result.drain_amount = rules_md.read_integer("General", "DrainMoneyAmount", 0);
+    result.drain_delay = rules_md.read_integer("CombatDamage", "DrainMoneyFrameDelay", 0);
+    result.drain_amount = rules_md.read_integer("CombatDamage", "DrainMoneyAmount", 0);
     result.falling_damage_multiplier =
-        rules_md.read_double("General", "FallingDamageMultiplier", 1.0);
+        rules_md.read_double("CombatDamage", "FallingDamageMultiplier", 1.0);
     result.current_strength_damage =
-        rules_md.read_bool("General", "CurrentStrengthDamage", true);
+        rules_md.read_bool("CombatDamage", "CurrentStrengthDamage", true);
     // RefundPercent=50% parses to 0.5 through the original percent rule.
     result.refund_percent = static_cast<std::int32_t>(
         rules::IniFile::double_value(rules_md.read_string("General", "RefundPercent"))
             .value_or(0.5) * 100.0);
     result.open_topped.range_bonus =
-        rules_md.read_integer("General", "OpenToppedRangeBonus", 0);
+        rules_md.read_integer("CombatDamage", "OpenToppedRangeBonus", 0);
     result.open_topped.damage_multiplier =
-        rules_md.read_double("General", "OpenToppedDamageMultiplier", 1.0);
+        rules_md.read_double("CombatDamage", "OpenToppedDamageMultiplier", 1.0);
     result.open_topped.warp_distance =
-        rules_md.read_integer("General", "OpenToppedWarpDistance", 0);
+        rules_md.read_integer("CombatDamage", "OpenToppedWarpDistance", 0);
 
     // New Allied and Soviet expansion units. SCHP is the Soviet Siege
     // Chopper; GGI, ROBO and BFRT are the Allied ones.

@@ -96,9 +96,8 @@ struct YuriGattlingWeapon {
     bool anti_ground = false;            // Projectile AG=yes (default).
 };
 
-// Gattling stage rules from one gattling type. The stage thresholds are not a
-// rules key; the original stores them in the type constructor.
-// TODO-ORIGINAL TechnoTypeClass 00710AF0 stage defaults.
+// Gattling stage rules from one gattling type. Stage1..3 and EliteStage1..3
+// are rules keys; the defaults below only apply when a key is missing.
 struct YuriGattling {
     struct Stage { YuriGattlingWeapon ground, air; };
     std::vector<Stage> stages;           // Weapon1..Weapon6 pairs.
@@ -114,8 +113,8 @@ class GattlingState {
 public:
     explicit GattlingState(const YuriGattling& rules) noexcept : rules_(&rules) {}
 
-    // One frame. A firing weapon climbs to its stage threshold; an idle one
-    // cools by rate_down per frame and drops a stage below its threshold.
+    // One frame. A firing weapon climbs by rate_up; an idle one cools by
+    // rate_down. The stage follows the value against the Stage= thresholds.
     void tick(bool firing, bool elite);
     std::int32_t stage() const noexcept { return stage_; }
     // Current weapon number: stage*2, +1 for air targets. Elite weapons use
