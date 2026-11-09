@@ -116,6 +116,7 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     int initial_camera_x_=0,initial_camera_y_=0;
     render::RadarStyle radar_style_;
     std::map<std::uint32_t,std::uint32_t> attacks_;
+    std::map<std::uint32_t,int> power_health_;
     std::map<std::uint32_t,ra2map::Cell> manual_moves_;
     std::set<std::uint32_t> move_destinations_;
     std::vector<Order> pending_;
@@ -169,6 +170,7 @@ public:
         ai_opening_=std::max(ai_opening_,std::uint32_t(std::max(0.0,rules_.read_double("General","AttackDelay",.5))*900));
         const auto initialized=proto::initialize(world_,factories_,catalog_,player_);
         if (initialized.status!=p::Status::Done) throw std::runtime_error(initialized.detail);
+        refresh_power_damage();
         const auto start=std::find_if(world_.entities.begin(),world_.entities.end(),[&](const auto& e){return live(e)&&e.house_id==player_;});
         if (start!=world_.entities.end()) center(*start);
         radar_style_=render::battle_radar_style(rules_);
@@ -247,6 +249,19 @@ public:
         return int(std::count_if(factories_.factories.begin(),factories_.factories.end(),[&](const auto& f){
             return f.house_id==player_ && f.object && f.object_type==type;
         }));
+    }
+    void refresh_power_damage() {
+        for(const auto& e:world_.entities) {
+            if(e.kind!=w::Kind::Structure)continue;
+            const auto* type=catalog_.find(e.type);if(!type || type->power_output<=0)continue;
+            const int hp=e.resolved_hp.value_or(0);
+            const auto [at,inserted]=power_health_.try_emplace(e.id,hp);
+            if(!inserted && at->second!=hp) {
+                at->second=hp;
+                if(const auto dirty=factories_.power_dirty.find(e.house_id);dirty!=factories_.power_dirty.end())
+                    dirty->second=true;
+            }
+        }
     }
     void run_build_queue(std::uint32_t frame) {
         for(const auto& [slot,line]:build_queue_.slots()) {
@@ -779,6 +794,7 @@ public:
         }
         // A producer can die during combat. Abandon its orphaned products
         // before checking defeat; production timers use this same frame.
+        refresh_power_damage();
         const auto after_combat=proto::tick(world_,factories_,catalog_,frame);
         if(after_combat.status!=p::Status::Done)gaps_.insert(after_combat.detail);
         sim::tech::update(rules_,world_);

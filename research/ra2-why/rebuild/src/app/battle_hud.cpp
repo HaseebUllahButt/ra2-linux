@@ -138,8 +138,9 @@ bool BattleHud::same_panel(const HudState& s) const {
 void BattleHud::draw_panel(render::Bitmap& b,const HudState& s) const {
     fill(b,{sidebar_x,0,sidebar_width,minimap_y},dark);
     text(b,808,3,"CREDITS $"+std::to_string(s.cash),ink,212);
-    text(b,808,17,"POWER OUT "+std::to_string(s.power_output)+" USE "+std::to_string(s.power_drain),ink,212);
-    fill(b,{808,29,212,6},edge);
+    text(b,808,17,"POWER OUT "+std::to_string(s.power_output)+" USE "+std::to_string(s.power_drain),
+        s.power_output<s.power_drain?red:ink,212);
+    fill(b,{808,29,212,6},s.power_output<s.power_drain?Color{75,30,24,255}:edge);
     const auto capacity=std::max({1,s.power_output,s.power_drain});
     fill(b,{808,29,static_cast<int>(212LL*std::max(0,s.power_output)/capacity),6},
          s.power_output<s.power_drain?red:green);
