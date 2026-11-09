@@ -1,45 +1,43 @@
 # RA2 engine rebuild
 
-Rebuild the original Red Alert 2 engine for native Linux. Base Red Alert 2 is
-the main target. Keep Yuri's Revenge behavior separate where the games differ.
+Run the base Red Alert 2 skirmish prototype on native Linux.
+The default menu starts a match with an Easy computer opponent.
+The game reads owned assets. It does not run the Windows executable.
 
-The game is incomplete. The Linux client shows original menu pages,
-country, color, and opponent choices, plus the credits slider.
-The scene check shows original terrain, trees, full-health building
-main images, standing infantry, and flat base HTNK, MTNK, and 4TNK models.
-These tanks can display separate hull and turret directions from resolved state.
-It advances the recovered native state. Tests execute prepared straight routes
-and final 45-degree or 90-degree turns on verified flat cells.
-Goal pathfinding, full movement, combat, production, AI,
-campaigns, saves, multiplayer, and menus still
-need work. The scene also needs pixel depth, shadows, lighting,
-house colors, other vehicle models, and other actor states.
+The rebuild remains incomplete. Matches use `PrototypeComplete` world state.
+Campaigns, saves, and multiplayer are not complete game modes.
+Keep later modules separate from base skirmish play.
 
-Build with a C++17 compiler, make, pkg-config, SDL2 development files, and the
-LZO2 runtime library. Keep the owned game assets in `game/` at the project root.
-The native build reads original files. It does not run the Windows executable.
+Build with a C++17 compiler, make, pkg-config, SDL2 development files,
+and the LZO2 runtime library. On test-host, owned assets are in `game-full/`.
+Tests select that folder when it contains `game.exe`.
+Set `TEST_GAME_DIR` to use another asset folder.
 
-Run from this directory:
+Run from the project root:
 
 ```sh
-make native
-make native-check
-make world-maps
-build/ra2-native --game-dir ../game
-build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP
-build/ra2-native --game-dir ../game --map ALL01T.MAP
+make -C rebuild -j8 test
+make -C rebuild human-input-check FEATURE_GAME_DIR="$PWD/game-full"
+rebuild/build/ra2-native --game-dir "$PWD/game-full"
+rebuild/build/ra2-native --game-dir "$PWD/game-full" --skirmish --headless --autoplay --frames 12000
 ```
 
-Omit `--map` to open the original menu. The supported buttons change pages.
-Maps can be local files or original map names inside mounted game archives.
-Match start stays disabled. Use `--yuri` to select expansion assets and rules.
-The simulation preserves sparse map records and runs both original terrain setup passes.
-The map audit checks 87 available base maps and all 161 installed expansion maps.
-The base packet also lists 50 cooperative variants absent from the installed base archives.
-Production timing matches both original executables with resolved house inputs.
-Production commands and unit placement remain unsupported.
-Use arrow keys to move the temporary scene viewer. Press Escape to exit. These viewer controls do not
-establish the original game input behavior. This is not yet a playable match.
+Choose Single Player, Skirmish, and Start Game in the menu.
+Close the help panel with a click or F1.
+Select the MCV and press D, double-click it, or click Deploy.
+Choose a building cameo. Click READY, then click a green footprint to place it.
+Units and buildings block placement. Red footprints show a blocked or distant position.
+Drag a box to select units. Left-click the ground to move or an enemy to attack.
+Right-click to clear selection. Press S to stop selected units.
+Move the camera with arrow keys or the screen edges. Click the minimap to jump.
+F1 shows controls and pauses the match. Esc cancels placement or returns to the menu.
+The score screen appears at match end. Click it to return to the battlefield.
+
+The human check sends SDL events through menu Start and the normal window event queue.
+It writes private captures under `/tmp/ra2-human-input.*`.
+Set `RA2_INPUT_DEPLOY=key` or `sidebar` to test help and focus around deployment.
+Set `RA2_DEBUG_LOOP=1` to write input and presentation timestamps to a private
+`/tmp/ra2-debug-loop.*` file. The process prints the exact path to stderr.
 
 ## Why
 
