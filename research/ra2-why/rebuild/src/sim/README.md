@@ -1313,3 +1313,47 @@ Its default run checks 2,048 searches and two unknown-flag propagation cases.
 Unknown projection data produces no nearest answer. The tests keep bridge bit 100 independent from source flag 1000.
 The earlier standalone nearest vectors retain A7F1ECFF and 4E70DF25 after the oracle hook refactor.
 The new modules remain unbound to live goals while their world-state and fit dependencies are unresolved.
+
+## Checked base goal runtime staging
+
+`goal_runtime.h` uses the caller-owned `session::world::Snapshot` and retains a separate Foot queue,
+drive state, retained search buffers, and frame. Import requires `Complete`
+setup, original map iteration order, the full Cell allocation array, resolved
+Cell state, and the original base executable. It rejects unfinished setup and
+unknown bridge, occupancy, link, type, or motion state. It copies all 250 RNG
+words and both indices. It does not infer bridge state from an empty overlay.
+
+The staged search connects the original Foot wrapper, movement components,
+hierarchy, regular search, and retained path memory. Unit mark-out and mark-in
+use the original ordered links and full 32-bit occupancy fields. The checked
+`original_live_cell_setup` binding runs the recovered Cell setup body against
+current ordered occupants. It needs explicit theater, tile guards, allocation,
+and land-wheel inputs. `original_unit_insertion_visibility` handles the checked
+flat projection and its first visibility test. Other visibility and Object
+effects require explicit callbacks. Search and marking use private state. Missing callbacks leave the published snapshot
+unchanged. Paths needing unrecovered retarget, failure, or local reachability
+inputs remain unsupported or unresolved.
+
+**Live game commands stay disabled.** The staged adapter can run a straight,
+flat, empty-cell drive when all original side-effect callbacks are supplied.
+It uses base 004A0BC0 to reserve the next Cell, then applies the recovered
+Foot +5A0 and +5A1 transitions. Each `begin()` or `tick()` stages the caller's
+shared Snapshot and movement state, and commits both only on success. It
+rejects external changes to the active Unit or watched Cells. Arrival requires
+a resolved completion callback. Bridge, turning, dynamic collision, and
+mission effects remain open.
+No application or `Simulation` command is connected to this staging API.
+
+`test_goal_runtime.sh` checks atomic rejection, staged search, original Unit
+link operations, ordered drive position calls, and a 23-frame occupancy replay.
+It connects the recovered live Cell setup binding. Its world, tile metadata,
+and unresolved Object effects are synthetic. `test_live_cell_setup.sh`
+checks 512 Cell setup bindings against the recovered body. The visibility test
+checks its first projection branch and rejects unresolved callbacks. `test_goal_runtime_real.sh` loads the real
+MP02T2 packed map and verifies that its unfinished phase cannot enter the
+runtime. The optional Unicorn scripts `original_unit_mark_check.py`,
+`original_drive_position_check.py`, `original_drive_occupancy_check.py`, and
+`original_unit_visibility_check.py`
+execute the corresponding base `game.exe` bodies with explicit fixture
+adapters. The occupancy check proves that the Unit and its reserved Cell can
+occupy different cells during a frame. It does not complete real scenario setup.

@@ -176,18 +176,26 @@ std::vector<std::array<int,2>> DriveSegment::swept_cells(const DriveTables& tabl
     }
     return {cells.begin(),cells.end()};
 }
-void DriveSegment::tick(const DriveTables& tables) {
+void DriveSegment::tick(const DriveTables& tables) { tick(tables,{}); }
+void DriveSegment::tick(const DriveTables& tables,const std::function<void(Coord,Coord)>& position) { tick(tables,position,{}); }
+void DriveSegment::tick(const DriveTables& tables,const std::function<void(Coord,Coord)>& position,
+                        const std::function<void(const DriveEvent&)>& event) {
     if (!active) return;
     const bool continue_in_frame=!first_update_ && motion.track!=-1;
+    const bool first=first_update_;
     first_update_=false;
-    if (motion.track==-1) prepare(tables);
-    follow(tables,true);
+    if (motion.track==-1) { prepare(tables);if (event) event({DriveEventKind::Prepare,current,motion}); }
+    else if (first && event) event({DriveEventKind::Prepare,current,motion});
+    follow(tables,true,position,event);
     // 004B0500 / base 004A05F0: one further preparation and Follow call, without new speed.
-    if (continue_in_frame && motion.track==-1 && motion.path[0]!=-1) { prepare(tables); follow(tables,false); }
+    if (continue_in_frame && motion.track==-1 && motion.path[0]!=-1) {
+        prepare(tables);if (event) event({DriveEventKind::Prepare,current,motion});follow(tables,false,position,event);
+    }
     active=motion.track!=-1 || motion.path[0]!=-1;
     if (!active) motion.destination.reset();
 }
-void DriveSegment::follow(const DriveTables& tables,bool add_speed) {
+void DriveSegment::follow(const DriveTables& tables,bool add_speed,const std::function<void(Coord,Coord)>& position,
+                          const std::function<void(const DriveEvent&)>& event) {
     const auto& path=tables.curve(tables.control(static_cast<unsigned>(motion.track)).primary);
     int budget=motion.remainder+(add_speed?speed:0);
     while (budget>7) {
@@ -195,15 +203,17 @@ void DriveSegment::follow(const DriveTables& tables,bool add_speed) {
         if (static_cast<std::size_t>(motion.sample)==path.size()-1) {
             // 004B0F20 terminal marker: place at the anchor and end this segment.
             // 004B1FD0..004B1FFB adds the remaining Manhattan distance correction.
+            if (event) event({DriveEventKind::Terminal,current,motion});
             const auto anchor=motion.anchor.value();
             const int distance=std::abs(anchor.x-current.x)+std::abs(anchor.y-current.y);
             const int correction=static_cast<int>(fp::multiply(fp::add(1.0,-fp::multiply(distance,1.0/11.0)),7.0));
-            current=anchor; motion.segment_active=false; motion.anchor.reset(); motion.track=-1; motion.sample=0; motion.remainder=budget+correction;
+            const auto old=current;current=anchor;if (position) position(old,current); motion.segment_active=false; motion.anchor.reset(); motion.track=-1; motion.sample=0; motion.remainder=budget+correction;
             return;
         }
+        if (event) event({DriveEventKind::Sample,current,motion});
         const auto& p=path.at(static_cast<std::size_t>(motion.sample));
         const auto point=motion.transform({p.x,p.y,0},static_cast<std::uint8_t>(p.facing));
-        current.x=point.x; current.y=point.y; facing=point.facing; ++motion.sample;
+        const auto old=current;current.x=point.x;current.y=point.y;if (position) position(old,current);facing=point.facing;++motion.sample;
     }
     motion.remainder=budget;
     if (budget>0 && static_cast<std::size_t>(motion.sample)<path.size()-1) {
@@ -216,8 +226,10 @@ void DriveSegment::follow(const DriveTables& tables,bool add_speed) {
         const auto same_cell=[](Coord a,Coord b){return a.x/256==b.x/256 && a.y/256==b.y/256;};
         const Coord next{target.x,target.y,current.z};
         // 004B22CC..004B23F5 prevents an interpolated diagonal point entering a third cell.
+        const auto old=current;
         if (same_cell(proposed,current) || same_cell(proposed,next)) current=proposed;
         else if (budget>3) current=next;
+        if (position) position(old,current);
 
     }
 }
