@@ -431,8 +431,13 @@ public:
         }
         if (!placement_.empty() && input.kind==InputKind::Button && input.pressed) {
             if (input.key==SDL_BUTTON_RIGHT) {placement_.clear();orders_.set_placement_active(false);}
-            else if (input.key==SDL_BUTTON_LEFT) if (const auto cell=cell_at({input.x,input.y}))
-                queue({OrderKind::Place,player_,0,0,placement_,*cell});
+            else if (input.key==SDL_BUTTON_LEFT) if (const auto cell=cell_at({input.x,input.y})) {
+                const auto origin=proto::placement_origin(catalog_,placement_,{std::int16_t(cell->x),std::int16_t(cell->y)});
+                if(origin && origin->x>=0 && origin->y>=0)
+                    queue({OrderKind::Place,player_,0,0,placement_,
+                        {std::uint16_t(origin->x),std::uint16_t(origin->y)}});
+                else status("Can't build here.");
+            }
             return;
         }
         auto commands=orders_.handle(input,world_,view(),clock_.now_ms());
@@ -571,9 +576,13 @@ public:
                 auto candidate=world_;auto factories=factories_;
                 if(proto::place(candidate,factories,catalog_,player_,power,cell,state.frame_counter).status!=p::Status::Done)continue;
                 w::Entity mark;mark.lifetime=w::Lifetime::Placed;mark.resolved_hp=1;
-                mark.cell=ra2map::Cell{std::uint16_t(cell.x),std::uint16_t(cell.y)};
-                const auto& c=world_.cells.at(std::uint32_t(cell.y)*512+cell.x);
-                mark.position=sim::Coord{cell.x*256+128,cell.y*256+128,c.terrain->floor_world_height.value_or(0)};
+                const auto shift=proto::placement_origin(catalog_,power,{0,0});
+                require(shift.has_value(),"Human input: missing placement cursor dimensions");
+                const auto mouse_x=cell.x-shift->x,mouse_y=cell.y-shift->y;
+                mark.cell=ra2map::Cell{std::uint16_t(mouse_x),std::uint16_t(mouse_y)};
+                const auto found=world_.cells.find(std::uint32_t(mouse_y)*512+mouse_x);
+                if(found==world_.cells.end() || !found->second.terrain)continue;
+                mark.position=sim::Coord{mouse_x*256+128,mouse_y*256+128,found->second.terrain->floor_world_height.value_or(0)};
                 const auto at=anchor(mark);if(!at||at->x<0||at->x>=804||at->y<0||at->y>=768)continue;
                 test_click(at->x,at->y);human_stage_=6;return;
             }
@@ -1079,16 +1088,17 @@ public:
         }
         effects_.draw(frame_,camera_x_,camera_y_,state.frame_counter);
         if(const auto box=orders_.selection_rectangle())rectangle(frame_,box->x,box->y,box->width,box->height,{70,255,90});
+        bool placement_legal=false;
         if(!placement_.empty())if(const auto cell=cell_at({pointer_x_,pointer_y_})) {
-            const p::CellXY origin{std::int16_t(cell->x),std::int16_t(cell->y)};
-            const bool valid=p::legal_placement(world_,catalog_,placement_,origin)==true &&
-                proto::passes_proximity(world_,factories_,catalog_,player_,placement_,origin)==true;
-            const std::array<std::uint8_t,3> color=valid?std::array<std::uint8_t,3>{70,255,90}:
-                std::array<std::uint8_t,3>{255,70,70};
-            if(const auto* type=catalog_.find(placement_))
-                for(const auto offset:p::original_foundation_cells(type->placement.foundation)) {
-                    const int x=int(cell->x)+offset.x,y=int(cell->y)+offset.y;
+            const auto cursor=proto::placement_cursor(world_,factories_,catalog_,player_,placement_,
+                {std::int16_t(cell->x),std::int16_t(cell->y)});
+            if(cursor) {
+                placement_legal=cursor->legal==true;
+                for(const auto& entry:cursor->cells) {
+                    const int x=entry.cell.x,y=entry.cell.y;
                     if(x<0||y<0||x>=512||y>=512)continue;
+                    const std::array<std::uint8_t,3> color=entry.legal_cell==true?
+                        std::array<std::uint8_t,3>{70,255,90}:std::array<std::uint8_t,3>{255,70,70};
                     const auto found=world_.cells.find(std::uint32_t(y)*512+x);
                     const int z=found!=world_.cells.end()&&found->second.terrain?
                         found->second.terrain->floor_world_height.value_or(0):0;
@@ -1101,6 +1111,7 @@ public:
                         pixel(frame_,at->x+dx,at->y+dy,color);
                     }
                 }
+            }
         }
         refresh_hud();hud_.draw(frame_,hud_state_);
         if(show_score_ && score_image_) {
@@ -1122,7 +1133,7 @@ public:
                 passable=at!=world_.cells.end()&&at->second.unit_land_speed.value_or(0)>0&&
                     at->second.cell_flag_100!=true;
             }
-            if(!placement_.empty())kind=passable&&!hovered?CursorKind::Deploy:CursorKind::NoGo;
+            if(!placement_.empty())kind=placement_legal?CursorKind::Deploy:CursorKind::NoGo;
             else if(hovered && hovered->house_id==player_)kind=
                 rules_.read_string(hovered->type,"DeploysInto").empty()?CursorKind::Select:CursorKind::Deploy;
             else if(!orders_.selected_ids().empty()) {

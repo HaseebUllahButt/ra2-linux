@@ -474,6 +474,40 @@ std::optional<bool> passes_proximity(const w::Snapshot& world,const FactorySet& 
     return ra2::sim::production::passes_proximity(world,factories,catalog,house_id,type,cell);
 }
 
+std::optional<CellXY> placement_origin(const Catalog& catalog,const std::string& type,CellXY mouse) {
+    const auto* t=catalog.find(type);
+    if (!t || t->rtti!=Rtti::BuildingType || t->placement.foundation<0 || t->placement.foundation>=22) return std::nullopt;
+    // 00499810: bounds of the list; an empty list or a span below one is one.
+    int min_x=0x200,max_x=-0x200,min_y=0x200,max_y=-0x200;
+    for (const auto offset:original_foundation_cells(t->placement.foundation)) {
+        min_x=std::min(min_x,int(offset.x)); max_x=std::max(max_x,int(offset.x));
+        min_y=std::min(min_y,int(offset.y)); max_y=std::max(max_y,int(offset.y));
+    }
+    const int width=std::max(max_x-min_x+1,1),height=std::max(max_y-min_y+1,1);
+    // 00498F10: ZoneOffset = (-(w-1)/2, -(h-1)/2), C division toward zero.
+    return CellXY{std::int16_t(mouse.x-(width-1)/2),std::int16_t(mouse.y-(height-1)/2)};
+}
+
+std::optional<PlacementCursor> placement_cursor(const w::Snapshot& world,const FactorySet& factories,
+                                                const Catalog& catalog,std::uint32_t house_id,
+                                                const std::string& type,CellXY mouse) {
+    const auto origin=placement_origin(catalog,type,mouse);
+    if (!origin) return std::nullopt;
+    const auto cells=ra2::sim::production::placement_cells(world,catalog,type,*origin);
+    if (!cells) return std::nullopt;
+    PlacementCursor cursor;
+    cursor.origin=*origin;
+    cursor.proximity=prototype::passes_proximity(world,factories,catalog,house_id,type,*origin);
+    cursor.legal=ra2::sim::production::legal_placement(world,catalog,type,*origin);
+    for (const auto& [cell,state]:*cells) {
+        std::optional<bool> legal_cell;
+        if (cursor.proximity==false || state==Placement::Illegal) legal_cell=false;
+        else if (cursor.proximity==true && state==Placement::Legal) legal_cell=true;
+        cursor.cells.push_back({cell,legal_cell});
+    }
+    return cursor;
+}
+
 Outcome place(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,std::uint32_t house_id,
               const std::string& type,CellXY cell,std::uint64_t frame) {
     bool known_valid=false;
