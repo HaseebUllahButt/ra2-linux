@@ -35,7 +35,7 @@ struct BuildChoice {
     bool enabled = false; // False dims the entry and rejects clicks.
     int progress = 0;     // 0..1000 production clock, 1000 means ready.
     BuildCategory category = BuildCategory::All;
-    int queued = 0;       // Queue length including the active item. 2+ shows a count badge.
+    int queued = 0;       // Queue length including the active item. 1+ shows a count badge.
 };
 
 // Everything the sidebar needs for one draw pass.
@@ -104,6 +104,8 @@ public:
     static render::Rectangle minimap_bounds();
     static render::Rectangle deploy_bounds();
 private:
+    mutable int page_=0;
+    mutable int panel_page_=-1;
     mutable BuildCategory active_category_ = BuildCategory::All;
     mutable bool panel_valid_=false;
     mutable BuildCategory panel_category_=BuildCategory::All;
