@@ -91,6 +91,7 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
         if(current!=w.cells.end() && resource(current->second)>=0) {
             auto& c=current->second;int r=resource(c);
             ++bag.bails;bag.credits+=std::max(0,rules_.read_integer(r?"Cruentus":"Riparius","Value",r?50:25));
+            // TODO-ORIGINAL CellClass::Reduce_Tiberium: restore the underlying tile land and refresh resource art caches.
             if(*c.overlay_data_11e==0) {c.terrain->overlay_type_index=-1;c.terrain->land_type=0;} else --*c.overlay_data_11e;
             // TODO-ORIGINAL UnitClass::Harvesting: pickup/unload animation timing uses a simple frame delay.
             bag.next=frame+std::max(1,rules_.read_integer(e.type,"HarvestRate",rules_.read_integer("General","OreDumpRate",15)));

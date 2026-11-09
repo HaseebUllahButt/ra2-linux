@@ -4,6 +4,10 @@
 namespace ra2::sim {
 // One instance per match. Owns routes for miners only; tick once per frame.
 // The battle loop must not give these miners to another movement instance.
+// Construct from base rules.ini. Call with monotonically increasing frame IDs.
+// Incomplete snapshots and duplicate/older frames do nothing.
+// Cargo belongs to this instance; create a fresh instance for each match.
+// Live placed CMIN/HARV units work automatically, without a harvest order.
 class PrototypeEconomy {
 public:
     explicit PrototypeEconomy(const rules::IniFile& rules);

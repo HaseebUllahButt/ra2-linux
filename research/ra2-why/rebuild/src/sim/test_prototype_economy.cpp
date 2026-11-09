@@ -26,13 +26,22 @@ int main(int argc,char** argv) {
     assert(rules.read_integer("CMIN","Storage")==20);assert(rules.read_integer("HARV","Storage")==40);
     for(auto type:{"CMIN","HARV"}) for(int overlay:{105,28}) {
         auto w=fixture(type,overlay);sim::PrototypeEconomy economy(rules);
-        int first=0;
+        int first=0;bool teleported=false;
         for(unsigned frame=0;frame<5000 && !first;++frame) {
-            economy.tick(w,frame);auto cash=w.houses[0].cash;int load=economy.load(1);
+            auto before=*w.entities[0].cell;
+            economy.tick(w,frame);
+            auto after=*w.entities[0].cell;
+            teleported |= std::abs(int(before.x)-after.x)>1 || std::abs(int(before.y)-after.y)>1;
+            auto cash=w.houses[0].cash;int load=economy.load(1);
             economy.tick(w,frame);assert(cash==w.houses[0].cash && load==economy.load(1));first=*cash;
         }
+        assert(teleported==(std::string(type)=="CMIN"));
         assert(first==rules.read_integer(type,"Storage")*rules.read_integer(overlay==28?"Cruentus":"Riparius","Value"));
     }
+    auto destroyed=fixture("HARV",105);destroyed.entities[0].resolved_hp=0;
+    sim::PrototypeEconomy dead(rules);dead.tick(destroyed,0);assert(dead.load(1)==0);
+    auto incomplete=fixture("CMIN",105);incomplete.setup_progress=sw::SetupProgress::Unknown;
+    sim::PrototypeEconomy guard(rules);guard.tick(incomplete,0);assert(guard.load(1)==0);
     auto w=fixture("CMIN",105);w.entities.pop_back();sim::PrototypeEconomy idle(rules);
     for(unsigned f=0;f<100;++f) { idle.tick(w,f); }
     assert(idle.load(1)==0);
