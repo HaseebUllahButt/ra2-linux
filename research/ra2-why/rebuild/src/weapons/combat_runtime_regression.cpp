@@ -77,6 +77,10 @@ void check_world(const sim::OriginalDistance& distance) {
     auto b=a;b.id=1;b.position=sim::Coord{impact.x+5,impact.y,0};b.next=0;
     auto source=a;source.id=3;source.next=0;
     world.entities={a,b,source};
+    const auto aim=sim::base_stationary_unit_aim(world,3,2,false);
+    check(aim && aim->x==impact.x && aim->y==impact.y && aim->z==impact.z,"stationary Unit aim");
+    check(!sim::base_stationary_unit_aim(world,3,2,{}) && !sim::base_stationary_unit_aim(world,3,2,true),
+          "unknown or moving Unit aim accepted");
     const auto area=[](const session::world::Entity& e)->std::optional<sim::AreaUnitProperties> {
         return sim::AreaUnitProperties{true,e.position,false,false,false};
     };

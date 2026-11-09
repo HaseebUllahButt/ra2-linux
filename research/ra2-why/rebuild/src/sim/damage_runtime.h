@@ -72,3 +72,13 @@ weapons::FlatCannonTickStatus base_advance_flat_projectile(
     FlatProjectile&, const weapons::FlatCannonTickInput&,
     const weapons::TerrainTraceLookup&, const OriginalDistance&);
 }
+
+namespace ra2::sim {
+// Base 006D65B0 for a current target whose original Unit locomotor virtual
+// +10 reports false. The actor's selected target ID must be resolved by the
+// caller. The Unit vtable +58 calls +48, which reads its stored position.
+// Moving-target lead, non-Unit targets and unknown locomotor state block it.
+std::optional<Coord> base_stationary_unit_aim(
+    const session::world::Snapshot&, std::uint32_t source_id,
+    std::uint32_t current_target_id, std::optional<bool> target_locomotor_moving);
+}

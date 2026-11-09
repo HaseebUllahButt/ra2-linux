@@ -174,3 +174,24 @@ weapons::FlatCannonTickStatus base_advance_flat_projectile(
     return result.status;
 }
 }
+
+namespace ra2::sim {
+std::optional<Coord> base_stationary_unit_aim(const session::world::Snapshot& world,
+    std::uint32_t source_id,std::uint32_t target_id,std::optional<bool> moving) {
+    if (world.edition!=session::world::Edition::Base || world.pending_cell_setup ||
+        world.random.first>=250 || world.random.second>=250 ||
+        (world.random.first+103)%250!=world.random.second || !source_id || !target_id ||
+        !moving || *moving) return {};
+    const session::world::Entity* source=nullptr;const session::world::Entity* target=nullptr;
+    std::set<std::uint32_t> seen;
+    for (const auto& item:world.entities) {
+        if (!item.id || !seen.insert(item.id).second) return {};
+        if (item.id==source_id) source=&item;
+        if (item.id==target_id) target=&item;
+    }
+    if (!source || !target || source->kind!=session::world::Kind::Unit ||
+        target->kind!=session::world::Kind::Unit || source->lifetime!=session::world::Lifetime::Placed ||
+        target->lifetime!=session::world::Lifetime::Placed || !target->position) return {};
+    return target->position;
+}
+}

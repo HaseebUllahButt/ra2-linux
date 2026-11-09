@@ -216,3 +216,9 @@ It applies House and object firepower, truncates, then applies the relevant
 veteran firepower multiplier. It includes the original sonic and fire-particle
 zero-damage branches. The comparison covers 5,000 original cases. Target
 armor and derived target damage remain separate.
+
+`base_stationary_unit_aim()` binds the original 006D65B0 stationary Unit aim
+point to a placed session entity's stored position. It requires the original
+locomotor movement result and rejects unknown or moving targets. The Unit
+vtable's +58 delegates to +48, which reads this position. The original check
+covers 2,000 aim points. Moving-target lead remains unresolved.
