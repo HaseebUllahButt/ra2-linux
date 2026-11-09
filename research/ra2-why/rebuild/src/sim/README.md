@@ -965,3 +965,40 @@ Both original editions match every native vector and aggregate hash 082C66E3.
 An error retains completed earlier levels in its private result. It does not publish them to Simulation.
 Native local reachability at 00565EB0 / 005840C0 remains open.
 The regular search must also expose exact progress and retained path-buffer state before live goal binding.
+
+## Original local reachability
+
+`original_local_reachability` ports base 00565EB0 and expansion 005840C0.
+It accepts a stable source Cell handle, hierarchy level, edition, movement zone, and initial output regions.
+The original local arrays use stride eight and side lengths two, four, and eight.
+The native flood preserves the LIFO stack, eight-neighbor order, visited aliases, and unique exit collection.
+Each neighbor query passes its signed Cell height and original entry flags (0,1).
+A nonzero entry result reads Cell +4C and the original movement compatibility table.
+LandType cannot replace that category.
+
+The final scan repeats one coordinate: source plus its masked low coordinate bits.
+The two loop indexes select visited bytes. They do not change query coordinates.
+Expansion instructions 00584395..0058444D prove this behavior; the base body gives the same output.
+A true result means this scan found an unvisited byte with a usable, matching-region query.
+It is not a general movement permission result.
+A false result appends missing adjacency targets in reverse link order and preserves duplicates.
+A true result preserves the existing output region list.
+Only the active side-by-side corner of the visited array represents original state.
+The native API zeroes its unused slots.
+
+Callbacks must supply exact neighbors, coordinates, region lookups, signed heights, entry results, categories, and usable-area answers.
+Unknown required state returns NeedsInput. Invalid levels, editions, zones, and categories return Unsupported.
+The native implementation does not guess entry or map-boundary answers.
+
+`original_local_reachability_check.py executable [--base] --vectors` checks 4,096 cases in each edition.
+Compare these lines with `test_local_reachability.sh --vectors`.
+They cover movement zones 0..11 and preserve aggregate hash 2F2A3C1E.
+Run the original Yuri script with `--zone12 --vectors` for 128 additional cases.
+Compare those lines with `test_local_reachability.sh --zone12`.
+They preserve aggregate hash 67DEB132.
+The original flood, compatibility table reads, vector bodies, scan, and output writes execute.
+Map indexing, neighbors, actor entry, usable-area, and allocation are explicit test adapters.
+`test_local_reachability.sh` checks all 4,224 vectors and four input or scan-state cases.
+
+This resolves the local algorithm used by the outer hierarchy retry dispatcher.
+Live goal binding still needs exact regular-search progress, retained path buffers, and staged-world callback inputs.
