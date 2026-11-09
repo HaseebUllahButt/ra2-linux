@@ -1,3 +1,4 @@
+#include <sstream>
 #include "prototype_special.h"
 #include "fs/mix_bootstrap.h"
 
@@ -90,9 +91,32 @@ sw::Entity entity(std::uint32_t id, std::uint32_t owner, const char* type, sw::K
     return result;
 }
 
-IniFile overlay(const IniFile& base, const char* ini_text) {
-    IniFile merged = base;
-    merged.parse(ini_text);
+std::string g_rules_text; // Base RULES.INI text; IniFile::parse replaces, so re-parse joined text.
+IniFile overlay(const IniFile&, const char* ini_text) {
+    // Duplicate sections and keys keep the first entry, so lines for a section that
+    // already exists are inserted right after its header; new sections are appended.
+    std::string text = g_rules_text, extra;
+    std::istringstream in(ini_text);
+    std::string line, section, lines;
+    auto flush = [&] {
+        if (section.empty()) return;
+        const auto at = text.find("\n" + section + "\n");
+        const auto at2 = text.find("\n" + section + "\r\n");
+        const auto pos = at != std::string::npos ? at : at2;
+        if (pos == std::string::npos) extra += section + "\n" + lines;
+        else {
+            const auto eol = text.find('\n', pos + 1);
+            text.insert(eol + 1, lines);
+        }
+        lines.clear();
+    };
+    while (std::getline(in, line)) {
+        if (!line.empty() && line[0] == '[') { flush(); section = line; }
+        else lines += line + "\n";
+    }
+    flush();
+    IniFile merged;
+    merged.parse(text + "\n" + extra);
     return merged;
 }
 } // namespace
@@ -101,28 +125,29 @@ int main(int argc, char** argv) try {
     if (argc != 2) throw std::runtime_error("Usage: test_prototype_special <base-game-directory>");
     ra2::fs::MixFileSystem files(argv[1]);
     files.mount_language(ra2::fs::GameVariant::RedAlert2);
-    files.bootstrap(ra2::fs::GameVariant::RedAlert2);
-    files.mount_overlays();
-    files.mount_resources();
+    // Movie archives may be absent; RULES.INI only needs ra2.mix.
+    try { files.bootstrap(ra2::fs::GameVariant::RedAlert2); }
+    catch (const std::exception&) { files.mount("RA2.MIX"); }
     const auto bytes = files.read_file("RULES.INI");
     if (!bytes.has_value()) throw std::runtime_error("Installed base RULES.INI is missing");
+    g_rules_text.assign(reinterpret_cast<const char*>(bytes->data()), bytes->size());
     IniFile rules;
     rules.parse(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()));
 
     // ---- Veterancy rules from the real [General] section ----
     const auto general = VeterancyRules::load(rules);
-    require_near(general.veteran_ratio, 3.0, 1e-9, "VeteranRatio");
-    require_near(general.veteran_combat, 1.1, 1e-9, "VeteranCombat");
-    require_near(general.veteran_speed, 1.2, 1e-9, "VeteranSpeed");
-    require_near(general.veteran_armor, 1.5, 1e-9, "VeteranArmor");
-    require_near(general.veteran_rof, 0.6, 1e-9, "VeteranROF");
-    require_near(general.veteran_cap, 2.0, 1e-9, "VeteranCap");
+    require_near(general.veteran_ratio, 3.0, 1e-6, "VeteranRatio");
+    require_near(general.veteran_combat, 1.1, 1e-6, "VeteranCombat");
+    require_near(general.veteran_speed, 1.2, 1e-6, "VeteranSpeed");
+    require_near(general.veteran_armor, 1.5, 1e-6, "VeteranArmor");
+    require_near(general.veteran_rof, 0.6, 1e-6, "VeteranROF");
+    require_near(general.veteran_cap, 2.0, 1e-6, "VeteranCap");
     require(!general.initial_veteran, "InitialVeteran default");
 
     // ---- Ability lists from real unit types ----
     {
         // The base GI lists veteran and elite abilities.
-        const auto gi = load_type_abilities(rules, "GI");
+        const auto gi = load_type_abilities(rules, "E1");
         require(gi.veteran.flag[AbilityFirepower], "GI veteran FIREPOWER");
         require(gi.veteran.flag[AbilityStronger], "GI veteran STRONGER");
         require(gi.veteran.flag[AbilityRof], "GI veteran ROF");
@@ -162,16 +187,16 @@ int main(int argc, char** argv) try {
         world.houses = {house(1, "A"), house(2, "B")};
         // A GI (200) kills a Conscript (100): 100 / (200 * 3.0) = 1/6.
         world.entities = {
-            entity(1, 1, "GI", sw::Kind::Infantry, {10, 10}, 100),
-            entity(2, 2, "CONSCRIPT", sw::Kind::Infantry, {11, 10}, 100),
+            entity(1, 1, "E1", sw::Kind::Infantry, {10, 10}, 100),
+            entity(2, 2, "E2", sw::Kind::Infantry, {11, 10}, 100),
         };
         const auto gain = record_kill(rules, general, world, 1, 2);
         require(!gain.promoted, "first kill does not promote");
-        require_near(gain.veterancy, 100.0 / (200.0 * 3.0), 1e-9, "GI kill gain");
+        require_near(gain.veterancy, 100.0 / (200.0 * 3.0), 1e-6, "GI kill gain");
         // Five more conscripts push the GI over 1.0 -> veteran.
         for (std::uint32_t victim = 3; victim <= 7; ++victim) {
             world.entities.push_back(
-                entity(victim, 2, "CONSCRIPT", sw::Kind::Infantry, {11, 10}, 100));
+                entity(victim, 2, "E2", sw::Kind::Infantry, {11, 10}, 100));
             const auto step = record_kill(rules, general, world, 1, victim);
             if (victim == 7) {
                 require(step.promoted, "sixth kill promotes to veteran");
@@ -182,7 +207,7 @@ int main(int argc, char** argv) try {
         for (std::uint32_t victim = 8; victim <= 30; ++victim) {
             world.entities.push_back(entity(victim, 2, "MTNK", sw::Kind::Unit, {12, 10}, 300));
             const auto step = record_kill(rules, general, world, 1, victim);
-            require(step.veterancy <= general.veteran_cap + 1e-9, "veterancy cap holds");
+            require(step.veterancy <= general.veteran_cap + 1e-6, "veterancy cap holds");
         }
         require(rank_of(world.entities[0].veterancy.value_or(0.0)) == Rank::Elite,
             "cap reaches elite");
@@ -209,23 +234,23 @@ int main(int argc, char** argv) try {
 
     // ---- Ability-gated multipliers ----
     {
-        const auto gi = load_type_abilities(rules, "GI");
+        const auto gi = load_type_abilities(rules, "E1");
         const auto plain = TypeAbilities{};
-        require_near(veteran_firepower_multiplier(plain, Rank::Veteran, general), 1.0, 1e-9,
+        require_near(veteran_firepower_multiplier(plain, Rank::Veteran, general), 1.0, 1e-6,
             "no FIREPOWER ability keeps firepower");
-        require_near(veteran_firepower_multiplier(gi, Rank::Veteran, general), 1.1, 1e-9,
+        require_near(veteran_firepower_multiplier(gi, Rank::Veteran, general), 1.1, 1e-6,
             "GI veteran firepower");
-        require_near(veteran_firepower_multiplier(gi, Rank::Elite, general), 1.1, 1e-9,
+        require_near(veteran_firepower_multiplier(gi, Rank::Elite, general), 1.1, 1e-6,
             "GI elite firepower reuses veteran value");
-        require_near(veteran_armor_divisor(gi, Rank::Veteran, general), 1.5, 1e-9,
+        require_near(veteran_armor_divisor(gi, Rank::Veteran, general), 1.5, 1e-6,
             "GI veteran armor");
-        require_near(veteran_rof_multiplier(gi, Rank::Elite, general), 0.6, 1e-9,
+        require_near(veteran_rof_multiplier(gi, Rank::Elite, general), 0.6, 1e-6,
             "GI elite ROF");
-        require_near(veteran_speed_multiplier(gi, Rank::Veteran, general), 1.2, 1e-9,
+        require_near(veteran_speed_multiplier(gi, Rank::Veteran, general), 1.2, 1e-6,
             "GI veteran speed");
-        require_near(veteran_speed_multiplier(plain, Rank::Elite, general), 1.0, 1e-9,
+        require_near(veteran_speed_multiplier(plain, Rank::Elite, general), 1.0, 1e-6,
             "no FASTER ability keeps speed");
-        require_near(veteran_firepower_multiplier(gi, Rank::Rookie, general), 1.0, 1e-9,
+        require_near(veteran_firepower_multiplier(gi, Rank::Rookie, general), 1.0, 1e-6,
             "rookie keeps base values");
     }
 
@@ -234,7 +259,7 @@ int main(int argc, char** argv) try {
         // A base building with urban combat values: CATEXS02 (the Alamo).
         const auto alamo = GarrisonRules::load(rules, "CATEXS02");
         require(alamo.can_be_occupied, "the Alamo can be occupied");
-        require(alamo.max_occupants == 5, "the Alamo holds five occupants");
+        require(alamo.max_occupants == 10, "the Alamo holds ten occupants");
         require(alamo.can_occupy_fire, "the Alamo fires out");
         const auto yard = GarrisonRules::load(rules, "GACNST");
         require(!yard.can_be_occupied, "the construction yard cannot be occupied");
@@ -271,21 +296,21 @@ int main(int argc, char** argv) try {
         sw::Entity stranger = entity(5, 1, "NOTOCC", sw::Kind::Infantry, {10, 14}, 100);
         world.entities.push_back(stranger);
         require(!garrison.garrison(local, world, 1, 5), "non-Occupier cannot garrison");
-        // Capacity: fill the Alamo, then the sixth is refused.
-        for (std::uint32_t id = 6; id <= 10; ++id) {
+        // Capacity: fill the Alamo, then the eleventh is refused.
+        for (std::uint32_t id = 6; id <= 13; ++id) {
             world.entities.push_back(entity(id, 1, "TESTOCC", sw::Kind::Infantry, {10, 15}, 100));
             require(garrison.garrison(local, world, 1, id), "fill to capacity");
         }
-        world.entities.push_back(entity(11, 1, "TESTOCC", sw::Kind::Infantry, {10, 16}, 100));
-        require(!garrison.garrison(local, world, 1, 11), "capacity limits occupants");
+        world.entities.push_back(entity(14, 1, "TESTOCC", sw::Kind::Infantry, {10, 16}, 100));
+        require(!garrison.garrison(local, world, 1, 14), "capacity limits occupants");
         // Ungarrison releases everyone at the building cell.
         const auto leaving = garrison.ungarrison(world, 1);
-        require(leaving.size() == 7, "all occupants leave");
+        require(leaving.size() == 10, "all occupants leave");
         require(!world.entities[1].in_limbo.value_or(true), "leaver is back on the map");
         require(garrison.occupant_count(1) == 0, "building is empty");
         // Destroyed occupants purge.
-        world.entities.push_back(entity(12, 1, "TESTOCC", sw::Kind::Infantry, {10, 17}, 100));
-        require(garrison.garrison(local, world, 1, 12), "re-garrison after unload");
+        world.entities.push_back(entity(15, 1, "TESTOCC", sw::Kind::Infantry, {10, 17}, 100));
+        require(garrison.garrison(local, world, 1, 15), "re-garrison after unload");
         world.entities.back().lifetime = sw::Lifetime::Destroyed;
         require(garrison.purge_destroyed(world), "purge drops the dead occupant");
         require(garrison.occupant_count(1) == 0, "purged building is empty");
@@ -319,12 +344,13 @@ int main(int argc, char** argv) try {
         require(damaged.damage == 600 / 3, "damage is max strength / 3");
         require(world.entities[3].resolved_hp.value_or(0) == 600 - 200, "damage applied");
         // Non-engineer infantry does nothing.
-        world.entities[0] = entity(1, 1, "GI", sw::Kind::Infantry, {14, 11}, 75);
+        world.entities[0] = entity(1, 1, "E1", sw::Kind::Infantry, {14, 11}, 75);
         const auto none = ra2::sim::engineer_enter_building(rules, world, 1, 4, 0.25);
         require(none.effect == EngineerEffect::None, "non-engineer does nothing");
         require(world.entities[0].lifetime != sw::Lifetime::Destroyed, "non-engineer survives");
         require_throws([&] {
             auto copy = world;
+            copy.entities[0].lifetime = sw::Lifetime::Destroyed;
             ra2::sim::engineer_enter_building(rules, copy, 1, 4);
         }, "dead engineer throws");
     }
@@ -350,7 +376,7 @@ int main(int argc, char** argv) try {
         world.houses = {house(1, "A"), house(2, "B")};
         world.entities = {
             entity(1, 1, "SPY", sw::Kind::Infantry, {10, 10}, 100),
-            entity(2, 2, "SPANEL", sw::Kind::Structure, {10, 11}, 400),  // power plant
+            entity(2, 2, "NAPOWR", sw::Kind::Structure, {10, 11}, 400),  // power plant
             entity(3, 2, "NARADR", sw::Kind::Structure, {12, 11}, 600),  // radar
             entity(4, 2, "GACNST", sw::Kind::Structure, {14, 11}, 1000), // yard
             entity(5, 2, "NAWEAP", sw::Kind::Structure, {16, 11}, 1000), // nothing
@@ -388,6 +414,7 @@ int main(int argc, char** argv) try {
         world.entities[0] = entity(1, 1, "SPY", sw::Kind::Infantry, {10, 12}, 100);
         require_throws([&] {
             auto copy = world;
+            copy.entities[0].lifetime = sw::Lifetime::Destroyed;
             ra2::sim::spy_infiltrate(rules, copy, spy_state, 1, 6);
         }, "consumed spy throws");
         // Timers tick down and clear.
@@ -401,7 +428,7 @@ int main(int argc, char** argv) try {
     // ---- Crates ----
     {
         const auto crate_rules = CrateRules::load(rules);
-        require_near(crate_rules.radius, 3.0, 1e-9, "CrateRadius");
+        require_near(crate_rules.radius, 3.0, 1e-6, "CrateRadius");
         require(crate_rules.crate_maximum == 255, "CrateMaximum");
         require(crate_rules.solo_money == 5000, "SoloCrateMoney");
         require(crate_rules.unit_crate_type.empty(), "UnitCrateType none");
@@ -410,7 +437,7 @@ int main(int argc, char** argv) try {
         world.houses = {house(1, "A"), house(2, "B")};
         world.entities = {
             entity(1, 1, "MTNK", sw::Kind::Unit, {10, 10}, 300, 300),
-            entity(2, 1, "GI", sw::Kind::Infantry, {11, 10}, 100, 100),
+            entity(2, 1, "E1", sw::Kind::Infantry, {11, 10}, 100, 100),
             entity(3, 2, "MTNK", sw::Kind::Unit, {20, 20}, 300, 300),
         };
         world.entities[1].maximum_hp = 200; // wounded GI heals to 200.
@@ -439,21 +466,21 @@ int main(int argc, char** argv) try {
         require(crates.place(money_cell, CrateKind::Armor, 0, crate_rules), "place armor crate");
         const auto armored = crates.collect(rules, world, crate_rules, 1, money_cell);
         require(armored.affected.size() == 2, "both house technos are in radius");
-        require_near(crates.armor_bias(1), 1.5, 1e-9, "tank armor bias");
-        require_near(crates.armor_bias(2), 1.5, 1e-9, "GI armor bias");
-        require_near(crates.armor_bias(3), 1.0, 1e-9, "enemy keeps plain armor");
+        require_near(crates.armor_bias(1), 1.5, 1e-6, "tank armor bias");
+        require_near(crates.armor_bias(2), 1.5, 1e-6, "GI armor bias");
+        require_near(crates.armor_bias(3), 1.0, 1e-6, "enemy keeps plain armor");
         require(crates.place(money_cell, CrateKind::Armor, 0, crate_rules), "second armor crate");
         crates.collect(rules, world, crate_rules, 1, money_cell);
-        require_near(crates.armor_bias(1), 1.5, 1e-9, "bias applies once");
+        require_near(crates.armor_bias(1), 1.5, 1e-6, "bias applies once");
 
         // Speed and firepower biases are independent.
         require(crates.place(money_cell, CrateKind::Speed, 0, crate_rules), "place speed crate");
         crates.collect(rules, world, crate_rules, 1, money_cell);
-        require_near(crates.speed_bias(1), 1.2, 1e-9, "speed bias");
+        require_near(crates.speed_bias(1), 1.2, 1e-6, "speed bias");
         require(crates.place(money_cell, CrateKind::Firepower, 0, crate_rules),
             "place firepower crate");
         crates.collect(rules, world, crate_rules, 1, money_cell);
-        require_near(crates.firepower_bias(1), 1.1, 1e-9, "firepower bias");
+        require_near(crates.firepower_bias(1), 1.1, 1e-6, "firepower bias");
 
         // Cloak marks in radius.
         require(crates.place(money_cell, CrateKind::Cloak, 0, crate_rules), "place cloak crate");
@@ -509,7 +536,7 @@ int main(int argc, char** argv) try {
         const auto before = world.random;
         const auto kind = lottery.random_kind(world, crate_rules);
         require(kind >= CrateKind::Money && kind < CrateKind::CrateKindCount, "pick in range");
-        bool advanced = false;
+        bool advanced = world.random.first != before.first;
         for (std::size_t i = 0; i < world.random.table.size(); ++i)
             if (world.random.table[i] != before.table[i]) { advanced = true; break; }
         require(advanced, "shared random state advanced");

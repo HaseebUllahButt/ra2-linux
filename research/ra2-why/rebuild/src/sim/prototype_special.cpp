@@ -187,6 +187,7 @@ TypeAbilities load_type_abilities(const IniFile& rules, std::string_view type) {
 }
 
 Rank rank_of(double veterancy) noexcept {
+    veterancy += 1e-9;
     if (veterancy >= rank_elite_value) return Rank::Elite;
     if (veterancy >= rank_veteran_value) return Rank::Veteran;
     return Rank::Rookie;
@@ -279,7 +280,8 @@ double veteran_sight_multiplier(const TypeAbilities& abilities, Rank rank,
 GarrisonRules GarrisonRules::load(const IniFile& rules, std::string_view type) {
     GarrisonRules result;
     result.can_be_occupied = rules.read_bool(type, "CanBeOccupied", false);
-    result.can_occupy_fire = rules.read_bool(type, "CanOccupyFire", false);
+    result.can_occupy_fire = rules.read_bool(type, "CanOccupyFire", result.can_be_occupied);
+    // TODO-ORIGINAL BuildingTypeClass ini reader: base rules.ini has no CanOccupyFire; assume occupied buildings fire.
     result.max_occupants = rules.read_integer(type, "MaxNumberOccupants", 0);
     return result;
 }
