@@ -943,3 +943,25 @@ Both editions and native code preserve aggregate hash 0BBA8654.
 The tests supply initialized vector storage with enough capacity. Allocation failure is outside this slice.
 Local reachability at base 00565EB0 / expansion 005840C0 remains separate.
 The outer retry dispatcher and persistent regular-search progress must be resolved before live goal commands use this helper.
+
+## Outer hierarchy retry control
+
+`run_original_hierarchy_retry` ports base 0042A590 and expansion 0042CCD0.
+It consumes all three paths, existing blocked lists, and the explicit Search +70 progress cell.
+It resolves a stable region-entry handle before the first level.
+Each level reads that cached entry before the local reachability call.
+Unreachable results append reported regions in reverse order, with canonical edge endpoints and preserved duplicates.
+Reachable results re-resolve the current progress cell and call the verified retry edge selector.
+All three levels run after Search +38 becomes false.
+Callbacks can change progress and later region words. The code retains the original read and call order.
+The entry handle must preserve the current table identity if a callback can replace the table.
+
+`original_hierarchy_retry_check.py executable [--base] --vectors` checks 4,096 cases per edition.
+The original outer loop, vector construction, list writes, and retry edge bodies execute.
+Region index, Cell lookup, and local reachability results are supplied.
+Selected reachability callbacks change the progress cell and later cached region words.
+Both original editions match every native vector and aggregate hash 082C66E3.
+`test_hierarchy_retry.sh` checks the same cases and three unresolved-input cases.
+An error retains completed earlier levels in its private result. It does not publish them to Simulation.
+Native local reachability at 00565EB0 / 005840C0 remains open.
+The regular search must also expose exact progress and retained path-buffer state before live goal binding.

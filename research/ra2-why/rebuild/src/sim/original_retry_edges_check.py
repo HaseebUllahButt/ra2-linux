@@ -59,9 +59,10 @@ def run(seed):
     for i in range(count): mix(read(EDGES+i*4))
     return h
 
-total=2166136261
-for seed in range(4096):
-    digest=run(seed)
-    if '--vectors' in sys.argv: print(seed,f'{digest:08x}')
-    total=((total^digest)*16777619)&0xffffffff
-print('4096 original hierarchy retry cases',f'{total:08x}',file=sys.stderr)
+if __name__=='__main__':
+    total=2166136261
+    for seed in range(4096):
+        digest=run(seed)
+        if '--vectors' in sys.argv: print(seed,f'{digest:08x}')
+        total=((total^digest)*16777619)&0xffffffff
+    print('4096 original hierarchy retry cases',f'{total:08x}',file=sys.stderr)
