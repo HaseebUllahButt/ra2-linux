@@ -98,12 +98,16 @@ private:
     bool revealed_xy(std::uint32_t house, std::int32_t x, std::int32_t y) const;
 
     sim::PrototypeShroud shroud_;
-    struct MaskCell { std::int32_t x, y; std::int64_t ax, ay; };
+    // drop: pixels from the cell's floor diamond down to the floor of the
+    // lowest cell in front of it (zero on flat ground). Cliff faces and high
+    // ground leave this strip between the two diamonds.
+    struct MaskCell { std::int32_t x, y; std::int64_t ax, ay; int drop = 0; };
     struct MaskRun { int y, x0, x1; bool black; }; // x1 excluded.
     struct MaskCache {
         bool anchors_ready = false;
         std::size_t cell_count = 0;
         std::vector<MaskCell> cells; // Sorted by anchor y.
+        int max_drop = 0;
         std::int32_t x0 = 0, y0 = 0, x1 = 0, y1 = 0; // Cell box plus one cell.
         bool ready = false;
         std::int64_t camera_x = 0, camera_y = 0;

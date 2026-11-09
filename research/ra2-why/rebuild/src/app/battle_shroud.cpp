@@ -1,4 +1,5 @@
 #include "battle_shroud.h"
+#include <unordered_map>
 
 #include <algorithm>
 #include <cmath>
@@ -133,6 +134,23 @@ void BattleShroud::mask_scene(render::Bitmap& frame, const session::world::Snaps
             mask_.x1 = std::max(mask_.x1, cell.x + 2);
             mask_.y1 = std::max(mask_.y1, cell.y + 2);
         }
+        // Cells at different heights leave a strip between their floor
+        // diamonds: the terrain picture has a cliff face or a slope there.
+        // A dark cell also covers the strip down to the cells in front.
+        std::unordered_map<std::uint32_t, std::int64_t> anchor_y;
+        anchor_y.reserve(mask_.cells.size());
+        for (const auto& cell : mask_.cells) anchor_y[std::uint32_t(cell.y) * 512 + cell.x] = cell.ay;
+        mask_.max_drop = 0;
+        for (auto& cell : mask_.cells) {
+            std::int64_t drop = 0;
+            const auto front = [&](int dx, int dy, int flat) {
+                const auto found = anchor_y.find(std::uint32_t(cell.y + dy) * 512 + (cell.x + dx));
+                if (found != anchor_y.end()) drop = std::max(drop, found->second - (cell.ay + flat));
+            };
+            front(1, 0, 15); front(0, 1, 15); front(1, 1, 30);
+            cell.drop = int(std::min<std::int64_t>(drop, 15 * 32));
+            mask_.max_drop = std::max(mask_.max_drop, cell.drop);
+        }
         std::sort(mask_.cells.begin(), mask_.cells.end(),
             [](const MaskCell& a, const MaskCell& b) { return a.ay < b.ay; });
         mask_.anchors_ready = true;
@@ -191,7 +209,8 @@ void BattleShroud::rebuild_mask(std::uint32_t house, std::int64_t camera_x,
     // TODO-ORIGINAL: the base shroud edge art (Cell_UpdateTwoShroudEdgeMasks
     // 00475520) and sloped cell shapes are not drawn; this is a flat fade.
     constexpr int full = 4 * 60 * 60;
-    const std::int64_t first_y = camera_y + area.y - 15, last_y = camera_y + area.y + area.height + 15;
+    const std::int64_t first_y = camera_y + area.y - 15 - mask_.max_drop;
+    const std::int64_t last_y = camera_y + area.y + area.height + 15;
     auto cell = std::lower_bound(mask_.cells.begin(), mask_.cells.end(), first_y,
         [](const MaskCell& c, std::int64_t y) { return c.ay < y; });
     for (; cell != mask_.cells.end() && cell->ay <= last_y; ++cell) {
@@ -221,6 +240,28 @@ void BattleShroud::rebuild_mask(std::uint32_t house, std::int64_t camera_x,
                     value = (dark * 255 + full / 2) / full;
                 }
                 auto& slot = row[px - area.x];
+                slot = static_cast<std::uint8_t>(std::max<int>(slot, value));
+            }
+        }
+        if (cell->drop <= 0) continue;
+        // Carry each column's lowest diamond pixel down over the strip.
+        for (int dx = -30; dx <= 29; ++dx) {
+            const std::int64_t px = cx + dx;
+            if (px < area.x || px >= area.x + area.width) continue;
+            const int dy = std::min((29 - dx) / 2, (dx + 29) / 2);
+            int value = 255;
+            if (sum != 16) {
+                const int s = dx + 2 * dy + 30, t = 2 * dy - dx + 30;
+                const int dark = top_corner * (60 - s) * (60 - t) + right_corner * s * (60 - t) +
+                    left_corner * (60 - s) * t + bottom_corner * s * t;
+                value = (dark * 255 + full / 2) / full;
+            }
+            if (value == 0) continue;
+            for (int step = 1; step <= cell->drop; ++step) {
+                const std::int64_t py = cy + dy + step;
+                if (py < area.y) continue;
+                if (py >= area.y + area.height) break;
+                auto& slot = mask_.dark[std::size_t(py - area.y) * area.width + (px - area.x)];
                 slot = static_cast<std::uint8_t>(std::max<int>(slot, value));
             }
         }

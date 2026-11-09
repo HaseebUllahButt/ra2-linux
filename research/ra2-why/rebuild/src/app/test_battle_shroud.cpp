@@ -167,6 +167,40 @@ void scene_mask() {
             if (at(frame, x, y)[0] != 200) throw std::runtime_error("mask crossed the clip");
 }
 
+// High ground: cells with x < 62 stand four levels (60 pixels) higher than
+// the cells in front of them. The raised cells leave the low places of cells
+// 60 and 61 empty: the terrain picture has a cliff face there. No pixel of
+// that strip may show in the black area.
+std::optional<BattleShroud::FramePoint> project_cliff(ra2map::Cell where) {
+    auto point = project(where);
+    if (point && where.x < 62) point->y -= 60;
+    return point;
+}
+void high_ground_mask() {
+    const auto world = battle();
+    BattleShroud shroud;
+    shroud.update(world, rules_for_test());
+    render::Bitmap frame{1024, 768, render::Bytes(1024u * 768u * 4u, 200)};
+    shroud.mask_scene(frame, world, 1, project_cliff, 0, 0, {0, 0, 800, 768});
+    for (int y = 54; y <= 58; ++y) {
+        // No floor diamond covers the low places of cells 60 and 61. The
+        // dark cells behind the strip must cover it.
+        for (int x = 60; x <= 61; ++x) {
+            const auto gap = *project(cell(x, y));
+            for (int py = gap.y - 4; py <= gap.y + 4; ++py)
+                for (int px = gap.x - 8; px <= gap.x + 8; ++px) {
+                    if (px < 0 || px >= 800 || py < 0 || py >= 768) continue;
+                    if (at(frame, px, py)[0] != 0)
+                        throw std::runtime_error("terrain shows below high black cells at " +
+                            std::to_string(px) + "," + std::to_string(py));
+                }
+        }
+    }
+    // The explored centre stays clear.
+    const auto centre = *project_cliff(cell(50, 50));
+    require(at(frame, centre.x, centre.y)[0] == 200, "explored cell stays clear with high ground");
+}
+
 // The cached mask matches a cold mask, rebuilds only on change, and follows
 // the camera and newly explored cells.
 render::Bitmap masked(const BattleShroud& shroud, const Snapshot& world,
@@ -288,6 +322,7 @@ int main(int argc, char** argv) try {
     visibility();
     footprints();
     scene_mask();
+    high_ground_mask();
     mask_cache();
     radar_mask();
     if (argc == 2) real_rules(argv[1]);
