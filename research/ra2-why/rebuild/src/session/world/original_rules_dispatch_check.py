@@ -11,6 +11,8 @@ through a supplied one-entry enumeration and searches a supplied Unit registry.
 With --vehicle-create, the registry starts empty. Original AMCV construction,
 base object, and five collection constructors run with supplied allocation,
 remaining collection, and runtime services.
+The --vehicle-enum and --vehicle-create-enum modes also run the original
+section count and ordered-key readers on the same filtered section.
 """
 import os
 import runpy
@@ -21,10 +23,11 @@ import sys
 from unicorn import UC_HOOK_CODE
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EIP,UC_X86_REG_ESP
 
-if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--vehicle','--vehicle-create')):
-    raise SystemExit('usage: original_rules_dispatch_check.py game.exe unit_flags_case real_map_case game_dir [--vehicle|--vehicle-create]')
+if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--vehicle','--vehicle-create','--vehicle-enum','--vehicle-create-enum')):
+    raise SystemExit('usage: original_rules_dispatch_check.py game.exe unit_flags_case real_map_case game_dir [mode]')
 real_vehicle=len(sys.argv)==6
-create_vehicle=real_vehicle and sys.argv[5]=='--vehicle-create'
+real_enumeration=real_vehicle and sys.argv[5] in ('--vehicle-enum','--vehicle-create-enum')
+create_vehicle=real_vehicle and sys.argv[5] in ('--vehicle-create','--vehicle-create-enum')
 if real_vehicle:
     entry=subprocess.check_output([sys.argv[3],sys.argv[4],'--amcv-vehicle-entry'],text=True).strip().split('\t')
     assert entry==['1','AMCV']
@@ -38,6 +41,7 @@ services=(0x647e60,0x64bc10,0x64bba0,0x64ba50,0x64c080,0x64c0f0,0x64c1d0,
 before=services[:15]; after=services[15:]
 events=[]; enumerations=[]; post_flags=[]
 vehicle_keys=[]; vehicle_lookups=[]; vehicle_copies=[]
+enumeration_pending={}; enumeration_returns=[]
 vehicle_allocations=[]; vehicle_constructors=[]; constructor_writes=[]
 other_allocations=[]
 type_parent_calls=[]
@@ -83,6 +87,27 @@ def supplied_ini_finalize():
     events.append(0x6e8ff0); m.cpu.reg_write(UC_X86_REG_EAX,1)
 
 def trace(cpu,address,size,user):
+    if real_enumeration and address in enumeration_pending:
+        name,expected=enumeration_pending.pop(address)
+        assert cpu.reg_read(UC_X86_REG_EAX)==expected, name
+        enumeration_returns.append((name,expected))
+    if real_enumeration and address==0x50cb00 and not g['active'][0]:
+        assert cpu.reg_read(UC_X86_REG_ECX)==ini
+        name=bytes(cpu.mem_read(m.argument(0),64)).split(b'\0',1)[0].decode('ascii')
+        enumerations.append(name)
+        ret=m.read(cpu.reg_read(UC_X86_REG_ESP))
+        assert ret not in enumeration_pending
+        enumeration_pending[ret]=(name,int(name=='VehicleTypes'))
+        cpu.reg_write(UC_X86_REG_ECX,vehicle_ini)
+    if real_enumeration and address==0x50ce00 and not g['active'][0]:
+        assert cpu.reg_read(UC_X86_REG_ECX)==ini
+        assert bytes(cpu.mem_read(m.argument(0),32)).split(b'\0',1)[0]==b'VehicleTypes'
+        assert m.argument(1)==0
+        ret=m.read(cpu.reg_read(UC_X86_REG_ESP))
+        assert ret not in enumeration_pending
+        enumeration_pending[ret]=('VehicleTypes key',vehicle_key)
+        vehicle_keys.append('1')
+        cpu.reg_write(UC_X86_REG_ECX,vehicle_ini)
     if real_vehicle and address==0x50e9a0 and not g['active'][0]:
         name=bytes(cpu.mem_read(m.argument(0),32)).split(b'\0',1)[0]
         assert name==b'VehicleTypes' and cpu.reg_read(UC_X86_REG_ECX)==ini
@@ -124,8 +149,13 @@ def trace(cpu,address,size,user):
         if real_vehicle: g['active'][0]=True
 
 for address in services: m.bind(address,4,supplied_rule_service(address))
-m.bind(0x50cb00,4,empty_section)
-if real_vehicle: m.bind(0x50ce00,8,supplied_vehicle_key)
+if real_enumeration:
+    for address in (0x50cb00,0x50ce00):
+        m.cpu.mem_write(address,bytes(g['hash_cpu'].mem_read(address,3)))
+        m.callbacks.pop(address,None); m.cpu.ctl_remove_cache(address,address+3)
+else:
+    m.bind(0x50cb00,4,empty_section)
+    if real_vehicle: m.bind(0x50ce00,8,supplied_vehicle_key)
 if create_vehicle:
     m.bind(0x782017,0,supplied_vehicle_allocation)
     m.cpu.ctl_remove_cache(0x782017,0x78201a)
@@ -141,11 +171,15 @@ m.bind(0x64dd90,8,supplied_post)
 m.cpu.hook_add(UC_HOOK_CODE,trace)
 if real_vehicle:
     m.word(vehicle_ini+0x24,1); m.word(vehicle_ini+0x30,vehicle_cache)
+    m.word(vehicle_ini+0x20,vehicle_cache); m.word(vehicle_ini+0x2c,1)
     m.word(vehicle_cache,g['original_hash']('VehicleTypes')); m.word(vehicle_cache+4,vehicle_section)
     m.word(vehicle_section+0x2c,vehicle_array); m.word(vehicle_section+0x30,1)
     m.word(vehicle_section+0x38,1); m.word(vehicle_section+0x3c,0)
     m.word(vehicle_array,g['original_hash']('1')); m.word(vehicle_array+4,vehicle_node)
     m.word(vehicle_node+0x10,vehicle_value)
+    m.word(vehicle_section+0x18,vehicle_node)
+    m.word(vehicle_node+4,vehicle_node); m.word(vehicle_node+8,vehicle_node)
+    m.word(vehicle_node+0xc,vehicle_key)
     m.cpu.mem_write(vehicle_value,b'AMCV\0'); m.cpu.mem_write(vehicle_key,b'1\0')
 
 cases=[(session,flag,fill) for session,flag in ((0,0),(1,1),(5,0))
@@ -183,6 +217,7 @@ for session,expected_flag,fill in cases:
     loaded['loaded']['unit_dispatch'].clear()
     events.clear(); enumerations.clear(); post_flags.clear()
     vehicle_keys.clear(); vehicle_lookups.clear(); vehicle_copies.clear()
+    enumeration_pending.clear(); enumeration_returns.clear()
     vehicle_allocations.clear(); vehicle_constructors.clear(); constructor_writes.clear()
     other_allocations.clear()
     type_parent_calls.clear()
@@ -198,6 +233,10 @@ for session,expected_flag,fill in cases:
                           'TerrainTypes','BuildingTypes','VehicleTypes']
     assert events==list(before)+[0x652270]+list(after)+[0x6e8ff0,0x64dd90]
     assert post_flags==[expected_flag]
+    if real_enumeration:
+        expected=[(name,int(name=='VehicleTypes')) for name in enumerations]
+        expected.append(('VehicleTypes key',vehicle_key))
+        assert enumeration_returns==expected and not enumeration_pending
     if real_vehicle:
         assert vehicle_keys==['1'] and vehicle_copies==[1]
         assert vehicle_lookups==['entry','return'] and m.read(0xa35d58)==1
