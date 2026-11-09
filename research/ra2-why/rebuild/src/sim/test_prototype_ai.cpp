@@ -2,6 +2,7 @@
 #include "fs/mix_bootstrap.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <array>
 #include <cmath>
 #include <map>
@@ -571,27 +572,92 @@ void check_first_team_timer() {
     require(easy.teams().size() == 2, "Second pick did not happen after TeamDelays");
 }
 
-void check_base_plan_continues() {
+void check_base_plan() {
+    // Base 004EF890 plan: yard, BuildPower, then passes over AIBuildThis
+    // types (barracks and war factory first) whose prerequisites are in
+    // earlier passes; then 2 - AIDifficulty more refineries and
+    // [Allied|Soviet]BaseDefenseCounts defense nodes. 0042C3D0 builds the
+    // first node that is not built.
     const auto rules = parse(
-        "[General]\n[BuildingTypes]\n0=YARD\n1=POWER\n2=BARR\n3=REF\n4=WORK\n5=SKIP\n6=RADAR\n"
-        "[AI]\nBuildPower=POWER\nBuildBarracks=BARR\nBuildRefinery=REF\nBuildWeapons=WORK\n"
-        "[YARD]\nConstructionYard=yes\nFactory=BuildingType\n"
-        "[POWER]\nPower=100\n[BARR]\n[REF]\n[WORK]\n"
-        "[SKIP]\nCost=100\nTechLevel=1\nOwner=Local\nAIBuildThis=no\n"
-        "[RADAR]\nCost=200\nTechLevel=1\nOwner=Local\nAIBuildThis=yes\nAIBasePlanningSide=-1\nPrerequisite=WORK\n");
+        "[General]\nAlliedBaseDefenseCounts=2,1,0\nSovietBaseDefenseCounts=5,5,5\n"
+        "PrerequisitePower=POWER\nPrerequisiteBarracks=BARR\nPrerequisiteProc=REF\n"
+        "[Sides]\nAllies=Local\nSoviets=Enemy\n"
+        "[BuildingTypes]\n0=YARD\n1=POWER\n2=BARR\n3=REF\n4=WORK\n5=RADAR\n6=SKIP\n7=DEF\n"
+        "[AI]\nBuildConst=YARD\nBuildPower=POWER\nBuildRefinery=REF\nBuildBarracks=BARR\nBuildWeapons=WORK\n"
+        "BuildRadar=RADAR\n"
+        "[YARD]\nConstructionYard=yes\nFactory=BuildingType\nOwner=Local\nAIBuildThis=yes\nTechLevel=-1\nCost=3000\n"
+        "[POWER]\nPower=100\nOwner=Local\nTechLevel=1\nCost=600\n"
+        "[BARR]\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=500\nPrerequisite=POWER\n"
+        "[REF]\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=2000\nPrerequisite=POWER\n"
+        "[WORK]\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=2000\nPrerequisite=PROC,BARR\n"
+        "[RADAR]\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=1000\nPrerequisite=PROC\n"
+        "[SKIP]\nOwner=Local\nAIBuildThis=no\nTechLevel=1\nCost=100\n"
+        "[DEF]\nOwner=Local\nIsBaseDefense=yes\nTechLevel=1\nCost=500\nPrerequisite=BARRACKS\nPrimary=GUN\n"
+        "[GUN]\nDamage=10\nProjectile=SHOT\n[SHOT]\nAG=yes\n");
     const auto ai = parse(
         "[TaskForces]\n0=TF\n[TF]\n0=1,GI\n[TeamTypes]\n0=T\n[T]\nTaskForce=TF\n"
         "[AITriggerTypes]\nTR=Attack,T,<all>,0,-1,<none>,0,50,1,100,1,0,0,0,<none>,1,1,1\n");
-    sw::Snapshot world;
-    world.houses = {house(computer, "Local", false), house(player, "Enemy", true)};
-    unsigned id = 1;
-    for (const auto* name : {"YARD", "POWER", "BARR", "REF", "WORK"})
-        world.entities.push_back(actor(rules, id++, computer, name, sw::Kind::Structure, {10,10}));
-    world.entities.push_back(actor(rules, 20, player, "YARD", sw::Kind::Structure, {40,40}));
-    PrototypeAI policy(rules, &ai);
-    const auto orders = policy.tick(world, computer, player, at(rules, policy) + 0);
-    require(orders.size() == 1 && orders[0].kind == OrderKind::Build && orders[0].type == "RADAR",
-        "Base plan stopped after its opening or ignored AIBuildThis");
+    const auto count = [](const std::vector<std::string>& plan, const std::string& type) {
+        return std::count(plan.begin(), plan.end(), type);
+    };
+    for (const auto level : {PrototypeAI::Difficulty::Easy, PrototypeAI::Difficulty::Normal, PrototypeAI::Difficulty::Hard}) {
+        sw::Snapshot world;
+        world.houses = {house(computer, "Local", false), house(player, "Enemy", true)};
+        world.houses[0].cash = 1000000;
+        world.entities = {actor(rules, 1, computer, "YARD", sw::Kind::Structure, {10,10}),
+                          actor(rules, 90, player, "YARD", sw::Kind::Structure, {40,40})};
+        PrototypeAI policy(rules, &ai, level);
+        const auto extra = static_cast<long>(level); // 2 - AIDifficulty
+        const long defenses = level == PrototypeAI::Difficulty::Hard ? 2 : level == PrototypeAI::Difficulty::Normal ? 1 : 0;
+        std::uint32_t id = 2;
+        std::vector<std::string> built;
+        for (std::int32_t frame = 0; frame < 90 * 40; frame += 90) {
+            for (const auto& order : policy.tick(world, computer, player, frame)) {
+                if (order.kind != OrderKind::Build || !listed(rules, "BuildingTypes", order.type)) continue;
+                world.entities.push_back(actor(rules, id, computer, order.type, sw::Kind::Structure,
+                    {static_cast<std::uint16_t>(12 + id), 10}));
+                ++id;
+                built.push_back(order.type);
+            }
+        }
+        const auto& plan = policy.base_plan();
+        require(plan.size() >= 6 && plan[0] == "YARD" && plan[1] == "POWER" && plan[2] == "BARR" && plan[3] == "REF",
+            "Base plan did not start with yard, power, barracks and refinery");
+        require(count(plan, "REF") == 1 + extra && count(plan, "DEF") == defenses &&
+            count(plan, "WORK") == 1 && count(plan, "RADAR") == 1 && count(plan, "SKIP") == 0 &&
+            plan.size() == static_cast<std::size_t>(6 + extra + defenses),
+            "Base plan did not add the difficulty refineries and defense nodes");
+        require(std::find(plan.begin(), plan.end(), "WORK") > std::find(plan.begin(), plan.end(), "BARR"),
+            "Base plan put the war factory before its prerequisites");
+        require(count(built, "REF") == 1 + extra && count(built, "DEF") == defenses &&
+            built.size() == plan.size() - 1, "Computer did not build every base plan node in turn");
+    }
+}
+
+// Base 004EF890 with the installed rules: both sides, every difficulty.
+void check_installed_base_plan(const IniFile& rules, const IniFile& ai, const Faction& allied, const Faction& soviet) {
+    for (const auto* faction : {&allied, &soviet})
+    for (const auto level : {PrototypeAI::Difficulty::Easy, PrototypeAI::Difficulty::Normal, PrototypeAI::Difficulty::Hard}) {
+        sw::Snapshot world;
+        world.houses = {house(computer, faction->country, false), house(player, "Americans", true)};
+        world.entities = {actor(rules, 1, computer, faction->yard, sw::Kind::Structure, {10,10}),
+                          actor(rules, 90, player, "GACNST", sw::Kind::Structure, {60,60})};
+        PrototypeAI policy(rules, &ai, level);
+        const auto orders = policy.tick(world, computer, player, 0);
+        const auto& plan = policy.base_plan();
+        const bool sov = faction == &soviet;
+        const long refineries = std::count(plan.begin(), plan.end(), sov ? "NAREFN" : "GAREFN");
+        const long defenses = std::count(plan.begin(), plan.end(), std::string{});
+        // [General] AlliedBaseDefenseCounts=25,20,6 and SovietBaseDefenseCounts=25,22,6.
+        const long expected = level == PrototypeAI::Difficulty::Hard ? 25 :
+            level == PrototypeAI::Difficulty::Normal ? (sov ? 22 : 20) : 6;
+        require(plan.size() > 8 && plan[0] == faction->yard && plan[1] == faction->buildings[0] &&
+            plan[2] == faction->buildings[1], "Installed base plan did not open with yard, power and barracks");
+        require(refineries == 1 + static_cast<long>(level) && defenses == expected,
+            "Installed base plan has the wrong refinery or defense count");
+        require(orders.size() == 1 && orders[0].kind == OrderKind::Build && orders[0].type == faction->buildings[0],
+            "Computer did not start the plan with power");
+    }
 }
 
 void check_enemy_power_triggers() {
@@ -817,7 +883,8 @@ int main(int argc, char** argv) try {
     check_team_leader();
     check_original_trigger_gates();
     check_first_team_timer();
-    check_base_plan_continues();
+    check_base_plan();
+    check_installed_base_plan(rules, ai, allied, soviet);
     check_enemy_power_triggers();
     check_defense_cap_release();
     check_team_policy();
