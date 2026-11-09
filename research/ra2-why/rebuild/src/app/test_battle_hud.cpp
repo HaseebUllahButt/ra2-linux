@@ -186,8 +186,8 @@ int main(int argc, char** argv) {
             auto source=art_pixel(x,y);
             if (!image.pixels[source+3] || !in_circle(x,y)) continue;
             auto dest=(static_cast<std::size_t>(clock_box.y+y)*screen.width+clock_box.x+x)*4;
-            // Shaded pixels are exactly half the art color; skip very dark
-            // art where half and full are too close to tell apart.
+            // Shaded pixels keep 40 percent of the art color; skip very
+            // dark art where shaded and full are too close to tell apart.
             if (image.pixels[source]>80 && screen.rgba[dest]==image.pixels[source]*2/5) ++in_wedge;
         }
         for (int y=2;y<clock_box.height/2;++y) for (int x=2;x<clock_box.width/2;++x) {
