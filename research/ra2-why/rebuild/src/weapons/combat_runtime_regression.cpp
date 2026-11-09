@@ -90,6 +90,28 @@ void check_world(const sim::OriginalDistance& distance) {
     const auto& c=*collected.candidates;
     check(c[0].id==2 && c[0].distance==0 && c[1].id==1 && c[1].distance==5 &&
           c[2].id==1 && c[2].distance==5,"area order and shared links");
+    sim::AreaDamageCursor cursor{{impact,3,8,90,true},76,*collected.candidates,0,{}};
+    bool alive=true;
+    const auto recipient=[&](std::uint32_t id)->std::optional<ResolvedImpactRecipient> {
+        ResolvedImpactRecipient state{};state.target_id=id;state.original_type=1;
+        state.health=(id==1 && !alive)?0:400;state.active=true;state.receives_damage=true;
+        return state;
+    };
+    auto next=sim::base_next_area_damage(cursor,recipient);
+    check(next.status==sim::AreaDamageStep::Request && next.request && next.request->target_id==2,
+          "first ordered damage callback");
+    check(sim::base_next_area_damage(cursor,recipient).request->target_id==2 &&
+          !sim::base_complete_area_damage_request(cursor,1) && sim::base_complete_area_damage_request(cursor,2),
+          "damage callback acknowledgement");
+    next=sim::base_next_area_damage(cursor,recipient);
+    check(next.request && next.request->target_id==1,"second ordered damage callback");
+    alive=false;check(sim::base_complete_area_damage_request(cursor,1),"damage callback completion");
+    check(sim::base_next_area_damage(cursor,recipient).status==sim::AreaDamageStep::Complete,
+          "damage recipient state was not refreshed");
+    sim::AreaDamageCursor blocked{{impact,3,8,90,true},76,*collected.candidates,0,{}};
+    auto unknown=[](std::uint32_t)->std::optional<ResolvedImpactRecipient> {return {};};
+    check(sim::base_next_area_damage(blocked,unknown).status==sim::AreaDamageStep::NeedsInput && blocked.next==0,
+          "unknown damage recipient advanced");
     auto missing=world;missing.entities[0].next.reset();
     check(!sim::base_small_ground_area_candidates(missing,impact,0.3f,3,false,area,distance).candidates,"unknown area link accepted");
     const auto collision=[](const session::world::Entity& e,std::uint32_t)->std::optional<sim::CollisionProperties> {

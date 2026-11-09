@@ -82,3 +82,26 @@ std::optional<Coord> base_stationary_unit_aim(
     const session::world::Snapshot&, std::uint32_t source_id,
     std::uint32_t current_target_id, std::optional<bool> target_locomotor_moving);
 }
+
+namespace ra2::sim {
+// Candidate order is fixed at collection time. Recipient state is resolved
+// again immediately before each original virtual damage callback.
+struct AreaDamageCursor {
+    weapons::AreaDamageEvent event;
+    int radius;
+    std::vector<AreaCandidate> candidates;
+    std::size_t next=0;
+    std::optional<weapons::DamageRequest> pending;
+};
+using AreaRecipientLookup=std::function<std::optional<weapons::ResolvedImpactRecipient>(std::uint32_t)>;
+enum class AreaDamageStep { Request, Complete, NeedsInput };
+struct AreaDamageNext {
+    AreaDamageStep status;
+    std::optional<weapons::DamageRequest> request;
+};
+// The pending request repeats until the caller completes the actual derived
+// damage callback and confirms it with base_complete_area_damage_request().
+// Unknown recipient state never advances the cursor.
+AreaDamageNext base_next_area_damage(AreaDamageCursor&, const AreaRecipientLookup&);
+bool base_complete_area_damage_request(AreaDamageCursor&,std::uint32_t target_id);
+}

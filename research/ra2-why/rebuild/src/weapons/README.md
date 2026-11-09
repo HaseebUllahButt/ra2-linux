@@ -230,3 +230,9 @@ flat locomotor and arithmetic bounds. The comparison covers 3,000 varied cases
 and all 1,024 quantized hull/turret direction pairs. Base art.ini supplies
 HTNK PrimaryFireFLH=150,0,100. Slope and other locomotor transforms remain
 unknown and are rejected.
+
+`base_next_area_damage()` walks collected recipients in order. It refreshes each
+recipient immediately before the damage request, and waits for the caller to
+finish the real derived damage callback before advancing. Repeated IDs remain
+repeated. Missing recipient state blocks the cursor. This is dispatch support;
+it does not execute triggers, damage, death or projectile removal.

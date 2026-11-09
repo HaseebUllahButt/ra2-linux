@@ -195,3 +195,32 @@ std::optional<Coord> base_stationary_unit_aim(const session::world::Snapshot& wo
     return target->position;
 }
 }
+
+namespace ra2::sim {
+AreaDamageNext base_next_area_damage(AreaDamageCursor& cursor,const AreaRecipientLookup& lookup) {
+    using S=AreaDamageStep;
+    if (!lookup || cursor.radius<0 || !cursor.event.area_flag || !cursor.event.warhead_id ||
+        cursor.next>cursor.candidates.size()) return {S::NeedsInput,{}};
+    if (cursor.pending) return {S::Request,cursor.pending};
+    while (cursor.next<cursor.candidates.size()) {
+        const auto candidate=cursor.candidates[cursor.next];
+        if (!candidate.id || candidate.distance<0) return {S::NeedsInput,{}};
+        auto state=lookup(candidate.id);
+        if (!state || state->target_id!=candidate.id) return {S::NeedsInput,{}};
+        state->attacker_id=cursor.event.attacker_id;
+        state->warhead_id=cursor.event.warhead_id;
+        state->raw_damage=cursor.event.damage;
+        state->distance=candidate.distance;
+        state->radius=cursor.radius;
+        const auto request=weapons::base_resolved_impact_recipient(*state);
+        if (request) { cursor.pending=request; return {S::Request,request}; }
+        ++cursor.next;
+    }
+    return {S::Complete,{}};
+}
+bool base_complete_area_damage_request(AreaDamageCursor& cursor,std::uint32_t id) {
+    if (!cursor.pending || !id || cursor.pending->target_id!=id || cursor.next>=cursor.candidates.size() ||
+        cursor.candidates[cursor.next].id!=id) return false;
+    cursor.pending.reset();++cursor.next;return true;
+}
+}
