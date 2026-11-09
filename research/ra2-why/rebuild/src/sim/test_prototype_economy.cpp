@@ -1,5 +1,7 @@
 #include "prototype_economy.h"
 #include "fs/mix_bootstrap.h"
+#include "pack/map_pack.h"
+#include <algorithm>
 #include <cassert>
 #include <iostream>
 using namespace ra2;
@@ -24,7 +26,10 @@ int main(int argc,char** argv) {
     files.mount_language(fs::GameVariant::RedAlert2);files.bootstrap(fs::GameVariant::RedAlert2);files.mount_resources();
     auto bytes=files.read_file("rules.ini");assert(bytes);rules::IniFile rules;rules.parse(std::string_view(reinterpret_cast<const char*>(bytes->data()),bytes->size()));
     assert(rules.read_integer("CMIN","Storage")==20);assert(rules.read_integer("HARV","Storage")==40);
-    for(auto type:{"CMIN","HARV"}) for(int overlay:{105,28}) {
+    const auto* registry=rules.find_section("OverlayTypes");assert(registry);
+    auto overlay_index=[&](const char* name) { for(std::size_t i=0;i<registry->entries.size();++i) if(registry->entries[i].value==name) return int(i);return -1; };
+    int ore=overlay_index("TIB01"),gem=overlay_index("GEM01");assert(ore==102 && gem==27);
+    for(auto type:{"CMIN","HARV"}) for(int overlay:{ore,gem}) {
         auto w=fixture(type,overlay);sim::PrototypeEconomy economy(rules);
         int first=0;bool teleported=false;
         for(unsigned frame=0;frame<5000 && !first;++frame) {
@@ -36,7 +41,7 @@ int main(int argc,char** argv) {
             economy.tick(w,frame);assert(cash==w.houses[0].cash && load==economy.load(1));first=*cash;
         }
         assert(teleported==(std::string(type)=="CMIN"));
-        assert(first==rules.read_integer(type,"Storage")*rules.read_integer(overlay==28?"Cruentus":"Riparius","Value"));
+        assert(first==rules.read_integer(type,"Storage")*rules.read_integer(overlay==gem?"Cruentus":"Riparius","Value"));
     }
     auto destroyed=fixture("HARV",105);destroyed.entities[0].resolved_hp=0;
     sim::PrototypeEconomy dead(rules);dead.tick(destroyed,0);assert(dead.load(1)==0);
@@ -45,8 +50,35 @@ int main(int argc,char** argv) {
     auto w=fixture("CMIN",105);w.entities.pop_back();sim::PrototypeEconomy idle(rules);
     for(unsigned f=0;f<100;++f) { idle.tick(w,f); }
     assert(idle.load(1)==0);
-    rules.parse("[Riparius]\nGrowth=2\nSpread=2\n[General]\nTiberiumGrows=yes\nTiberiumSpreads=yes\n");
-    sim::PrototypeEconomy growth(rules);w=fixture("CMIN",105);w.entities.clear();w.cells[4*512+7].overlay_data_11e=10;
-    growth.tick(w,0);growth.tick(w,2);assert(*w.cells[4*512+7].overlay_data_11e==11);assert(w.cells[3*512+7].terrain->overlay_type_index==105);
+    auto text=std::string(reinterpret_cast<const char*>(bytes->data()),bytes->size());
+    for(const auto& field:{std::string("Growth=2200"),std::string("Spread=2200")}) {
+        auto position=text.find(field);assert(position!=std::string::npos);
+        text.replace(position,field.size(),field.substr(0,field.find('=')+1)+"2");
+    }
+    rules.parse(text);
+    sim::PrototypeEconomy growth(rules);w=fixture("CMIN",ore);w.entities.clear();w.cells[4*512+7].overlay_data_11e=10;
+    growth.tick(w,0);growth.tick(w,2);assert(*w.cells[4*512+7].overlay_data_11e==11);assert(w.cells[3*512+7].terrain->overlay_type_index==ore);
+    // Read actual map overlay bytes, including MP02T2 ore 102 and gems 27.
+    auto map_bytes=files.read_file("MP02T2.MAP");assert(map_bytes);
+    rules::IniFile map;map.parse(std::string_view(reinterpret_cast<const char*>(map_bytes->data()),map_bytes->size()));
+    auto terrain=pack::load_terrain(map);
+    assert(std::count(terrain.overlay.begin(),terrain.overlay.end(),ore)==303);
+    assert(std::count(terrain.overlay.begin(),terrain.overlay.end(),gem)==59);
+    for(int overlay:{ore,gem}) {
+        auto k=std::size_t(std::find(terrain.overlay.begin(),terrain.overlay.end(),overlay)-terrain.overlay.begin());
+        auto actual=fixture("CMIN",-1);auto& cell=actual.cells[4*512+3];
+        cell.terrain->overlay_type_index=terrain.overlay[k];cell.overlay_data_11e=terrain.overlay_data[k];
+        sim::PrototypeEconomy from_map(rules);from_map.tick(actual,0);assert(from_map.load(1)==1);
+        const auto& harvested=actual.cells.at(4*512+3);
+        assert(harvested.overlay_data_11e==terrain.overlay_data[k]-1 || harvested.terrain->overlay_type_index==-1);
+    }
+    // A reordered list proves that numeric INI keys do not define indexes.
+    rules::IniFile reordered;
+    reordered.parse("[OverlayTypes]\n88=GEM01\n77=OTHER\n44=TIB01\n[GEM01]\nTiberium=yes\n[TIB01]\nTiberium=yes\n[Tiberiums]\n4=Rich\n9=Poor\n[Rich]\nImage=2\nValue=70\n[Poor]\nImage=1\nValue=30\n");
+    for(int overlay:{0,2}) {
+        auto custom=fixture("CMIN",overlay);sim::PrototypeEconomy remapped(reordered);
+        for(unsigned frame=0;frame<4000 && *custom.houses[0].cash==0;++frame) remapped.tick(custom,frame);
+        assert(*custom.houses[0].cash==20*(overlay==0?70:30));
+    }
     std::cout<<"prototype economy: passed real base rules, miners, gems, credits, growth, spread, duplicate frames, no refinery\n";
 }

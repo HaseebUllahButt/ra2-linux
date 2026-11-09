@@ -16,15 +16,36 @@ bool open(const sw::CellState& c) {
         c.terrain->floor_world_height && c.unit_land_speed.value_or(1)>0;
 }
 }
-PrototypeEconomy::PrototypeEconomy(const rules::IniFile& r):rules_(r) {}
+PrototypeEconomy::PrototypeEconomy(const rules::IniFile& r):rules_(r) {
+    const auto* overlays=r.find_section("OverlayTypes");
+    const auto* types=r.find_section("Tiberiums");
+    if(!overlays || !types) return;
+    // Registry positions, not numeric INI keys, are the live OverlayType indexes.
+    // TODO-ORIGINAL TiberiumTypeClass::Read_INI: extend Image families beyond the four base resource images.
+    for(const auto& type:types->entries) {
+        int image=r.read_integer(type.value,"Image",1);
+        const char* prefix=image==1?"TIB":image==2?"GEM":image==3?"TIB2_":image==4?"TIB3_":nullptr;
+        if(!prefix) continue;
+        Resource resource{type.value,-1};
+        int resource_index=int(resources_.size());
+        for(std::size_t i=0;i<overlays->entries.size();++i) {
+            const auto& name=overlays->entries[i].value;
+            std::string stem=prefix;
+            if(name.size()!=stem.size()+2 || name.compare(0,stem.size(),stem)!=0 ||
+               name[stem.size()]<'0' || name[stem.size()]>'9' || name.back()<'0' || name.back()>'9' ||
+               !r.read_bool(name,"Tiberium",false)) continue;
+            if(resource.first_overlay<0) resource.first_overlay=int(i);
+            overlay_resources_.emplace(int(i),resource_index);
+        }
+        resources_.push_back(std::move(resource));
+    }
+}
 int PrototypeEconomy::load(std::uint32_t id) const { auto i=cargo_.find(id);return i==cargo_.end()?0:i->second.bails; }
 int PrototypeEconomy::resource(const sw::CellState& c) const {
     if (!c.terrain || !c.overlay_data_11e) return -1;
     int index=c.terrain->overlay_type_index.value_or(-1);
-    // TODO-ORIGINAL 005DC0B0: resolve arbitrary resource registries. Base overlay ranges only.
-    if(index>=105 && index<=124) return 0;
-    if(index>=28 && index<=39) return 1;
-    return -1;
+    auto found=overlay_resources_.find(index);
+    return found==overlay_resources_.end()?-1:found->second;
 }
 void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
     if(w.setup_progress!=sw::SetupProgress::PrototypeComplete || w.pending_cell_setup || (last_ && frame<=*last_)) return;
@@ -34,7 +55,7 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
     std::vector<std::pair<std::uint32_t,int>> spread;
     for(auto& [k,c]:w.cells) {
         int r=resource(c);if(r<0) continue;
-        const char* section=r?"Cruentus":"Riparius";
+        const auto& section=resources_[r].section;
         int growth=std::max(1,rules_.read_integer(section,"Growth",2200));
         int interval=std::max(1,rules_.read_integer(section,"Spread",2200));
         if(frame && frame%growth==0 && rules_.read_bool("General","TiberiumGrows",true) && *c.overlay_data_11e<11) ++*c.overlay_data_11e;
@@ -48,7 +69,7 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
             }
         }
     }
-    for(auto [k,r]:spread) {auto& c=w.cells.at(k);if(c.terrain->overlay_type_index!=-1) continue;c.terrain->overlay_type_index=r?28:105;c.overlay_data_11e=0;c.terrain->land_type=5;}
+    for(auto [k,r]:spread) {auto& c=w.cells.at(k);if(c.terrain->overlay_type_index!=-1) continue;c.terrain->overlay_type_index=resources_[r].first_overlay;c.overlay_data_11e=0;c.terrain->land_type=5;}
     std::set<std::uint32_t> live;
     std::vector<sw::Entity*> miners;
     for(auto& e:w.entities) if(alive(e) && e.kind==sw::Kind::Unit && (e.type=="CMIN" || e.type=="HARV")) miners.push_back(&e);
@@ -90,7 +111,7 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
         auto current=w.cells.find(key(*e.cell));
         if(current!=w.cells.end() && resource(current->second)>=0) {
             auto& c=current->second;int r=resource(c);
-            ++bag.bails;bag.credits+=std::max(0,rules_.read_integer(r?"Cruentus":"Riparius","Value",r?50:25));
+            ++bag.bails;bag.credits+=std::max(0,rules_.read_integer(resources_[r].section,"Value",0));
             // TODO-ORIGINAL CellClass::Reduce_Tiberium: restore the underlying tile land and refresh resource art caches.
             if(*c.overlay_data_11e==0) {c.terrain->overlay_type_index=-1;c.terrain->land_type=0;} else --*c.overlay_data_11e;
             // TODO-ORIGINAL UnitClass::Harvesting: pickup/unload animation timing uses a simple frame delay.
