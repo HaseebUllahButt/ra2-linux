@@ -3,7 +3,17 @@
 #include <sim/fp.h>
 #include <cmath>
 #include <stdexcept>
+#include <limits>
 namespace ra2::weapons {
+std::optional<int> base_weapon_range_from_cells(double cells, int fallback) {
+    if (!std::isfinite(cells)) return {};
+    if (cells==-1.0) return fallback;
+    try {
+        const double value=sim::fp::multiply(cells,256.0);
+        if (value<std::numeric_limits<int>::min() || value>std::numeric_limits<int>::max()) return {};
+        return static_cast<int>(value);
+    } catch (const std::exception&) { return {}; }
+}
 CannonRangeStatus base_cannon_range(const CannonRangeInput& in,const sim::OriginalDistance& distance) {
     using S=CannonRangeStatus;
     if (!in.plain_cannon_and_ground || !*in.plain_cannon_and_ground ||

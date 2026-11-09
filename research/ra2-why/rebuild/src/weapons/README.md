@@ -203,3 +203,10 @@ alliances. It follows the original integer sampling order and returns unknown
 for missing cells. It includes the original first-hit wall exception. The
 comparison covers 2,400 complete game.exe traces. The loaded world must still
 supply Cell +140 bit 80, wall ownership and alliance state.
+
+`base_weapon_range_from_cells()` converts a resolved original INI double with
+00469AE0 semantics. A value of -1 retains the supplied prior value. The base
+120mm Range of 5.75 resolves to 1472 world units. The owned asset check also
+checks AP spread, damage falloff and the absent Burst and DecloakToFire keys.
+The original WeaponType constructor sets those two absent fields to one. The
+original comparison checks those defaults and 3,003 range conversions.

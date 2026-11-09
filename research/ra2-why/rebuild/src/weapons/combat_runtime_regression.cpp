@@ -118,6 +118,8 @@ void check_projectile(const std::string& path,const sim::OriginalDistance& dista
     };
     CannonLineInput exception{{0,0,0},{512,0,0},true,true,false,true};
     check(base_cannon_line_trace(exception,changing).status==TerrainTraceStatus::Clear,"line exception used the wrong cell");
+    check(base_weapon_range_from_cells(5.75,0)==1472 && base_weapon_range_from_cells(-1.0,19)==19,
+          "original weapon range conversion");
     CannonRangeInput range_input{{0,0,0},{512,0,0},1024,0,6,true,false};
     check(base_cannon_range(range_input,distance)==CannonRangeStatus::InRange,"original Cannon range");
     range_input.target.x=1030;

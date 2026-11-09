@@ -2,6 +2,10 @@
 #include <sim/distance.h>
 #include <optional>
 namespace ra2::weapons {
+// Base 00469AE0 conversion after the original INI reader returns a double.
+// -1 keeps the caller's constructor or previous value. Unsupported numeric
+// conversions return empty; no rule defaults are supplied here.
+std::optional<int> base_weapon_range_from_cells(double cells, int fallback);
 // Resolved original inputs for Unit virtual +350 and 006C4BB0.
 struct CannonRangeInput {
     sim::Coord origin, target; // Original resolved virtual +48 positions.

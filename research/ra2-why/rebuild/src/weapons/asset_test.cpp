@@ -16,6 +16,11 @@ int main(int argc, char** argv) {
     if (ini.read_string("HTNK", "Primary") != "120mm" ||
         ini.read_integer("120mm", "Damage") != 90 ||
         ini.read_integer("120mm", "ROF") != 65 ||
+        ini.read_double("120mm", "Range") != 5.75 ||
+        ini.contains("120mm", "Burst") || ini.contains("120mm", "DecloakToFire") ||
+        ini.read_integer("HTNK", "Strength") != 400 ||
+        ini.read_double("AP", "CellSpread") != static_cast<double>(0.3f) ||
+        ini.read_double("AP", "PercentAtMax") != 0.5 ||
         ini.read_integer("120mm", "Speed") != 40 ||
         ini.read_string("120mm", "Projectile") != "Cannon" ||
         ini.read_string("120mm", "Warhead") != "AP" ||
