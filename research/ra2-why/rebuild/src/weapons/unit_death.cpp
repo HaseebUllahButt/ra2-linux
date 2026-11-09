@@ -15,3 +15,13 @@ bool base_unit_death_trigger_prefix(UnitDeathTriggerState& state,bool attacker,
     return true;
 }
 }
+
+namespace ra2::weapons {
+bool base_unit_parent_death_trigger_prefix(UnitDeathTriggerState& state,bool attacker,
+    const UnitDeathTriggerCallback& callback) {
+    if (!callback) return false;
+    if (state.active && state.has_trigger && attacker) callback(6,state);
+    if (state.active && state.has_trigger && attacker) callback(4,state);
+    return true;
+}
+}

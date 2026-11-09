@@ -252,3 +252,9 @@ order before its Techno parent. The callback executes each real trigger and
 updates the live state before the next event. A special trigger check remains
 an explicit input. The original comparison covers 2,000 cases with trigger and
 active-state mutations. Parent death, rewards, effects and removal remain open.
+
+`base_unit_parent_death_trigger_prefix()` continues the Unit death callback
+through its Techno parent's two Unit trigger events. It requires the preceding
+original type/house score query to be resolved. The combined Unit and parent
+trigger comparison covers 2,000 original paths with synchronous mutations.
+Ownership, score, veterancy and all later death effects still need callbacks.

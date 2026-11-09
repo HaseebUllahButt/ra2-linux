@@ -13,6 +13,7 @@ int main() {
    }
   };
   if (!base_unit_death_trigger_prefix(s,attacker,bool(special),cb)) return 1;
+  if (!base_unit_parent_death_trigger_prefix(s,attacker,cb)) return 1;
   std::cout << s.has_trigger << ' ' << s.active << ' ' << events.size();
   for (int event:events) std::cout << ' ' << event;
   std::cout << '\n';

@@ -59,6 +59,11 @@ void check_fire_and_damage() {
     };
     check(base_unit_death_trigger_prefix(death,true,{},trigger) && events==std::vector<int>({7,0x30,0x1d}),
           "original Unit death trigger order");
+    check(base_unit_parent_death_trigger_prefix(death,true,trigger) && events.size()==3,
+          "inactive Unit parent death trigger");
+    death={true,true,-1};events.clear();
+    check(base_unit_parent_death_trigger_prefix(death,true,trigger) && events==std::vector<int>({6,4}),
+          "Unit parent death trigger order");
     death={true,true,0};events.clear();
     check(!base_unit_death_trigger_prefix(death,true,{},trigger) && events.empty(),"unknown Unit trigger check accepted");
     TechnoDamageInput d{};d.raw_damage=100;d.house_armor_multiplier=2;d.object_armor_multiplier=1;
