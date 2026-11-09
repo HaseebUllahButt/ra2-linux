@@ -81,8 +81,8 @@ HudAction BattleHud::handle_click(int x,int y,const HudState& s) const {
 void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
     if(!valid(b)) return;
     fill(b,{sidebar_x,0,sidebar_width,view_height},dark);
-    text(b,808,5,"CREDITS $"+std::to_string(s.cash),ink,212);
-    text(b,808,15,"POWER "+std::to_string(s.power_output)+"/"+std::to_string(s.power_drain),ink,212);
+    text(b,808,3,"CREDITS $"+std::to_string(s.cash),ink,212);
+    text(b,808,17,"POWER "+std::to_string(s.power_output)+"/"+std::to_string(s.power_drain),ink,212);
     fill(b,{808,29,212,6},edge);
     const auto capacity=std::max({1,s.power_output,s.power_drain});
     fill(b,{808,29,static_cast<int>(212LL*std::max(0,s.power_output)/capacity),6},

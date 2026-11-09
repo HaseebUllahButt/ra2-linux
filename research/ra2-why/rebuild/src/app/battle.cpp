@@ -71,6 +71,7 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     w::BaseBattleAssets& assets_;
     w::Snapshot world_; // The single owning session world.
     rules::IniFile rules_;
+    ra2text::CsfFile labels_;
     p::Catalog catalog_;
     p::FactorySet factories_;
     sim::PrototypeMovement movement_;
@@ -108,6 +109,7 @@ public:
                  (args.game_directory/"game.exe").string()),economy_(rules_),ai_(rules_),
          window_(window),scene_(scene),terrain_(terrain),geometry_(render::MapGeometry::from_ini(assets.map_ini())),
          clock_(clock),player_(world_.houses.at(0).id),enemy_(world_.houses.at(1).id),orders_(player_) {
+        if(const auto labels=assets_.read_asset("RA2.CSF"))labels_.parse(labels->data(),labels->size());
         const auto initialized=proto::initialize(world_,factories_,catalog_,player_);
         if (initialized.status!=p::Status::Done) throw std::runtime_error(initialized.detail);
         const auto start=std::find_if(world_.entities.begin(),world_.entities.end(),[&](const auto& e){return live(e)&&e.house_id==player_;});
@@ -117,6 +119,10 @@ public:
     const w::Snapshot& world() const {return world_;}
     sim::Victory result() const {return victory_.result;}
     bool autoplay_moved() const {return autoplay_moved_;}
+    std::string name(const std::string& type) const {
+        if(const auto* label=labels_.find(rules_.read_string(type,"UIName")))return label->text;
+        return rules_.read_string(type,"Name",type);
+    }
     void pan(int dx,int dy) {
         camera_x_=std::clamp(camera_x_+dx,0,std::max(0,terrain_.width-BattleHud::sidebar_x));
         camera_y_=std::clamp(camera_y_+dy,0,std::max(0,terrain_.height-BattleHud::view_height));
@@ -197,7 +203,7 @@ public:
                     const auto* type=catalog_.find(action.type);
                     if (ready && type && type->rtti==p::Rtti::BuildingType) {
                         placement_=action.type;orders_.set_placement_active(true);
-                        status_="Place "+placement_+" near your base. Esc cancels.";
+                        status_="Place "+name(placement_)+". Esc cancels.";
                     } else queue({OrderKind::Build,player_,0,0,action.type,{}});
                 } else if (action.kind==HudActionKind::Minimap) {
                     pan(action.position.x-camera_x_-BattleHud::sidebar_x/2,
@@ -270,7 +276,7 @@ public:
             })) break;
             const auto outcome=proto::begin_production(world_,factories_,catalog_,order.house,order.type,frame);
             if (outcome.status==p::Status::Done) ++built;
-            if (order.house==player_) note(outcome,"Building "+order.type+".");
+            if (order.house==player_) note(outcome,"Building "+name(order.type)+".");
             break;
         }
         case OrderKind::Place: {
@@ -464,7 +470,7 @@ public:
         hud_state_.cash=h.cash.value_or(0);hud_state_.power_output=h.power_output.value_or(0);
         hud_state_.power_drain=h.power_drain.value_or(0);hud_state_.selected_labels.clear();
         for(const auto id:orders_.selected_ids())if(const auto* e=find(world_,id))
-            hud_state_.selected_labels.push_back(e->type+" "+std::to_string(e->resolved_hp.value_or(0)));
+            hud_state_.selected_labels.push_back(name(e->type)+" "+std::to_string(e->resolved_hp.value_or(0)));
         hud_state_.status=status_;hud_state_.result=result_name(victory_.result);
         hud_state_.choices.clear();
         const auto eligible=proto::options(world_,factories_,catalog_,player_);
@@ -482,7 +488,7 @@ public:
             for(const auto* list:{&available.buildings,&available.units,&available.infantry})
                 if(std::find(list->begin(),list->end(),type)!=list->end())allowed=true;
             if((!allowed || gate==eligible.end()||gate->second!=p::CanBuild::Can)&&!factory)continue;
-            BuildChoice choice;choice.type=type;choice.name=type;choice.cost=facts->cost;choice.enabled=true;
+            BuildChoice choice;choice.type=type;choice.name=name(type);choice.cost=facts->cost;choice.enabled=true;
             if(factory)choice.progress=factory->progress*1000/54;
             hud_state_.choices.push_back(std::move(choice));
         }
