@@ -54,7 +54,7 @@ Result run(w::BaseBattleAssets& assets,const std::string& game,int frames,int re
     s::PrototypeCombatRuntime combat(assets.rules(),assets.battle_rules(),assets.map_ini(),assets.art_ini(),game+"/game.exe");
     auto catalog=p::Catalog::from(assets.rules(),assets.art_ini(),assets.map_ini());
     p::FactorySet factories;
-    for(auto house:{a,b}) {
+    for(auto house:{a}) {
         auto result=p::prototype::initialize(world,factories,catalog,house);
         if(result.status!=p::Status::Done) throw std::runtime_error("production initialize: "+result.detail);
     }
@@ -78,6 +78,22 @@ Result run(w::BaseBattleAssets& assets,const std::string& game,int frames,int re
             }
         }
         p::prototype::tick(world,factories,catalog,frame);
+        // TODO-ORIGINAL AI base planning: try nearby Cells in a fixed order.
+        const auto pending=factories.factories;
+        for(const auto& factory:pending) {
+            if(!factory.object || factory.progress!=54) continue;
+            const auto* type=catalog.find(factory.object_type);
+            if(!type || std::none_of(catalog.buildings.begin(),catalog.buildings.end(),[&](const auto& t){return t.id==factory.object_type;})) continue;
+            auto yard=std::find_if(world.entities.begin(),world.entities.end(),[&](const auto& e){return e.house_id==factory.house_id && e.kind==w::Kind::Structure && e.cell;});
+            if(yard==world.entities.end()) continue;
+            const auto origin=*yard->cell;
+            bool placed=false;
+            for(int radius=2;radius<=10 && !placed;++radius) for(int dy=-radius;dy<=radius && !placed;++dy) for(int dx=-radius;dx<=radius && !placed;++dx) {
+                if(std::abs(dx)!=radius && std::abs(dy)!=radius) continue;
+                placed=p::prototype::place(world,factories,catalog,factory.house_id,factory.object_type,
+                    {std::int16_t(origin.x+dx),std::int16_t(origin.y+dy)},frame).status==p::Status::Done;
+            }
+        }
         // TODO-ORIGINAL Attack mission: approach a free nearby Cell, then let combat check range.
         auto step=combat.tick(world,frame);fired+=step.fired;killed+=step.destroyed;unresolved+=step.unresolved.size();
         if(!step.unresolved.empty() && unresolved==step.unresolved.size()) std::cout<<"first combat gap: "<<step.unresolved.front()<<'\n';
