@@ -72,28 +72,38 @@ bool fallen(const Owned& owned, bool short_game) {
 }
 }
 
-Victory evaluate_original_victory(const session::world::Snapshot& world,
-    std::uint32_t player_house, std::uint32_t enemy_house, const VictoryRules& rules) {
-    require_houses(world,player_house,enemy_house);
-    Owned player, enemy;
+namespace {
+Owned owned_by(const session::world::Snapshot& world, std::uint32_t house, const VictoryRules& rules) {
+    Owned owned;
     for (const auto& entity:world.entities) {
-        if (entity.lifetime!=session::world::Lifetime::Placed) continue;
+        if (entity.house_id!=house || entity.lifetime!=session::world::Lifetime::Placed) continue;
         if (entity.resolved_hp && *entity.resolved_hp<=0) continue;
-        Owned* owned=entity.house_id==player_house ? &player : entity.house_id==enemy_house ? &enemy : nullptr;
-        if (!owned) continue;
         switch (entity.kind) {
-            case session::world::Kind::Structure: ++owned->buildings; break;
-            case session::world::Kind::Infantry: ++owned->infantry; break;
-            case session::world::Kind::Aircraft: ++owned->aircraft; break;
+            case session::world::Kind::Structure: ++owned.buildings; break;
+            case session::world::Kind::Infantry: ++owned.infantry; break;
+            case session::world::Kind::Aircraft: ++owned.aircraft; break;
             case session::world::Kind::Unit:
-                ++owned->units;
+                ++owned.units;
                 for (std::size_t i=0;i<rules.base_units.size() && i<2;++i)
-                    if (same_type(entity.type,rules.base_units[i])) { ++owned->base_units; break; }
+                    if (same_type(entity.type,rules.base_units[i])) { ++owned.base_units; break; }
                 break;
             default: break;
         }
     }
-    const bool player_alive=!fallen(player,rules.short_game), enemy_alive=!fallen(enemy,rules.short_game);
+    return owned;
+}
+}
+
+bool original_house_fallen(const session::world::Snapshot& world, std::uint32_t house,
+    const VictoryRules& rules) {
+    return fallen(owned_by(world,house,rules),rules.short_game);
+}
+
+Victory evaluate_original_victory(const session::world::Snapshot& world,
+    std::uint32_t player_house, std::uint32_t enemy_house, const VictoryRules& rules) {
+    require_houses(world,player_house,enemy_house);
+    const bool player_alive=!original_house_fallen(world,player_house,rules);
+    const bool enemy_alive=!original_house_fallen(world,enemy_house,rules);
     if (player_alive && enemy_alive) return Victory::InProgress;
     if (player_alive) return Victory::PlayerWon;
     if (enemy_alive) return Victory::PlayerLost;
@@ -124,6 +134,28 @@ Victory VictoryState::update(const session::world::Snapshot& world,
 Victory VictoryState::update(const session::world::Snapshot& world,
     std::uint32_t player_house, std::uint32_t enemy_house, const VictoryRules& rules) {
     if (!settled()) result=evaluate_original_victory(world,player_house,enemy_house,rules);
+    return result;
+}
+
+bool VictoryState::fallen(std::uint32_t house) const noexcept {
+    return std::find(fallen_houses.begin(),fallen_houses.end(),house)!=fallen_houses.end();
+}
+
+Victory VictoryState::update(const session::world::Snapshot& world, std::uint32_t player_house,
+    const std::vector<std::uint32_t>& enemy_houses, const VictoryRules& rules) {
+    if (settled()) return result;
+    if (enemy_houses.empty()) throw std::invalid_argument("victory needs one enemy house or more");
+    for (const auto enemy:enemy_houses) require_houses(world,player_house,enemy);
+    const auto check=[&](std::uint32_t house) {
+        if (!fallen(house) && original_house_fallen(world,house,rules)) fallen_houses.push_back(house);
+        return fallen(house);
+    };
+    const bool player_fallen=check(player_house);
+    bool enemies_fallen=true;
+    for (const auto enemy:enemy_houses) enemies_fallen=check(enemy) && enemies_fallen;
+    if (player_fallen && enemies_fallen) result=Victory::Draw;
+    else if (player_fallen) result=Victory::PlayerLost;
+    else if (enemies_fallen) result=Victory::PlayerWon;
     return result;
 }
 }

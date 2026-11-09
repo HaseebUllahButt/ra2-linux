@@ -110,7 +110,46 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     const render::Bitmap& terrain_;
     render::MapGeometry geometry_;
     loop::Clock& clock_;
-    std::uint32_t player_,enemy_;
+    std::uint32_t player_,enemy_; // enemy_ is the first computer house.
+    // Every computer house in house order, its policy, and its chosen enemy
+    // house (zero before the first choice).
+    std::vector<std::uint32_t> enemies_;
+    std::vector<sim::PrototypeAI> ais_;
+    std::vector<std::uint32_t> ai_targets_;
+    bool is_enemy(std::uint32_t house) const {
+        return std::find(enemies_.begin(),enemies_.end(),house)!=enemies_.end();
+    }
+    // The first living building of a house, else its first living object.
+    std::optional<sim::Coord> base_centre(std::uint32_t house) const {
+        std::optional<sim::Coord> any;
+        for(const auto& e:world_.entities)if(live(e)&&e.house_id==house&&e.position) {
+            if(e.kind==w::Kind::Structure)return e.position;
+            if(!any)any=e.position;
+        }
+        return any;
+    }
+    // Base 004E8990: a house with no enemy takes the nearest base centre of
+    // a house that is not itself and not defeated. It keeps that enemy until
+    // the enemy is defeated. TODO-ORIGINAL: the AIHateDelays timer and the
+    // anger scores of 004EEBA0 are not modeled.
+    std::uint32_t ai_target(std::size_t index) {
+        auto& target=ai_targets_.at(index);
+        if(target && !victory_.fallen(target))return target;
+        const auto self=enemies_.at(index);
+        const auto own=base_centre(self);
+        target=player_;
+        auto best=std::numeric_limits<std::int64_t>::max();
+        auto consider=[&](std::uint32_t house) {
+            if(house==self||victory_.fallen(house))return;
+            const auto centre=base_centre(house);
+            if(!own||!centre)return;
+            const auto dx=std::int64_t(own->x)-centre->x,dy=std::int64_t(own->y)-centre->y;
+            if(dx*dx+dy*dy<best){best=dx*dx+dy*dy;target=house;}
+        };
+        consider(player_);
+        for(const auto house:enemies_)consider(house);
+        return target;
+    }
     BattleOrders orders_;
     BattleHud hud_;
     BattleCursor cursor_;
@@ -172,7 +211,12 @@ public:
         if(const auto labels=assets_.read_asset("RA2.CSF"))labels_.parse(labels->data(),labels->size());
         movement_.use_rules(rules_);
         score_assets_=ui::ScoreAssets::load(files,labels_);
-        score_.emplace(std::vector<std::pair<std::uint32_t,std::string>>{{player_,house(world_,player_).name},{enemy_,house(world_,enemy_).name}});
+        for(const auto& h:world_.houses)
+            if(h.id!=player_ && !(h.role && (*h.role==w::HouseRole::Neutral||*h.role==w::HouseRole::Special)))enemies_.push_back(h.id);
+        if(enemies_.empty()||enemies_.front()!=enemy_)throw std::runtime_error("Match has no computer house");
+        std::vector<std::pair<std::uint32_t,std::string>> roster{{player_,house(world_,player_).name}};
+        for(const auto id:enemies_)roster.emplace_back(id,house(world_,id).name);
+        score_.emplace(roster);
         help_visible_=!args_.autoplay;
         status("Select MCV. D deploys.");
         camera_scroll_.reset(clock_.now_ms());
@@ -186,6 +230,15 @@ public:
         const auto ai_difficulty=difficulty_==ui::Opponent::Hard?sim::PrototypeAI::Difficulty::Hard:
             difficulty_==ui::Opponent::Medium?sim::PrototypeAI::Difficulty::Normal:sim::PrototypeAI::Difficulty::Easy;
         ai_=sim::PrototypeAI(rules_,&ai_ini,ai_difficulty);
+        // One policy for each computer house, with the difficulty of its setup slot.
+        const auto choices=opponent_choices(args_.setup,rules_,house(world_,player_).country,
+            std::clamp(args_.setup.color.value_or(0),0,7),enemies_.size());
+        for(std::size_t i=0;i<enemies_.size();++i) {
+            const auto level=i<choices.size()?choices[i].difficulty:difficulty_;
+            ais_.emplace_back(rules_,&ai_ini,level==ui::Opponent::Hard?sim::PrototypeAI::Difficulty::Hard:
+                level==ui::Opponent::Medium?sim::PrototypeAI::Difficulty::Normal:sim::PrototypeAI::Difficulty::Easy);
+        }
+        ai_targets_.assign(enemies_.size(),0);
         if(!ai_.uses_ai_ini())throw std::runtime_error("Base AI.INI has no usable team triggers");
         std::cout<<"Computer policy: base AI.INI triggers="<<ai_.trigger_count()<<" difficulty="<<int(ai_difficulty)<<'\n';
         // Base 004E4110 reads Short Game (00A3D2C2) and the first two BaseUnit types.
@@ -710,7 +763,7 @@ public:
     }
     void execute(const Order& order,std::uint32_t frame) {
         loop::profile::Timer probe(loop::profile::Phase::Orders);
-        if (order.house!=player_ && order.house!=enemy_) return;
+        if (order.house!=player_ && !is_enemy(order.house)) return;
         const auto* e=find(world_,order.entity);
         if (order.kind!=OrderKind::Build && order.kind!=OrderKind::Place &&
             (!e || !live(*e) || e->house_id!=order.house)) return;
@@ -860,7 +913,7 @@ public:
         for(const auto id:fighters) {
             const auto* source=find(world_,id);const w::Entity* target=nullptr;
             std::int64_t best=std::numeric_limits<std::int64_t>::max();
-            for(const auto& other:world_.entities) if(live(other)&&other.house_id==enemy_&&
+            for(const auto& other:world_.entities) if(live(other)&&is_enemy(other.house_id)&&
                 combat_.can_attack(world_,id,other.id)) {
                 const auto dx=std::int64_t(source->position->x)-other.position->x;
                 const auto dy=std::int64_t(source->position->y)-other.position->y;
@@ -883,13 +936,20 @@ public:
         if(victory_.settled())return;
         run_build_queue(frame);
         if(args_.autoplay)autoplay(frame);
-        auto enemy_commands=ai_.tick(world_,enemy_,player_,std::int32_t(frame));
-        ai_orders+=enemy_commands.size();
-        pending_.insert(pending_.end(),enemy_commands.begin(),enemy_commands.end());
+        // A defeated computer house gives no more orders (House +13D).
+        for(std::size_t i=0;i<enemies_.size();++i) {
+            if(victory_.fallen(enemies_[i]))continue;
+            auto enemy_commands=ais_[i].tick(world_,enemies_[i],ai_target(i),std::int32_t(frame));
+            ai_orders+=enemy_commands.size();
+            pending_.insert(pending_.end(),enemy_commands.begin(),enemy_commands.end());
+        }
         auto commands=std::move(pending_);pending_.clear();
         move_destinations_.clear();
         for(const auto& order:commands)execute(order,frame);
-        if(frame%15==0){auto_place(enemy_,frame);if(args_.autoplay)auto_place(player_,frame);}
+        if(frame%15==0) {
+            for(const auto id:enemies_)if(!victory_.fallen(id))auto_place(id,frame);
+            if(args_.autoplay)auto_place(player_,frame);
+        }
         std::map<std::uint32_t,int> cash_before;
         for(const auto& h:world_.houses)cash_before[h.id]=h.cash.value_or(0);
         economy_.tick(world_,frame);
@@ -912,7 +972,7 @@ public:
         effects_.observe(world_,combat_.projectiles(),frame,effect_project(),&fighting.events,&rules_);
         for(const auto& event:fighting.events) {
             if(ai_opening_check_ && !first_ai_shot_ && event.kind==sim::PrototypeCombatEventKind::Shot &&
-                event.source_house==enemy_ && event.target_house==player_) {
+                is_enemy(event.source_house) && event.target_house==player_) {
                 first_ai_shot_=frame;
                 std::cout<<"AI_OPENING difficulty="<<std::getenv("RA2_AI_OPENING_CHECK")
                     <<" speed="<<frame_delay_ticks(args_)<<" first_shot="<<frame
@@ -961,12 +1021,12 @@ public:
         sim::tech::update(rules_,world_);
         orders_.sync(world_);
         infantry=std::max(infantry,std::size_t(std::count_if(world_.entities.begin(),world_.entities.end(),[](const auto& e){return live(e)&&e.kind==w::Kind::Infantry;})));
-        victory_.update(world_,player_,enemy_,victory_rules_);
+        victory_.update(world_,player_,enemies_,victory_rules_);
         if(args_.autoplay && frame%600==0) {
             std::size_t ours=0,theirs=0;
             for(const auto& e:world_.entities)if(live(e)) {
                 if(e.house_id==player_)++ours;
-                if(e.house_id==enemy_)++theirs;
+                if(is_enemy(e.house_id))++theirs;
             }
             std::cerr<<"Match frame="<<frame<<" player="<<ours<<" computer="<<theirs
                 <<" moved="<<moved<<" fired="<<fired<<" impacts="<<impacts<<" built="<<built<<'\n';
@@ -977,7 +1037,7 @@ public:
             score_->clock(clock_.now_ms(),false);
             auto score=score_->finish(victory_.result==sim::Victory::PlayerWon);
             for(std::size_t i=0;i<score.houses.size();++i) {
-                const auto id=i==0?player_:enemy_;
+                const auto id=i==0?player_:enemies_.at(i-1);
                 for(const auto& e:world_.entities)if(e.house_id==id) {
                     if(e.kind==w::Kind::Structure)++score.houses[i].buildings_built;
                     else if(e.kind!=w::Kind::Terrain)++score.houses[i].units_built;
@@ -1074,7 +1134,7 @@ public:
                 const int dx=at->x-pointer_x_,dy=at->y-pointer_y_,d=dx*dx+dy*dy;
                 if(d<nearest){nearest=d;hovered=&e;}
             }
-        for(const auto& e:world_.entities)if(live(e)&&(e.house_id==player_||e.house_id==enemy_)) {
+        for(const auto& e:world_.entities)if(live(e)&&(e.house_id==player_||is_enemy(e.house_id))) {
             const auto point=anchor(e);if(!point||point->x<0||point->x>=BattleHud::sidebar_x)continue;
             const auto color=radar_style_.houses.at(e.house_id);
             // TODO-ORIGINAL: House markers and health bars use simple native art.
@@ -1137,7 +1197,7 @@ public:
             else if(hovered && hovered->house_id==player_)kind=
                 rules_.read_string(hovered->type,"DeploysInto").empty()?CursorKind::Select:CursorKind::Deploy;
             else if(!orders_.selected_ids().empty()) {
-                if(hovered && hovered->house_id==enemy_) {
+                if(hovered && is_enemy(hovered->house_id)) {
                     bool can=false;
                     for(const auto id:orders_.selected_ids())can|=combat_.can_attack(world_,id,hovered->id);
                     kind=can?CursorKind::Attack:CursorKind::NoGo;
@@ -1163,7 +1223,7 @@ public:
             <<" world=PrototypeComplete\n";
         for(const auto& gap:gaps_)std::cout<<"TODO-ORIGINAL: "<<gap<<'\n';
         if((args_.autoplay||args_.human_input_check) && !victory_.settled())for(const auto& e:world_.entities)
-            if(live(e)&&(e.house_id==player_||e.house_id==enemy_))
+            if(live(e)&&(e.house_id==player_||is_enemy(e.house_id)))
                 std::cout<<"Survivor house="<<e.house_id<<" id="<<e.id<<" type="<<e.type<<" hp="
                     <<e.resolved_hp.value_or(0)<<" cell="<<e.cell->x<<','<<e.cell->y
                     <<" moving="<<movement_.moving(e.id)<<" attack="
@@ -1192,6 +1252,16 @@ int run_prototype_battle(const BattleOptions& requested) {
         if(const auto* speed=std::getenv("RA2_AI_OPENING_SPEED"))args.setup.game_speed=std::stoi(speed);
         if(!args.headless || !args.autoplay)throw std::runtime_error("Opening check needs headless autoplay");
     }
+    // Regression hook for matches with several computers: one letter (e, m or
+    // h) for each open slot. Normal matches use the saved setup.
+    if(const char* roster=std::getenv("RA2_TEST_OPPONENTS")) {
+        for(auto& slot:args.setup.opponents)slot.opponent=ui::Opponent::Closed;
+        std::size_t slot=0;
+        for(const char* level=roster;*level && slot<args.setup.opponents.size();++level) {
+            if(*level!='e' && *level!='m' && *level!='h')throw std::runtime_error("Unknown test opponent level");
+            args.setup.opponents[slot++].opponent=*level=='h'?ui::Opponent::Hard:*level=='m'?ui::Opponent::Medium:ui::Opponent::Easy;
+        }
+    }
     auto assets=w::BaseBattleAssets::load(args.game_directory,args.map,args.setup.map_archive.value_or(""));
     // Merge the rules while the world is set up. Both only read the loaded
     // rules; overlay_rules keeps the result for the Battle's own request.
@@ -1206,12 +1276,16 @@ int run_prototype_battle(const BattleOptions& requested) {
     const int credits=std::clamp(args.setup.credits.value_or(10000),2500,10000);
     const int count=std::clamp(args.setup.unit_count.value_or(2),0,24);
     const int color=std::clamp(args.setup.color.value_or(0),0,7);
-    const auto opponent=first_opponent_choice(args.setup,assets.rules(),country,color);
-    // TODO-ORIGINAL: This first match supports one human and one computer,
-    // Battle rules, two deterministic starting waypoints, and base factions.
-    // Opponent slots after the first open one are not used.
+    // Multiplayer maps keep the start positions in waypoints 0 to 7.
+    std::size_t starts=0;
+    for(const auto& waypoint:assets.map().waypoints())if(waypoint.index>=0 && waypoint.index<8)++starts;
+    const auto opponents=opponent_choices(args.setup,assets.rules(),country,color,starts>1?starts-1:1);
+    // TODO-ORIGINAL: One human and the open computer slots, Battle rules,
+    // start positions in waypoint order, base factions, and no alliances.
     setup.players.push_back({"Player",country,credits,color,-1,count,true});
-    setup.players.push_back({"Computer",opponent.country,credits,opponent.color,-1,count,false});
+    for(std::size_t i=0;i<opponents.size();++i)
+        setup.players.push_back({i?"Computer "+std::to_string(i+1):std::string("Computer"),
+            opponents[i].country,credits,opponents[i].color,-1,count,false});
     const auto seed=sim::Random(0x524132).state();
     auto battle=w::prototype_battle(assets,setup,seed);
     if(!battle)throw std::runtime_error("Cannot create prototype Battle setup for "+args.map);

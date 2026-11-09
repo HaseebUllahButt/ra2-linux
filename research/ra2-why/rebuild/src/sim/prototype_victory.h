@@ -23,6 +23,13 @@ struct VictoryState {
     // The same latch with the original rule.
     Victory update(const session::world::Snapshot& world,
         std::uint32_t player_house, std::uint32_t enemy_house, const struct VictoryRules& rules);
+    // The original rule with several enemy houses. A fallen house stays
+    // fallen (House +13D). The player wins when every enemy has fallen and
+    // loses when the player house falls. Call it once per game frame.
+    Victory update(const session::world::Snapshot& world, std::uint32_t player_house,
+        const std::vector<std::uint32_t>& enemy_houses, const struct VictoryRules& rules);
+    bool fallen(std::uint32_t house) const noexcept;
+    std::vector<std::uint32_t> fallen_houses; // In the order they fell.
 };
 
 // Original automatic defeat rule, base game.exe HouseClass::AI 004E4110
@@ -36,6 +43,9 @@ struct VictoryRules {
     // [General] BaseUnit. The original reads entries 0 and 1 only.
     std::vector<std::string> base_units;
 };
+// True when the original rule defeats this house in this snapshot.
+bool original_house_fallen(const session::world::Snapshot& world, std::uint32_t house,
+    const VictoryRules& rules);
 // Verdict from the original rule. Only objects on the map count (Placed).
 // TODO-ORIGINAL: 004E7DF0 then destroys every object of the fallen house, and
 // Harvester Truce (scenario flag 0x800) removes HarvesterUnit types from the

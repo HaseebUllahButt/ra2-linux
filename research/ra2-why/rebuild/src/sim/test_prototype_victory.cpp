@@ -235,6 +235,37 @@ int main() {
         try { (void)evaluate_original_victory(world,1,1,quick); } catch (const std::invalid_argument&) { thrown=true; }
         if (!thrown) throw std::runtime_error("original rule accepted equal houses");
     }
+    {
+        // Several enemies: each house falls alone; the player wins after the last one.
+        using ra2::sim::VictoryRules;
+        VictoryRules quick; quick.base_units={"AMCV","SMCV"};
+        sw::Snapshot world;
+        world.houses={player,enemy,make_house(3,"Third",sw::HouseRole::Player)};
+        auto add=[&](std::uint32_t id,std::uint32_t house,sw::Kind kind,const char* type) {
+            auto e=make_entity(id,house,kind,sw::Lifetime::Placed,100); e.type=type; world.entities.push_back(e);
+        };
+        add(20,1,sw::Kind::Structure,"GACNST"); add(21,2,sw::Kind::Structure,"NACNST");
+        add(22,3,sw::Kind::Unit,"SMCV"); add(23,2,sw::Kind::Unit,"HTNK");
+        VictoryState state;
+        const std::vector<std::uint32_t> enemies{2,3};
+        expect(state.update(world,1,enemies,quick),Victory::InProgress,"three houses: all alive");
+        world.entities[1].resolved_hp=0;
+        expect(state.update(world,1,enemies,quick),Victory::InProgress,"three houses: one enemy left");
+        if (!state.fallen(2) || state.fallen(3) || state.fallen(1)) throw std::runtime_error("three houses: wrong fallen set");
+        // A fallen house stays fallen, even with a new building.
+        add(24,2,sw::Kind::Structure,"NAPOWR");
+        expect(state.update(world,1,enemies,quick),Victory::InProgress,"three houses: latch per house");
+        if (!state.fallen(2)) throw std::runtime_error("three houses: fallen house came back");
+        world.entities[2].lifetime=sw::Lifetime::Destroyed;
+        expect(state.update(world,1,enemies,quick),Victory::PlayerWon,"three houses: last enemy falls");
+        VictoryState lost;
+        world.entities[2].lifetime=sw::Lifetime::Placed; world.entities[0].resolved_hp=0;
+        expect(lost.update(world,1,enemies,quick),Victory::PlayerLost,"three houses: player falls first");
+        bool thrown=false;
+        try { VictoryState bad; (void)bad.update(world,1,std::vector<std::uint32_t>{},quick); }
+        catch (const std::invalid_argument&) { thrown=true; }
+        if (!thrown) throw std::runtime_error("empty enemy list was accepted");
+    }
     std::cout<<"Prototype victory spot checks passed: empty armies, one side gone, "
                "both gone, living construction yards, filters, errors and the latch.\n";
     return 0;
