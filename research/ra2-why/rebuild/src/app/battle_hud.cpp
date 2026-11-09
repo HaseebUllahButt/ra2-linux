@@ -1,7 +1,7 @@
 // Reference: Phobos-YRpp/SidebarClass.h (cameo progress and strips),
-// Phobos-YRpp/RadarClass.h (RadarRect and RadarViewRect), and
-// CnC_Red_Alert/CODE/RADAR.CPP (radar coordinate scaling).
-// TODO-ORIGINAL: plain rectangles replace original sidebar/cameo artwork.
+// Phobos-YRpp/RadarClass.h (RadarRect), CnC_Red_Alert/CODE/RADAR.CPP
+// (radar coordinate scaling), UI.INI [AdvancedCommandBar] (button order).
+// Art positions were matched pixel by pixel against original screenshots.
 #include "battle_hud.h"
 #include "../loop/profile.h"
 #include "../fs/mix_bootstrap.h"
@@ -9,38 +9,44 @@
 #include "../gfx/shp_decode.h"
 #include <algorithm>
 #include <cctype>
-#include <cmath>
 #include <cstdint>
 
 namespace ra2::app {
 namespace {
 using render::Rectangle;
 using Color = std::array<unsigned char, 4>;
-constexpr Color ink{224, 230, 192, 255}, dark{22, 29, 32, 255},
-    edge{104, 129, 126, 255}, green{70, 190, 90, 255}, red{220, 75, 60, 255},
-    gold{255, 214, 64, 255};
+constexpr Color ink{224, 230, 192, 255}, dark{22, 29, 32, 255}, edge{104, 129, 126, 255};
+// Original sidebar text blue, sampled from the credits counter.
+constexpr gfx::Rgba side_text{165, 211, 255, 255};
+constexpr int slots = BattleHud::build_columns * BattleHud::build_rows;
+// Power bar: POWERP.SHP segments, 2 pixels high on a 3 pixel pitch, from
+// y 725 upward at x 861. Frames: 0 unlit, 1 green, 2 yellow, 3 red.
+constexpr int power_x = 861, power_bottom = 725, power_segments = 167;
+// Command bar buttons in [AdvancedCommandBar] order.
+constexpr const char* command_buttons[] = {"button00.shp", "button01.shp", "button03.shp",
+                                           "button04.shp", "button06.shp", "button09.shp"};
+
 bool valid(const render::Bitmap& b) {
     return b.width > 0 && b.height > 0 &&
-        static_cast<std::uint64_t>(b.width)*b.height*4 <= b.rgba.size();
+        static_cast<std::uint64_t>(b.width) * b.height * 4 <= b.rgba.size();
 }
 void pixel(render::Bitmap& b, int x, int y, Color c) {
     if (x < 0 || y < 0 || x >= b.width || y >= b.height) return;
-    auto i = (static_cast<std::size_t>(y)*b.width+x)*4;
-    std::copy(c.begin(), c.end(), b.rgba.begin()+i);
+    auto i = (static_cast<std::size_t>(y) * b.width + x) * 4;
+    std::copy(c.begin(), c.end(), b.rgba.begin() + i);
 }
 void fill(render::Bitmap& b, Rectangle r, Color c) {
-    for (int y = std::max(0,r.y); y < std::min(b.height,r.y+r.height); ++y)
-        for (int x = std::max(0,r.x); x < std::min(b.width,r.x+r.width); ++x) pixel(b,x,y,c);
+    for (int y = std::max(0, r.y); y < std::min(b.height, r.y + r.height); ++y)
+        for (int x = std::max(0, r.x); x < std::min(b.width, r.x + r.width); ++x) pixel(b, x, y, c);
 }
 void border(render::Bitmap& b, Rectangle r, Color c) {
-    fill(b,{r.x,r.y,r.width,1},c); fill(b,{r.x,r.y+r.height-1,r.width,1},c);
-    fill(b,{r.x,r.y,1,r.height},c); fill(b,{r.x+r.width-1,r.y,1,r.height},c);
+    fill(b, {r.x, r.y, r.width, 1}, c); fill(b, {r.x, r.y + r.height - 1, r.width, 1}, c);
+    fill(b, {r.x, r.y, 1, r.height}, c); fill(b, {r.x + r.width - 1, r.y, 1, r.height}, c);
 }
-// TODO-ORIGINAL: replace the embedded 3x5 font with original game typography.
-void text(render::Bitmap& b, int x, int y, const std::string& s, Color c, int limit,
-          int scale=2) {
-    const std::string chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$:/-?.'";
-    const char* glyphs[]={"010101111101101","110101110101110","011100100100011",
+// Fallback only, when the original GAME.FNT is missing: a 3x5 font.
+void tiny_text(render::Bitmap& b, int x, int y, const std::string& s, Color c, int limit, int scale = 1) {
+    const std::string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$:/-?.'";
+    const char* glyphs[] = {"010101111101101","110101110101110","011100100100011",
         "110101101101110","111100110100111","111100110100100","011100101101011",
         "101101111101101","111010010010111","001001001101010","101101110101101",
         "100100100100111","101111111101101","101111111111101","010101101101010",
@@ -51,280 +57,355 @@ void text(render::Bitmap& b, int x, int y, const std::string& s, Color c, int li
         "111100110001110","011100111101111","111001010010010","111101111101111",
         "111101111001110","011110010011110","000010000010000","001001010100100",
         "000000111000000","110001010000010","000000000000010","010010000000000"};
-    int end=x+limit;
-    for (unsigned char raw:s) {
-        if (x+3*scale>end) break;
-        auto n=chars.find(static_cast<char>(std::toupper(raw)));
-        if(n!=std::string::npos) for(int j=0;j<15;++j)
-            if(glyphs[n][j]=='1') fill(b,{x+(j%3)*scale,y+(j/3)*scale,scale,scale},c);
-        x+=4*scale;
+    const int end = x + limit;
+    for (unsigned char raw : s) {
+        if (x + 3 * scale > end) break;
+        const auto n = chars.find(static_cast<char>(std::toupper(raw)));
+        if (n != std::string::npos) for (int j = 0; j < 15; ++j)
+            if (glyphs[n][j] == '1') fill(b, {x + (j % 3) * scale, y + (j / 3) * scale, scale, scale}, c);
+        x += 4 * scale;
     }
 }
-bool inside(int x,int y,Rectangle r) {
-    return x>=r.x && y>=r.y && x<r.x+r.width && y<r.y+r.height;
+bool inside(int x, int y, Rectangle r) {
+    return x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height;
 }
+void copy_rect(const render::Bitmap& from, render::Bitmap& to, Rectangle r) {
+    const int x0 = std::max(0, r.x), x1 = std::min({to.width, from.width, r.x + r.width});
+    for (int y = std::max(0, r.y); y < std::min({to.height, from.height, r.y + r.height}); ++y)
+        if (x1 > x0) std::copy_n(from.rgba.begin() + (std::size_t(y) * from.width + x0) * 4,
+            std::size_t(x1 - x0) * 4, to.rgba.begin() + (std::size_t(y) * to.width + x0) * 4);
 }
+// Font text with a one pixel black shadow, for messages over the battlefield.
+void shadow_text(render::Bitmap& b, const ui::GameFont& font, const std::string& s, int x, int y, gfx::Rgba c) {
+    hud_text(b, font, s, x + 1, y + 1, {0, 0, 0, 255});
+    hud_text(b, font, s, x, y, c);
+}
+} // namespace
+
 void BattleHud::load_assets(const fs::MixFileSystem& files, const rules::IniFile& rules,
-                            const rules::IniFile& art, const std::vector<BuildChoice>& choices) {
-    panel_valid_=false;
-    if(panel_.rgba.empty())panel_={view_width,minimap_y,render::Bytes(std::size_t(view_width)*minimap_y*4)};
-    cameos_.clear();cameo_names_.clear();cameo_palette_.reset();
-    cameo_files_=&files;
-    const auto pal=files.read_file("cameo.pal");
-    if(!pal)return;
-    try { cameo_palette_=gfx::Palette::from_bytes(*pal); }
-    catch(const std::exception&) { return; }
-    for(const auto& c:choices) {
-        const auto image=rules.read_string(c.type,"Image",c.type);
-        cameo_names_[c.type]=art.read_string(image,"Cameo",image+"ICON")+".shp";
+                            const rules::IniFile& art, const std::vector<BuildChoice>& choices,
+                            bool soviet) {
+    panel_valid_ = false;
+    art_.load(files, soviet);
+    cameos_.clear(); cameo_names_.clear(); cameo_palette_.reset(); defenses_.clear();
+    cameo_files_ = &files;
+    for (const auto& c : choices)
+        if (rules.read_string(c.type, "BuildCat", "") == "Combat") defenses_.insert(c.type);
+    const auto pal = files.read_file("cameo.pal");
+    if (!pal) return;
+    try { cameo_palette_ = gfx::Palette::from_bytes(*pal); }
+    catch (const std::exception&) { return; }
+    for (const auto& c : choices) {
+        const auto image = rules.read_string(c.type, "Image", c.type);
+        cameo_names_[c.type] = art.read_string(image, "Cameo", image + "ICON") + ".shp";
     }
 }
 const render::Bitmap* BattleHud::cameo(const std::string& type) const {
-    auto cached=cameos_.find(type);
-    if(cached!=cameos_.end())return valid(cached->second)?&cached->second:nullptr;
-    if(!cameo_files_||!cameo_palette_)return nullptr;
-    const auto name=cameo_names_.find(type);
-    if(name==cameo_names_.end())return nullptr;
+    auto cached = cameos_.find(type);
+    if (cached != cameos_.end()) return valid(cached->second) ? &cached->second : nullptr;
+    if (!cameo_files_ || !cameo_palette_) return nullptr;
+    const auto name = cameo_names_.find(type);
+    if (name == cameo_names_.end()) return nullptr;
     render::Bitmap bitmap;
-    const auto data=cameo_files_->read_file(name->second);
-    if(data)try {
-        auto decoded=gfx::ShpImage::parse(*data).decode_frame(0,*cameo_palette_);
-        bitmap.width=decoded.width;bitmap.height=decoded.height;bitmap.rgba=std::move(decoded.pixels);
-    } catch(const std::exception&) { /* TODO-ORIGINAL: fallback for unsupported cameo art. */ }
-    const auto item=cameos_.emplace(type,std::move(bitmap)).first;
-    return valid(item->second)?&item->second:nullptr;
+    const auto data = cameo_files_->read_file(name->second);
+    if (data) try {
+        auto decoded = gfx::ShpImage::parse(*data).decode_frame(0, *cameo_palette_);
+        bitmap.width = decoded.width; bitmap.height = decoded.height; bitmap.rgba = std::move(decoded.pixels);
+    } catch (const std::exception&) { /* Missing cameo: plain slot with the name. */ }
+    const auto item = cameos_.emplace(type, std::move(bitmap)).first;
+    return valid(item->second) ? &item->second : nullptr;
 }
 
 render::Rectangle BattleHud::build_button_bounds(int i) {
-    if(i<0 || i>=build_columns*build_rows) return {};
-    return {palette_x+i%build_columns*build_button_pitch_x,
-        palette_y+i/build_columns*build_button_pitch_y,build_button_width,build_button_height};
+    if (i < 0 || i >= slots) return {};
+    return {palette_x + i % build_columns * build_button_pitch_x,
+            palette_y + i / build_columns * build_button_pitch_y, build_button_width, build_button_height};
 }
-render::Rectangle BattleHud::deploy_bounds() { return {palette_x,deploy_y,deploy_width,deploy_height}; }
-render::Rectangle BattleHud::minimap_bounds() { return {minimap_x,minimap_y,minimap_region_width,minimap_region_height}; }
-HudAction BattleHud::handle_click(int x,int y,const HudState& s) const {
-    if (y >= 36 && y < 58 && x >= 808 && x < 1018) {
-        active_category_ = static_cast<BuildCategory>((x-808)/42);
-        page_=0;
-        return {};
+render::Rectangle BattleHud::deploy_bounds() {
+    return {command_slot_x + deploy_slot * command_slot_width, deploy_y, deploy_width, deploy_height};
+}
+render::Rectangle BattleHud::minimap_bounds() {
+    return {minimap_x, minimap_y, minimap_region_width, minimap_region_height};
+}
+render::Rectangle BattleHud::scroll_down_bounds() { return {895, 734, 46, 25}; }
+render::Rectangle BattleHud::scroll_up_bounds() { return {941, 734, 46, 25}; }
+render::Rectangle BattleHud::tab_bounds(int tab) const {
+    if (tab < 0 || tab > 3) return {};
+    const auto layout = hud_side_layout(art_.soviet());
+    const auto* s = art_.sprite("tab00.shp");
+    return {layout.tab_x + tab * layout.tab_pitch, tab_y, s ? s->width : 28, s ? s->height : 27};
+}
+int BattleHud::tab_of(const BuildChoice& c) const {
+    switch (c.category) {
+    case BuildCategory::Defenses: return 1;
+    case BuildCategory::Infantry: return 2;
+    case BuildCategory::Vehicles: case BuildCategory::Aircraft: return 3;
+    default: return defenses_.count(c.type) ? 1 : 0;
     }
-    const int count=int(std::count_if(s.choices.begin(),s.choices.end(),[&](const auto& c){
-        return active_category_==BuildCategory::All || c.category==active_category_;
-    }));
-    const int pages=std::max(1,(count+build_columns*build_rows-1)/(build_columns*build_rows));
-    page_=std::min(page_,pages-1);
-    if(y>=550 && y<560 && x>=808 && x<1020 && pages>1) {
-        page_=(page_+(x<914?pages-1:1))%pages;
-        return {};
-    }
-    int slot=0;
+}
+// Keeps the active tab and the scroll row valid for this state. An empty
+// active tab moves to the first tab with items.
+void BattleHud::settle(const HudState& s) const {
+    int count[4] = {};
+    for (const auto& c : s.choices) ++count[tab_of(c)];
+    if (!count[active_tab_])
+        for (int t = 0; t < 4; ++t) if (count[t]) { active_tab_ = t; break; }
+    const int rows = (count[active_tab_] + build_columns - 1) / build_columns;
+    top_row_ = std::clamp(top_row_, 0, std::max(0, rows - build_rows));
+}
+std::vector<const BuildChoice*> BattleHud::visible(const HudState& s) const {
+    std::vector<const BuildChoice*> out;
+    int index = 0;
     for (const auto& c : s.choices) {
-        if (active_category_ != BuildCategory::All && c.category != active_category_) continue;
-        if(slot<page_*build_columns*build_rows){++slot;continue;}
-        if (slot >= (page_+1)*build_columns*build_rows) break;
-        if (inside(x,y,build_button_bounds(slot-page_*build_columns*build_rows)) && c.enabled)
-            return {HudActionKind::Build,c.type,{}};
-        ++slot;
+        if (tab_of(c) != active_tab_) continue;
+        if (index++ < top_row_ * build_columns) continue;
+        if (int(out.size()) == slots) break;
+        out.push_back(&c);
     }
-    if(s.can_deploy && inside(x,y,deploy_bounds())) return {HudActionKind::Deploy,{}, {}};
-    auto r=minimap_bounds();
-    if(inside(x,y,r) && s.map_width>0 && s.map_height>0)
-        return {HudActionKind::Minimap,{},
-            {static_cast<int>(static_cast<std::int64_t>(x-r.x)*s.map_width/r.width),
-             static_cast<int>(static_cast<std::int64_t>(y-r.y)*s.map_height/r.height)}};
+    return out;
+}
+render::Rectangle BattleHud::choice_bounds(const HudState& s, const std::string& type) const {
+    settle(s);
+    const auto list = visible(s);
+    for (std::size_t i = 0; i < list.size(); ++i)
+        if (list[i]->type == type) return build_button_bounds(int(i));
     return {};
 }
+
+HudAction BattleHud::handle_click(int x, int y, const HudState& s) const {
+    settle(s);
+    for (int t = 0; t < 4; ++t) if (inside(x, y, tab_bounds(t))) {
+        if (std::any_of(s.choices.begin(), s.choices.end(), [&](const auto& c) { return tab_of(c) == t; })) {
+            active_tab_ = t; top_row_ = 0;
+        }
+        return {};
+    }
+    if (inside(x, y, scroll_up_bounds())) { top_row_ = std::max(0, top_row_ - 1); return {}; }
+    if (inside(x, y, scroll_down_bounds())) { ++top_row_; settle(s); return {}; }
+    const auto list = visible(s);
+    for (std::size_t i = 0; i < list.size(); ++i)
+        if (inside(x, y, build_button_bounds(int(i))))
+            return list[i]->enabled ? HudAction{HudActionKind::Build, list[i]->type, {}} : HudAction{};
+    if (s.can_deploy && inside(x, y, deploy_bounds())) return {HudActionKind::Deploy, {}, {}};
+    const auto r = minimap_bounds();
+    if (inside(x, y, r) && s.map_width > 0 && s.map_height > 0 && valid(s.minimap))
+        return {HudActionKind::Minimap, {},
+            {static_cast<int>(static_cast<std::int64_t>(x - r.x) * s.map_width / r.width),
+             static_cast<int>(static_cast<std::int64_t>(y - r.y) * s.map_height / r.height)}};
+    return {};
+}
+
 bool BattleHud::same_panel(const HudState& s) const {
-    const auto& old=panel_state_;
-    return panel_valid_&&panel_page_==page_&&panel_category_==active_category_&&old.cash==s.cash&&
-        old.power_output==s.power_output&&old.power_drain==s.power_drain&&
-        old.status==s.status&&old.result==s.result&&old.selected_labels==s.selected_labels&&
-        old.can_deploy==s.can_deploy&&
-        old.choices.size()==s.choices.size()&&std::equal(old.choices.begin(),old.choices.end(),s.choices.begin(),
-            [](const auto& a,const auto& b) {
-                return a.type==b.type&&a.name==b.name&&a.cost==b.cost&&a.enabled==b.enabled&&
-                    a.progress==b.progress&&a.category==b.category&&a.queued==b.queued&&a.held==b.held;
-            });
+    const auto& old = panel_state_;
+    return panel_valid_ && panel_tab_ == active_tab_ && panel_row_ == top_row_ && old.cash == s.cash &&
+        old.power_output == s.power_output && old.power_drain == s.power_drain &&
+        old.can_deploy == s.can_deploy &&
+        old.choices.size() == s.choices.size() &&
+        std::equal(old.choices.begin(), old.choices.end(), s.choices.begin(), [](const auto& a, const auto& b) {
+            return a.type == b.type && a.name == b.name && a.cost == b.cost && a.enabled == b.enabled &&
+                a.progress == b.progress && a.category == b.category && a.queued == b.queued && a.held == b.held;
+        });
 }
-void BattleHud::draw_panel(render::Bitmap& b,const HudState& s) const {
-    fill(b,{sidebar_x,0,sidebar_width,minimap_y},dark);
-    text(b,808,3,"CREDITS $"+std::to_string(s.cash),ink,212);
-    text(b,808,17,"POWER OUT "+std::to_string(s.power_output)+" USE "+std::to_string(s.power_drain),
-        s.power_output<s.power_drain?red:ink,212);
-    fill(b,{808,29,212,6},s.power_output<s.power_drain?Color{75,30,24,255}:edge);
-    const auto capacity=std::max({1,s.power_output,s.power_drain});
-    fill(b,{808,29,static_cast<int>(212LL*std::max(0,s.power_output)/capacity),6},
-         s.power_output<s.power_drain?red:green);
-    // Enlarged tabs. The click test in handle_click uses these same rects.
-    // Below the power bar (ends at y 35), above the buttons (start y 60).
-    const char* tabs[] = {"ALL", "BLD", "INF", "VEH", "AIR"};
-    for (int i=0;i<5;++i) {
-        Rectangle tab{808+i*42,36,42,22};
-        if(static_cast<int>(active_category_)==i) {
-            // Clear active-tab mark: dim gold fill plus a gold frame.
-            fill(b,{tab.x+1,tab.y+1,tab.width-2,tab.height-2},{58,50,18,255});
-            border(b,tab,gold);
-            border(b,{tab.x+1,tab.y+1,tab.width-2,tab.height-2},gold);
-        } else {
-            border(b,tab,edge);
-        }
-        std::string label=tabs[i];
-        text(b,tab.x+(42-(4*static_cast<int>(label.size())-2))/2,tab.y+6,label,ink,40,2);
+
+void BattleHud::draw_panel(render::Bitmap& b, const HudState& s) const {
+    if (!art_.ready()) { draw_fallback_panel(b, s); return; }
+    const auto layout = hud_side_layout(art_.soviet());
+    const auto put = [&](const char* name, int frame, int x, int y) {
+        if (const auto* sprite = art_.sprite(name, frame)) hud_blit(b, *sprite, x, y);
+    };
+    // Sidebar frame, top to bottom.
+    put("credits.shp", 0, sidebar_x, 0);
+    put("top.shp", 0, sidebar_x, 16);
+    put("diplobtn.shp", 0, layout.diplomacy.x, layout.diplomacy.y);
+    put("optbtn.shp", 0, layout.options.x, layout.options.y);
+    put("side1.shp", 0, sidebar_x, 158);
+    put("repair.shp", 0, layout.repair.x, layout.repair.y);
+    put("sell.shp", 0, layout.sell.x, layout.sell.y);
+    int count[4] = {};
+    for (const auto& c : s.choices) ++count[tab_of(c)];
+    for (int t = 0; t < 4; ++t) {
+        const auto r = tab_bounds(t);
+        const std::string name = "tab0" + std::to_string(t) + ".shp";
+        put(name.c_str(), !count[t] ? 2 : t == active_tab_ ? 1 : 0, r.x, r.y);
     }
-    if (s.choices.empty() && s.result.empty()) {
-        text(b,816,90,"DEPLOY YOUR",gold,200);
-        text(b,816,106,"MCV FIRST",gold,200);
+    for (int row = 0; row < build_rows; ++row) put("side2.shp", 0, sidebar_x, strip_y + row * build_button_pitch_y);
+    put("side3.shp", 0, sidebar_x, 727);
+    put("addon.shp", 0, sidebar_x, 753);
+    const int rows = (count[active_tab_] + build_columns - 1) / build_columns;
+    put("r-dn.shp", top_row_ + build_rows < rows ? 0 : 2, scroll_down_bounds().x, scroll_down_bounds().y);
+    put("r-up.shp", top_row_ > 0 ? 0 : 2, scroll_up_bounds().x, scroll_up_bounds().y);
+    // Credits, centered in CREDITS.SHP.
+    if (const auto* font = art_.font()) {
+        const auto cash = std::to_string(std::max(0, s.cash));
+        hud_text(b, *font, cash, sidebar_x + (sidebar_width - hud_text_width(*font, cash)) / 2, 2, side_text);
     }
-    int i=0;
-    for (const auto& c : s.choices) {
-        if (active_category_ != BuildCategory::All && c.category != active_category_) continue;
-        if(i<page_*build_columns*build_rows){++i;continue;}
-        if (i>=(page_+1)*build_columns*build_rows) break;
-        auto r=build_button_bounds(i++-page_*build_columns*build_rows); border(b,r,edge);
-        const auto* image=cameo(c.type);
-        if (image) {
-            const auto& src=*image;
-            for (int y=1;y<r.height-1;++y) for (int x=1;x<r.width-1;++x) {
-                auto p=(static_cast<std::size_t>(y-1)*src.height/(r.height-2)*src.width+(x-1)*src.width/(r.width-2))*4;
-                if (src.rgba[p+3]) {
-                    const int shade=c.enabled?5:2;
-                    pixel(b,r.x+x,r.y+y,{std::uint8_t(src.rgba[p]*shade/5),
-                        std::uint8_t(src.rgba[p+1]*shade/5),std::uint8_t(src.rgba[p+2]*shade/5),src.rgba[p+3]});
+    // Power bar. TODO-ORIGINAL: the segment scale and the colour split are
+    // fitted to two original screenshots, not read from the original code.
+    const int lit = std::clamp(s.power_output * 2 / 7, 0, power_segments);
+    const bool low = s.power_drain > s.power_output;
+    for (int k = 0; k < power_segments; ++k) {
+        int frame = 0;
+        if (k < lit) frame = low ? 3 : k < lit / 4 ? 3 : k < lit * 3 / 4 ? 2 : 1;
+        put("powerp.shp", frame, power_x, power_bottom - 3 * k);
+    }
+    // Cameos.
+    const auto list = visible(s);
+    for (std::size_t i = 0; i < list.size(); ++i) {
+        const auto& c = *list[i];
+        const auto r = build_button_bounds(int(i));
+        if (const auto* image = cameo(c.type)) {
+            const int shade = c.enabled ? 5 : 2;
+            for (int y = 0; y < std::min(r.height, image->height); ++y)
+                for (int x = 0; x < std::min(r.width, image->width); ++x) {
+                    const auto* p = &image->rgba[(std::size_t(y) * image->width + x) * 4];
+                    if (p[3]) pixel(b, r.x + x, r.y + y, {std::uint8_t(p[0] * shade / 5),
+                        std::uint8_t(p[1] * shade / 5), std::uint8_t(p[2] * shade / 5), 255});
                 }
+        } else if (const auto* font = art_.font()) {
+            hud_text(b, *font, c.name.empty() ? c.type : c.name, r.x + 2, r.y + 2, side_text);
+        }
+        // Build clock: GCLOCK2.SHP frame 1 (just started) .. 54 (almost done).
+        if (c.progress > 0 && c.progress < 1000)
+            if (const auto* clock = art_.sprite("gclock2.shp", 1 + std::clamp(c.progress, 0, 999) * 54 / 1000))
+                hud_blend(b, *clock, r.x, r.y);
+        if (const auto* font = art_.font()) {
+            std::string label = c.held ? "On Hold" :
+                c.progress >= 1000 && tab_of(c) <= 1 ? "Ready" : "";
+            if (!label.empty()) {
+                const int w = hud_text_width(*font, label);
+                const int x = r.x + (r.width - w) / 2;
+                fill(b, {x - 2, r.y + 1, w + 3, int(font->line_height()) + 1}, {0, 0, 0, 255});
+                hud_text(b, *font, label, x, r.y + 1, side_text);
+            }
+            if (c.queued > 1) {
+                const auto n = std::to_string(c.queued);
+                hud_text(b, *font, n, r.x + r.width - hud_text_width(*font, n) - 2, r.y + 1, side_text);
             }
         }
-        auto color=c.enabled?ink:edge;
-        const bool art_loaded=image!=nullptr;
-        if (art_loaded) {
-            // Original cameo art: no name, cost or BUILD text on top.
-            if(c.held) {
-                text(b,r.x+4,r.y+22,"ON HOLD",gold,r.width-8,2);
-            } else if (c.progress>=1000) {
-                text(b,r.x+4,r.y+22,c.category==BuildCategory::Buildings?"READY":"WAITING FOR EXIT",gold,r.width-8,1);
-            } else if (c.progress>0) {
-                // Clock shading, like the original CLOCK.SHP overlay: a dark
-                // wedge that grows clockwise from 12 o'clock.
-                const double sweep=std::clamp(c.progress,0,1000)/1000.0*2*M_PI;
-                const int cx=r.x+r.width/2, cy=r.y+r.height/2;
-                const int rad=std::min(r.width,r.height)/2-2;
-                // Local button coords; dx/dy measure from the button center.
-                for (int y=1;y<r.height-1;++y)
-                    for (int x=1;x<r.width-1;++x) {
-                        const double dx=r.x+x+0.5-cx, dy=r.y+y+0.5-cy;
-                        if (dx*dx+dy*dy>rad*rad) continue;
-                        double ang=std::atan2(dx,-dy);
-                        if (ang<0) ang+=2*M_PI;
-                        if (ang<=sweep) {
-                            // Blend toward black, like the original translucent
-                            // clock table: keep 40 percent of the color.
-                            auto i=(static_cast<std::size_t>(r.y+y)*b.width+r.x+x)*4;
-                            b.rgba[i]=b.rgba[i]*2/5;
-                            b.rgba[i+1]=b.rgba[i+1]*2/5;
-                            b.rgba[i+2]=b.rgba[i+2]*2/5;
-                        }
-                    }
-            }
-        } else {
-            // Fallback art: keep the text labels and the progress bar.
-            text(b,r.x+4,r.y+6,c.name.empty()?c.type:c.name,color,r.width-8);
-            text(b,r.x+4,r.y+19,"$"+std::to_string(c.cost),color,r.width-8);
-            text(b,r.x+4,r.y+31,c.held?"ON HOLD":c.progress>=1000?"READY":c.progress>0?std::to_string(c.progress/10)+"%":"BUILD",color,r.width-8);
-            fill(b,{r.x+4,r.y+46,(r.width-8)*std::clamp(c.progress,0,1000)/1000,5},c.enabled?green:edge);
-        }
-        if(c.queued>0) {  // Queue count badge: total items, active one included.
-            const std::string n=std::to_string(c.queued);
-            const int w=8*static_cast<int>(n.size())+6;
-            fill(b,{r.x+r.width-w-2,r.y+r.height-15,w,13},dark);
-            text(b,r.x+r.width-w-1,r.y+r.height-13,n,gold,w-2,2);
-        }
     }
-    const int count=int(std::count_if(s.choices.begin(),s.choices.end(),[&](const auto& c){
-        return active_category_==BuildCategory::All || c.category==active_category_;
-    }));
-    const int pages=std::max(1,(count+build_columns*build_rows-1)/(build_columns*build_rows));
-    if(pages>1)text(b,808,552,"PREV     "+std::to_string(page_+1)+"/"+std::to_string(pages)+"     NEXT",gold,212,1);
-    if(s.can_deploy) {
-        border(b,deploy_bounds(),ink); text(b,816,577,"DEPLOY",ink,190);
+    // Command bar.
+    put("lspacer.shp", 0, 0, command_bar_y);
+    put("lendcap.shp", 0, 20, command_bar_y);
+    for (int i = 0; i < command_slots; ++i) {
+        const int x = command_slot_x + i * command_slot_width;
+        if (i < int(std::size(command_buttons))) put(command_buttons[i], 0, x, command_bar_y);
+        else put("bttnbkgd.shp", 0, x, command_bar_y);
     }
-    text(b,808,596,"SELECTED UNITS",edge,212);
-    int y=606;
-    for(const auto& label:s.selected_labels) {
-        if(y>642) break;
-        text(b,808,y,label,ink,212); y+=13;
-    }
-    // Status on two short rows so long text does not cut off. Rows sit
-    // below the selected list (ends y 643) and above the minimap (y 672).
-    const std::string& st=s.status;
-    std::string row1=st,row2;
-    if(st.size()>26) {
-        auto cut=st.rfind(' ',26);
-        if(cut==std::string::npos) cut=26;
-        row1=st.substr(0,cut);
-        row2=st.substr(cut+(st[cut]==' '?1:0));
-    }
-    text(b,808,650,row1,ink,212,row1.size()>26?1:2);
-    text(b,808,662,row2,ink,212,row2.size()>26?1:2);
+    put("rendcap.shp", 0, command_slot_x + command_slots * command_slot_width, command_bar_y);
 }
-void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
-    loop::profile::Timer probe(loop::profile::Phase::HudDraw);
-    if(!valid(b))return;
-    const int count=int(std::count_if(s.choices.begin(),s.choices.end(),[&](const auto& c){
-        return active_category_==BuildCategory::All || c.category==active_category_;
-    }));
-    page_=std::min(page_,std::max(0,(count-1)/(build_columns*build_rows)));
-    if(!same_panel(s)) {
-        panel_valid_=false;
-        if(panel_.rgba.empty())panel_={view_width,minimap_y,render::Bytes(std::size_t(view_width)*minimap_y*4)};
-        draw_panel(panel_,s);
-        panel_state_.cash=s.cash;panel_state_.power_output=s.power_output;panel_state_.power_drain=s.power_drain;
-        panel_state_.selected_labels=s.selected_labels;panel_state_.choices=s.choices;
-        panel_state_.status=s.status;panel_state_.result=s.result;panel_state_.can_deploy=s.can_deploy;
-        panel_category_=active_category_;panel_page_=page_;panel_valid_=true;
+
+void BattleHud::draw_fallback_panel(render::Bitmap& b, const HudState& s) const {
+    // Same regions as the original art, in plain shapes.
+    fill(b, {sidebar_x, 0, sidebar_width, view_height}, dark);
+    fill(b, {0, command_bar_y, sidebar_x, command_bar_height}, dark);
+    tiny_text(b, sidebar_x + 50, 4, "$" + std::to_string(s.cash), ink, 110, 2);
+    border(b, minimap_bounds(), edge);
+    int count[4] = {};
+    for (const auto& c : s.choices) ++count[tab_of(c)];
+    const char* names[] = {"BLD", "DEF", "INF", "VEH"};
+    for (int t = 0; t < 4; ++t) {
+        const auto r = tab_bounds(t);
+        border(b, r, t == active_tab_ ? ink : edge);
+        tiny_text(b, r.x + 2, r.y + 10, names[t], count[t] ? ink : edge, r.width - 2);
     }
-    const int right=std::min(b.width,view_width),bottom=std::min(b.height,minimap_y);
-    if(right>sidebar_x)for(int y=0;y<bottom;++y)
-        std::copy_n(panel_.rgba.begin()+(std::size_t(y)*view_width+sidebar_x)*4,
-            std::size_t(right-sidebar_x)*4,b.rgba.begin()+(std::size_t(y)*b.width+sidebar_x)*4);
-    // Hover tooltip: the hovered cameo cost, drawn over the cached panel.
-    if(s.pointer_x>=palette_x&&s.pointer_x<view_width&&s.pointer_y>=palette_y&&s.pointer_y<deploy_y) {
-        int slot=0;
-        for(const auto& c:s.choices) {
-            if(active_category_!=BuildCategory::All&&c.category!=active_category_) continue;
-            if(slot>=build_columns*build_rows) break;
-            auto r=build_button_bounds(slot++);
-            if(c.enabled&&inside(s.pointer_x,s.pointer_y,r)) {
-                const std::string tip="$"+std::to_string(c.cost);
-                const int w=4*static_cast<int>(tip.size())+6;
-                const Rectangle box{r.x+r.width-w,r.y+r.height+1,w,11};
-                fill(b,box,dark); border(b,box,edge);
-                text(b,box.x+3,box.y+3,tip,gold,w-4,1);
-                break;
-            }
+    const auto list = visible(s);
+    for (int i = 0; i < slots; ++i) border(b, build_button_bounds(i), edge);
+    for (std::size_t i = 0; i < list.size(); ++i) {
+        const auto& c = *list[i];
+        const auto r = build_button_bounds(int(i));
+        const Color color = c.enabled ? ink : edge;
+        tiny_text(b, r.x + 3, r.y + 4, c.name.empty() ? c.type : c.name, color, r.width - 6);
+        tiny_text(b, r.x + 3, r.y + 14, "$" + std::to_string(c.cost), color, r.width - 6);
+        tiny_text(b, r.x + 3, r.y + 24, c.held ? "HOLD" : c.progress >= 1000 ? "READY" :
+            c.progress > 0 ? std::to_string(c.progress / 10) + "%" : "", color, r.width - 6);
+        if (c.queued > 1) tiny_text(b, r.x + 3, r.y + 34, std::to_string(c.queued), color, r.width - 6);
+    }
+    for (int i = 0; i < command_slots; ++i)
+        border(b, {command_slot_x + i * command_slot_width, command_bar_y, command_slot_width, command_bar_height}, edge);
+    if (s.can_deploy) tiny_text(b, deploy_bounds().x + 4, deploy_bounds().y + 13, "DEPLOY", ink, 48);
+}
+
+void BattleHud::draw(render::Bitmap& b, const HudState& s) const {
+    loop::profile::Timer probe(loop::profile::Phase::HudDraw);
+    if (!valid(b)) return;
+    settle(s);
+    if (!same_panel(s)) {
+        if (panel_.rgba.empty()) panel_ = {view_width, view_height, render::Bytes(std::size_t(view_width) * view_height * 4)};
+        draw_panel(panel_, s);
+        panel_state_.cash = s.cash; panel_state_.power_output = s.power_output; panel_state_.power_drain = s.power_drain;
+        panel_state_.choices = s.choices; panel_state_.can_deploy = s.can_deploy;
+        panel_tab_ = active_tab_; panel_row_ = top_row_; panel_valid_ = true;
+    }
+    copy_rect(panel_, b, {sidebar_x, 0, sidebar_width, view_height});
+    copy_rect(panel_, b, {0, command_bar_y, sidebar_x, command_bar_height});
+    const auto* font = art_.font();
+
+    // Radar: eagle logo while off; opens over 32 frames when it comes online.
+    const bool radar_on = valid(s.minimap);
+    radar_frame_ = std::clamp(radar_frame_ + (radar_on ? 1 : -1), 0, 32);
+    const auto r = minimap_bounds();
+    if (const auto* radar = art_.sprite("radar.shp", radar_frame_)) hud_blit(b, *radar, sidebar_x, 48);
+    else fill(b, r, {8, 15, 12, 255});
+    if (radar_on && (radar_frame_ == 32 || !art_.ready())) {
+        for (int y = 0; y < r.height; ++y) for (int x = 0; x < r.width; ++x) {
+            const auto i = (static_cast<std::size_t>(y) * s.minimap.height / r.height * s.minimap.width +
+                static_cast<std::size_t>(x) * s.minimap.width / r.width) * 4;
+            pixel(b, r.x + x, r.y + y, {s.minimap.rgba[i], s.minimap.rgba[i + 1], s.minimap.rgba[i + 2], 255});
+        }
+        if (s.map_width > 0 && s.map_height > 0 && s.camera.width > 0 && s.camera.height > 0) {
+            auto scale = [](std::int64_t v, int map, int size) { return static_cast<int>(std::clamp<std::int64_t>(v, 0, map) * size / map); };
+            const int x = scale(s.camera.x, s.map_width, r.width), y = scale(s.camera.y, s.map_height, r.height);
+            const int right = scale(static_cast<std::int64_t>(s.camera.x) + s.camera.width, s.map_width, r.width);
+            const int bottom = scale(static_cast<std::int64_t>(s.camera.y) + s.camera.height, s.map_height, r.height);
+            if (right > x && bottom > y) border(b, {r.x + x, r.y + y, right - x, bottom - y}, ink);
         }
     }
-    auto r=minimap_bounds(); fill(b,r,{8,15,12,255});
-    if(valid(s.minimap)) for(int y=0;y<r.height;++y) for(int x=0;x<r.width;++x) {
-        const auto i=(static_cast<std::size_t>(y)*s.minimap.height/r.height*s.minimap.width+
-            static_cast<std::size_t>(x)*s.minimap.width/r.width)*4;
-        pixel(b,r.x+x,r.y+y,{s.minimap.rgba[i],s.minimap.rgba[i+1],s.minimap.rgba[i+2],s.minimap.rgba[i+3]});
+
+    // Hover: a light frame on the cameo under the pointer, and a tooltip
+    // with the name and the cost.
+    const auto list = visible(s);
+    for (std::size_t i = 0; i < list.size(); ++i) {
+        const auto box = build_button_bounds(int(i));
+        if (!inside(s.pointer_x, s.pointer_y, box)) continue;
+        border(b, box, {side_text.r, side_text.g, side_text.b, 255});
+        const auto& c = *list[i];
+        const std::string name = c.name.empty() ? c.type : c.name, cost = "$" + std::to_string(c.cost);
+        if (font) {
+            const int w = std::max(hud_text_width(*font, name), hud_text_width(*font, cost)) + 6;
+            const int h = 2 * int(font->line_height()) + 4;
+            const Rectangle tip{std::max(0, sidebar_x - w - 2), std::clamp(box.y, 0, command_bar_y - h), w, h};
+            fill(b, tip, {0, 0, 0, 255}); border(b, tip, {side_text.r, side_text.g, side_text.b, 255});
+            hud_text(b, *font, name, tip.x + 3, tip.y + 2, side_text);
+            hud_text(b, *font, cost, tip.x + 3, tip.y + 2 + int(font->line_height()), side_text);
+        } else {
+            const int w = 4 * int(cost.size()) + 6;
+            const Rectangle tip{sidebar_x - w - 2, box.y, w, 11};
+            fill(b, tip, dark); border(b, tip, edge);
+            tiny_text(b, tip.x + 3, tip.y + 3, cost, ink, w - 4);
+        }
+        break;
     }
-    if(s.map_width>0 && s.map_height>0 && s.camera.width>0 && s.camera.height>0) {
-        auto scale=[](std::int64_t v,int map,int size) { return static_cast<int>(std::clamp<std::int64_t>(v,0,map)*size/map); };
-        int x=scale(s.camera.x,s.map_width,r.width), y=scale(s.camera.y,s.map_height,r.height);
-        int right=scale(static_cast<std::int64_t>(s.camera.x)+s.camera.width,s.map_width,r.width);
-        int bottom=scale(static_cast<std::int64_t>(s.camera.y)+s.camera.height,s.map_height,r.height);
-        if(right>x && bottom>y) border(b,{r.x+x,r.y+y,right-x,bottom-y},ink);
+
+    // Message line, top left of the battlefield, like original game messages.
+    if (!s.status.empty()) {
+        if (font) shadow_text(b, *font, s.status, 8, 8, {255, 255, 255, 255});
+        else tiny_text(b, 8, 8, s.status, ink, sidebar_x - 16, 2);
     }
-    if(!s.result.empty()) {
-        // Clear end banner: VICTORY green, DEFEAT red, DRAW gold.
-        const bool win=s.result.find("VICT")!=std::string::npos;
-        const Color tone=win?green:s.result.find("DEFEAT")!=std::string::npos?red:gold;
-        const Rectangle box{(sidebar_x-604)/2,330,604,60};
-        fill(b,box,dark); border(b,box,tone);
-        // TODO-ORIGINAL: original end-of-match banner art and animation.
-        const int scale=8, w=static_cast<int>(s.result.size())*4*scale-scale;
-        text(b,box.x+std::max(0,(box.width-w)/2),box.y+(box.height-5*scale)/2,
-             s.result,tone,box.width-16,scale);
+
+    // End banner: GRFXTXT.SHP "You Are Victorious!" or "Game Over".
+    if (!s.result.empty()) {
+        const bool win = s.result.find("VICT") != std::string::npos;
+        const auto* banner = art_.sprite("grfxtxt.shp", win ? 2 : 3);
+        if (banner) {
+            hud_blit(b, *banner, (sidebar_x - banner->width) / 2, (command_bar_y - banner->height) / 2,
+                     {0, 0, sidebar_x, command_bar_y});
+        } else {
+            const Rectangle box{(sidebar_x - 604) / 2, 330, 604, 60};
+            fill(b, box, dark); border(b, box, ink);
+            const int scale = 8, w = static_cast<int>(s.result.size()) * 4 * scale - scale;
+            tiny_text(b, box.x + std::max(0, (box.width - w) / 2), box.y + (box.height - 5 * scale) / 2,
+                      s.result, ink, box.width - 16, scale);
+        }
     }
 }
 } // namespace ra2::app
