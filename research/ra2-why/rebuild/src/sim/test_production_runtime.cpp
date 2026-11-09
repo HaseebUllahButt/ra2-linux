@@ -1,4 +1,5 @@
 #include "production_runtime.h"
+#include "../session/world/world.h"
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
@@ -77,6 +78,46 @@ void placement_cases() {
 unsigned checks=0;
 void require(bool ok,const char* what) { ++checks; if (!ok) throw std::runtime_error(what); }
 void self_test() {
+    // 004B9630 preserves paid stages; 004B97C0 refunds only paid money.
+    {
+        namespace w=ra2::session::world;
+        w::Snapshot world; world.setup_progress=w::SetupProgress::Complete;
+        world.geometry=ra2::session::PlacementGeometry{100,100,{2,2,96,90}};
+        w::House owner; owner.id=1; owner.cash=800;
+        owner.infantry_owned_5440=std::map<std::int32_t,std::int32_t>{{0,1}};
+        world.houses.push_back(owner);
+        w::Entity product; product.id=2; product.house_id=1; product.type="E1";
+        product.kind=w::Kind::Infantry; product.lifetime=w::Lifetime::Created;
+        world.entities.push_back(product);
+        Catalog catalog; TypeFacts type; type.id="E1"; type.rtti=Rtti::InfantryType; type.cost=200;
+        catalog.infantry.push_back(type);
+        FactorySet factories; FactoryState factory; factory.house_id=1; factory.slot=1;
+        factory.object=2; factory.object_type="E1"; factory.progress=20; factory.balance=125;
+        factory.interval=5; factory.timer_duration=5; factory.suspended=false;
+        factories.factories.push_back(factory);
+        require(hold_production(world,factories,catalog,1,"E1",12).status==Status::Done,"hold running product");
+        const auto& held=factories.factories.front();
+        require(held.progress==20 && held.balance==125 && held.suspended && held.interval==0 &&
+            held.timer_duration==0 && held.timer_start==12,"hold preserves progress and clears timer");
+        require(*world.houses.front().cash==800,"hold has no refund");
+        require(tick(world,factories,catalog,1000).status==Status::Done &&
+            factories.factories.front().progress==20 && *world.houses.front().cash==800,
+            "held factory never advances or drains money");
+        require(hold_production(world,factories,catalog,1,"E1",13).status==Status::Rejected,"hold twice rejected");
+        require(cancel_production(world,factories,catalog,1,"E1",14).status==Status::Done,"cancel held product");
+        require(*world.houses.front().cash==875,"refund equals cost minus balance");
+        require(world.houses.front().infantry_owned_5440->at(0)==0,"cancel drops owned count");
+        require(world.entities.front().lifetime==w::Lifetime::Destroyed,"cancel destroys product");
+        require(!factories.factories.front().object && factories.factories.front().progress==0,"cancel resets factory");
+        require(cancel_production(world,factories,catalog,1,"E1",15).status==Status::Rejected,"cancel twice rejected");
+        require(*world.houses.front().cash==875,"cancel twice gives no extra refund");
+        world.entities.front().lifetime=w::Lifetime::Created;
+        (*world.houses.front().infantry_owned_5440)[0]=1;
+        auto& complete=factories.factories.front();
+        complete.object=2; complete.object_type="E1"; complete.progress=54; complete.balance=0;
+        require(cancel_production(world,factories,catalog,1,"E1",16).status==Status::Done &&
+            *world.houses.front().cash==1075,"completed product refunds full cost before exit");
+    }
     // Foundation lists from 00454EF0: GACNST uses 4x4 (index 18).
     require(original_foundation_cells(18).size()==16,"4x4 foundation");
     require(original_foundation_cells(9).size()==8,"special 3x3 foundation");

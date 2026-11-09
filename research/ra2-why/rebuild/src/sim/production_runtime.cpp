@@ -934,6 +934,61 @@ Outcome begin_production(w::Snapshot& snapshot,FactorySet& factories,const Catal
     Outcome o; o.status=Status::Done; o.entity=factory_in_slot(factories,house_id,slot)->object; o.value=*frames; return o;
 }
 
+Outcome hold_production(w::Snapshot& s,FactorySet& f,const Catalog& c,std::uint32_t owner,
+                        const std::string& type,std::uint64_t frame) {
+    if (!runtime_ready(s)) return fail(Status::NeedsInput,"setup is not complete");
+    const auto* t=c.find(type);
+    if (!t) return fail(Status::Rejected,"unknown type");
+    auto* factory=factory_in_slot(f,owner,slot_of(*t));
+    if (!factory || !factory->object || factory->object_type!=type || factory->suspended)
+        return fail(Status::Rejected,"no running product");
+    // 004B9630: preserve progress and balance, discard the partial stage timer.
+    factory->suspended=true; factory->interval=0;
+    factory->timer_start=frame; factory->timer_duration=0;
+    return Outcome{Status::Done,{},factory->object,{}};
+}
+
+Outcome cancel_production(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint32_t owner,
+                          const std::string& type,std::uint64_t frame) {
+    if (!runtime_ready(snapshot)) return fail(Status::NeedsInput,"setup is not complete");
+    const auto* t=c.find(type);
+    if (!t) return fail(Status::Rejected,"unknown type");
+    auto* factory=factory_in_slot(factories,owner,slot_of(*t));
+    if (!factory || !factory->object || factory->object_type!=type)
+        return fail(Status::Rejected,"no product to cancel");
+    auto* h=house_of(snapshot,owner);
+    const auto* item=entity_of(snapshot,factory->object);
+    if (!h || !h->cash || !item || item->lifetime!=w::Lifetime::Created)
+        return fail(Status::NeedsInput,"factory product or cash unresolved");
+    const auto cost=cost_of(c,*t,*h);
+    if (!cost) return fail(Status::NeedsInput,"refund cost unresolved");
+    const auto cash=std::int64_t(*h->cash)+*cost-factory->balance;
+    if (cash<INT32_MIN || cash>INT32_MAX) return fail(Status::NeedsInput,"refund exceeds cash range");
+    w::Undo undo(snapshot); auto f=factories;
+    factory=factory_in_slot(f,owner,slot_of(*t));
+    h=house_of(snapshot,owner);
+    auto* object=entity_of(snapshot,factory->object);
+    // 004B97C0 refunds current Cost_Of(owner) minus unpaid Balance, even at 54.
+    *h->cash=std::int32_t(cash);
+    auto* counts=t->rtti==Rtti::BuildingType?&h->buildings_owned_5420:
+        t->rtti==Rtti::UnitType?&h->units_owned_5430:
+        t->rtti==Rtti::InfantryType?&h->infantry_owned_5440:&h->aircraft_owned_5450;
+    if (!counter_add(*counts,t->heap_index,-1)) return fail(Status::NeedsInput,"owned counter unresolved");
+    if (t->rtti==Rtti::UnitType) {
+        if (h->unit_count) --*h->unit_count;
+        if (h->unit_type_counts) --(*h->unit_type_counts)[t->heap_index];
+    }
+    f.buildings.erase(object->id);
+    object->lifetime=w::Lifetime::Destroyed; object->resolved_hp=0;
+    object->active=false; object->in_limbo=true; object->on_map=false;
+    object->object_field_74=0; object->object_field_76=1; object->target_id=0;
+    factory->object=0; factory->object_type.clear(); factory->balance=0;
+    factory->progress=0; factory->suspended=true; factory->interval=0;
+    factory->timer_start=frame; factory->timer_duration=0;
+    undo.commit(); factories=std::move(f);
+    return Outcome{Status::Done,{},{},{}};
+}
+
 std::optional<bool> passes_proximity(const w::Snapshot& s,const FactorySet& f,const Catalog& c,
                                      std::uint32_t house_id,const std::string& type,CellXY cell) {
     const auto* t=c.find(type); const auto* h=house_of(s,house_id);
