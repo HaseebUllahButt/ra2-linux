@@ -239,6 +239,18 @@ int main(int argc,char** argv) {
     assert(menu.page()==ui::Page::SinglePlayer); menu.render();
     menu.pointer_down(645,284); assert(menu.pointer_up(645,284)==ui::Action::PageChanged);
     assert(menu.page()==ui::Page::Skirmish); auto skirmish_image=menu.render();
+    const auto start_control=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
+        [](const auto& c){return c.id==ui::SkirmishControls::start;});
+    assert(start_control!=base_skirmish.controls.end());
+    // Shell buttons snap to the original 156-by-42 pixel right column.
+    const int start_x=650;
+    const int start_y=249;
+    menu.pointer_down(start_x,start_y);
+    assert(menu.pointer_up(start_x,start_y)==ui::Action::None);
+    menu.enable_prototype_start(true);
+    menu.pointer_down(start_x,start_y);
+    assert(menu.pointer_up(start_x,start_y)==ui::Action::StartMatch);
+    menu.enable_prototype_start(false);
     auto speed_label=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
                                   [](const auto& c){return c.id==1689;});
     assert(speed_label!=base_skirmish.controls.end());

@@ -37,7 +37,8 @@ all: test
 
 FS_OBJECTS = build/native/src/fs/mix_archive.o build/native/src/fs/mix_bootstrap.o build/native/src/fs/filename_hash.o
 GFX_OBJECTS = build/native/src/gfx/palette.o build/native/src/gfx/shp_decode.o
-SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS)) build/native/src/weapons/weapons.o $(SESSION_WORLD_OBJECTS)
+COMBAT_RUNTIME_OBJECTS = build/native/src/weapons/unit_death.o build/native/src/weapons/detonation.o build/native/src/weapons/muzzle.o build/native/src/weapons/projectile_damage.o build/native/src/weapons/cannon_line.o build/native/src/weapons/cannon_range.o build/native/src/weapons/fire_eligibility.o build/native/src/weapons/fire_timer.o build/native/src/weapons/techno_damage.o build/native/src/weapons/weapons.o build/native/src/weapons/object_damage.o build/native/src/sim/damage_runtime.o build/native/src/sim/random.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o build/native/src/rules/ini_file.o
+SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS)) $(COMBAT_RUNTIME_OBJECTS) $(SESSION_WORLD_OBJECTS)
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 SESSION_OBJECTS = build/native/src/session/session.o build/native/src/session/map_geometry.o build/native/src/session/placement_terrain.o
 SESSION_WORLD_OBJECTS = build/native/src/session/world/world.o build/native/src/session/world/speed_type.o build/native/src/session/world/movement_zone.o build/native/src/session/world/unit_flags.o $(SESSION_OBJECTS) build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/sim/coarse_category.o build/native/src/sim/cell_setup.o build/native/src/sim/replacement.o build/native/src/sim/world.o build/native/src/sim/floor.o build/native/src/rules/ini_file.o build/native/src/weapons/occupant_order.o
@@ -447,7 +448,6 @@ build/session_unit_loop_cases: build/native/src/session/session.o build/native/s
 build/session_mission_cases: build/native/src/session/session.o build/native/src/session/mission_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-COMBAT_RUNTIME_OBJECTS = build/native/src/weapons/unit_death.o build/native/src/weapons/detonation.o build/native/src/weapons/muzzle.o build/native/src/weapons/projectile_damage.o build/native/src/weapons/cannon_line.o build/native/src/weapons/cannon_range.o build/native/src/weapons/fire_eligibility.o build/native/src/weapons/fire_timer.o build/native/src/weapons/techno_damage.o build/native/src/weapons/weapons.o build/native/src/weapons/object_damage.o build/native/src/sim/damage_runtime.o build/native/src/sim/random.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o build/native/src/rules/ini_file.o
 
 .PHONY: combat-runtime
 combat-runtime: build/combat_runtime_regression
@@ -667,7 +667,7 @@ run-map:
 sim-production-runtime: build/sim_production_runtime_test
 	build/sim_production_runtime_test
 
-build/sim_production_runtime_test: build/native/src/sim/test_production_runtime.o build/native/src/sim/production_runtime.o
+build/sim_production_runtime_test: build/native/src/sim/test_production_runtime.o build/native/src/sim/production_runtime.o build/native/src/sim/build_time.o build/native/src/sim/factory.o build/native/src/sim/random.o build/native/src/rules/ini_file.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 .PHONY: sim-goal-runtime sim-goal-runtime-real sim-live-cell-setup sim-unit-visibility

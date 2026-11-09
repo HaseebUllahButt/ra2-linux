@@ -93,7 +93,7 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     std::set<std::int32_t> keys_;
     std::set<std::string> gaps_;
     int camera_x_=0,camera_y_=0,pointer_x_=-1,pointer_y_=-1;
-    std::string placement_,status_="Select units. Right-click to move or attack. D deploys. Esc returns.";
+    std::string placement_,status_="Select MCV. D deploys.";
     bool quit_=false,autoplay_moved_=false,autoplay_deployed_=false;
     std::uint32_t autoplay_unit_=0;
     std::optional<sim::Coord> autoplay_start_;
@@ -180,7 +180,6 @@ public:
                 else quit_=true;
                 return;
             }
-            if (input.pressed && input.key==SDLK_d) deploy_selected();
             if (input.pressed && input.key==SDLK_h) {
                 for (const auto& e:world_.entities) if (live(e)&&e.house_id==player_) {center(e);break;}
             }
@@ -244,7 +243,11 @@ public:
             }
             break;
         case OrderKind::Attack:
-            if (combat_.attack(world_,order.entity,order.target)) attacks_[order.entity]=order.target;
+            if (combat_.attack(world_,order.entity,order.target)) {
+                const auto prior=attacks_.find(order.entity);
+                if(prior==attacks_.end()||prior->second!=order.target)movement_.cancel(world_,order.entity);
+                attacks_[order.entity]=order.target;
+            }
             break;
         case OrderKind::Stop:
             movement_.cancel(world_,order.entity);combat_.stop(world_,order.entity);attacks_.erase(order.entity);break;
@@ -366,7 +369,8 @@ public:
         for(const auto id:fighters) {
             const auto* source=find(world_,id);const w::Entity* target=nullptr;
             std::int64_t best=std::numeric_limits<std::int64_t>::max();
-            for(const auto& other:world_.entities) if(live(other)&&other.house_id==enemy_&&other.kind!=w::Kind::Terrain) {
+            for(const auto& other:world_.entities) if(live(other)&&other.house_id==enemy_&&
+                combat_.can_attack(world_,id,other.id)) {
                 const auto dx=std::int64_t(source->position->x)-other.position->x;
                 const auto dy=std::int64_t(source->position->y)-other.position->y;
                 const auto distance=dx*dx+dy*dy;
@@ -386,22 +390,25 @@ public:
         pending_.insert(pending_.end(),enemy_commands.begin(),enemy_commands.end());
         auto commands=std::move(pending_);pending_.clear();
         for(const auto& order:commands)execute(order,frame);
-        const auto production=proto::tick(world_,factories_,catalog_,frame);
-        if(production.status!=p::Status::Done)gaps_.insert(production.detail);
         if(frame%15==0){auto_place(enemy_,frame);if(args_.autoplay)auto_place(player_,frame);}
         economy_.tick(world_,frame);
         const auto motion=movement_.tick(world_,frame);
         moved+=motion.moved.size();
+        for(const auto id:motion.blocked)movement_.cancel(world_,id);
         if(motion.status!=sim::PrototypeMoveStatus::Complete)gaps_.insert(motion.detail);
         // TODO-ORIGINAL: Stationary troops acquire a nearby enemy. This is
         // native guard behavior, not original Mission_Guard or threat selection.
         if(frame%15==0) {
             std::vector<std::pair<std::uint32_t,std::uint32_t>> acquire;
-            for(const auto& e:world_.entities) if(fighter(e)&&!movement_.moving(e.id)&&!attacks_.count(e.id)) {
+            for(const auto& e:world_.entities) if((fighter(e)||(live(e)&&e.kind==w::Kind::Structure&&
+                !rules_.read_string(e.type,"Primary").empty()&&
+                sim::tech::building_online(rules_,sim::tech::house_power(rules_,world_,e.house_id),e.type)))&&
+                !movement_.moving(e.id)&&!attacks_.count(e.id)) {
                 const auto opponent=e.house_id==player_?enemy_:e.house_id==enemy_?player_:0;
                 if(!opponent)continue;
                 std::int64_t best=std::int64_t(6*256)*(6*256);std::uint32_t target=0;
-                for(const auto& other:world_.entities) if(live(other)&&other.house_id==opponent) {
+                for(const auto& other:world_.entities) if(live(other)&&other.house_id==opponent&&
+                    combat_.can_attack(world_,e.id,other.id)) {
                     const auto dx=std::int64_t(e.position->x)-other.position->x;
                     const auto dy=std::int64_t(e.position->y)-other.position->y;
                     if(dx*dx+dy*dy<best){best=dx*dx+dy*dy;target=other.id;}
@@ -416,17 +423,21 @@ public:
         std::set<std::uint32_t> approach;
         for(const auto& [source,target]:fighting.out_of_range) {
             approach.insert(source);
-            if(frame%15 || movement_.moving(source))continue;
+            if(frame%15 || (movement_.moving(source)&&frame%90))continue;
             const auto* e=find(world_,source);const auto* goal=find(world_,target);
-            if(e&&goal&&live(*e)&&live(*goal)&&!miner(*e))
+            if(e&&goal&&live(*e)&&live(*goal)&&!miner(*e)&&e->kind!=w::Kind::Structure)
                 movement_.issue(world_,source,*goal->cell,sim::original_rule_speed(rules_.read_integer(e->type,"Speed",4)));
         }
         for(auto it=attacks_.begin();it!=attacks_.end();) {
             const auto* source=find(world_,it->first);const auto* target=find(world_,it->second);
-            if(!source||!target||!live(*source)||!live(*target)) {
+            if(!source||!target||!live(*source)||!live(*target)||!combat_.can_attack(world_,it->first,it->second)) {
                 movement_.cancel(world_,it->first);combat_.stop(world_,it->first);it=attacks_.erase(it);
             } else {if(!approach.count(it->first))movement_.cancel(world_,it->first);++it;}
         }
+        // A producer can die during combat. Abandon its orphaned products
+        // before checking defeat; production timers use this same frame.
+        const auto after_combat=proto::tick(world_,factories_,catalog_,frame);
+        if(after_combat.status!=p::Status::Done)gaps_.insert(after_combat.detail);
         sim::tech::update(rules_,world_);
         orders_.sync(world_);
         infantry=std::max(infantry,std::size_t(std::count_if(world_.entities.begin(),world_.entities.end(),[](const auto& e){return live(e)&&e.kind==w::Kind::Infantry;})));
@@ -515,7 +526,7 @@ public:
             const auto point=anchor(e);if(!point||point->x<0||point->x>=BattleHud::sidebar_x)continue;
             const auto color=e.house_id==player_?std::array<std::uint8_t,3>{70,255,90}:std::array<std::uint8_t,3>{255,65,50};
             // TODO-ORIGINAL: House markers and health bars use simple native art.
-            pixel(frame_,point->x,point->y,color);
+            rectangle(frame_,point->x-5,point->y+9,10,3,color);
             if(std::find(orders_.selected_ids().begin(),orders_.selected_ids().end(),e.id)!=orders_.selected_ids().end()) {
                 rectangle(frame_,point->x-17,point->y-25,34,32,color);
                 const int health=std::clamp(e.resolved_hp.value_or(0)*30/std::max(1,e.maximum_hp.value_or(1)),0,30);

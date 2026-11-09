@@ -33,7 +33,7 @@ void border(render::Bitmap& b, Rectangle r, Color c) {
 }
 // TODO-ORIGINAL: replace the embedded 3x5 font with original game typography.
 void text(render::Bitmap& b, int x, int y, const std::string& s, Color c, int limit,
-          int scale=1) {
+          int scale=2) {
     const std::string chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$:/-?.";
     const char* glyphs[]={"010101111101101","110101110101110","011100100100011",
         "110101101101110","111100110100111","111100110100100","011100101101011",
@@ -83,25 +83,24 @@ void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
     fill(b,{sidebar_x,0,sidebar_width,view_height},dark);
     text(b,808,5,"CREDITS $"+std::to_string(s.cash),ink,212);
     text(b,808,15,"POWER "+std::to_string(s.power_output)+"/"+std::to_string(s.power_drain),ink,212);
-    fill(b,{808,25,212,6},edge);
+    fill(b,{808,29,212,6},edge);
     const auto capacity=std::max({1,s.power_output,s.power_drain});
-    fill(b,{808,25,static_cast<int>(212LL*std::max(0,s.power_output)/capacity),6},
+    fill(b,{808,29,static_cast<int>(212LL*std::max(0,s.power_output)/capacity),6},
          s.power_output<s.power_drain?red:green);
-    text(b,808,34,"TODO-ORIGINAL",edge,212);
     for(int i=0;i<build_columns*build_rows;++i) {
         auto r=build_button_bounds(i); border(b,r,edge);
         if(i>=static_cast<int>(s.choices.size())) continue;
         const auto& c=s.choices[i]; auto color=c.enabled?ink:edge;
         text(b,r.x+4,r.y+6,c.name.empty()?c.type:c.name,color,r.width-8);
         text(b,r.x+4,r.y+19,"$"+std::to_string(c.cost),color,r.width-8);
-        text(b,r.x+4,r.y+31,c.progress>=1000?"READY":"TODO-ORIGINAL",color,r.width-8);
+        text(b,r.x+4,r.y+31,c.progress>=1000?"READY":c.progress>0?std::to_string(c.progress/10)+"%":"BUILD",color,r.width-8);
         fill(b,{r.x+4,r.y+46,(r.width-8)*std::clamp(c.progress,0,1000)/1000,5},c.enabled?green:edge);
     }
     border(b,deploy_bounds(),ink); text(b,816,577,"DEPLOY",ink,190);
     int y=606;
     for(const auto& label:s.selected_labels) {
         if(y>642) break;
-        text(b,808,y,label,ink,212); y+=8;
+        text(b,808,y,label,ink,212); y+=13;
     }
     text(b,808,658,s.status,ink,212);
     auto r=minimap_bounds(); fill(b,r,{8,15,12,255});
