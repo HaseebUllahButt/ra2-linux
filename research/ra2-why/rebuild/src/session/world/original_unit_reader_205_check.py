@@ -22,6 +22,8 @@ The connected-real-token modes run the original tokenizer with supplied
 thread storage. Token calls outside VHPScan remain supplied.
 The connected-real-section mode also runs the original AMCV section lookup.
 The connected-real-copy mode also runs the original string-copy routine.
+The connected-real-color mode runs the color reader with supplied decimal
+formatting and scanning services for its tested default values.
 Other INI, formatting, enumeration, allocation, and asset services are supplied.
 Mode rules and later loading remain omitted.
 """
@@ -34,11 +36,12 @@ from itertools import product
 from unicorn import UC_HOOK_CODE,UC_HOOK_MEM_READ,UC_HOOK_MEM_WRITE
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EIP,UC_X86_REG_ESP
 
-if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--connected','--connected-real-bool','--connected-real-art','--connected-real-integer','--connected-real-float','--connected-real-speed','--connected-speed-wheel','--connected-zone-subterranean','--connected-real-placement','--connected-restricted-water','--connected-real-armor','--connected-real-vhpscan','--connected-vhpscan-strong','--connected-real-compare','--connected-compare-strong','--connected-real-token','--connected-token-strong','--connected-real-section','--connected-real-copy')):
+if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--connected','--connected-real-bool','--connected-real-art','--connected-real-integer','--connected-real-float','--connected-real-speed','--connected-speed-wheel','--connected-zone-subterranean','--connected-real-placement','--connected-restricted-water','--connected-real-armor','--connected-real-vhpscan','--connected-vhpscan-strong','--connected-real-compare','--connected-compare-strong','--connected-real-token','--connected-token-strong','--connected-real-section','--connected-real-copy','--connected-real-color')):
     raise SystemExit('usage: original_unit_reader_205_check.py game.exe unit_flags_case real_map_case game_dir [mode]')
 executable,native,fixture,game=sys.argv[1:5]
 connected=len(sys.argv)==6
-real_copy=connected and sys.argv[5]=='--connected-real-copy'
+real_color=connected and sys.argv[5]=='--connected-real-color'
+real_copy=connected and (real_color or sys.argv[5]=='--connected-real-copy')
 real_section=connected and (real_copy or sys.argv[5]=='--connected-real-section')
 real_token=connected and (real_section or sys.argv[5] in ('--connected-real-token','--connected-token-strong'))
 real_compare=connected and (real_token or sys.argv[5] in ('--connected-real-compare','--connected-compare-strong'))
@@ -125,6 +128,10 @@ section_pending={}
 section_returns=[]
 copy_pending={}
 copy_results=[]
+color_pending={}
+color_entries=[]
+color_results=[]
+color_scan_results=[]
 
 def trace_write(cpu,access,address,size,value,user):
     if active[0] and address<=m.TYPE+0x205<address+size:
@@ -171,6 +178,15 @@ def supplied_thread_storage():
 
 def supplied_scan_float():
     source,format_ptr,target=m.argument(0),m.argument(1),m.argument(2)
+    if real_color and color_pending:
+        assert bytes(m.cpu.mem_read(format_ptr,9))==b'%d,%d,%d\0'
+        text=bytes(m.cpu.mem_read(source,64)).split(b'\0',1)[0].decode('ascii')
+        parts=text.split(',')
+        assert len(parts)==3 and all(part.isdecimal() and int(part)<=255 for part in parts)
+        for i,part in enumerate(parts): m.word(m.argument(i+2),int(part))
+        color_scan_results.append(tuple(map(int,parts)))
+        m.cpu.reg_write(UC_X86_REG_EAX,3)
+        return
     assert bytes(m.cpu.mem_read(format_ptr,3))==b'%f\0'
     text=bytes(m.cpu.mem_read(source,256)).split(b'\0',1)[0].decode('ascii')
     assert text in ('3.5','6','1'), text
@@ -191,6 +207,10 @@ def parent_reader():
 
 def trace_code(cpu,address,size,user):
     if active[0] and connected:
+        if real_color and mode==3 and address in color_pending:
+            target,expected=color_pending.pop(address)
+            assert cpu.reg_read(UC_X86_REG_EAX)==target and bytes(cpu.mem_read(target,3))==expected
+            color_results.append(expected)
         if real_copy and mode==3 and address in copy_pending:
             target,expected=copy_pending.pop(address)
             assert cpu.reg_read(UC_X86_REG_EAX)==target
@@ -210,6 +230,18 @@ def trace_code(cpu,address,size,user):
             integer_checked.add(key)
         if address in (0x70ab40,0x6daf60,0x5d7810,0x4107e0): chain_calls.append(address)
         if address==0x6daf60: calls['parent']+=1
+        if real_color and mode==3 and address==0x46a010:
+            target,section_ptr,key_ptr,source=(m.argument(i) for i in range(4))
+            section_name=bytes(cpu.mem_read(section_ptr,64)).split(b'\0',1)[0].decode('ascii')
+            key=bytes(cpu.mem_read(key_ptr,64)).split(b'\0',1)[0].decode('ascii')
+            incoming=cpu.reg_read(UC_X86_REG_ECX)
+            assert (section_name,incoming) in (('AMCV',0x100b000),('MCV',0x8397f0)), (section_name,key,hex(incoming))
+            records=raw_rules if section_name=='AMCV' else raw_art
+            assert not any(name.casefold()==key.casefold() for name in records)
+            ret=struct.unpack('<I',bytes(cpu.mem_read(cpu.reg_read(UC_X86_REG_ESP),4)))[0]
+            assert ret not in color_pending
+            color_pending[ret]=(target,bytes(cpu.mem_read(source,3)))
+            color_entries.append(key)
         if real_copy and mode==3 and address==0x7823d0:
             target,source,count=m.argument(0),m.argument(1),m.argument(2)
             assert count<=1024
@@ -339,6 +371,15 @@ def pair_reader():
 
 def format_key():
     calls['format']+=1
+    if real_color and color_pending:
+        target,fmt=(m.argument(i) for i in range(2))
+        assert bytes(m.cpu.mem_read(fmt,9))==b'%d,%d,%d\0'
+        numbers=[m.argument(i) for i in range(2,5)]
+        assert all(value<=255 for value in numbers)
+        raw=','.join(map(str,numbers)).encode('ascii')
+        m.cpu.mem_write(target,raw+b'\0')
+        m.cpu.reg_write(UC_X86_REG_EAX,len(raw))
+        return
     target=m.argument(0); m.cpu.mem_write(target,b'Key\0')
     m.cpu.reg_write(UC_X86_REG_EAX,3)
 
@@ -429,6 +470,7 @@ if real_bool:
         token_prologue=bytes(hash_cpu.mem_read(0x782ec2,3))
         section_prologue=bytes(hash_cpu.mem_read(0x50c9b0,3))
         copy_prologue=bytes(hash_cpu.mem_read(0x7823d0,3))
+        color_prologue=bytes(hash_cpu.mem_read(0x46a010,3))
 for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
     m.cpu.mem_write(m.TYPE,constructor)
     m.cpu.mem_write(m.TYPE+0x205,bytes([initial]))
@@ -475,6 +517,9 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
             if real_copy:
                 m.cpu.mem_write(0x7823d0,copy_prologue); m.callbacks.pop(0x7823d0,None)
                 m.cpu.ctl_remove_cache(0x7823d0,0x7823d3)
+            if real_color:
+                m.cpu.mem_write(0x46a010,color_prologue); m.callbacks.pop(0x46a010,None)
+                m.cpu.ctl_remove_cache(0x46a010,0x46a013)
         else:
             m.word(0x100b000+0x24,0)
             m.bind(0x50f410,12,base['boolean'])
@@ -502,6 +547,8 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
                 m.bind(0x50c9b0,4,base['section_lookup']); m.cpu.ctl_remove_cache(0x50c9b0,0x50c9b3)
             if real_copy:
                 m.bind(0x7823d0,0,checked_copy_string); m.cpu.ctl_remove_cache(0x7823d0,0x7823d3)
+            if real_color:
+                m.bind(0x46a010,16,base['color_reader']); m.cpu.ctl_remove_cache(0x46a010,0x46a013)
         m.cpu.ctl_remove_cache(0x50f410,0x50f413)
     calls.update(parent=0,pair=0,format=0,compare=0)
     chain_calls.clear()
@@ -538,6 +585,7 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
     section_returns.clear()
     copy_pending.clear()
     copy_results.clear()
+    color_pending.clear(); color_entries.clear(); color_results.clear(); color_scan_results.clear()
     m.cpu.reg_write(UC_X86_REG_ECX,m.TYPE); m.cpu.reg_write(UC_X86_REG_ESP,0x103f000)
     m.cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,0x100b000))
     writes.clear(); active[0]=True
@@ -595,7 +643,11 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
             assert token_returns==[source] and m.read(0x14c1000+0x18)==source+length
         if real_section:
             assert section_entries==['AMCV'] and section_returns==[section] and not section_pending
-        if real_copy: assert len(copy_results)==87 and not copy_pending
+        if real_copy: assert len(copy_results)==(89 if real_color else 87) and not copy_pending
+        if real_color:
+            assert color_entries==['RadialColor','LineTrailColor']
+            assert color_results==[b'\0\0\0',b'\x80\x80\x80']
+            assert color_scan_results==[(0,0,0),(128,128,128)] and not color_pending
     assert calls['parent']==1 and calls['pair']>=1 and calls['format']>=6 and calls['compare']>=1
     if connected: assert chain_calls==[0x70ab40,0x6daf60,0x5d7810,0x4107e0]
 parent_ok[0]=False
@@ -637,4 +689,4 @@ if real_section:
     assert calls=={'parent':1,'pair':0,'format':0,'compare':0}
     assert chain_calls==[0x70ab40,0x6daf60,0x5d7810,0x4107e0]
 print('base x86 %sreader chain preserves supplied Type +205 in %d checked cases'%
-      ('connected real-copy ' if real_copy else 'connected real-section ' if real_section else 'connected token-Strong ' if real_token and vhpscan_override else 'connected real-token ' if real_token else 'connected compare-Strong ' if real_compare and vhpscan_override else 'connected real-compare ' if real_compare else 'connected synthetic-VHPScan ' if vhpscan_override else 'connected real-VHPScan ' if real_vhpscan else 'connected real-armor ' if real_armor else 'connected synthetic-Water ' if restricted_override else 'connected real-placement ' if real_restricted else 'connected synthetic-zone ' if zone_override else 'connected synthetic-Wheel ' if speed_override else 'connected real-speed ' if real_speed else 'connected real-float ' if real_float else 'connected real-integer ' if real_integer else 'connected real-art ' if real_art else 'connected real-boolean ' if real_bool else 'connected ' if connected else 'UnitType ',10 if real_section else 9 if connected else 7))
+      ('connected real-color ' if real_color else 'connected real-copy ' if real_copy else 'connected real-section ' if real_section else 'connected token-Strong ' if real_token and vhpscan_override else 'connected real-token ' if real_token else 'connected compare-Strong ' if real_compare and vhpscan_override else 'connected real-compare ' if real_compare else 'connected synthetic-VHPScan ' if vhpscan_override else 'connected real-VHPScan ' if real_vhpscan else 'connected real-armor ' if real_armor else 'connected synthetic-Water ' if restricted_override else 'connected real-placement ' if real_restricted else 'connected synthetic-zone ' if zone_override else 'connected synthetic-Wheel ' if speed_override else 'connected real-speed ' if real_speed else 'connected real-float ' if real_float else 'connected real-integer ' if real_integer else 'connected real-art ' if real_art else 'connected real-boolean ' if real_bool else 'connected ' if connected else 'UnitType ',10 if real_section else 9 if connected else 7))
