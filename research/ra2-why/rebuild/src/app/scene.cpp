@@ -219,6 +219,50 @@ std::optional<ra2map::Cell> Scene::pick_cell(std::int64_t map_x, std::int64_t ma
     return result;
 }
 
+VehicleArt& Scene::vehicle(const std::string& type) {
+    auto found=vehicles_.find(type);
+    if(found==vehicles_.end())
+        found=vehicles_.emplace(type,VehicleArt::load(files_,art_,rules_,type,prototype_)).first;
+    return found->second;
+}
+Scene::Asset& Scene::actor(actors::Kind kind,const std::string& type) {
+    const auto key=std::make_pair(kind,type);
+    auto found=assets_.find(key);
+    if(found==assets_.end())
+        found=assets_.emplace(key,Asset{actors::ActorArt::load(files_,art_,rules_,type,kind,theater_),{}}).first;
+    return found->second;
+}
+const gfx::RgbaImage& Scene::image(Asset& asset,std::size_t frame,bool terrain) {
+    auto found=asset.frames.find(frame);
+    if(found==asset.frames.end())
+        found=asset.frames.emplace(frame,asset.art.draw_frame(frame,terrain?terrain_palette_:palette_)).first;
+    return found->second;
+}
+void Scene::prepare(const sim::Snapshot& state) {
+    if(!pick_ready_)prepare_pick();
+    if(!terrain_ready_)prepare_terrain(terrain_gaps_);
+    for(const auto& entity:state.entities)if(!entity.dead)try {
+        if(entity.kind==sim::Kind::Unit) {
+            if(entity.facing<0||entity.facing>255||!entity.turret_facing||
+                *entity.turret_facing<0||*entity.turret_facing>255)continue;
+            vehicle(entity.type).draw(std::uint8_t(entity.facing),std::uint8_t(*entity.turret_facing));
+            const auto deploy=rules_.read_string(entity.type,"DeploysInto");
+            if(!deploy.empty())image(actor(actors::Kind::Building,deploy),0);
+        } else {
+            const auto kind=entity.kind==sim::Kind::Structure?actors::Kind::Building:actors::Kind::Infantry;
+            auto& asset=actor(kind,entity.type);
+            const auto frame=kind==actors::Kind::Infantry?
+                asset.art.frame_for_map("Ready",std::uint8_t(entity.facing),0):0;
+            image(asset,frame);
+        }
+    } catch(const std::exception&) { /* Render reports unsupported art at its original point. */ }
+    // Refineries release a free miner. Resolve its first pose before that event.
+    for(const auto& refinery:rules_.read_list("AI","BuildRefinery"))try {
+        const auto free_unit=rules_.read_string(refinery,"FreeUnit");
+        if(!free_unit.empty())vehicle(free_unit).draw(0,0);
+    } catch(const std::exception&) { /* Keep the normal render fallback. */ }
+}
+
 SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& state,
                          render::Rectangle viewport) {
     loop::profile::Timer probe(loop::profile::Phase::Scene);
@@ -294,34 +338,23 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
                     throw std::runtime_error("Vehicle turret facing is unresolved");
                 if (*entity.turret_facing < 0 || *entity.turret_facing > 255)
                     throw std::runtime_error("Vehicle turret facing is outside its original byte range");
-                auto asset = vehicles_.find(entity.type);
-                if (asset == vehicles_.end())
-                    asset = vehicles_.emplace(entity.type, VehicleArt::load(files_, art_, rules_, entity.type, prototype_)).first;
-                const auto& sprite = asset->second.draw(static_cast<std::uint8_t>(entity.facing),
+                const auto& sprite=vehicle(entity.type).draw(static_cast<std::uint8_t>(entity.facing),
                     static_cast<std::uint8_t>(*entity.turret_facing));
                 result.drawn += blit(result.image, sprite.image,
                     {anchor.x + sprite.left, anchor.y + sprite.top});
                 continue;
             }
             const auto kind = entity.kind == sim::Kind::Structure ? actors::Kind::Building : actors::Kind::Infantry;
-            const auto key = std::make_pair(kind, entity.type);
-            auto found = assets_.find(key);
-            if (found == assets_.end()) {
-                found = assets_.emplace(key, Asset{actors::ActorArt::load(files_, art_, rules_,
-                    entity.type, kind, theater_), {}}).first;
-            }
-            auto& asset = found->second;
+            auto& asset=actor(kind,entity.type);
             // Only stationary, full-health main images are established here.
             // Gameplay transitions and damaged building frames remain separate.
             if (entity.map_health != 256 && !prototype_)
                 throw std::runtime_error("Damaged actor frame selection is unresolved");
             const auto frame = kind == actors::Kind::Infantry ?
                 asset.art.frame_for_map("Ready", static_cast<std::uint8_t>(entity.facing), 0) : 0;
-            auto image = asset.frames.find(frame);
-            if (image == asset.frames.end())
-                image = asset.frames.emplace(frame, asset.art.draw_frame(frame, palette_)).first;
-            const auto origin = asset.art.main_canvas_origin(anchor);
-            result.drawn += blit(result.image, image->second, origin);
+            const auto& sprite=image(asset,frame);
+            const auto origin=asset.art.main_canvas_origin(anchor);
+            result.drawn+=blit(result.image,sprite,origin);
         } catch (const std::exception& error) {
             result.gaps.push_back("Entity " + std::to_string(draw.entity->id) + ": " + error.what());
         }
@@ -357,18 +390,11 @@ void Scene::prepare_terrain(std::vector<std::string>& position_gaps) {
         const auto& type = draw.object->type;
         try {
             const auto anchor = actors::project_world(draw.position, map_camera_);
-            const auto key = std::make_pair(actors::Kind::Terrain, type);
-            auto found = assets_.find(key);
-            if (found == assets_.end())
-                found = assets_.emplace(key, Asset{actors::ActorArt::load(files_, art_, rules_,
-                    type, actors::Kind::Terrain, theater_), {}}).first;
-            auto& asset = found->second;
-            const auto frame = actors::terrain_initial_frame(rules_, type);
-            auto image = asset.frames.find(frame);
-            if (image == asset.frames.end())
-                image = asset.frames.emplace(frame, asset.art.draw_frame(frame, terrain_palette_)).first;
-            draw.origin = asset.art.main_canvas_origin(anchor);
-            draw.sprite = &image->second;
+            auto& asset=actor(actors::Kind::Terrain,type);
+            const auto frame=actors::terrain_initial_frame(rules_,type);
+            const auto& sprite=image(asset,frame,true);
+            draw.origin=asset.art.main_canvas_origin(anchor);
+            draw.sprite=&sprite;
         } catch (const std::exception& error) {
             draw.error = "Terrain " + type + ": " + error.what();
         }

@@ -76,6 +76,16 @@ int main(int argc, char** argv) {
             require(frame.gaps.size() == 5, "Original animated spawner gaps were lost");
             require(frame.drawn > simulation.snapshot().entities.size(), "Original map trees did not reach the scene");
             require(frame.image.rgba != battlefield.rgba, "The scene did not compose the original buildings");
+            if(!expansion) {
+                app::Scene prepared(files,art,app::overlay_rules(rules,map),geometry,simulation.terrain(),
+                    "TEMPERATE",map_objects.terrain());
+                prepared.prepare(simulation.snapshot());
+                const auto warmed=prepared.render(battlefield,simulation.snapshot(),
+                    {0,0,battlefield.width,battlefield.height});
+                require(warmed.image.rgba==frame.image.rgba && warmed.drawn==frame.drawn && warmed.gaps==frame.gaps,
+                    "Preparing scene assets changed pixels, object count, or draw errors");
+            }
+
 
             // A flat cell gives an independently fixed anchor: (1800,1245).
             // Width 80 and LocalSize (2,6) come from the original test map.

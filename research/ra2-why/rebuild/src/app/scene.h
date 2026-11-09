@@ -30,6 +30,8 @@ public:
           bool prototype = false);
     SceneFrame render(const render::Bitmap& terrain, const sim::Snapshot& state,
                       render::Rectangle viewport);
+    // Resolve initial art and fixed floor lookups before the first frame.
+    void prepare(const sim::Snapshot& state);
     actors::ScreenPoint map_anchor(const sim::Entity& entity) const;
     // The floor Cell nearest to a map pixel, by |dx|+2|dy| between the pixel
     // and the Cell's centre anchor, below 46. Ties pick the lowest packed key
@@ -61,6 +63,9 @@ private:
     };
     void prepare_terrain(std::vector<std::string>& position_gaps);
     actors::WorldPosition position(const sim::Entity& entity) const;
+    VehicleArt& vehicle(const std::string& type);
+    Asset& actor(actors::Kind kind,const std::string& type);
+    const gfx::RgbaImage& image(Asset& asset,std::size_t frame,bool terrain=false);
     const fs::MixFileSystem& files_;
     rules::IniFile art_, rules_;
     gfx::Palette palette_, terrain_palette_;
