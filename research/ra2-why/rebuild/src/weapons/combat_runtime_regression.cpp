@@ -4,6 +4,7 @@
 #include "fire_timer.h"
 #include "techno_damage.h"
 #include "projectile_damage.h"
+#include "muzzle.h"
 #include <sim/damage_runtime.h>
 #include <array>
 #include <cstdint>
@@ -135,6 +136,12 @@ void check_projectile(const std::string& path,const sim::OriginalDistance& dista
     check(base_cannon_range(range_input,distance)==CannonRangeStatus::OutOfRange,"Cannon maximum range");
     range_input.target.x=512;range_input.line_blocked.reset();
     check(base_cannon_range(range_input,distance)==CannonRangeStatus::NeedsInput,"unknown Cannon line trace accepted");
+    FlatUnitMuzzleInput muzzle{{12800,12800,0},0,16384,{{150,0,100}},0,0,true};
+    const auto muzzle_point=base_flat_unit_muzzle(muzzle);
+    check(muzzle_point && muzzle_point->x==12949 && muzzle_point->y==12800 && muzzle_point->z==100,
+          "original HTNK muzzle point");
+    muzzle.flat_drive_locomotor.reset();
+    check(!base_flat_unit_muzzle(muzzle),"unknown locomotor muzzle accepted");
     const auto angles=BaseBallisticAngles::from_executable(path);
     const std::array<std::int32_t,3> delta{{512,128,0}};
     const int range=distance.between({0,0,0},{512,128,0},true);

@@ -30,7 +30,13 @@ int main(int argc, char** argv) {
         !ini.read_bool("Cannon", "SubjectToWalls") ||
         ini.read_integer("AudioVisual", "Gravity") != 6)
       throw std::runtime_error("unexpected shipped HTNK rules");
-    std::cout << "Original HTNK, 120mm, Cannon and gravity rules match\n";
+    auto art_bytes=files.read_file("art.ini");
+    if (!art_bytes) throw std::runtime_error("missing base art.ini");
+    ra2::rules::IniFile art;
+    art.parse(std::string_view(reinterpret_cast<const char *>(art_bytes->data()), art_bytes->size()));
+    if (art.read_string("HTNK", "PrimaryFireFLH") != "150,0,100")
+      throw std::runtime_error("unexpected base HTNK muzzle offset");
+    std::cout << "Original HTNK, 120mm, Cannon, AP and muzzle assets match\n";
     return 0;
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

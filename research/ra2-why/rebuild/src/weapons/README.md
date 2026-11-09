@@ -222,3 +222,11 @@ point to a placed session entity's stored position. It requires the original
 locomotor movement result and rejects unknown or moving targets. The Unit
 vtable's +58 delegates to +48, which reads this position. The original check
 covers 2,000 aim points. Moving-target lead remains unresolved.
+
+`base_flat_unit_muzzle()` implements the original 006C1830 muzzle position for
+flat drive Units. It uses independent original hull and turret directions,
+weapon-slot FLH, UnitType turret offset and the live burst index. It checks the
+flat locomotor and arithmetic bounds. The comparison covers 3,000 varied cases
+and all 1,024 quantized hull/turret direction pairs. Base art.ini supplies
+HTNK PrimaryFireFLH=150,0,100. Slope and other locomotor transforms remain
+unknown and are rejected.
