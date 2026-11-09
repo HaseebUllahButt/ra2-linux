@@ -20,7 +20,7 @@ template<class A> void fields(A& a, sim::CoarseOverlayState& v) { a(v.flag_22d,v
 template<class A> void fields(A& a, sim::CoarseOccupantState& v) { a(v.runtime_type,v.building_flag_16c0,v.building_flag_16bf,v.house_flag_1fa,v.building_state_618,v.terrain_field_2a8,v.terrain_field_2ac); }
 template<class A> void fields(A& a, sim::TerrainCell& v) { a(v.cell,v.tile_index,v.tile_replacement_resolved,v.resolved_tile_index,v.subtile,v.tmp_terrain,v.land_type,v.height_level,v.ramp_index,v.floor_world_height,v.bridge,v.overlay_type_index); }
 template<class A> void fields(A& a, sim::RandomState& v) { a(v.table,v.first,v.second); }
-template<class A> void fields(A& a, sim::production::FactoryState& v) { a(v.house_id,v.slot,v.object,v.object_type,v.progress,v.balance,v.interval,v.timer_start,v.suspended); }
+template<class A> void fields(A& a, sim::production::FactoryState& v) { a(v.house_id,v.slot,v.object,v.object_type,v.progress,v.balance,v.interval,v.timer_start,v.timer_duration,v.suspended); }
 template<class A> void fields(A& a, sim::production::SessionFlags& v) { a(v.session_type,v.super_weapons,v.build_off_ally,v.player_house); }
 template<class A> void fields(A& a, sim::production::BuildingState& v) { a(v.on_530,v.primary,v.mission_a0); }
 template<class A> void fields(A& a, sim::production::FactorySet& v) { a(v.flags,v.buildings,v.factories,v.house_factory_counts,v.power_dirty,v.power_blackout_idle); }

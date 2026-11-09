@@ -51,7 +51,7 @@ int main(int argc,char** argv) try {
     unsigned frame=0;bool concurrent=false;
     session::save::SavedGame saved;saved.world=b;
     saved.factories.flags.player_house=b.houses[0].id;
-    saved.factories.factories.push_back({b.houses[0].id,3,7,"HTNK",24,800,3,17,false});
+    saved.factories.factories.push_back({b.houses[0].id,3,7,"HTNK",24,800,3,17,7,false});
     saved.factories.house_factory_counts[b.houses[0].id]={1,2,3,4,5,6};
     saved.factories.power_dirty[1]=true;saved.factories.power_blackout_idle[1]=false;
     saved.factories.buildings[1]={true,true,5};
@@ -60,6 +60,9 @@ int main(int argc,char** argv) try {
     const auto bytes=session::save::encode(saved);
     session::save::SavedGame decoded;
     require(session::save::decode(bytes,decoded) && session::save::encode(decoded)==bytes,"full state round trip failed");
+    require(decoded.factories.factories[0].timer_duration==7 &&
+        decoded.factories.factories[0].interval==3 && !decoded.factories.factories[0].suspended,
+        "running factory timer did not survive save");
     const auto unchanged=session::save::encode(decoded);
     for(std::size_t n: {std::size_t(0),std::size_t(9),bytes.size()-1})
         require(!session::save::decode(bytes.substr(0,n),decoded),"truncated input accepted");

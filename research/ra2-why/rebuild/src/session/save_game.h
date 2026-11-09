@@ -3,7 +3,7 @@
 #include "sim/production_runtime.h"
 
 namespace ra2::session::save {
-inline constexpr std::uint32_t format_version=1;
+inline constexpr std::uint32_t format_version=2;
 // Caller-owned routes. Preserve path order and the movement clock on restore.
 struct PendingMove {
     ra2map::Cell goal{};
