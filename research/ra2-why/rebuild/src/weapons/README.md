@@ -195,3 +195,10 @@ ballistic height solution and a caller-resolved 004BBAA0 line trace. It rejects
 unknown flags, gravity, bridge state or trace. Its comparison covers 5,033
 original cases. Target and muzzle position selection, the real line trace and
 turret facing remain separate.
+
+`base_cannon_line_trace()` runs the original 004BBAA0 firing-line traversal
+using resolved Cell identities, floors, wall state, overlay indices and
+alliances. It follows the original integer sampling order and returns unknown
+for missing cells. It includes the original first-hit wall exception. The
+comparison covers 2,400 complete game.exe traces. The loaded world must still
+supply Cell +140 bit 80, wall ownership and alliance state.

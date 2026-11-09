@@ -1,3 +1,4 @@
+#include "cannon_line.h"
 #include "cannon_range.h"
 #include "fire_eligibility.h"
 #include "fire_timer.h"
@@ -94,6 +95,17 @@ void check_world(const sim::OriginalDistance& distance) {
     check(!sim::base_world_projectile_collision(world,center,impact,3,false,collision,distance).collision,"pending setup accepted");
 }
 void check_projectile(const std::string& path,const sim::OriginalDistance& distance) {
+    const CannonLineLookup lookup_line=[](std::int16_t x,std::int16_t y)->std::optional<CannonLineCell> {
+        if (x<0 || x>=512 || y<0 || y>=512) return {};
+        const int h=(x*37+y*73+17)&255, level=h%7-3, bit=(h/7)%2, ov=(h/14)%7;
+        const int overlay=ov==0?0:ov==1?2:ov==2?26:-1;
+        return CannonLineCell{{static_cast<unsigned>(y*512+x+1),level+4*bit,overlay!=-1,false,false},level,overlay};
+    };
+    CannonLineInput line{{12800,12800,0},{15360,15360,0},true,true,false,false};
+    auto trace=base_cannon_line_trace(line,lookup_line);
+    check(trace.status==TerrainTraceStatus::Hit && trace.cell_id==26164,"original Cannon line trace");
+    const CannonLineLookup missing_line=[](std::int16_t,std::int16_t)->std::optional<CannonLineCell> {return {};};
+    check(base_cannon_line_trace(line,missing_line).status==TerrainTraceStatus::NeedsCell,"unknown Cannon line cell accepted");
     CannonRangeInput range_input{{0,0,0},{512,0,0},1024,0,6,true,false};
     check(base_cannon_range(range_input,distance)==CannonRangeStatus::InRange,"original Cannon range");
     range_input.target.x=1030;
