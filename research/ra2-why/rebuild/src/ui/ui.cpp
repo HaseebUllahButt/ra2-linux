@@ -118,8 +118,29 @@ Rect dialog_to_pixels(Rect rect, unsigned base_width, unsigned base_height) {
             convert(rect.width,base_width,4),convert(rect.height,base_height,8)};
 }
 namespace {
+// Plain DLGTEMPLATE, used by resources such as 181 and 182 (in-game options).
+// Control IDs are 16-bit here; 0xFFFF is kept as 65535.
+Dialog parse_classic_dialog(Reader& r, std::uint16_t id, const ra2text::CsfFile& strings) {
+    auto style=r.dword(); r.dword(); auto count=r.word();
+    Dialog out{id,{r.signed_word(),r.signed_word(),r.signed_word(),r.signed_word()},"",0,{}};
+    r.text_or_ordinal(); r.text_or_ordinal(); r.text_or_ordinal();
+    if(style & 0x40) {out.font_points=r.word();out.font=r.text_or_ordinal();}
+    require(count<=4096, "too many dialog controls");
+    for(unsigned i=0;i<count;++i) {
+        r.align4(); auto flags=r.dword(); auto ex=r.dword();
+        Rect rect{r.signed_word(),r.signed_word(),r.signed_word(),r.signed_word()};
+        std::uint32_t control_id=r.word(); std::uint16_t cls=0; r.text_or_ordinal(&cls);
+        auto key=r.text_or_ordinal(); auto extra=r.word(); r.skip(extra);
+        std::string label;
+        if (!key.empty()) {auto text=strings.find(key);if(text)label=text->text;}
+        out.controls.push_back({control_id,flags,ex,cls,rect,std::move(key),std::move(label)});
+    }
+    return out;
+}
 Dialog parse_dialog(const Bytes& exe, std::uint16_t id, const ra2text::CsfFile& strings) {
     auto data=dialog_data(exe,id); Reader r{exe,data.start,data.end};
+    r.need(4);
+    if(u16(exe,r.p)!=1 || u16(exe,r.p+2)!=0xffff) return parse_classic_dialog(r,id,strings);
     require(r.word()==1 && r.word()==0xffff, "unsupported dialog template");
     r.dword();r.dword();auto style=r.dword();auto count=r.word();
     Dialog out{id,{r.signed_word(),r.signed_word(),r.signed_word(),r.signed_word()},"",0,{}};
@@ -146,6 +167,9 @@ Dialog load_dialog(const Bytes& exe, Page page, const ra2text::CsfFile& strings)
     case Page::Skirmish: return parse_dialog(exe,258,strings);
     }
     throw std::runtime_error("unsupported dialog page");
+}
+Dialog load_dialog_resource(const Bytes& exe, std::uint16_t id, const ra2text::CsfFile& strings) {
+    return parse_dialog(exe,id,strings);
 }
 Dialog load_map_selection_dialog(const Bytes& exe, const ra2text::CsfFile& strings) {
     // 0x005E68A0 loads resource 107 for the original map selector.

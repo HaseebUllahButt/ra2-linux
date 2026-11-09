@@ -1,4 +1,6 @@
 #include "battle_formation.h"
+#include <fstream>
+#include <iterator>
 #include "battle.h"
 #include "cameo_click.h"
 #include "battle_status.h"
@@ -18,6 +20,7 @@
 #include "terrain_inputs.h"
 #include "../session/world/setup.h"
 #include "battle_setup.h"
+#include "battle_options.h"
 #include "../sim/prototype_ai.h"
 #include "../sim/prototype_economy.h"
 #include "../sim/prototype_movement.h"
@@ -180,8 +183,10 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     std::string placement_;
     bool quit_=false,autoplay_moved_=false,autoplay_deployed_=false;
     bool help_visible_=true,show_score_=false;
-    enum class PausePanel { Closed, Options, Abort };
-    PausePanel pause_panel_=PausePanel::Closed;
+    // The original in-game options screen (game.exe dialogs 181 and 182).
+    // Without its art the old text panel is drawn for the same state.
+    OptionsMenu options_;
+    std::optional<OptionsMenuArt> options_art_;
     bool force_draw_=false;
     int human_stage_=0;
     std::uint32_t human_target_=0,human_wait_frame_=0;
@@ -218,6 +223,16 @@ public:
         for(const auto id:enemies_)roster.emplace_back(id,house(world_,id).name);
         score_.emplace(roster);
         help_visible_=!args_.autoplay;
+        try {
+            // Dialog text comes from game.exe; art from the side archive mounted by the caller.
+            std::ifstream exe(args_.game_directory/"game.exe",std::ios::binary);
+            const std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(exe)),std::istreambuf_iterator<char>());
+            options_=OptionsMenu::load(bytes,labels_);
+            options_art_=OptionsMenuArt::load(files);
+        } catch(const std::exception& error) {
+            options_art_.reset();
+            gaps_.insert(std::string("Original options menu art is not available: ")+error.what());
+        }
         status("Select MCV. D deploys.");
         camera_scroll_.reset(clock_.now_ms());
         for(const auto& slot:args_.setup.opponents)if(slot.opponent && *slot.opponent!=ui::Opponent::Closed) {
@@ -388,35 +403,44 @@ public:
             if (input.pressed) keys_.insert(input.key);else keys_.erase(input.key);
             if (input.pressed && input.key==SDLK_ESCAPE) {
                 orders_.cancel_input();keys_.clear();
-                if(pause_panel_==PausePanel::Abort)pause_panel_=PausePanel::Options;
-                else if(pause_panel_==PausePanel::Options)pause_panel_=PausePanel::Closed;
+                if(options_.visible())options_.escape();
                 else if (!placement_.empty()&&!help_visible_) {placement_.clear();orders_.set_placement_active(false);status("");}
                 else if(help_visible_)help_visible_=false;
                 else if(victory_.settled())quit_=true;
-                else pause_panel_=PausePanel::Options;
+                else options_.show();
                 return;
             }
-            if(pause_panel_==PausePanel::Closed && input.pressed && input.key==SDLK_F1) {
+            if(!options_.visible() && input.pressed && input.key==SDLK_F1) {
                 orders_.cancel_input();keys_.clear();help_visible_=!help_visible_;return;
             }
             if(input.pressed && input.key==SDLK_TAB && victory_.settled()) {show_score_=!show_score_;return;}
-            if (pause_panel_==PausePanel::Closed && input.pressed && input.key==SDLK_h) {
+            if (!options_.visible() && input.pressed && input.key==SDLK_h) {
                 for (const auto& e:world_.entities) if (live(e)&&e.house_id==player_) {center(e);break;}
             }
         }
-        if(pause_panel_!=PausePanel::Closed) {
-            PauseAction action=PauseAction::None;
-            if(input.kind==InputKind::Button && input.pressed && input.key==SDL_BUTTON_LEFT)
-                action=BattleHelp::pause_action(input.x,input.y,pause_panel_==PausePanel::Abort);
-            if(input.kind==InputKind::Key && input.pressed) {
-                if(input.key==SDLK_q && pause_panel_==PausePanel::Options)action=PauseAction::Abort;
-                if(input.key==SDLK_RETURN)action=pause_panel_==PausePanel::Abort?PauseAction::Abort:PauseAction::Resume;
+        if(options_.visible()) {
+            auto event=OptionsEvent::None;
+            if(input.kind==InputKind::Motion)options_.pointer_move(input.x,input.y);
+            if(input.kind==InputKind::Button && input.key==SDL_BUTTON_LEFT) {
+                if(options_art_) {
+                    if(input.pressed)options_.pointer_down(input.x,input.y);
+                    else event=options_.pointer_up(input.x,input.y);
+                } else if(input.pressed) {
+                    // The text panel keeps its own button places.
+                    const bool abort=options_.page()==OptionsPage::ConfirmAbort;
+                    const auto action=BattleHelp::pause_action(input.x,input.y,abort);
+                    if(action==PauseAction::Abort)event=options_.activate(abort?OptionsButton::Leave:OptionsButton::AbortMission);
+                    else if(action==PauseAction::Back)options_.escape();
+                    else if(action==PauseAction::Resume)event=options_.activate(OptionsButton::ResumeMission);
+                }
             }
-            if(action==PauseAction::Abort) {
-                if(pause_panel_==PausePanel::Abort)quit_=true;
-                else pause_panel_=PausePanel::Abort;
-            } else if(action==PauseAction::Back)pause_panel_=PausePanel::Options;
-            else if(action==PauseAction::Resume) {pause_panel_=PausePanel::Closed;orders_.cancel_input();keys_.clear();}
+            if(input.kind==InputKind::Key && input.pressed) {
+                const bool abort=options_.page()==OptionsPage::ConfirmAbort;
+                if(input.key==SDLK_q && !abort)event=options_.activate(OptionsButton::AbortMission);
+                if(input.key==SDLK_RETURN)event=options_.activate(abort?OptionsButton::Leave:OptionsButton::ResumeMission);
+            }
+            if(event==OptionsEvent::Quit)quit_=true;
+            else if(event==OptionsEvent::Resume) {orders_.cancel_input();keys_.clear();}
             return;
         }
         if(help_visible_) {
@@ -503,7 +527,7 @@ public:
             if (!args_.headless && event.kind==InputKind::Focus) state.window_active=event.pressed;
             input(event);
         }
-        state.paused=help_visible_||pause_panel_!=PausePanel::Closed;
+        state.paused=help_visible_||options_.visible();
         score_->clock(clock_.now_ms(),!state.paused&&state.window_active&&!victory_.settled());
         audio_.service(state.paused||!state.window_active);
         if (quit_) state.running=false;
@@ -662,17 +686,20 @@ public:
             test_key(SDLK_ESCAPE);human_stage_=72;break;
         }
         case 72:
-            require(pause_panel_==PausePanel::Options,"Human input: Esc did not show pause options");
+            require(options_.page()==OptionsPage::Options,"Human input: Esc did not show pause options");
             require(state.frame_counter==human_wait_frame_,"Human input: options did not pause play");
+            require(options_art_.has_value(),"Human input: original options art is missing");
+            checkpoint(state,"04b-options");
             test_key(SDLK_q);human_stage_=73;break;
         case 73:
-            require(pause_panel_==PausePanel::Abort,"Human input: abort confirmation is missing");
+            require(options_.page()==OptionsPage::ConfirmAbort,"Human input: abort confirmation is missing");
+            checkpoint(state,"04c-abort-question");
             test_key(SDLK_ESCAPE);human_stage_=74;break;
         case 74:
-            require(pause_panel_==PausePanel::Options,"Human input: abort cancel did not return to options");
+            require(options_.page()==OptionsPage::Options,"Human input: abort cancel did not return to options");
             test_key(SDLK_ESCAPE);human_stage_=75;break;
         case 75:
-            require(pause_panel_==PausePanel::Closed,"Human input: options did not resume play");
+            require(!options_.visible(),"Human input: options did not resume play");
             human_wait_frame_=state.frame_counter;
             window_.inject_for_test({InputKind::Focus,0,0,0,false});
             test_key(SDLK_F1);human_stage_=70;break;
@@ -1128,7 +1155,7 @@ public:
         for(const auto& detail:scene.gaps)gaps_.insert(detail);
         frame_=std::move(scene.image);
         const w::Entity* hovered=nullptr;int nearest=24*24;
-        if(!help_visible_&&pause_panel_==PausePanel::Closed&&!show_score_&&pointer_x_>=0&&pointer_x_<BattleHud::sidebar_x&&
+        if(!help_visible_&&!options_.visible()&&!show_score_&&pointer_x_>=0&&pointer_x_<BattleHud::sidebar_x&&
             pointer_y_>=0&&pointer_y_<BattleHud::view_height)
             for(const auto& e:world_.entities)if(const auto at=anchor(e)) {
                 const int dx=at->x-pointer_x_,dy=at->y-pointer_y_,d=dx*dx+dy*dy;
@@ -1183,9 +1210,12 @@ public:
             }
         }
         if(help_visible_)help_.draw(frame_);
-        if(pause_panel_!=PausePanel::Closed)help_.draw_pause(frame_,pause_panel_==PausePanel::Abort);
+        if(options_.visible()) {
+            if(options_art_)draw_options_menu(frame_,options_,*options_art_);
+            else help_.draw_pause(frame_,options_.page()==OptionsPage::ConfirmAbort);
+        }
         CursorKind kind=CursorKind::Normal;
-        if(!help_visible_&&pause_panel_==PausePanel::Closed&&!show_score_&&pointer_x_>=0&&pointer_x_<BattleHud::sidebar_x) {
+        if(!help_visible_&&!options_.visible()&&!show_score_&&pointer_x_>=0&&pointer_x_<BattleHud::sidebar_x) {
             const auto cell=cell_at({pointer_x_,pointer_y_});
             bool passable=false;
             if(cell) {
@@ -1313,6 +1343,8 @@ int run_prototype_battle(const BattleOptions& requested) {
     if(args.setup.map_archive && !args.setup.map_archive->empty())files.mount(*args.setup.map_archive);
     files.mount_language(fs::GameVariant::RedAlert2);
     files.bootstrap(fs::GameVariant::RedAlert2);files.mount_overlays();files.mount_resources();
+    // Base 0051A330: the options menu art comes from the side archive inside RA2.MIX.
+    files.mount(side_archive(assets.rules().read_string(country,"Side")!="GDI"),false);
     auto scene_art=render::TheaterArt::load(files,assets.map_ini().read_string("Map","Theater"));
     (void)scene_art;
     const auto rules=rules_job.get();

@@ -14,6 +14,7 @@ import sys
 
 root = pathlib.Path(sys.argv[1])
 names = ['00-help', '01-deployed', '02-production', '03-ready', '04-placed',
+         '04b-options', '04c-abort-question',
          '05-selected', '06-moved', '07-attack', '08-result',
          '09-camera-after-result', '10-menu']
 frames = {}
@@ -30,6 +31,7 @@ for name in names:
     frames[name] = pixels
 
 for before, after in [('00-help', '01-deployed'), ('02-production', '03-ready'),
+                      ('04-placed', '04b-options'), ('04b-options', '04c-abort-question'),
                       ('03-ready', '04-placed'), ('05-selected', '06-moved'),
                       ('07-attack', '08-result'), ('08-result', '09-camera-after-result')]:
     assert frames[before] != frames[after], 'Unchanged capture: ' + after
