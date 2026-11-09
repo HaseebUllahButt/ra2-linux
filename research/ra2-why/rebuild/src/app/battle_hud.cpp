@@ -8,6 +8,7 @@
 #include "../gfx/shp_decode.h"
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 
 namespace ra2::app {
@@ -89,7 +90,7 @@ render::Rectangle BattleHud::build_button_bounds(int i) {
 render::Rectangle BattleHud::deploy_bounds() { return {palette_x,deploy_y,deploy_width,deploy_height}; }
 render::Rectangle BattleHud::minimap_bounds() { return {minimap_x,minimap_y,minimap_region_width,minimap_region_height}; }
 HudAction BattleHud::handle_click(int x,int y,const HudState& s) const {
-    if (y >= 38 && y < 56 && x >= 808 && x < 1018) {
+    if (y >= 36 && y < 58 && x >= 808 && x < 1018) {
         active_category_ = static_cast<BuildCategory>((x-808)/42);
         return {};
     }
@@ -118,11 +119,14 @@ void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
     const auto capacity=std::max({1,s.power_output,s.power_drain});
     fill(b,{808,29,static_cast<int>(212LL*std::max(0,s.power_output)/capacity),6},
          s.power_output<s.power_drain?red:green);
+    // Enlarged tabs. The click test in handle_click uses these same rects.
+    // Below the power bar (ends at y 35), above the buttons (start y 60).
     const char* tabs[] = {"ALL", "BLD", "INF", "VEH", "AIR"};
     for (int i=0;i<5;++i) {
-        Rectangle tab{808+i*42,38,40,18};
+        Rectangle tab{808+i*42,36,42,22};
         border(b,tab,static_cast<int>(active_category_)==i?gold:edge);
-        text(b,tab.x+3,tab.y+4,tabs[i],ink,34,1);
+        std::string label=tabs[i];
+        text(b,tab.x+(42-(4*static_cast<int>(label.size())-2))/2,tab.y+6,label,ink,40,2);
     }
     if (s.choices.empty() && s.result.empty()) {
         text(b,816,90,"DEPLOY YOUR",gold,200);
@@ -142,10 +146,37 @@ void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
             }
         }
         auto color=c.enabled?ink:edge;
-        text(b,r.x+4,r.y+6,c.name.empty()?c.type:c.name,color,r.width-8);
-        text(b,r.x+4,r.y+19,"$"+std::to_string(c.cost),color,r.width-8);
-        text(b,r.x+4,r.y+31,c.progress>=1000?"READY":c.progress>0?std::to_string(c.progress/10)+"%":"BUILD",color,r.width-8);
-        fill(b,{r.x+4,r.y+46,(r.width-8)*std::clamp(c.progress,0,1000)/1000,5},c.enabled?green:edge);
+        bool art_loaded=image!=cameos_.end() && valid(image->second);
+        if (art_loaded) {
+            // Original cameo art: no name, cost or BUILD text on top.
+            if (c.progress>=1000) {
+                text(b,r.x+32,r.y+22,"READY",gold,r.width-8,2);
+            } else if (c.progress>0) {
+                // Clock shading, like the original CLOCK.SHP overlay: a dark
+                // wedge that grows clockwise from 12 o'clock.
+                const double sweep=std::clamp(c.progress,0,1000)/1000.0*2*M_PI;
+                const int cx=r.x+r.width/2, cy=r.y+r.height/2;
+                const int rad=std::min(r.width,r.height)/2-2;
+                // Local button coords; dx/dy measure from the button center.
+                for (int y=1;y<r.height-1;++y)
+                    for (int x=1;x<r.width-1;++x) {
+                        const double dx=r.x+x+0.5-cx, dy=r.y+y+0.5-cy;
+                        if (dx*dx+dy*dy>rad*rad) continue;
+                        double ang=std::atan2(dx,-dy);
+                        if (ang<0) ang+=2*M_PI;
+                        if (ang<=sweep) {
+                            auto i=(static_cast<std::size_t>(r.y+y)*b.width+r.x+x)*4;
+                            b.rgba[i]/=2; b.rgba[i+1]/=2; b.rgba[i+2]/=2;
+                        }
+                    }
+            }
+        } else {
+            // Fallback art: keep the text labels and the progress bar.
+            text(b,r.x+4,r.y+6,c.name.empty()?c.type:c.name,color,r.width-8);
+            text(b,r.x+4,r.y+19,"$"+std::to_string(c.cost),color,r.width-8);
+            text(b,r.x+4,r.y+31,c.progress>=1000?"READY":c.progress>0?std::to_string(c.progress/10)+"%":"BUILD",color,r.width-8);
+            fill(b,{r.x+4,r.y+46,(r.width-8)*std::clamp(c.progress,0,1000)/1000,5},c.enabled?green:edge);
+        }
     }
     border(b,deploy_bounds(),ink); text(b,816,577,"DEPLOY",ink,190);
     int y=606;

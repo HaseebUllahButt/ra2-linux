@@ -91,6 +91,18 @@ int main(int argc, char** argv) {
     hud.handle_click(808+3*42,44,tabs);
     assert(hud.handle_click(r.x+1,r.y+1,tabs).type=="MTNK");
     hud.handle_click(808,44,tabs);
+    // Enlarged tabs: the drawn tab and the hit area are the same rect.
+    // Tabs sit at y 36..58, below the power bar, above the buttons.
+    assert(hud.handle_click(808,35,tabs).kind==HudActionKind::None);
+    assert(hud.handle_click(808,58,tabs).kind==HudActionKind::None);
+    assert(hud.handle_click(808,57,tabs).kind==HudActionKind::None);
+    hud.handle_click(809,37,tabs);
+    assert(hud.handle_click(r.x+1,r.y+1,tabs).type=="GAPOWR");
+    auto tabframe=frame(); hud.draw(tabframe,tabs);
+    assert(tabframe.rgba[(36*1024+809)*4]!=17); // top border row of the first tab
+    assert(tabframe.rgba[(57*1024+809)*4]!=17); // bottom border row
+    assert(tabframe.rgba[(35*1024+809)*4]==22); // power bar row: plain sidebar dark
+    assert(tabframe.rgba[(58*1024+809)*4]==22); // gap above the buttons
     if (argc > 1) {
         fs::MixFileSystem files(argv[1]);
         files.mount_language(fs::GameVariant::RedAlert2);
@@ -126,6 +138,89 @@ int main(int argc, char** argv) {
                                screen.rgba.begin()+dest)) ++matches;
             }
             assert(matches>100);
+            // Loaded cameo art carries no idle text: the whole opaque
+            // interior matches the source art exactly at progress 0.
+            int exact=0, total=0;
+            for (int y=1;y<box.height-1;++y) for (int x=1;x<box.width-1;++x) {
+                auto source=(static_cast<std::size_t>(y-1)*image.height/(box.height-2)*image.width+
+                             (x-1)*image.width/(box.width-2))*4;
+                if (!image.pixels[source+3]) continue;
+                auto dest=(static_cast<std::size_t>(box.y+y)*screen.width+box.x+x)*4;
+                ++total;
+                if (std::equal(image.pixels.begin()+source,image.pixels.begin()+source+4,
+                               screen.rgba.begin()+dest)) ++exact;
+            }
+            assert(total>1000 && exact==total);
+        // Clock checks compare button 0 art with this icon, so run them
+        // only for the first icon (POWRICON, i is already incremented).
+        if (i!=1) continue;
+        // READY shows clearly in gold over loaded art.
+        originals.choices[0].progress=1000;
+        hud.draw(screen,originals);
+        auto ready_box=BattleHud::build_button_bounds(0);
+        int gold_hits=0;
+        for (int y=ready_box.y;y<ready_box.y+ready_box.height;++y)
+            for (int x=ready_box.x;x<ready_box.x+ready_box.width;++x) {
+                auto i=(static_cast<std::size_t>(y)*screen.width+x)*4;
+                if (screen.rgba[i]==255&&screen.rgba[i+1]==214&&screen.rgba[i+2]==64) ++gold_hits;
+            }
+        assert(gold_hits>50);
+        // Clock shading: progress 250 darkens a wedge clockwise from the
+        // top. Top-right is inside the wedge, top-left is not.
+        originals.choices[0].progress=250;
+        hud.draw(screen,originals);
+        auto clock_box=BattleHud::build_button_bounds(0);
+        // The clock wedge only covers a circle around the button center.
+        const double clock_rad=std::min(clock_box.width,clock_box.height)/2.0-2;
+        auto in_circle=[&](int x,int y) {
+            double dx=x+0.5-clock_box.width/2.0, dy=y+0.5-clock_box.height/2.0;
+            return dx*dx+dy*dy<=clock_rad*clock_rad;
+        };
+        auto art_pixel=[&](int bx,int by) {
+            auto source=(static_cast<std::size_t>(by-1)*image.height/(clock_box.height-2)*image.width+
+                         (bx-1)*image.width/(clock_box.width-2))*4;
+            return source;
+        };
+        int in_wedge=0, out_wedge=0;
+        for (int y=2;y<clock_box.height/2;++y) for (int x=clock_box.width/2;x<clock_box.width-2;++x) {
+            auto source=art_pixel(x,y);
+            if (!image.pixels[source+3] || !in_circle(x,y)) continue;
+            auto dest=(static_cast<std::size_t>(clock_box.y+y)*screen.width+clock_box.x+x)*4;
+            // Shaded pixels are exactly half the art color; skip very dark
+            // art where half and full are too close to tell apart.
+            if (image.pixels[source]>60 && screen.rgba[dest]==image.pixels[source]/2) ++in_wedge;
+        }
+        for (int y=2;y<clock_box.height/2;++y) for (int x=2;x<clock_box.width/2;++x) {
+            auto source=art_pixel(x,y);
+            if (!image.pixels[source+3] || !in_circle(x,y)) continue;
+            auto dest=(static_cast<std::size_t>(clock_box.y+y)*screen.width+clock_box.x+x)*4;
+            if (std::equal(image.pixels.begin()+source,image.pixels.begin()+source+4,
+                           screen.rgba.begin()+dest)) ++out_wedge;
+        }
+        assert(in_wedge>50 && in_wedge+out_wedge>200);
+        // Progress 750: the wedge covers 270 degrees. Top-left is the only
+        // clean quadrant; top-right and bottom-left are darkened.
+        originals.choices[0].progress=750;
+        hud.draw(screen,originals);
+        int dark_tl=0, opaque_tl=0, dark_mid=0, opaque_mid=0;
+        // Top-left quarter-disc slice, clear of the 270 degree boundary.
+        for (int y=8;y<24;++y) for (int x=32;x<48;++x) {
+            auto source=art_pixel(x,y);
+            if (!image.pixels[source+3] || !in_circle(x,y)) continue;
+            auto dest=(static_cast<std::size_t>(clock_box.y+y)*screen.width+clock_box.x+x)*4;
+            ++opaque_tl;
+            if (image.pixels[source]>60 && screen.rgba[dest]==image.pixels[source]/2) ++dark_tl;
+        }
+        for (int y=32;y<48;++y) for (int x=32;x<48;++x) {
+            auto source=art_pixel(x,y);
+            if (!image.pixels[source+3] || !in_circle(x,y)) continue;
+            auto dest=(static_cast<std::size_t>(clock_box.y+y)*screen.width+clock_box.x+x)*4;
+            ++opaque_mid;
+            if (image.pixels[source]>60 && screen.rgba[dest]==image.pixels[source]/2) ++dark_mid;
+        }
+        assert(dark_tl==0 && opaque_tl>10);
+        assert(dark_mid>50 && dark_mid<=opaque_mid);
+        originals.choices[0].progress=0;
         }
     }
     std::cout<<"battle HUD tests passed\n";
