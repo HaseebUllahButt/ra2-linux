@@ -995,12 +995,14 @@ public:
             <<" ai_orders="<<ai_orders<<" result="<<(victory_.settled()?result_name(victory_.result):"IN_PROGRESS")
             <<" world=PrototypeComplete\n";
         for(const auto& gap:gaps_)std::cout<<"TODO-ORIGINAL: "<<gap<<'\n';
-        if(args_.human_input_check && human_stage_<13)
-            throw std::runtime_error("Human input check did not reach result and menu; stage="+std::to_string(human_stage_));
-        if(args_.autoplay && !victory_.settled())for(const auto& e:world_.entities)
+        if((args_.autoplay||args_.human_input_check) && !victory_.settled())for(const auto& e:world_.entities)
             if(live(e)&&(e.house_id==player_||e.house_id==enemy_))
                 std::cout<<"Survivor house="<<e.house_id<<" id="<<e.id<<" type="<<e.type<<" hp="
-                    <<e.resolved_hp.value_or(0)<<" cell="<<e.cell->x<<','<<e.cell->y<<'\n';
+                    <<e.resolved_hp.value_or(0)<<" cell="<<e.cell->x<<','<<e.cell->y
+                    <<" moving="<<movement_.moving(e.id)<<" attack="
+                    <<(attacks_.count(e.id)?attacks_.at(e.id):0)<<'\n';
+        if(args_.human_input_check && human_stage_<13)
+            throw std::runtime_error("Human input check did not reach result and menu; stage="+std::to_string(human_stage_));
         if(args_.autoplay && (!autoplay_deployed_||!autoplay_moved_||!moved||!fired||!impacts||!built||!infantry||
             !ai_orders||!victory_.settled()))throw std::runtime_error("Autoplay did not complete the required match loop");
     }
