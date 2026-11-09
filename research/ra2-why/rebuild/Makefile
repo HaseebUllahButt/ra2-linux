@@ -10,11 +10,11 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/render/tmp_decode.cpp src/render/minimap.cpp src/loop/game_loop.cpp \
     src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp src/fs/filename_hash.cpp \
     src/gfx/palette.cpp src/gfx/shp_decode.cpp src/actors/actors.cpp \
-    src/session/session.cpp src/session/map_geometry.cpp src/session/placement_terrain.cpp src/session/world/world.cpp src/session/world/speed_type.cpp src/session/world/movement_zone.cpp src/session/world/unit_flags.cpp src/session/world/cell_occupancy.cpp src/session/world/bridge_footprint.cpp src/weapons/weapons.cpp src/weapons/occupant_order.cpp src/weapons/object_damage.cpp \
+    src/session/session.cpp src/session/map_geometry.cpp src/session/placement_terrain.cpp src/session/world/world.cpp src/session/world/setup.cpp src/session/world/speed_type.cpp src/session/world/movement_zone.cpp src/session/world/unit_flags.cpp src/session/world/cell_occupancy.cpp src/session/world/bridge_footprint.cpp src/weapons/weapons.cpp src/weapons/occupant_order.cpp src/weapons/object_damage.cpp src/weapons/fire_eligibility.cpp src/weapons/cannon_range.cpp src/weapons/cannon_line.cpp src/weapons/projectile_damage.cpp src/weapons/fire_timer.cpp src/weapons/techno_damage.cpp \
     src/ui/ui.cpp src/ui/shell.cpp src/ui/skirmish.cpp src/text/csf.cpp \
     src/pack/map_pack.cpp src/rules/ini_file.cpp src/map/map_file.cpp \
     src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
-    src/sim/combat.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp src/sim/path.cpp src/sim/path_smoothing.cpp src/sim/cell_entry.cpp src/sim/coarse_category.cpp src/sim/regions.cpp src/sim/hierarchy.cpp src/sim/hierarchy_route.cpp src/sim/production.cpp \
+    src/sim/combat.cpp src/sim/damage_runtime.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp src/sim/path.cpp src/sim/path_smoothing.cpp src/sim/cell_entry.cpp src/sim/coarse_category.cpp src/sim/regions.cpp src/sim/hierarchy.cpp src/sim/hierarchy_route.cpp src/sim/production.cpp \
     src/sim/world.cpp src/sim/world_init.cpp src/sim/cell_setup.cpp src/sim/drive.cpp src/sim/movement.cpp src/sim/movement_regions.cpp src/sim/component_lookup.cpp src/sim/goal_path.cpp src/sim/retry_edges.cpp src/sim/hierarchy_retry.cpp src/sim/local_reachability.cpp src/sim/search_memory.cpp src/sim/foot_path.cpp src/sim/nearest_cell.cpp src/sim/cell_projection.cpp src/sim/cell_fit.cpp src/sim/overlay_mark.cpp src/sim/replacement.cpp src/sim/build_time.cpp src/voxel/voxel.cpp
 NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
 
@@ -33,11 +33,11 @@ all: test
 
 FS_OBJECTS = build/native/src/fs/mix_archive.o build/native/src/fs/mix_bootstrap.o build/native/src/fs/filename_hash.o
 GFX_OBJECTS = build/native/src/gfx/palette.o build/native/src/gfx/shp_decode.o
-SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS))
+SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS)) build/native/src/weapons/weapons.o
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 SESSION_OBJECTS = build/native/src/session/session.o build/native/src/session/map_geometry.o build/native/src/session/placement_terrain.o
 
-native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-postprocessed-path sim-filtered-path sim-smoothing sim-full-smoothing sim-entry-height sim-category sim-regions sim-movement-regions sim-component-lookup sim-goal-control sim-retry-edges sim-hierarchy-retry sim-local-reachability sim-search-memory sim-foot-path sim-nearest-cell sim-cell-projection sim-nearest-projection sim-cell-fit sim-rectangle-fit sim-nearest-fit sim-hierarchy-memory sim-overlay-mark sim-hierarchy sim-hierarchy-route sim-replacement sim-world sim-cell-setup sim-build-time sim-production session session-terrain session-world weapons
+native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-postprocessed-path sim-filtered-path sim-smoothing sim-full-smoothing sim-entry-height sim-category sim-regions sim-movement-regions sim-component-lookup sim-goal-control sim-retry-edges sim-hierarchy-retry sim-local-reachability sim-search-memory sim-foot-path sim-nearest-cell sim-cell-projection sim-nearest-projection sim-cell-fit sim-rectangle-fit sim-nearest-fit sim-hierarchy-memory sim-overlay-mark sim-hierarchy sim-hierarchy-route sim-replacement sim-world sim-cell-setup sim-build-time sim-production session session-terrain session-world weapons combat-runtime
 	build/ra2-native --game-dir ../game --frames 3 --headless
 	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
@@ -330,8 +330,10 @@ build/session_test: $(SESSION_OBJECTS) build/native/src/session/test_main.o buil
 SESSION_WORLD_OBJECTS = build/native/src/session/world/world.o build/native/src/session/world/speed_type.o build/native/src/session/world/movement_zone.o build/native/src/session/world/unit_flags.o $(SESSION_OBJECTS) build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/sim/coarse_category.o build/native/src/sim/cell_setup.o build/native/src/sim/replacement.o build/native/src/sim/world.o build/native/src/sim/floor.o build/native/src/rules/ini_file.o build/native/src/weapons/occupant_order.o
 
 .PHONY: session-world
-session-world: build/session_world_unit_flags_test build/session_world_movement_zone_test build/session_world_speed_type_test build/session_world_cell_setup_test build/session_world_snapshot_test build/session_world_map_test build/session_world_target_tile_test build/session_world_cell_occupancy_cases build/session_world_bridge_cases
+session-world: build/session_world_house_updates_cases build/session_world_setup_test build/session_world_unit_flags_test build/session_world_movement_zone_test build/session_world_speed_type_test build/session_world_cell_setup_test build/session_world_snapshot_test build/session_world_map_test build/session_world_target_tile_test build/session_world_cell_occupancy_cases build/session_world_bridge_cases
 	build/session_world_snapshot_test
+	build/session_world_house_updates_cases > /dev/null
+	build/session_world_setup_test ../game
 	build/session_world_speed_type_test
 	build/session_world_movement_zone_test
 	build/session_world_unit_flags_test
@@ -341,6 +343,9 @@ session-world: build/session_world_unit_flags_test build/session_world_movement_
 	build/session_world_target_tile_test ../game --stage
 	build/session_world_cell_occupancy_cases > /dev/null
 	build/session_world_bridge_cases > /dev/null
+
+build/session_world_setup_test: build/native/src/session/world/setup_case.o build/native/src/session/world/setup.o $(SESSION_WORLD_OBJECTS) $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 build/session_world_unit_flags_test: build/native/src/session/world/unit_flags_case.o build/native/src/session/world/unit_flags.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
@@ -355,6 +360,9 @@ build/session_world_cell_setup_test: build/native/src/session/world/cell_setup_c
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/session_world_snapshot_test: build/native/src/session/world/test_snapshot.o $(SESSION_WORLD_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/session_world_house_updates_cases: build/native/src/session/world/house_updates_case.o $(SESSION_WORLD_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/session_world_house_cases: build/native/src/session/world/house_case.o $(SESSION_WORLD_OBJECTS)
@@ -420,6 +428,18 @@ build/session_unit_loop_cases: build/native/src/session/session.o build/native/s
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/session_mission_cases: build/native/src/session/session.o build/native/src/session/mission_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+COMBAT_RUNTIME_OBJECTS = build/native/src/weapons/projectile_damage.o build/native/src/weapons/cannon_line.o build/native/src/weapons/cannon_range.o build/native/src/weapons/fire_eligibility.o build/native/src/weapons/fire_timer.o build/native/src/weapons/techno_damage.o build/native/src/weapons/weapons.o build/native/src/sim/damage_runtime.o build/native/src/sim/random.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o
+
+.PHONY: combat-runtime
+combat-runtime: build/combat_runtime_regression
+	build/combat_runtime_regression ../game/game.exe
+
+build/combat_runtime_regression: build/native/src/weapons/combat_runtime_regression.o $(COMBAT_RUNTIME_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/weapons_%_cases: build/native/src/weapons/%_test.o $(COMBAT_RUNTIME_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 .PHONY: weapons
