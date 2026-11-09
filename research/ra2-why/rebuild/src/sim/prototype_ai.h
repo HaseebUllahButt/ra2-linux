@@ -4,6 +4,7 @@
 #include "rules/ini_file.h"
 #include "session/world/world.h"
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -81,8 +82,9 @@ private:
         std::size_t type = 0, trigger = 0;
         std::vector<std::uint32_t> members;
         bool forming = true, guarding = false, moving = false;
+        bool succeeded = false; // Base TeamClass +83, set by script action 49.
         std::int32_t line = 0;
-        std::int64_t wait_until = 0, deadline = 0;
+        std::int64_t created = 0, wait_until = 0, deadline = 0;
         std::uint32_t target = 0;
         ra2map::Cell goal{};
     };
@@ -90,7 +92,7 @@ private:
     void select_team(const Context&);
     void fill_teams(Context&, std::vector<skirmish::Order>* build_orders);
     void run_teams(Context&, std::vector<skirmish::Order>&);
-    void finish(Team&, bool success);
+    void finish(Team&);
     bool condition(const Context&, const Trigger&) const;
     std::uint32_t random(std::uint32_t low, std::uint32_t high);
 
@@ -103,6 +105,9 @@ private:
     std::vector<Trigger> triggers_;
     std::vector<double> weights_; // current trigger weights
     std::vector<Team> teams_;
+    // Base House +53BC: the last seen construction yard Cell. It stays when
+    // the yard dies, as the original does not clear it.
+    std::map<std::uint32_t, ra2map::Cell> base_centres_;
     std::optional<std::int32_t> last_frame_;
     std::uint32_t computer_house_ = 0, player_house_ = 0, seed_ = 1;
     std::int64_t next_build_ = 0, next_attack_ = 0, next_team_ = 0;
