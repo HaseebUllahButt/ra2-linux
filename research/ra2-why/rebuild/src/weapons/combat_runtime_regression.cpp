@@ -214,6 +214,11 @@ void check_projectile(const std::string& path,const sim::OriginalDistance& dista
     const auto before=projectile;tick.cell_objects.reset();
     check(sim::base_advance_flat_projectile(projectile,tick,lookup,distance)==FlatCannonTickStatus::NeedsInput &&
           projectile.arc.position==before.arc.position && projectile.arc.velocity==before.arc.velocity,"unknown projectile tick changed state");
+    tick.cell_objects=std::vector<ProjectileCellObject>{};tick.position_in_map=false;
+    check(sim::base_advance_flat_projectile(projectile,tick,lookup,distance)==FlatCannonTickStatus::Remove &&
+          projectile.phase==sim::FlatProjectilePhase::RemovalPending,"projectile removal callbacks skipped");
+    check(sim::base_advance_flat_projectile(projectile,tick,lookup,distance)==FlatCannonTickStatus::NeedsInput,
+          "pending projectile advanced");
 }
 }
 int main(int argc,char** argv) {

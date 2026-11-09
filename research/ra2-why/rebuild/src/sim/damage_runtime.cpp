@@ -170,7 +170,7 @@ weapons::FlatCannonTickStatus base_advance_flat_projectile(
     projectile.arc.position=result.state.position;
     projectile.arc.velocity=result.state.velocity;
     if (result.status==S::Impact) projectile.phase=FlatProjectilePhase::ImpactPending;
-    else if (result.status==S::Remove) projectile.phase=FlatProjectilePhase::Removed;
+    else if (result.status==S::Remove) projectile.phase=FlatProjectilePhase::RemovalPending;
     return result.status;
 }
 }

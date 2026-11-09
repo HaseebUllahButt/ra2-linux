@@ -57,7 +57,7 @@ AreaCollectionResult base_small_ground_area_candidates(
 }
 
 namespace ra2::sim {
-enum class FlatProjectilePhase { Flying, ImpactPending, Removed };
+enum class FlatProjectilePhase { Flying, ImpactPending, RemovalPending };
 struct FlatProjectile {
     weapons::ArcInput arc;
     Coord target;
@@ -67,7 +67,8 @@ struct FlatProjectile {
 // Advances one existing projectile with the recovered flat Cannon slice.
 // An unresolved tick leaves the entire projectile unchanged. ImpactPending
 // requires the caller to run original impact effects and damage; it is not a
-// completed detonation or removal. Removed covers only the map-boundary path.
+// completed detonation or removal. RemovalPending requires the original
+// +11C(2) and +F0 callbacks for the map-boundary path.
 weapons::FlatCannonTickStatus base_advance_flat_projectile(
     FlatProjectile&, const weapons::FlatCannonTickInput&,
     const weapons::TerrainTraceLookup&, const OriginalDistance&);
