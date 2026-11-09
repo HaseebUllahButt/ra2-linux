@@ -49,9 +49,27 @@ void BattleHelp::draw(render::Bitmap& b) const {
     fill(b,{x,y,600,430},edge); fill(b,{x+3,y+3,594,424},bg);
     text(b,x+20,y+18,"SKIRMISH CONTROLS",gold,560,3);
     text(b,x+20,y+49,"OBJECTIVE: DESTROY THE ENEMY BASE.",ink,560);
-    const char* lines[]={"LEFT CLICK: SELECT A UNIT", "DRAG LEFT MOUSE: BOX SELECT UNITS", "LEFT CLICK GROUND: MOVE SELECTED UNITS", "LEFT CLICK ENEMY: ATTACK", "RIGHT CLICK: CLEAR SELECTION", "DOUBLE CLICK MCV OR PRESS D: DEPLOY", "S: STOP SELECTED UNITS", "ARROWS OR SCREEN EDGES: MOVE CAMERA", "BUILD: CLICK READY, THEN CLICK MAP TO PLACE", "ESC: RETURN TO MENU"};
+    const char* lines[]={"LEFT CLICK: SELECT A UNIT", "DRAG LEFT MOUSE: BOX SELECT UNITS", "LEFT CLICK GROUND: MOVE SELECTED UNITS", "LEFT CLICK ENEMY: ATTACK", "RIGHT CLICK: CLEAR SELECTION", "DOUBLE CLICK MCV OR PRESS D: DEPLOY", "S: STOP SELECTED UNITS", "ARROWS OR SCREEN EDGES: MOVE CAMERA", "BUILD: CLICK READY, THEN CLICK MAP TO PLACE", "ESC: PAUSE / ABORT"};
     int line_y=y+83;
     for (auto line:lines) { text(b,x+20,line_y,line,ink,560); line_y+=29; }
     text(b,x+20,y+394,"CLICK TO CLOSE   /   F1: SHOW HELP",gold,560);
+}
+PauseAction BattleHelp::pause_action(int x,int y,bool confirm) {
+    if(y<429||y>=469)return PauseAction::None;
+    if(x>=282&&x<494)return confirm?PauseAction::Back:PauseAction::Resume;
+    if(x>=530&&x<742)return PauseAction::Abort;
+    return PauseAction::None;
+}
+void BattleHelp::draw_pause(render::Bitmap& b,bool confirm) const {
+    if(b.width<=0||b.height<=0||std::uint64_t(b.width)*b.height*4>b.rgba.size())return;
+    // Native 1024x768 panel. TODO-ORIGINAL: original options artwork and settings.
+    constexpr Color edge{160,145,84,255},bg{20,27,30,255},ink{235,230,200,255},gold{255,214,64,255};
+    fill(b,{262,269,500,230},edge);fill(b,{265,272,494,224},bg);
+    text(b,282,289,confirm?"ABORT MATCH?":"GAME PAUSED",gold,460,3);
+    text(b,282,338,confirm?"YOUR CURRENT MATCH WILL END.":"RESUME PLAY OR ABORT THIS MATCH.",ink,460);
+    text(b,282,388,confirm?"ENTER: ABORT    ESC: BACK":"ESC: RESUME    Q: ABORT",ink,460);
+    for(int x:{282,530}) {fill(b,{x,429,212,40},edge);fill(b,{x+2,431,208,36},bg);}
+    text(b,302,443,confirm?"BACK":"RESUME",gold,172);
+    text(b,550,443,"ABORT",gold,172);
 }
 }

@@ -78,6 +78,9 @@ void BattleOrders::cancel_pointer() {
 }
 void BattleOrders::clear() {
     selected_.clear();
+    cancel_input();
+}
+void BattleOrders::cancel_input() {
     cancel_pointer();
     last_click_.reset();
 }

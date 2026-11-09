@@ -40,6 +40,9 @@ public:
     std::optional<BattleRect> selection_rectangle() const noexcept { return rectangle_; }
     // Clear selection and pointer history.
     void clear();
+    // Close a modal panel without committing its pointer release as an order.
+    // Keep the selected units.
+    void cancel_input();
     // Root owns placement and its orders. While active, normal battle input is blocked.
     // Escape cancels this flag first and keeps selection. A later Escape clears selection.
     void set_placement_active(bool active);

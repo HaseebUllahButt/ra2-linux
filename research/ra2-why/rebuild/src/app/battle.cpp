@@ -128,6 +128,8 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     std::string placement_,status_="Select MCV. D deploys.";
     bool quit_=false,autoplay_moved_=false,autoplay_deployed_=false;
     bool help_visible_=true,show_score_=false;
+    enum class PausePanel { Closed, Options, Abort };
+    PausePanel pause_panel_=PausePanel::Closed;
     bool force_draw_=false;
     int human_stage_=0;
     std::uint32_t human_target_=0,human_wait_frame_=0;
@@ -299,8 +301,13 @@ public:
     }
     void input(const Input& input) {
         if (input.kind==InputKind::Quit) {quit_=true;return;}
-        if (input.kind==InputKind::Focus && !input.pressed) {
-            keys_.clear();pointer_x_=pointer_y_=-1;
+        if (input.kind==InputKind::Focus || input.kind==InputKind::Resize) {
+            if(input.kind==InputKind::Focus && !input.pressed) {
+                keys_.clear();pointer_x_=pointer_y_=-1;
+            }
+            // Modal panels must not swallow the focus gain that restores orders.
+            (void)orders_.handle(input,world_,view(),clock_.now_ms());
+            return;
         }
         if (input.kind==InputKind::Motion || input.kind==InputKind::Button) {
             pointer_x_=input.x;pointer_y_=input.y;
@@ -308,15 +315,37 @@ public:
         if (input.kind==InputKind::Key) {
             if (input.pressed) keys_.insert(input.key);else keys_.erase(input.key);
             if (input.pressed && input.key==SDLK_ESCAPE) {
-                if (!placement_.empty()&&!help_visible_) {placement_.clear();orders_.set_placement_active(false);}
-                else quit_=true;
+                orders_.cancel_input();keys_.clear();
+                if(pause_panel_==PausePanel::Abort)pause_panel_=PausePanel::Options;
+                else if(pause_panel_==PausePanel::Options)pause_panel_=PausePanel::Closed;
+                else if (!placement_.empty()&&!help_visible_) {placement_.clear();orders_.set_placement_active(false);status("");}
+                else if(help_visible_)help_visible_=false;
+                else if(victory_.settled())quit_=true;
+                else pause_panel_=PausePanel::Options;
                 return;
             }
-            if(input.pressed && input.key==SDLK_F1) {help_visible_=!help_visible_;return;}
+            if(pause_panel_==PausePanel::Closed && input.pressed && input.key==SDLK_F1) {
+                orders_.cancel_input();keys_.clear();help_visible_=!help_visible_;return;
+            }
             if(input.pressed && input.key==SDLK_TAB && victory_.settled()) {show_score_=!show_score_;return;}
-            if (input.pressed && input.key==SDLK_h) {
+            if (pause_panel_==PausePanel::Closed && input.pressed && input.key==SDLK_h) {
                 for (const auto& e:world_.entities) if (live(e)&&e.house_id==player_) {center(e);break;}
             }
+        }
+        if(pause_panel_!=PausePanel::Closed) {
+            PauseAction action=PauseAction::None;
+            if(input.kind==InputKind::Button && input.pressed && input.key==SDL_BUTTON_LEFT)
+                action=BattleHelp::pause_action(input.x,input.y,pause_panel_==PausePanel::Abort);
+            if(input.kind==InputKind::Key && input.pressed) {
+                if(input.key==SDLK_q && pause_panel_==PausePanel::Options)action=PauseAction::Abort;
+                if(input.key==SDLK_RETURN)action=pause_panel_==PausePanel::Abort?PauseAction::Abort:PauseAction::Resume;
+            }
+            if(action==PauseAction::Abort) {
+                if(pause_panel_==PausePanel::Abort)quit_=true;
+                else pause_panel_=PausePanel::Abort;
+            } else if(action==PauseAction::Back)pause_panel_=PausePanel::Options;
+            else if(action==PauseAction::Resume) {pause_panel_=PausePanel::Closed;orders_.cancel_input();keys_.clear();}
+            return;
         }
         if(help_visible_) {
             if(input.kind==InputKind::Button && input.pressed)help_visible_=false;
@@ -372,7 +401,7 @@ public:
             if (!args_.headless && event.kind==InputKind::Focus) state.window_active=event.pressed;
             input(event);
         }
-        state.paused=help_visible_;
+        state.paused=help_visible_||pause_panel_!=PausePanel::Closed;
         if (quit_) state.running=false;
     }
     void test_click(int x,int y) {
@@ -491,6 +520,32 @@ public:
         case 7: {
             require(orders_.selected_ids().size()>=2,"Human input: tank box selection failed");
             checkpoint(state,"05-selected");
+            human_wait_frame_=state.frame_counter;
+            test_key(SDLK_ESCAPE);human_stage_=72;break;
+        }
+        case 72:
+            require(pause_panel_==PausePanel::Options,"Human input: Esc did not show pause options");
+            require(state.frame_counter==human_wait_frame_,"Human input: options did not pause play");
+            test_key(SDLK_q);human_stage_=73;break;
+        case 73:
+            require(pause_panel_==PausePanel::Abort,"Human input: abort confirmation is missing");
+            test_key(SDLK_ESCAPE);human_stage_=74;break;
+        case 74:
+            require(pause_panel_==PausePanel::Options,"Human input: abort cancel did not return to options");
+            test_key(SDLK_ESCAPE);human_stage_=75;break;
+        case 75:
+            require(pause_panel_==PausePanel::Closed,"Human input: options did not resume play");
+            human_wait_frame_=state.frame_counter;
+            window_.inject_for_test({InputKind::Focus,0,0,0,false});
+            test_key(SDLK_F1);human_stage_=70;break;
+        case 70:
+            require(help_visible_,"Human input: F1 did not open help during play");
+            require(state.frame_counter==human_wait_frame_,"Human input: help did not pause the simulation");
+            window_.inject_for_test({InputKind::Focus,0,0,0,true});
+            test_key(SDLK_F1);human_stage_=71;break;
+        case 71: {
+            require(!help_visible_,"Human input: F1 did not close help during play");
+            require(orders_.selected_ids().size()>=2,"Human input: modal panels lost the selection");
             const auto* e=find(world_,human_positions_.begin()->first);require(e,"Human input: tank vanished");
             for(int dy=-6;dy<=6;++dy)for(int dx=3;dx<=7;++dx) {
                 auto mark=*e;mark.cell=ra2map::Cell{std::uint16_t(int(e->cell->x)+dx),std::uint16_t(int(e->cell->y)+dy)};
@@ -906,7 +961,7 @@ public:
         for(const auto& detail:scene.gaps)gaps_.insert(detail);
         frame_=std::move(scene.image);
         const w::Entity* hovered=nullptr;int nearest=24*24;
-        if(!help_visible_&&!show_score_&&pointer_x_>=0&&pointer_x_<BattleHud::sidebar_x&&
+        if(!help_visible_&&pause_panel_==PausePanel::Closed&&!show_score_&&pointer_x_>=0&&pointer_x_<BattleHud::sidebar_x&&
             pointer_y_>=0&&pointer_y_<BattleHud::view_height)
             for(const auto& e:world_.entities)if(const auto at=anchor(e)) {
                 const int dx=at->x-pointer_x_,dy=at->y-pointer_y_,d=dx*dx+dy*dy;
@@ -959,8 +1014,9 @@ public:
             }
         }
         if(help_visible_)help_.draw(frame_);
+        if(pause_panel_!=PausePanel::Closed)help_.draw_pause(frame_,pause_panel_==PausePanel::Abort);
         CursorKind kind=CursorKind::Normal;
-        if(!help_visible_&&!show_score_&&pointer_x_>=0&&pointer_x_<BattleHud::sidebar_x) {
+        if(!help_visible_&&pause_panel_==PausePanel::Closed&&!show_score_&&pointer_x_>=0&&pointer_x_<BattleHud::sidebar_x) {
             const auto cell=cell_at({pointer_x_,pointer_y_});
             bool passable=false;
             if(cell) {
