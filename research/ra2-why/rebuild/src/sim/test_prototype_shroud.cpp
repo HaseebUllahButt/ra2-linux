@@ -5,7 +5,9 @@
 #include "fs/mix_bootstrap.h"
 
 #include <cstdint>
+#include <algorithm>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -103,6 +105,60 @@ int main(int argc, char** argv) try {
         require(shroud.vision(9, cell(0, 0)) == Vision::Hidden, "unknown house reads hidden");
         require(shroud.width() == 4 && shroud.height() == 4, "grid size round trip");
     }
+    // Original CellSpread counts 007A5908 for every range 0..10, and the cap
+    // at ten cells from RevealArea 0054A110.
+    {
+        const int counts[] = {1, 9, 21, 37, 61, 89, 121, 161, 205, 253, 309};
+        for (int range = 0; range <= 11; ++range) {
+            PrototypeShroud shroud(40, 40);
+            shroud.sight_from(1, cell(20, 20), range);
+            int revealed = 0;
+            for (std::uint16_t y = 0; y < 40; ++y)
+                for (std::uint16_t x = 0; x < 40; ++x)
+                    revealed += shroud.cell_revealed_to(1, cell(x, y)) ? 1 : 0;
+            const int expected = range == 0 ? 0 : counts[std::min(range, 10)];
+            require(revealed == expected, "sight area differs from the original CellSpread count");
+        }
+        // Spot offsets from the table: (3,1) is in range 3, (3,2) is not.
+        PrototypeShroud shroud(40, 40);
+        shroud.sight_from(1, cell(20, 20), 3);
+        require(shroud.cell_revealed_to(1, cell(23, 21)), "CellSpread range three keeps (3,1)");
+        require(!shroud.cell_revealed_to(1, cell(23, 22)), "CellSpread range three drops (3,2)");
+    }
+    // A building sees from the centre cell the caller supplies.
+    {
+        PrototypeShroud shroud(40, 40);
+        ra2::rules::IniFile rules;
+        rules.parse("[YARD]\nSight=2\n");
+        sw::Snapshot world;
+        world.houses = {house(1, "Player")};
+        world.entities = {actor(1, 1, "YARD", sw::Kind::Structure, 10, 10)};
+        shroud.tick(world, rules, [](const sw::Entity& entity) {
+            return std::optional<ra2map::Cell>(ra2map::Cell{
+                static_cast<std::uint16_t>(entity.cell->x + 2),
+                static_cast<std::uint16_t>(entity.cell->y + 2)});
+        });
+        require(shroud.cell_visible_to(1, cell(14, 12)), "sight from the footprint centre");
+        require(!shroud.cell_visible_to(1, cell(9, 10)), "not from the anchor cell");
+    }
+    // An ally of the gap owner keeps its view.
+    {
+        PrototypeShroud shroud(40, 40);
+        ra2::rules::IniFile rules;
+        rules.parse("[TANK]\nSight=4\n[GAPGEN]\nGapGenerator=yes\nGapRadiusInCells=3\n");
+        sw::Snapshot world;
+        world.houses = {house(1, "Player"), house(2, "Enemy"), house(3, "Friend")};
+        world.houses[0].original_index = 0;
+        world.houses[1].original_index = 1;
+        world.houses[2].original_index = 2;
+        world.houses[1].alliance_mask_5674 = 1u << 2;
+        world.entities = {actor(1, 1, "TANK", sw::Kind::Unit, 10, 10),
+            actor(2, 2, "GAPGEN", sw::Kind::Structure, 12, 10),
+            actor(3, 3, "TANK", sw::Kind::Unit, 12, 10)};
+        shroud.tick(world, rules);
+        require(!shroud.cell_revealed_to(1, cell(12, 10)), "gap hides the enemy");
+        require(shroud.cell_visible_to(3, cell(12, 10)), "gap spares the owner's ally");
+    }
     // Fog: sight follows the actor, explored ground stays.
     {
         PrototypeShroud shroud(40, 40);
@@ -130,7 +186,7 @@ int main(int argc, char** argv) try {
     {
         PrototypeShroud shroud(40, 40);
         ra2::rules::IniFile rules;
-        rules.parse("[TANK]\nSight=4\n[GAPGEN]\nGapGenerator=yes\nGapRadiusInCells=3\n");
+        rules.parse("[TANK]\nSight=4\n[GAPGEN]\nGapGenerator=yes\nGapRadiusInCells=3\nSight=1\n");
         sw::Snapshot world;
         world.houses = {house(1, "Player"), house(2, "Enemy")};
         world.entities = {actor(1, 1, "TANK", sw::Kind::Unit, 10, 10),
@@ -169,7 +225,7 @@ int main(int argc, char** argv) try {
         require(shroud.cell_visible_to(2, cell(20, 20)), "the enemy keeps its own sight");
         check_tick_is_idempotent(shroud, world, rules);
     }
-    // Sight rules: zero reveals nothing, a missing key reads as one cell,
+    // Sight rules: zero reveals nothing, a missing key reads as zero,
     // unplaced and terrain objects never sight.
     {
         PrototypeShroud shroud(40, 40);
@@ -182,8 +238,12 @@ int main(int argc, char** argv) try {
         require(shroud.vision(1, cell(10, 10)) == Vision::Hidden, "sight zero reveals nothing");
         world.entities[0].type = "MYSTERY";
         shroud.tick(world, rules);
-        require(shroud.cell_visible_to(1, cell(10, 10)), "missing Sight reads as one cell");
-        require(!shroud.cell_visible_to(1, cell(12, 10)), "one cell of sight only");
+        require(shroud.sight_range(rules, "MYSTERY") == 0, "missing Sight reads as zero");
+        require(shroud.vision(1, cell(10, 10)) == Vision::Hidden,
+            "missing Sight reveals nothing (006D9B40 default)");
+        rules.parse("[BLIND]\nSight=0\n[MYSTERY]\nSight=1\n");
+        shroud.tick(world, rules);
+        require(shroud.cell_visible_to(1, cell(10, 10)), "Sight=1 reveals the cell");
         world.entities[0].lifetime = sw::Lifetime::Created;
         shroud.tick(world, rules);
         require(!shroud.cell_visible_to(1, cell(10, 10)), "unplaced actor never sights");

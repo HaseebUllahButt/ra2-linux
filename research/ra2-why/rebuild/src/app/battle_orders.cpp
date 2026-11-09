@@ -123,6 +123,7 @@ const session::world::Entity* BattleOrders::pick(const session::world::Snapshot&
     for (const auto& entity : world.entities) {
         if (enemy ? (!live(entity) || !enemy_of(entity,world,house_)) : !selectable(entity))
             continue;
+        if (visible_ && !visible_(entity)) continue;
         const auto anchor=view.project(entity);
         if (!anchor || !contains(view.battlefield,*anchor)) continue;
         const auto dx=std::int64_t(anchor->x)-point.x, dy=std::int64_t(anchor->y)-point.y;
@@ -219,7 +220,7 @@ std::vector<sim::skirmish::Order> BattleOrders::handle(const Input& input,
         selected_.clear();
         last_click_.reset();
         if (view.project) for (const auto& entity : world.entities) {
-            if (!selectable(entity)) continue;
+            if (!selectable(entity) || (visible_ && !visible_(entity))) continue;
             const auto anchor=view.project(entity);
             if (anchor && contains(view.battlefield,*anchor) && contains(*rectangle,*anchor))
                 selected_.push_back(entity.id);

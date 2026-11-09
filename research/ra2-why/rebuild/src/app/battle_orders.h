@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace ra2::app {
@@ -47,6 +48,11 @@ public:
     // Escape cancels this flag first and keeps selection. A later Escape clears selection.
     void set_placement_active(bool active);
     bool placement_active() const noexcept { return placement_; }
+    // Optional shroud filter. Objects it rejects cannot be clicked, box-selected
+    // or targeted; a click on a hidden enemy orders a move to that ground.
+    // Pass BattleShroud::visible_filter(house), or nothing to clear it.
+    using VisibleFilter = std::function<bool(const session::world::Entity&)>;
+    void set_visible_filter(VisibleFilter filter) { visible_ = std::move(filter); }
 private:
     struct Click {
         std::uint32_t id;
@@ -62,6 +68,7 @@ private:
         sim::skirmish::OrderKind, std::uint32_t target=0, ra2map::Cell cell={}) const;
 
     std::uint32_t house_;
+    VisibleFilter visible_;
     std::vector<std::uint32_t> selected_;
     std::optional<BattlePoint> press_;
     std::optional<BattleRect> rectangle_;
