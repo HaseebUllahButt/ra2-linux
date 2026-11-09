@@ -2,16 +2,17 @@
 #include "sim/test_inputs.h"
 #include "sim/world_init.h"
 #include "render/minimap.h"
+#include "world.h"
 #include <cassert>
 #include <cstdint>
 #include <iostream>
 #include <map>
 
 // Conditional native fixture for MP02T2. Packed Overlay indexes are treated
-// as admitted. This does not execute Overlay effects, Cell +11D, Tube or
-// animation creation, shadow writes, object loading, or bridge setup.
+// as admitted. The two map passes do not execute Overlay effects, Cell +11D,
+// Tube or animation creation, shadow writes, object loading, or bridge setup.
 int main(int argc,char** argv) {
-    if (argc!=2 && !(argc==3 && std::string(argv[2])=="--bounds")) return 2;
+    if (argc!=2 && !(argc==3 && (std::string(argv[2])=="--bounds" || std::string(argv[2])=="--stage"))) return 2;
     using namespace ra2;
     const std::string game=argv[1];
     fs::MixFileSystem files(game);
@@ -25,7 +26,7 @@ int main(int argc,char** argv) {
     auto art=render::TheaterArt::load(files,map.read_string("Map","Theater"));
     const auto& record=art.resolved_metadata(131,0);
     assert(record.present && art.resolved_subtile_present(131,0));
-    if (argc==3) {
+    if (argc==3 && std::string(argv[2])=="--bounds") {
         std::cout<<art.tile_width()<<' '<<art.tile_height()<<' '<<record.flags<<' '
                  <<record.y<<' '<<record.extra_y<<'\n';
         return 0;
@@ -82,6 +83,73 @@ int main(int argc,char** argv) {
             found=true;
         }
         assert(found);
+    }
+    if (argc==3) {
+        using namespace session::world;
+        // These runtime values are test inputs, not conclusions about the map.
+        // Overlay effects, object loading, bridge setup, Tube and animation
+        // creation, and shadow writes were not executed by the two passes.
+        Stage stage(sim::Random(42).state());
+        const auto house=stage.create_player_house("Player","Americans",10000,0,64);
+        assert(house);
+        const auto unit=stage.create_unit(*house,"AMCV",1000,0,false);
+        assert(unit);
+        std::map<std::uint32_t,CellState> staged_cells;
+        for (const auto& terrain:cells) {
+            const int dx=int(terrain.cell.x)-135,dy=int(terrain.cell.y)-80;
+            if ((dx>=-1 && dx<=1 && dy>=-1 && dy<=1) || (dx==2 && dy==2)) {
+                auto& state=staged_cells[std::uint32_t(terrain.cell.y)*512+terrain.cell.x];
+                state.allocated=true; state.terrain=terrain; state.neighbor_count=0;
+            }
+        }
+        constexpr std::uint32_t target=80u*512+135;
+        assert(staged_cells.size()==10 && staged_cells.count(target));
+        assert(stage.install_base_cells(*geometry,std::move(staged_cells),{},{}));
+        BaseUnitProfile profile;
+        profile.restricted_land=-1; profile.movement_mode=-1; profile.placement_mode=2;
+        profile.speed_type=1; profile.level_height=104; profile.type_flag_aa0=false;
+        profile.unit_flag_32c=false; profile.linked_team=false; profile.type_flag_205=true;
+        profile.unit_flag_32a=false; profile.type_flag_bb0=false; profile.type_flag_bb1=false;
+        assert(stage.place_base_unit(*unit,{135,80},32,profile)==PlacementResult::Unresolved);
+        auto supplied=stage.snapshot();
+        supplied.tube_vector_count=0;
+        auto& target_cell=supplied.cells.at(target);
+        target_cell.heads=weapons::CellContentHeads{};
+        target_cell.terrain->bridge=false; target_cell.cell_flag_100=false;
+        target_cell.ground_occupancy_124=0; target_cell.cell_field_54=-1;
+        target_cell.cell_field_58=-1; target_cell.tube_field_116=-1;
+        target_cell.unit_land_speed=1.0f; target_cell.land_track=1.0f;
+        target_cell.usable=true; target_cell.coarse_category=0;
+        Stage prepared(std::move(supplied));
+        assert(prepared.place_base_unit(*unit,{135,80},32,profile)==PlacementResult::Placed);
+        const auto before=prepared.snapshot().random;
+        sim::CellSetupStatic guard;
+        guard.receiver_tile_index=131; guard.animation_index=-1;
+        guard.shadow_enabled=false; guard.bounds_height=30;
+        auto missing_bounds=guard; missing_bounds.bounds_height.reset();
+        const auto incomplete=prepared.complete_pending_cell_setup(missing_bounds,theater,cliff,{{0,1.0f}});
+        assert(incomplete.status==sim::CellSetupStatus::NeedsInput);
+        assert(prepared.snapshot().pending_cell_setup && prepared.snapshot().random.table==before.table &&
+               prepared.snapshot().random.first==before.first && prepared.snapshot().random.second==before.second &&
+               prepared.snapshot().cells.at(target).ground_occupancy_124==0x20);
+        const auto completed=prepared.complete_pending_cell_setup(guard,theater,cliff,{{0,1.0f}});
+        if (completed.status!=sim::CellSetupStatus::Complete) {
+            std::cerr<<"conditional stage setup needs input: "<<completed.detail<<'\n';
+            return 1;
+        }
+        const auto& result=prepared.snapshot();
+        const auto& after=result.cells.at(target);
+        assert(!result.pending_cell_setup && after.cell_field_11d==0 && after.coarse_category==0);
+        assert(after.coarse_cache_height==4 && after.hierarchy_cache_height==4);
+        assert(after.heads->ground_head==*unit && after.ground_occupancy_124==0x20);
+        assert(after.terrain->bridge==false && after.unit_land_speed==1.0f);
+        assert(result.entities.at(0).lifetime==Lifetime::Placed && result.entities.at(0).cell &&
+               result.entities.at(0).cell->x==135 && result.entities.at(0).cell->y==80);
+        for (int dy=-1;dy<=1;++dy) for (int dx=-1;dx<=1;++dx) if (dx || dy)
+            assert(result.cells.at(std::uint32_t(80+dy)*512+135+dx).neighbor_count==1);
+        assert(result.random.table==before.table && result.random.first==before.first && result.random.second==before.second);
+        std::cout<<"MP02T2 staged placement and Cell setup pass with supplied runtime values\n";
+        return 0;
     }
     std::cout<<"MP02T2 conditional tile passes keep waypoint 0 at tile 131, ramp 0, land 0\n";
 }

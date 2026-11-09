@@ -17,8 +17,9 @@ ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ../map_geometry.cpp ../geometry
 ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} cell_occupancy.cpp cell_occupancy_case.cpp -o "$build/cell_occupancy_case"
 ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} bridge_footprint.cpp bridge_footprint_case.cpp -o "$build/bridge_footprint_case"
 ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -I "$shared/render" \
-    ../session.cpp ../map_geometry.cpp ../placement_terrain.cpp target_tile_case.cpp \
-    "$shared"/sim/{test_inputs,world,world_init,replacement,floor,random,distance}.cpp \
+    world.cpp ../session.cpp ../map_geometry.cpp ../placement_terrain.cpp target_tile_case.cpp \
+    "$shared"/sim/{test_inputs,world,world_init,cell_setup,coarse_category,replacement,floor,random,distance}.cpp \
+    "$shared/weapons/occupant_order.cpp" \
     "$shared"/render/{minimap,tmp_decode}.cpp "$shared/gfx/palette.cpp" \
     "$shared"/fs/{mix_archive,mix_bootstrap,filename_hash}.cpp "$shared/rules/ini_file.cpp" \
     "$shared/map/map_file.cpp" "$shared/pack/map_pack.cpp" -ldl -o "$build/target_tile_case"
@@ -33,6 +34,7 @@ ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -
 "$build/bridge_footprint_case" > /dev/null
 "$build/real_map_case" "$game"
 "$build/target_tile_case" "$game"
+"$build/target_tile_case" "$game" --stage
 if [ "${2:-}" = "--original" ]; then
     export PYTHONPATH="$shared/sim${PYTHONPATH:+:$PYTHONPATH}"
     ${PYTHON:-python3} original_base_local_check.py "$game/game.exe" "$build/geometry_cases"
