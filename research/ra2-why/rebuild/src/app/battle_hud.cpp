@@ -165,8 +165,12 @@ void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
                         double ang=std::atan2(dx,-dy);
                         if (ang<0) ang+=2*M_PI;
                         if (ang<=sweep) {
+                            // Blend toward black, like the original translucent
+                            // clock table: keep 40 percent of the color.
                             auto i=(static_cast<std::size_t>(r.y+y)*b.width+r.x+x)*4;
-                            b.rgba[i]/=2; b.rgba[i+1]/=2; b.rgba[i+2]/=2;
+                            b.rgba[i]=b.rgba[i]*2/5;
+                            b.rgba[i+1]=b.rgba[i+1]*2/5;
+                            b.rgba[i+2]=b.rgba[i+2]*2/5;
                         }
                     }
             }

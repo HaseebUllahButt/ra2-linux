@@ -188,7 +188,7 @@ int main(int argc, char** argv) {
             auto dest=(static_cast<std::size_t>(clock_box.y+y)*screen.width+clock_box.x+x)*4;
             // Shaded pixels are exactly half the art color; skip very dark
             // art where half and full are too close to tell apart.
-            if (image.pixels[source]>60 && screen.rgba[dest]==image.pixels[source]/2) ++in_wedge;
+            if (image.pixels[source]>80 && screen.rgba[dest]==image.pixels[source]*2/5) ++in_wedge;
         }
         for (int y=2;y<clock_box.height/2;++y) for (int x=2;x<clock_box.width/2;++x) {
             auto source=art_pixel(x,y);
@@ -209,14 +209,14 @@ int main(int argc, char** argv) {
             if (!image.pixels[source+3] || !in_circle(x,y)) continue;
             auto dest=(static_cast<std::size_t>(clock_box.y+y)*screen.width+clock_box.x+x)*4;
             ++opaque_tl;
-            if (image.pixels[source]>60 && screen.rgba[dest]==image.pixels[source]/2) ++dark_tl;
+            if (image.pixels[source]>80 && screen.rgba[dest]==image.pixels[source]*2/5) ++dark_tl;
         }
         for (int y=32;y<48;++y) for (int x=32;x<48;++x) {
             auto source=art_pixel(x,y);
             if (!image.pixels[source+3] || !in_circle(x,y)) continue;
             auto dest=(static_cast<std::size_t>(clock_box.y+y)*screen.width+clock_box.x+x)*4;
             ++opaque_mid;
-            if (image.pixels[source]>60 && screen.rgba[dest]==image.pixels[source]/2) ++dark_mid;
+            if (image.pixels[source]>80 && screen.rgba[dest]==image.pixels[source]*2/5) ++dark_mid;
         }
         assert(dark_tl==0 && opaque_tl>10);
         assert(dark_mid>50 && dark_mid<=opaque_mid);
