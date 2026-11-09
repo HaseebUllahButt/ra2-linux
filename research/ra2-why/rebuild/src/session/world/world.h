@@ -98,6 +98,7 @@ struct Entity {
     std::optional<double> armor_multiplier; // Base Techno +120.
     // Resolved 004F58A0 country multiplier for this type; it varies by kind.
     std::optional<double> house_armor_multiplier;
+    std::optional<std::uint8_t> techno_field_329;
 };
 struct CellState {
     std::optional<bool> allocated; // The original allocated Cell, not the fallback receiver.
