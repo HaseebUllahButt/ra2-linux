@@ -240,7 +240,6 @@ std::uint32_t chebyshev(ra2map::Cell a, ra2map::Cell b) {
 
 constexpr std::int32_t frames_per_second = 15;
 constexpr std::int32_t move_timeout_frames = 1800;
-constexpr std::int64_t unlimited_cash = std::numeric_limits<std::int32_t>::max();
 } // namespace
 
 struct PrototypeAI::Context {
@@ -252,6 +251,7 @@ struct PrototypeAI::Context {
     Actors actors, buildings, enemies;
     std::int64_t cash = 0;
     bool enemy_available = false;
+    std::optional<ra2map::Cell> own_centre, enemy_centre; // Base House +53BC
     std::map<std::uint32_t, const WorldEntity*> own; // live own actors by ID
     std::map<std::uint32_t, const WorldEntity*> targets; // live legal enemy targets
 
@@ -343,6 +343,7 @@ void PrototypeAI::reset() noexcept {
     computer_house_ = player_house_ = 0;
     next_build_ = next_attack_ = next_team_ = 0;
     teams_.clear();
+    base_centres_.clear();
     weights_.clear();
     for (const auto& trigger : triggers_) weights_.push_back(trigger.weight);
     seed_ = 1;
@@ -444,15 +445,16 @@ void PrototypeAI::select_team(const Context& context) {
         const auto force = std::find_if(task_forces_.begin(), task_forces_.end(),
             [&](const TaskForce& f) { return f.id == team.task_force; });
         if (force == task_forces_.end()) return false;
-        // Each member type must be buildable now (cash aside) or recruitable.
+        // Base 004F3630 asks each member type for a factory with
+        // FindFactory(allowOccupied, requirePower, requireCanBuild=false).
+        // In a skirmish (00A3D298 set) a missing factory rejects the team,
+        // even if idle units of that type exist. Prerequisites are not
+        // checked here; production checks them when a member is requested.
+        // TODO-ORIGINAL: the requirePower factory test is not modelled.
         for (const auto& [count, type_name] : force->members) {
             (void)count;
-            const bool idle = std::any_of(context.actors.begin(), context.actors.end(),
-                [&](const WorldEntity* e) { return e->kind != WorldKind::Structure && equal_name(e->type, type_name); });
             const auto* kind = factory_kind(rules_, type_name);
-            const bool naval = rules_.read_bool(type_name, "Naval");
-            if (!idle && !(kind && factory(rules_, context.buildings, kind, naval) &&
-                buildable(rules_, context.computer, context.actors, context.buildings, type_name, unlimited_cash)))
+            if (!kind || !factory(rules_, context.buildings, kind, rules_.read_bool(type_name, "Naval")))
                 return false;
         }
         return true;
@@ -505,6 +507,7 @@ void PrototypeAI::select_team(const Context& context) {
         Team team;
         team.type = type;
         team.trigger = picked;
+        team.created = context.frame;
         teams_.push_back(std::move(team));
     }
 }
@@ -554,13 +557,17 @@ void PrototypeAI::fill_teams(Context& context, std::vector<skirmish::Order>* res
     }
 }
 
-void PrototypeAI::finish(Team& team, bool success) {
-    const auto& trigger = triggers_[team.trigger];
-    auto& weight = weights_[team.trigger];
-    // Rules AITriggerSuccessWeightDelta / AITriggerFailureWeightDelta (signed).
-    weight += rules_.read_double("General", success ? "AITriggerSuccessWeightDelta" : "AITriggerFailureWeightDelta",
-        success ? 20.0 : -50.0);
-    weight = std::max(trigger.minimum, std::min(trigger.maximum, weight));
+void PrototypeAI::finish(Team& team) {
+    // Base 006B7770 (TeamClass destructor): every AI trigger whose first
+    // team is this TeamType gets the success delta when script action 49
+    // set +83, else the failure delta.
+    const bool success = team.succeeded;
+    const auto delta = rules_.read_double("General",
+        success ? "AITriggerSuccessWeightDelta" : "AITriggerFailureWeightDelta", success ? 20.0 : -50.0);
+    for (std::size_t i = 0; i < triggers_.size(); ++i) {
+        if (triggers_[i].team1 != team_types_[team.type].id) continue;
+        weights_[i] = std::max(triggers_[i].minimum, std::min(triggers_[i].maximum, weights_[i] + delta));
+    }
     team.members.clear();
     team.forming = false;
     team.guarding = false;
@@ -574,10 +581,24 @@ void PrototypeAI::run_teams(Context& context, std::vector<skirmish::Order>& resu
             for (const auto& entry : section->entries) names.push_back(entry.value);
         return names;
     }();
+    // Base 006BDAA0/006BDDB0: a point `cells` away from `from`, in the
+    // direction of `toward`. TODO-ORIGINAL: the binary facing step is not
+    // modelled, so the angle is not quantized.
+    const auto gather_point = [&](ra2map::Cell from, ra2map::Cell toward, bool random_direction, std::int32_t cells) {
+        const double fx = from.x * 256.0 + 128, fy = from.y * 256.0 + 128;
+        // A random facing is a byte shifted into a signed 16-bit facing,
+        // then turned into radians as (facing - 0x3FFF) * -2pi/65536.
+        const double angle = random_direction ?
+            (static_cast<std::int16_t>(random(0, 255) << 8) - 0x3fff) * (-2 * 3.14159265358979323846 / 65536) :
+            std::atan2(-(toward.y * 256.0 + 128 - fy), toward.x * 256.0 + 128 - fx);
+        const double x = fx + std::cos(angle) * cells * 256.0, y = fy - std::sin(angle) * cells * 256.0;
+        const auto clamp = [](double v) { return static_cast<std::uint16_t>(std::clamp(std::floor(v / 256), 0.0, 65535.0)); };
+        return ra2map::Cell{clamp(x), clamp(y)};
+    };
     for (auto& team : teams_) {
         if (team.forming || team.guarding || team.members.empty() || context.frame < team.wait_until) continue;
         const auto script_at = std::find(script_ids_.begin(), script_ids_.end(), team_types_[team.type].script);
-        if (script_at == script_ids_.end()) { finish(team, false); continue; }
+        if (script_at == script_ids_.end()) { finish(team); continue; }
         const auto& steps = scripts_[static_cast<std::size_t>(script_at - script_ids_.begin())];
         // Base game.exe 006BAA60 (TeamClass::FetchALeader): use the
         // greatest LeadershipRating, keeping the first member on a tie.
@@ -611,7 +632,7 @@ void PrototypeAI::run_teams(Context& context, std::vector<skirmish::Order>& resu
             return index < building_list.size() ? building_list[index] : std::string{};
         };
         for (int guard = 0; guard < 16; ++guard) {
-            if (team.line < 0 || team.line >= static_cast<std::int32_t>(steps.size())) { finish(team, true); break; }
+            if (team.line < 0 || team.line >= static_cast<std::int32_t>(steps.size())) { finish(team); break; }
             const auto step = steps[static_cast<std::size_t>(team.line)];
             bool yield = false;
             switch (step.action) {
@@ -664,6 +685,51 @@ void PrototypeAI::run_teams(Context& context, std::vector<skirmish::Order>& resu
                 yield = true;
                 break;
             }
+            case 49: // Base 006B7AD0 case 0x31: register success (+83) and go on.
+                team.succeeded = true;
+                ++team.line;
+                break;
+            case 53: case 54: { // Gather near the enemy base (53) or outside the own base (54).
+                if (!team.moving) {
+                    // Base 006BDAA0 (53): with no selected enemy, or an enemy
+                    // whose base centre is unset, the step is complete. The
+                    // point is AISafeDistance cells from the enemy centre,
+                    // toward the own centre (the leader when that is unset).
+                    // Base 006BDDB0 (54): the point is AISafeDistance cells
+                    // from the own centre toward the enemy centre, or in a
+                    // random direction when no enemy is selected.
+                    // No visibility test is made on the enemy centre.
+                    ra2map::Cell from{}, toward{};
+                    bool random_direction = false;
+                    if (step.action == 53) {
+                        if (!context.enemy_available || !context.enemy_centre) { ++team.line; break; }
+                        from = *context.enemy_centre;
+                        toward = context.own_centre ? *context.own_centre : centre;
+                    } else {
+                        // TODO-ORIGINAL: an unset own centre is Coord zero.
+                        from = context.own_centre ? *context.own_centre : centre;
+                        if (context.enemy_available) toward = context.enemy_centre.value_or(ra2map::Cell{});
+                        else random_direction = true;
+                    }
+                    team.goal = gather_point(from, toward, random_direction,
+                        rules_.read_integer("General", "AISafeDistance", 20));
+                    team.moving = true;
+                    team.deadline = context.frame + move_timeout_frames;
+                    send(skirmish::OrderKind::Move, 0, team.goal);
+                    yield = true;
+                    break;
+                }
+                // Base 006BA1A0 uses RelaxedStray for 53 and 54, Stray otherwise.
+                // TODO-ORIGINAL: no regroup on the leader first, no
+                // NearbyLocation free Cell search; the move timeout is local.
+                const auto stray = rules_.read_double("General", "RelaxedStray", 3.0);
+                const bool arrived = std::all_of(team.members.begin(), team.members.end(), [&](std::uint32_t id) {
+                    return static_cast<double>(distance(*context.own.at(id)->cell, team.goal)) <= stray * stray;
+                });
+                if (arrived || context.frame >= team.deadline) { team.moving = false; ++team.line; break; }
+                yield = true;
+                break;
+            }
             case 5: // Guard. TODO-ORIGINAL: argument units are taken as seconds.
                 if (!team.moving) {
                     team.moving = true;
@@ -674,8 +740,8 @@ void PrototypeAI::run_teams(Context& context, std::vector<skirmish::Order>& resu
             case 6: team.line = step.argument - 1; break; // Jump; lines count from one.
             case 11: team.guarding = true; yield = true; break; // Take a new mission and hold.
             default:
-                // TODO-ORIGINAL: 49/53/54 regroup and gather, transport, super
-                // weapon and the other ScriptClass actions are skipped.
+                // TODO-ORIGINAL: transport, super weapon and the other
+                // ScriptClass actions are skipped.
                 ++team.line;
                 break;
             }
@@ -720,7 +786,7 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
     if (team_due) next_team_ = static_cast<std::int64_t>(game_frame) +
         std::max(1, by_difficulty(rules_, "TeamDelays", difficulty_, 2000));
 
-    Context context{world, *computer, *player, game_frame, side_index(rules_, *computer), {}, {}, {}, 0, false, {}, {}};
+    Context context{world, *computer, *player, game_frame, side_index(rules_, *computer), {}, {}, {}, 0, false, {}, {}, {}, {}};
     auto& actors = context.actors;
     auto& buildings = context.buildings;
     auto& enemies = context.enemies;
@@ -760,11 +826,28 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
     if (actors.empty() || enemies.empty()) return result;
     context.cash = static_cast<std::int64_t>(computer->cash.value_or(0));
 
-    // Drop dead members. A launched team with nobody left has failed.
+    // Base 004F5BE0 sets House +53BC to the newest construction yard Cell.
+    // It is not cleared when that yard is lost.
+    for (const auto house : {computer_house_id, player_house_id}) {
+        const WorldEntity* newest = nullptr;
+        for (const auto& entity : world.entities)
+            if (entity.house_id == house && live(entity) && yard(rules_, entity) && (!newest || entity.id > newest->id))
+                newest = &entity;
+        if (newest) base_centres_[house] = *newest->cell;
+    }
+    if (const auto found = base_centres_.find(computer_house_id); found != base_centres_.end())
+        context.own_centre = found->second;
+    if (const auto found = base_centres_.find(player_house_id); found != base_centres_.end())
+        context.enemy_centre = found->second;
+
+    // Drop dead members. Base 006B7AD0 deletes a team with no members once
+    // it has been launched, or, in a multiplayer game, once it is older than
+    // DissolveUnfilledTeamDelay frames.
+    const auto dissolve = rules_.read_integer("General", "DissolveUnfilledTeamDelay", 5000);
     for (auto& team : teams_) {
         team.members.erase(std::remove_if(team.members.begin(), team.members.end(),
             [&](std::uint32_t id) { return !context.own.count(id); }), team.members.end());
-        if (!team.forming && team.members.empty()) finish(team, false);
+        if (team.members.empty() && (!team.forming || dissolve < game_frame - team.created)) finish(team);
     }
     teams_.erase(std::remove_if(teams_.begin(), teams_.end(),
         [](const Team& team) { return !team.forming && team.members.empty(); }), teams_.end());
