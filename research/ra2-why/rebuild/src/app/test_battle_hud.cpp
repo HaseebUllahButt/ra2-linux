@@ -1,5 +1,9 @@
 #include "battle_hud.h"
+#include "../fs/mix_bootstrap.h"
+#include "../rules/ini_file.h"
+#include "../gfx/shp_decode.h"
 #include <cassert>
+#include <algorithm>
 #include <iostream>
 using namespace ra2;
 using namespace ra2::app;
@@ -13,7 +17,7 @@ bool same(const render::Bitmap& a,const render::Bitmap& b,render::Rectangle r) {
     return true;
 }
 }
-int main() {
+int main(int argc, char** argv) {
     BattleHud hud; HudState s;
     s.choices={{"E1","INFANTRY",100,true,500},{"MTNK","TANK",800,false,0}};
     auto r=BattleHud::build_button_bounds(0);
@@ -78,5 +82,51 @@ int main() {
     render::Bitmap malformed{1024,768,{1,2,3}};hud.draw(malformed,s);
     assert(malformed.rgba.size()==3);
     s.minimap=malformed; hud.draw(changed,s);
+    HudState tabs;
+    tabs.choices={{"GAPOWR","POWER",800,true,0,BuildCategory::Buildings},
+                  {"E1","GI",200,true,0,BuildCategory::Infantry},
+                  {"MTNK","TANK",700,true,0,BuildCategory::Vehicles}};
+    hud.handle_click(808+2*42,44,tabs);
+    assert(hud.handle_click(r.x+1,r.y+1,tabs).type=="E1");
+    hud.handle_click(808+3*42,44,tabs);
+    assert(hud.handle_click(r.x+1,r.y+1,tabs).type=="MTNK");
+    hud.handle_click(808,44,tabs);
+    if (argc > 1) {
+        fs::MixFileSystem files(argv[1]);
+        files.mount_language(fs::GameVariant::RedAlert2);
+        files.bootstrap(fs::GameVariant::RedAlert2);
+        files.mount_overlays(); files.mount_resources();
+        auto read_ini=[&](const char* name) {
+            auto bytes=files.read_file(name); assert(bytes);
+            rules::IniFile ini;
+            ini.parse(std::string_view(reinterpret_cast<const char*>(bytes->data()),bytes->size()));
+            return ini;
+        };
+        auto rules=read_ini("rules.ini"), art=read_ini("art.ini");
+        auto palette_bytes=files.read_file("cameo.pal"); assert(palette_bytes);
+        auto palette=gfx::Palette::from_bytes(*palette_bytes);
+        HudState originals;
+        originals.choices={{"GAPOWR","",800,true,0},{"GAPILE","",500,true,0},
+                           {"MTNK","",700,true,0}};
+        hud.load_assets(files,rules,art,originals.choices);
+        auto screen=frame(); hud.draw(screen,originals);
+        int i=0;
+        for (const char* name : {"POWRICON.SHP","BRRKICON.SHP","GTNKICON.SHP"}) {
+            auto bytes=files.read_file(name); assert(bytes);
+            auto image=gfx::ShpImage::parse(*bytes).decode_frame(0,palette);
+            auto box=BattleHud::build_button_bounds(i++);
+            int matches=0;
+            // This strip is clear of the text and progress indicators.
+            for (int y=42;y<46;++y) for (int x=1;x<box.width-1;++x) {
+                auto source=(static_cast<std::size_t>(y-1)*image.height/(box.height-2)*image.width+
+                             (x-1)*image.width/(box.width-2))*4;
+                auto dest=(static_cast<std::size_t>(box.y+y)*screen.width+box.x+x)*4;
+                if (image.pixels[source+3] &&
+                    std::equal(image.pixels.begin()+source,image.pixels.begin()+source+4,
+                               screen.rgba.begin()+dest)) ++matches;
+            }
+            assert(matches>100);
+        }
+    }
     std::cout<<"battle HUD tests passed\n";
 }
