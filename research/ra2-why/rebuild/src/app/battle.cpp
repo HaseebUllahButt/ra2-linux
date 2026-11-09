@@ -533,11 +533,20 @@ public:
             const auto color=e.house_id==player_?std::array<std::uint8_t,3>{70,255,90}:std::array<std::uint8_t,3>{255,65,50};
             // TODO-ORIGINAL: House markers and health bars use simple native art.
             rectangle(frame_,point->x-5,point->y+9,10,3,color);
-            if(std::find(orders_.selected_ids().begin(),orders_.selected_ids().end(),e.id)!=orders_.selected_ids().end()) {
-                rectangle(frame_,point->x-17,point->y-25,34,32,color);
+            const bool selected=std::find(orders_.selected_ids().begin(),orders_.selected_ids().end(),e.id)!=orders_.selected_ids().end();
+            if(selected)rectangle(frame_,point->x-17,point->y-25,34,32,color);
+            if(selected || e.house_id==enemy_) {
                 const int health=std::clamp(e.resolved_hp.value_or(0)*30/std::max(1,e.maximum_hp.value_or(1)),0,30);
                 for(int x=0;x<health;++x)for(int y=0;y<3;++y)pixel(frame_,point->x-15+x,point->y-30+y,color);
             }
+        }
+        // TODO-ORIGINAL: Small native shell marks replace projectile art.
+        for(const auto& shot:combat_.projectiles()) {
+            const auto& p=shot.flight.arc.position;
+            if(p[0]<0||p[1]<0||p[0]>=512*256||p[1]>=512*256)continue;
+            w::Entity mark;mark.cell=ra2map::Cell{std::uint16_t(p[0]/256),std::uint16_t(p[1]/256)};
+            mark.position=sim::Coord{p[0],p[1],p[2]};mark.resolved_hp=1;mark.lifetime=w::Lifetime::Placed;
+            if(const auto at=anchor(mark))rectangle(frame_,at->x-1,at->y-1,3,3,{255,235,100});
         }
         if(const auto box=orders_.selection_rectangle())rectangle(frame_,box->x,box->y,box->width,box->height,{70,255,90});
         if(!placement_.empty())if(const auto cell=cell_at({pointer_x_,pointer_y_})) {
