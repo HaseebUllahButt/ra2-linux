@@ -80,7 +80,10 @@ m.virtual(0x414,8,m.ret(0));m.virtual(0x1e8,0,m.ret(0))
 m.virtual(0x54,0,m.ret(0))
 m.word(m.VT+0x12c,0x5d36e0);m.bind(0x4e09a0,4,m.ret(0))
 cpu.mem_write(m.TYPE+0x205,b'\x01')
-m.bind(0x472540,4,m.ret(0))
+setup_calls=[]
+def note_cell_setup():
+    setup_calls.append(m.cpu.reg_read(UC_X86_REG_ECX))
+m.bind(0x472540,4,note_cell_setup)
 m.bind(0x568140,4,m.ret(1))
 m.bind(0x5348a0,8,m.ret(1))
 m.bind(0x54a550,16,m.ret(0))
@@ -134,5 +137,7 @@ for speed in (0.0,1.0):
     z=m.signed(m.FOOT+0x90) if result else -1
     height=cpu.mem_read(m.FOOT+0x378,1)[0] if result else -1
     occupancy=cpu.mem_read(destination+0x124,1)[0]
-    print('PLACE_RESULT',result,on_map,4 if head==m.FOOT else 0,occupancy,house_count,m.read(m.FOOT+0x30),
+    assert len(setup_calls)==int(bool(result))
+    if result: assert setup_calls[-1]==destination
+    print('PLACE_RESULT',result,on_map,4 if head==m.FOOT else 0,occupancy,int(bool(setup_calls)),house_count,m.read(m.FOOT+0x30),
           hull,turret,z,height,*neighbor,*indexes,*table)

@@ -139,6 +139,9 @@ int main() {
     assert(placed.lifetime==Lifetime::Placed && placed.hull_facing==32 && placed.turret_facing==32);
     assert(battle.snapshot().cells.at(69*512+54).heads->ground_head==*battle_unit);
     assert(battle.snapshot().cells.at(69*512+54).ground_occupancy_124==0x20);
+    assert(battle.snapshot().pending_cell_setup);
+    assert(!battle.snapshot().cells.at(69*512+54).coarse_category);
+    assert(battle.place_base_unit(*battle_unit,{56,69},32,profile)==PlacementResult::Unresolved);
     assert(battle.snapshot().houses[0].placed_unit_counts->at(0)==1);
     for (const auto& direction:std::vector<std::pair<int,int>>{{0,-1},{1,-1},{1,0},{1,1},{0,1},{-1,1},{-1,0},{-1,-1}})
         assert(battle.snapshot().cells.at((69+direction.second)*512+54+direction.first).neighbor_count==1);

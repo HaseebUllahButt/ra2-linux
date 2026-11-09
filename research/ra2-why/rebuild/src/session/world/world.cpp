@@ -143,7 +143,7 @@ PlacementResult Stage::place_base_unit(std::uint32_t unit_id, StartPoint point,
     std::uint8_t facing, const BaseUnitProfile& profile) {
     // This slice is the ordinary, unlinked, single-cell ground Unit path.
     // 00703040 and 004C8CA0 have many additional branches.
-    if (!snapshot_.geometry || point.x<1 || point.y<1 || point.x>510 || point.y>510 ||
+    if (snapshot_.pending_cell_setup || !snapshot_.geometry || point.x<1 || point.y<1 || point.x>510 || point.y>510 ||
         !profile.restricted_land || *profile.restricted_land!=-1 ||
         !profile.movement_mode || *profile.movement_mode!=-1 ||
         !profile.placement_mode || *profile.placement_mode!=2 ||
@@ -238,6 +238,11 @@ PlacementResult Stage::place_base_unit(std::uint32_t unit_id, StartPoint point,
     unit->timer_length=0; unit->timer_active=false; // Unit 006FC9AB.
     // 006C47B9 divides world Z by LevelHeight and stores the low byte times 10.
     unit->height_byte=static_cast<std::uint8_t>((*terrain.floor_world_height / *profile.level_height)*10);
+    // 0054AB70 invokes Cell setup 00472540 after linking. The test oracle
+    // supplies that body, so its resulting category and side effects remain
+    // unknown. Require a resolved snapshot before another placement.
+    cell->second.coarse_category.reset();
+    candidate.pending_cell_setup=true;
     if (!validate(candidate)) return PlacementResult::Unresolved;
     snapshot_=std::move(candidate);
     return PlacementResult::Placed;
