@@ -1,44 +1,63 @@
 #pragma once
-// Original-style end-of-match score screen. Draws win or lose, the match
-// length, and the per-house production, kill and loss table into a caller
-// supplied RGBA image. The original gamemd.exe score screen 0x0067E7C0
-// (ScoreScreenClass) keeps its layout in dialog resources; this rebuild
-// draws the same columns with the GAME.FNT bitmap font instead. The
-// TODO-ORIGINAL markers below list the parts not yet verified against the
-// original layout code.
+// End-of-match score screen for the playable native prototype.
+// Draws a CPU RGBA image: original mpscore.pcx art, GAME.FNT font and CSF
+// text. Layout is a simple version; see TODO-ORIGINAL in score_screen.cpp.
 #include "ui.h"
-#include "../gfx/shp_decode.h"
+#include <cstdint>
 #include <string>
 #include <vector>
 
 namespace ra2::ui {
-// One house in the end-of-match table. Built counts production; lost and
-// killed count combat deaths. The original accumulates these in the house
-// statistics at HouseClass +0x4D8 (units built), +0x4DC (buildings built)
-// and the damage/kill tallies the score screen reads at 0x0067E7C0.
-struct ScoreSide {
-    std::string name;          // House label shown in the row.
-    std::uint32_t units_built = 0;
-    std::uint32_t buildings_built = 0;
-    std::uint32_t units_lost = 0;
-    std::uint32_t units_killed = 0;
+// Totals for one house. kills_of[v] counts objects of house v that this
+// house destroyed. losses_to[k] counts own objects that house k destroyed.
+struct ScoreHouse {
+    std::string name;
+    gfx::Rgba color{224, 224, 224, 255};
+    std::uint32_t units_built = 0, buildings_built = 0;
     std::uint32_t credits_harvested = 0;
+    std::vector<std::uint32_t> kills_of, losses_to; // Indexed by house row.
+    std::uint32_t kills() const noexcept;
+    std::uint32_t losses() const noexcept;
 };
 
-// End-of-match data. rows[0] is the local player; the rest follow in table
-// order. player_won picks the title: Mission Accomplished or Mission Failed.
 struct ScoreScreen {
     bool player_won = false;
-    std::uint32_t seconds = 0; // Match length in seconds.
-    std::vector<ScoreSide> rows;
+    std::uint32_t seconds = 0;       // Time played.
+    std::vector<ScoreHouse> houses;  // houses[0] is the local player.
 };
 
-// Formats seconds as the original H:MM:SS clock (hours are not clipped).
+// Collects events during a match. Feed it from the sim, then call finish().
+class ScoreTally {
+public:
+    explicit ScoreTally(std::vector<std::string> names);
+    void built(std::size_t house, bool is_building);
+    void harvested(std::size_t house, std::uint32_t credits);
+    // killer may be npos for a death with no killer (no one gets a kill).
+    static constexpr std::size_t npos = static_cast<std::size_t>(-1);
+    void destroyed(std::size_t killer, std::size_t victim);
+    ScoreScreen finish(bool player_won, std::uint32_t seconds) const;
+private:
+    ScoreScreen state_;
+};
+
+// Text and art for the screen. Defaults are the English original strings.
+struct ScoreAssets {
+    GameFont font;
+    gfx::RgbaImage background; // Empty means plain black.
+    std::string title_win = "You Are Victorious!", title_lose = "Mission Failed";
+    std::string heading = "Skirmish Score", time = "Time", players = "Players";
+    std::string kills = "Kills", losses = "Losses", built = "Built";
+    std::string harvested = "Harvested", continue_text = "Continue";
+    // Reads GAME.FNT, mpscore.pcx and CSF labels. Missing art or labels
+    // fall back to the defaults. Throws only if GAME.FNT is missing.
+    static ScoreAssets load(const fs::MixFileSystem& files, const ra2text::CsfFile& strings);
+};
+
+// "H:MM:SS" clock text; hours are not clipped.
 std::string format_score_time(std::uint32_t seconds);
 
-// Draws the whole score screen into target at the original 800x600 layout.
-// Throws std::runtime_error when target is not 800x600 or any row is empty.
-// The panel covers the image, so a caller may reuse a fresh or dirty buffer.
-void draw_score_screen(gfx::RgbaImage& target, const ScoreScreen& screen,
-                       const GameFont& font);
-} // namespace ra2::ui
+constexpr unsigned kScoreWidth = 800, kScoreHeight = 600;
+// Returns a new 800x600 image. Throws std::invalid_argument if there are no
+// houses or more than 8.
+gfx::RgbaImage draw_score_screen(const ScoreAssets& assets, const ScoreScreen& screen);
+}

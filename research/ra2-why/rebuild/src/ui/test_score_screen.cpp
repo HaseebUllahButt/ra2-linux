@@ -1,76 +1,78 @@
 #include "score_screen.h"
 #include "../fs/mix_bootstrap.h"
-#include <cassert>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
-
 using namespace ra2;
-
 namespace {
-std::size_t colored(const gfx::RgbaImage& image) {
-    std::size_t count = 0;
-    for (std::size_t i = 0; i < image.pixels.size(); i += 4)
-        if (image.pixels[i] || image.pixels[i + 1] || image.pixels[i + 2]) ++count;
-    return count;
+void check(bool ok, const char* what) {
+    if (!ok) throw std::runtime_error(std::string("FAILED: ") + what);
 }
-
-// Counts pixels inside a horizontal band that are clearly brighter than the
-// black panel, so drawn text shows up as a positive count.
-std::size_t bright(const gfx::RgbaImage& image, int top, int bottom) {
-    std::size_t count = 0;
-    for (int y = top; y < bottom && y < image.height; ++y)
-        for (int x = 0; x < image.width; ++x) {
-            const auto i = (static_cast<std::size_t>(y) * image.width + x) * 4;
-            if (image.pixels[i] > 64 || image.pixels[i + 1] > 64 || image.pixels[i + 2] > 64) ++count;
-        }
-    return count;
+std::size_t bright(const gfx::RgbaImage& im, int x0, int y0, int x1, int y1) {
+    std::size_t n = 0;
+    for (int y = y0; y < y1; ++y) for (int x = x0; x < x1; ++x) {
+        auto i = (std::size_t(y) * im.width + x) * 4;
+        if (im.pixels[i] > 100 || im.pixels[i + 1] > 100 || im.pixels[i + 2] > 100) ++n;
+    }
+    return n;
 }
-} // namespace
-
+}
 int main(int argc, char** argv) {
-    if (argc != 2) {
-        std::cerr << "usage: test_score_screen game_directory\n";
-        return 2;
-    }
+    if (argc != 2) { std::cerr << "usage: test_score_screen game_dir\n"; return 2; }
     fs::MixFileSystem files(argv[1]);
-    files.bootstrap();
-    const auto fontdata = files.read_file("GAME.FNT");
-    assert(fontdata && "GAME.FNT missing");
-    const auto font = ui::GameFont::parse(*fontdata);
+    files.mount_language(fs::GameVariant::RedAlert2);
+    files.bootstrap(fs::GameVariant::RedAlert2);
+    ra2text::CsfFile strings;
+    auto csf = files.read_file("ra2.csf");
+    check(csf.has_value(), "ra2.csf");
+    strings.parse(csf->data(), csf->size());
+    auto assets = ui::ScoreAssets::load(files, strings);
+    check(assets.background.width == 640 && assets.background.height == 400, "original art loaded");
+    check(assets.title_win == "You Are Victorious!", "win title from CSF");
+    check(assets.title_lose == "Mission Failed", "lose title from CSF");
+    check(assets.built == "Built" && assets.harvested == "Harvested", "labels from CSF");
 
-    // Clock format: hours are unbounded, minutes and seconds two digits.
-    assert(ui::format_score_time(0) == "example.invalid");
-    assert(ui::format_score_time(59) == "example.invalid");
-    assert(ui::format_score_time(3661) == "example.invalid");
-    assert(ui::format_score_time(7325) == "example.invalid");
+    check(ui::format_score_time(0) == "example.invalid", "clock 0");
+    check(ui::format_score_time(3661) == "example.invalid", "clock hour");
+    check(ui::format_score_time(7325) == "example.invalid", "clock 2h");
 
-    ui::ScoreScreen win;
-    win.player_won = true;
-    win.seconds = 7325;
-    win.rows.push_back({"Allies", 10, 4, 3, 7, 5000});
-    win.rows.push_back({"Soviets", 8, 5, 7, 3, 3000});
+    ui::ScoreTally t({"Allies", "Soviet"});
+    t.built(0, false); t.built(0, false); t.built(0, true); t.built(1, true);
+    t.harvested(0, 700); t.harvested(0, 300);
+    t.destroyed(0, 1); t.destroyed(0, 1); t.destroyed(1, 0);
+    t.destroyed(ui::ScoreTally::npos, 0);   // death with no killer
+    t.destroyed(1, 1);                      // own-house kill
+    t.built(9, true);                       // out of range: ignored
+    auto win = t.finish(true, 3725);
+    check(win.houses[0].units_built == 2 && win.houses[0].buildings_built == 1, "built counts");
+    check(win.houses[0].credits_harvested == 1000, "harvest");
+    check(win.houses[0].kills() == 2 && win.houses[0].kills_of[1] == 2, "kills");
+    check(win.houses[0].losses() == 2 && win.houses[0].losses_to[1] == 1, "losses");
+    check(win.houses[1].kills() == 1 && win.houses[1].losses() == 3, "enemy totals");
 
-    gfx::RgbaImage canvas{800, 600, std::vector<std::uint8_t>(800 * 600 * 4, 0)};
-    ui::draw_score_screen(canvas, win, font);
-    assert(colored(canvas) > 0);
-
-    // The win title band holds gold text; the lose title differs in text.
-    gfx::RgbaImage lose{800, 600, std::vector<std::uint8_t>(800 * 600 * 4, 0)};
-    ui::ScoreScreen lost = win;
-    lost.player_won = false;
-    ui::draw_score_screen(lose, lost, font);
-    assert(colored(lose) > 0);
-
-    // Wrong panel size throws; the panel is always 800x600.
-    gfx::RgbaImage small{640, 480, std::vector<std::uint8_t>(640 * 480 * 4, 0)};
+    auto a = ui::draw_score_screen(assets, win);
+    check(a.width == 800 && a.height == 600 && a.pixels.size() == 800 * 600 * 4, "size");
+    check(a.pixels[3] == 255, "opaque");
+    // Title row (just under the heading) differs between win and lose.
+    auto lose_screen = win; lose_screen.player_won = false;
+    auto b = ui::draw_score_screen(assets, lose_screen);
+    check(a.pixels != b.pixels, "win and lose differ");
+    check(bright(a, 0, 100, 800, 500) > 200, "table text drawn");
+    // Art shows: the original picture has colour outside the black border.
+    check(bright(a, 80, 100, 720, 500) > 0, "art or text inside panel");
+    // Black fallback still draws text.
+    ui::ScoreAssets bare = assets; bare.background = {};
+    auto c = ui::draw_score_screen(bare, win);
+    check(bright(c, 0, 100, 800, 500) > 200, "text without art");
+    check(a.pixels != c.pixels, "art changes image");
+    // Bad inputs.
     bool threw = false;
-    try {
-        ui::draw_score_screen(small, win, font);
-    } catch (const std::runtime_error&) {
-        threw = true;
+    try { ui::draw_score_screen(assets, ui::ScoreScreen{}); } catch (const std::invalid_argument&) { threw = true; }
+    check(threw, "empty throws");
+    if (const char* dump = std::getenv("SCORE_DUMP")) {
+        std::ofstream o(dump, std::ios::binary);
+        o << "P6\n800 600\n255\n";
+        for (std::size_t i = 0; i < a.pixels.size(); i += 4) o.write(reinterpret_cast<const char*>(&a.pixels[i]), 3);
     }
-    assert(threw);
-
     std::cout << "score screen ok\n";
-    return 0;
 }
