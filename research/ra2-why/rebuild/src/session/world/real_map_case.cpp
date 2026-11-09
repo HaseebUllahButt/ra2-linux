@@ -17,6 +17,13 @@ int main(int argc, char** argv) {
     map.parse(original_test_ini(argv[1],"MP02T2.MAP",true));
     if (argc==3) {
         const std::string request=argv[2];
+        if (request=="--mcv-all-art") {
+            art.parse(original_test_ini(argv[1],"ART.INI",true));
+            const auto* section=art.find_section("MCV");
+            assert(section);
+            for (const auto& value:section->entries) std::cout<<value.key<<'\t'<<value.value<<'\n';
+            return std::cout?0:1;
+        }
         if (request=="--amcv-all-rules") {
             rules.parse(original_test_ini(argv[1],"RULES.INI",true));
             assert(map.key_count("AMCV")==0);

@@ -5,6 +5,8 @@ The full 0070AB40 body runs with restored constructor state. In connected mode,
 the ObjectType and TechnoType reader bodies also execute, including one case
 with installed AMCV boolean values. In connected-real-bool mode, the original
 boolean reader uses a separately supplied cache of installed AMCV records.
+In connected-real-art mode, original string and boolean readers also use
+separate supplied caches for installed AMCV rules and MCV art records.
 Other INI, formatting, enumeration, allocation, and asset services are supplied.
 Mode rules and later loading remain omitted.
 """
@@ -14,14 +16,15 @@ import struct
 import subprocess
 import sys
 from itertools import product
-from unicorn import UC_HOOK_CODE,UC_HOOK_MEM_WRITE
+from unicorn import UC_HOOK_CODE,UC_HOOK_MEM_READ,UC_HOOK_MEM_WRITE
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EIP,UC_X86_REG_ESP
 
-if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--connected','--connected-real-bool')):
-    raise SystemExit('usage: original_unit_reader_205_check.py game.exe unit_flags_case real_map_case game_dir [--connected|--connected-real-bool]')
+if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--connected','--connected-real-bool','--connected-real-art')):
+    raise SystemExit('usage: original_unit_reader_205_check.py game.exe unit_flags_case real_map_case game_dir [--connected|--connected-real-bool|--connected-real-art]')
 executable,native,fixture,game=sys.argv[1:5]
 connected=len(sys.argv)==6
-real_bool=connected and sys.argv[5]=='--connected-real-bool'
+real_bool=connected and sys.argv[5] in ('--connected-real-bool','--connected-real-art')
+real_art=connected and sys.argv[5]=='--connected-real-art'
 sys.argv=[sys.argv[0],executable,native,fixture,game]
 if connected:
     techno=runpy.run_path(os.path.join(os.path.dirname(__file__),'original_techno_reader_205_check.py'))
@@ -29,6 +32,10 @@ if connected:
     lines=subprocess.check_output([fixture,game,'--amcv-all-rules'],text=True).splitlines()
     base['installed'].update({key.casefold():value for key,value in (line.split('\t',1) for line in lines)})
     raw_rules=dict(line.split('\t',1) for line in lines)
+    if real_art:
+        assert raw_rules.get('Image')=='MCV'
+        lines=subprocess.check_output([fixture,game,'--mcv-all-art'],text=True).splitlines()
+        raw_art=dict(line.split('\t',1) for line in lines)
 else:
     base=runpy.run_path(os.path.join(os.path.dirname(__file__),'original_object_reader_205_check.py'))
 m=base['m']
@@ -39,10 +46,25 @@ calls={'parent':0,'pair':0,'format':0,'compare':0}
 chain_calls=[]
 parent_ok=[True]
 bool_entries=[]
+art_entries=[]
+art_value_reads=set()
+art_value_ranges={}
 
 def trace_write(cpu,access,address,size,value,user):
     if active[0] and address<=m.TYPE+0x205<address+size:
         writes.append((address,size,value))
+
+def trace_art_value(cpu,access,address,size,value,user):
+    if active[0] and real_art and mode==3:
+        for key,(start,end) in art_value_ranges.items():
+            if address<end and address+size>start: art_value_reads.add(key)
+
+def checked_copy_string():
+    source=m.argument(1)
+    if active[0] and real_art and mode==3:
+        for key,(start,end) in art_value_ranges.items():
+            if start<=source<end: art_value_reads.add(key)
+    base['copy_string']()
 
 def parent_reader():
     calls['parent']+=1
@@ -54,11 +76,28 @@ def trace_code(cpu,address,size,user):
         if address==0x6daf60: calls['parent']+=1
         if real_bool and address==0x50f410:
             section=bytes(cpu.mem_read(m.argument(0),64)).split(b'\0',1)[0].decode('ascii')
-            assert section.casefold()=='amcv'
+            incoming=cpu.reg_read(UC_X86_REG_ECX)
+            if real_art and mode==3 and section.casefold()=='mcv':
+                assert incoming==0x8397f0
+                cpu.reg_write(UC_X86_REG_ECX,art_ini)
+                art_entries.append((address,bytes(cpu.mem_read(m.argument(1),64)).split(b'\0',1)[0].decode('ascii')))
+                return
+            assert section.casefold()=='amcv', (mode,section,hex(incoming))
+            if real_art and mode==3: assert incoming==0x100b000
             bool_entries.append(address)
             # Supply records only to the boolean reader. Other INI services
             # keep their separately supplied context.
             if mode==3: cpu.reg_write(UC_X86_REG_ECX,bool_ini)
+        if real_art and mode==3 and address==0x50e9a0:
+            section=bytes(cpu.mem_read(m.argument(0),64)).split(b'\0',1)[0].decode('ascii')
+            incoming=cpu.reg_read(UC_X86_REG_ECX)
+            if section.casefold()=='amcv':
+                assert incoming==0x100b000
+                cpu.reg_write(UC_X86_REG_ECX,bool_ini)
+            else:
+                assert section.casefold()=='mcv' and incoming==0x8397f0, (section,hex(incoming))
+                cpu.reg_write(UC_X86_REG_ECX,art_ini)
+                art_entries.append((address,bytes(cpu.mem_read(m.argument(1),64)).split(b'\0',1)[0].decode('ascii')))
 
 def pair_reader():
     calls['pair']+=1
@@ -79,7 +118,9 @@ def compare_names():
 
 m.cpu.hook_add(UC_HOOK_MEM_WRITE,trace_write)
 m.cpu.hook_add(UC_HOOK_CODE,trace_code)
+if real_art: m.cpu.hook_add(UC_HOOK_MEM_READ,trace_art_value,begin=0x1380000,end=0x14fffff)
 if not connected: m.bind(0x6daf60,4,parent_reader)
+if real_art: m.bind(0x7823d0,0,checked_copy_string)
 m.bind(0x50fa40,16,pair_reader)
 m.bind(0x46c400,12,base['integer']); m.bind(0x46a970,12,base['integer'])
 m.bind(0x7820f4,0,format_key); m.bind(0x781f20,0,compare_names)
@@ -109,6 +150,22 @@ if real_bool:
     m.word(section+0x2c,array); m.word(section+0x30,len(entries)); m.word(section+0x38,1)
     m.word(bool_ini+0x24,1); m.word(bool_ini+0x30,section_cache)
     boolean_prologue=bytes(hash_cpu.mem_read(0x50f410,3))
+    if real_art:
+        art_cache,art_section,art_ini,art_array=0x1311000,0x1312000,0x1313000,0x1314000
+        assert {key.casefold():value for key,value in raw_art.items()}=={'cameo':'MCVICON','remapable':'yes','voxel':'yes'}
+        art_values=sorted(((original_hash(key),key,value) for key,value in raw_art.items()),
+                          key=lambda pair:pair[0] if pair[0]<0x80000000 else pair[0]-0x100000000)
+        assert len(art_values)<1024 and len({digest for digest,_,_ in art_values})==len(art_values)
+        for index,(digest,key,value) in enumerate(art_values):
+            node=0x1360000+index*0x40; encoded=value.encode('utf-8')+b'\0'
+            assert strings+len(encoded)<0x1500000
+            art_value_ranges[key]=(strings,strings+len(encoded))
+            m.cpu.mem_write(strings,encoded); m.word(node+0x10,strings); strings+=len(encoded)
+            m.word(art_array+8*index,digest); m.word(art_array+8*index+4,node)
+        m.word(art_cache,original_hash('MCV')); m.word(art_cache+4,art_section)
+        m.word(art_section+0x2c,art_array); m.word(art_section+0x30,len(art_values)); m.word(art_section+0x38,1)
+        m.word(art_ini+0x24,1); m.word(art_ini+0x30,art_cache)
+        string_prologue=bytes(hash_cpu.mem_read(0x50e9a0,3))
 for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
     m.cpu.mem_write(m.TYPE,constructor)
     m.cpu.mem_write(m.TYPE+0x205,bytes([initial]))
@@ -120,13 +177,21 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
         if mode==3:
             m.cpu.mem_write(0x50f410,boolean_prologue); m.callbacks.pop(0x50f410,None)
             m.word(section+0x3c,0)
+            if real_art:
+                m.word(art_section+0x3c,0)
+                m.cpu.mem_write(0x50e9a0,string_prologue); m.callbacks.pop(0x50e9a0,None)
+                m.cpu.ctl_remove_cache(0x50e9a0,0x50e9a3)
         else:
             m.word(0x100b000+0x24,0)
             m.bind(0x50f410,12,base['boolean'])
+            if real_art:
+                m.bind(0x50e9a0,20,base['string_reader']); m.cpu.ctl_remove_cache(0x50e9a0,0x50e9a3)
         m.cpu.ctl_remove_cache(0x50f410,0x50f413)
     calls.update(parent=0,pair=0,format=0,compare=0)
     chain_calls.clear()
     bool_entries.clear()
+    art_entries.clear()
+    art_value_reads.clear()
     m.cpu.reg_write(UC_X86_REG_ECX,m.TYPE); m.cpu.reg_write(UC_X86_REG_ESP,0x103f000)
     m.cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,0x100b000))
     writes.clear(); active[0]=True
@@ -138,6 +203,11 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
         assert m.cpu.mem_read(m.TYPE+0xaf3,1)==b'\x01' and m.cpu.mem_read(m.TYPE+0xaa0,1)==b'\x00'
         assert m.signed(m.TYPE+0x5a4)==1
         if real_bool: assert len(bool_entries)>100
+        if real_art:
+            assert {(0x50f410,'Voxel'),(0x50f410,'Remapable'),(0x50e9a0,'Cameo')} <= set(art_entries)
+            # Cameo uses the supplied string-copy service. Boolean bytes
+            # execute in x86.
+            assert {'Voxel','Remapable','Cameo'} <= art_value_reads, art_value_reads
     assert calls['parent']==1 and calls['pair']>=1 and calls['format']>=6 and calls['compare']>=1
     if connected: assert chain_calls==[0x70ab40,0x6daf60,0x5d7810,0x4107e0]
 parent_ok[0]=False
@@ -156,4 +226,4 @@ assert not writes and m.cpu.mem_read(m.TYPE+0x205,1)==b'\x01'
 assert calls=={'parent':1,'pair':0,'format':0,'compare':0}
 if connected: assert chain_calls==[0x70ab40,0x6daf60,0x5d7810,0x4107e0]
 print('base x86 %sreader chain preserves supplied Type +205 in %d checked cases'%
-      ('connected real-boolean ' if real_bool else 'connected ' if connected else 'UnitType ',9 if connected else 7))
+      ('connected real-art ' if real_art else 'connected real-boolean ' if real_bool else 'connected ' if connected else 'UnitType ',9 if connected else 7))
