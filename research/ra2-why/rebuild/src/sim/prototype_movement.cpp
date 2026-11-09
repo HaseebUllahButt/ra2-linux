@@ -630,8 +630,12 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
             return {};
         };
         // Friendly Infantry in the next Cell steps to a free neighbour Cell,
-        // and the vehicle waits for it (004A2670 asks blockers to scatter).
-        // TODO-ORIGINAL: the scatter choice of 00476920 and its timers.
+        // and the vehicle waits for it (004A2670 calls Cell Scatter_Content
+        // 00476920 on the blocked Cell at 004A2DE3, 004A329A and 004A390D).
+        // A soldier that already walks is left alone: it may walk for the
+        // other movement owner (Battle and the miners each have one), and
+        // two owners that push one soldier opposite ways hold it in place.
+        // TODO-ORIGINAL: the scatter choice of 00476920.
         const auto scatter=[&](ra2map::Cell cell) {
             const auto found=candidate.cells.find(key(cell));
             if (found==candidate.cells.end() || !found->second.heads) return false;
@@ -645,7 +649,8 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
             for (const auto sid:crowd) {
                 if (moves.count(sid)) { any=true;continue; }
                 const auto* soldier=find_unit(candidate,sid);
-                if (!soldier) continue;
+                if (!soldier || !soldier->position) continue;
+                if (soldier->locomotor_moving.value_or(false)) { any=true;continue; }
                 const auto kind=profile(*soldier);
                 const Context side{&movers,&claims,&soldiers,false,true,soldier->house_id,rules_?&kind.ground:nullptr};
                 for (const auto& d:directions) {
@@ -655,7 +660,7 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
                     bool on_route=same(n,*actor->cell);
                     if (movement) for (std::size_t i=0;i<movement->path.size() && i<3;++i) on_route|=same(n,movement->path[i]);
                     if (on_route || pass_cell(candidate,n,sid,&side)!=Pass::Open) continue;
-                    moves[sid]=Move{n,kind.speed,{n},0,false};movers.insert(sid);any=true;break;
+                    moves[sid]=Move{n,kind.speed,{n},0,false,*soldier->position};movers.insert(sid);any=true;break;
                 }
             }
             return any;
@@ -691,7 +696,12 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
             if (face(target)) return Next::Turn;
             auto available=pass_cell(candidate,target,id,&ctx);
             if (available==Pass::Unresolved) { failure=fail(PrototypeMoveStatus::NeedsInput,"prototype next Cell is unresolved");return Next::Fail; }
-            if (available!=Pass::Open && !walker && scatter(target)) return Next::Hold;
+            // The wait for soldiers to step aside ends after BlockagePathDelay
+            // frames, like the wait behind a moving Unit (004A3600..004A36DE:
+            // the Foot +558 timer of Rules +13D0 frames, then the Foot path
+            // 004C3000 runs in mode 2). The soldiers then count as walls for
+            // the new route.
+            if (available!=Pass::Open && !walker && movement->waited<wait_limit && scatter(target)) return Next::Hold;
             if (available==Pass::Busy && wait_for(target)) return Next::Hold;
             if (available!=Pass::Open) {
                 // 004A2670: a blocked vehicle less than CloseEnough from its
@@ -716,8 +726,10 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
             if (movement) { ++movement->waited;movement->stalled=true; }
             actor->locomotor_moving=false;
         };
+        // A blocked Unit that keeps its route starts a new wait, so it asks
+        // blockers to step aside again before the next plan.
         const auto block=[&] {
-            actor->locomotor_moving=false;movement->stalled=true;result.blocked.push_back(id);
+            actor->locomotor_moving=false;movement->stalled=true;movement->waited=0;result.blocked.push_back(id);
         };
         if (self.drive) {
             auto& m=motions[id];
@@ -889,6 +901,12 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
             continue;
         }
         if (!movement) continue;
+        // A step aside gives way. Drop it when another movement owner moved
+        // the soldier since this owner's last frame. The waiting vehicle
+        // asks again if it still needs the Cell.
+        if (movement->aside && (movement->aside->x!=actor->position->x || movement->aside->y!=actor->position->y)) {
+            moves.erase(id);movers.erase(id);continue;
+        }
         if (movement->path.empty() && !same(*actor->cell,movement->goal)) {
             const auto revised=route_or_nearby(candidate,id,*actor->cell,movement->goal,&ctx);
             if (revised.status==PrototypeMoveStatus::NeedsInput || revised.status==PrototypeMoveStatus::Invalid) return fail(revised.status,revised.detail);
@@ -971,6 +989,7 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
         if (blocked) { block();continue; }
         if (!moved) { hold();continue; }
         movement->waited=0;movement->stalled=false;actor->locomotor_moving=true;result.moved.push_back(id);
+        if (movement->aside) movement->aside=*actor->position;
         if (movement->path.empty() && same(*actor->cell,movement->goal)) finish(id,actor);
     }
     journal.keep=true;moves_=std::move(moves);motion_=std::move(motions);spots_=std::move(spots);last_frame_=frame;return result;

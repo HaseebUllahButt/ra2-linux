@@ -76,8 +76,9 @@ public:
     const Motion* motion(std::uint32_t unit) const { auto it=motion_.find(unit); return it==motion_.end()?nullptr:&it->second; }
 private:
     // waited counts frames spent behind a moving Unit. stalled is true when
-    // the Unit did not move in its last tick.
-    struct Move { ra2map::Cell goal;int speed=0;std::vector<ra2map::Cell> path;int waited=0;bool stalled=false; };
+    // the Unit did not move in its last tick. aside is set for a soldier's
+    // step out of a vehicle's way: the place where this owner last put it.
+    struct Move { ra2map::Cell goal;int speed=0;std::vector<ra2map::Cell> path;int waited=0;bool stalled=false;std::optional<Coord> aside={}; };
     std::map<std::uint32_t,Move> moves_;
     std::map<std::uint32_t,Motion> motion_;
     // Infantry spot (2..4) in its Cell; 0 is a whole-Cell 0x20 occupant.
