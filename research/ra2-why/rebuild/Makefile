@@ -10,7 +10,7 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/render/tmp_decode.cpp src/render/minimap.cpp src/loop/game_loop.cpp \
     src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp src/fs/filename_hash.cpp \
     src/gfx/palette.cpp src/gfx/shp_decode.cpp src/actors/actors.cpp \
-    src/session/session.cpp src/session/map_geometry.cpp src/session/placement_terrain.cpp src/session/world/world.cpp src/session/world/speed_type.cpp src/session/world/movement_zone.cpp src/session/world/cell_occupancy.cpp src/session/world/bridge_footprint.cpp src/weapons/weapons.cpp src/weapons/occupant_order.cpp src/weapons/object_damage.cpp \
+    src/session/session.cpp src/session/map_geometry.cpp src/session/placement_terrain.cpp src/session/world/world.cpp src/session/world/speed_type.cpp src/session/world/movement_zone.cpp src/session/world/unit_flags.cpp src/session/world/cell_occupancy.cpp src/session/world/bridge_footprint.cpp src/weapons/weapons.cpp src/weapons/occupant_order.cpp src/weapons/object_damage.cpp \
     src/ui/ui.cpp src/ui/shell.cpp src/ui/skirmish.cpp src/text/csf.cpp \
     src/pack/map_pack.cpp src/rules/ini_file.cpp src/map/map_file.cpp \
     src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
@@ -278,19 +278,23 @@ session: build/session_test
 build/session_test: $(SESSION_OBJECTS) build/native/src/session/test_main.o build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/rules/ini_file.o $(FS_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-SESSION_WORLD_OBJECTS = build/native/src/session/world/world.o build/native/src/session/world/speed_type.o build/native/src/session/world/movement_zone.o $(SESSION_OBJECTS) build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/sim/coarse_category.o build/native/src/sim/cell_setup.o build/native/src/sim/replacement.o build/native/src/sim/world.o build/native/src/sim/floor.o build/native/src/rules/ini_file.o build/native/src/weapons/occupant_order.o
+SESSION_WORLD_OBJECTS = build/native/src/session/world/world.o build/native/src/session/world/speed_type.o build/native/src/session/world/movement_zone.o build/native/src/session/world/unit_flags.o $(SESSION_OBJECTS) build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/sim/coarse_category.o build/native/src/sim/cell_setup.o build/native/src/sim/replacement.o build/native/src/sim/world.o build/native/src/sim/floor.o build/native/src/rules/ini_file.o build/native/src/weapons/occupant_order.o
 
 .PHONY: session-world
-session-world: build/session_world_movement_zone_test build/session_world_speed_type_test build/session_world_cell_setup_test build/session_world_snapshot_test build/session_world_map_test build/session_world_target_tile_test build/session_world_cell_occupancy_cases build/session_world_bridge_cases
+session-world: build/session_world_unit_flags_test build/session_world_movement_zone_test build/session_world_speed_type_test build/session_world_cell_setup_test build/session_world_snapshot_test build/session_world_map_test build/session_world_target_tile_test build/session_world_cell_occupancy_cases build/session_world_bridge_cases
 	build/session_world_snapshot_test
 	build/session_world_speed_type_test
 	build/session_world_movement_zone_test
+	build/session_world_unit_flags_test
 	build/session_world_cell_setup_test
 	build/session_world_map_test ../game
 	build/session_world_target_tile_test ../game
 	build/session_world_target_tile_test ../game --stage
 	build/session_world_cell_occupancy_cases > /dev/null
 	build/session_world_bridge_cases > /dev/null
+
+build/session_world_unit_flags_test: build/native/src/session/world/unit_flags_case.o build/native/src/session/world/unit_flags.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/session_world_movement_zone_test: build/native/src/session/world/movement_zone_case.o build/native/src/session/world/movement_zone.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
