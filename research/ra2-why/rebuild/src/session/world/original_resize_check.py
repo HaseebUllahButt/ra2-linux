@@ -5,8 +5,9 @@ The original reader, Cell reset, resize wrapper, allocation loop, Cell
 constructor, coordinate setter, resize suffix, and early Cell pass execute.
 INI, allocation, Cell parent/registration, lighting lookups, category cache,
 and region builders are supplied. Object and lighting vectors are empty.
-The default tile index is supplied. The trace stops before packed tile data,
-overlays, and later Battle phases.
+The default tile index is supplied. An optional source adds decoded MP02T2
+tile records with supplied stream and tile-index services. Overlay processing
+and later Battle phases remain outside the check.
 """
 import struct
 import subprocess
@@ -190,5 +191,5 @@ if tile_source:
         assert struct.unpack('<h',m.cpu.mem_read(cell+0x116,2))[0]==-1
         assert m.read(cell+0xe4)==0 and m.read(cell+0xe8)==0
         assert m.cpu.mem_read(cell+0x122,1)==b'\0' and m.cpu.mem_read(cell+0x124,1)==b'\0'
-    assert count==19900 and target_index in expected
+    assert count==len(expected)==19900 and target_index in expected
     print(f'base x86 reads {len(expected)} MP02T2 packed tiles and preserves tested fields in 19900 cells')
