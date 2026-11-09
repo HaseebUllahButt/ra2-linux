@@ -256,10 +256,14 @@ using rules::IniFile;
 IniFile prototype_merge_rules(const IniFile& base,const IniFile& mode) {
     std::map<std::string,std::map<std::string,std::string>> sections;
     for (const auto* ini:{&base,&mode}) {
+        std::set<std::string> section_names;
         std::set<std::pair<std::string,std::string>> seen;
-        for (const auto& section:ini->sections()) for (const auto& entry:section.entries)
-            if (seen.emplace(section.name,entry.key).second)
-                sections[section.name][entry.key]=entry.value;
+        for (const auto& section:ini->sections()) {
+            if (!section_names.insert(section.name).second) continue;
+            for (const auto& entry:section.entries)
+                if (seen.emplace(section.name,entry.key).second)
+                    sections[section.name][entry.key]=entry.value;
+        }
     }
     std::ostringstream text;
     for (const auto& section:sections) {
@@ -387,6 +391,7 @@ bool prototype_unlink(Snapshot& w,Entity& victim) {
     if (!victim.next || *victim.next==victim.id) return false;
     std::map<std::uint32_t,Entity*> objects;
     for (auto& e:w.entities) if (!e.id || !objects.emplace(e.id,&e).second) return false;
+    if (*victim.next && !objects.count(*victim.next)) return false;
     std::vector<std::uint32_t*> links;
     std::vector<session::world::CellState*> emptied;
     for (auto& pair:w.cells) {
@@ -403,7 +408,6 @@ bool prototype_unlink(Snapshot& w,Entity& victim) {
                     links.push_back(link);
                     if (head==&cell.heads->ground_head && head==link && *victim.next==0)
                         emptied.push_back(&cell);
-                    break;
                 }
                 link=&*it->second->next;
             }

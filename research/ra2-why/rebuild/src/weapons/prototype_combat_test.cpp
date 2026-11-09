@@ -49,6 +49,9 @@ void same_rng(const sim::RandomState& a,const sim::RandomState& b) {
 void tank_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
     rules::IniFile map;
     auto a=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400),b=a;
+    // One object can be visible from more than one Cell through the same link.
+    a.cells.at(51*512+54).heads->ground_head=2;
+    b.cells.at(51*512+54).heads->ground_head=2;
     sim::PrototypeCombatRuntime one(rules,map,art,exe),two(rules,map,art,exe);
     check(one.attack(a,1,2) && two.attack(b,1,2),"tank attack order rejected");
     std::size_t fired=0,impacts=0,deaths=0;bool saw_projectile=false,saw_damage=false;
@@ -79,8 +82,25 @@ void tank_test(const rules::IniFile& rules,const rules::IniFile& art,const std::
     check(saw_projectile && saw_damage && fired>=5 && impacts>=5 && deaths==1,"tank did not fight and die");
     check(a.entities[1].lifetime==world::Lifetime::Destroyed && a.entities[1].resolved_hp==0 &&
           a.entities[1].active==false && a.entities[1].next==0,"dead tank state");
-    check(a.cells.at(50*512+54).heads->ground_head==3 && a.entities[2].next==0,"death changed surviving links");
+    check(a.cells.at(50*512+54).heads->ground_head==3 &&
+          a.cells.at(51*512+54).heads->ground_head==3 && a.entities[2].next==0,
+          "death changed surviving links");
     check(!one.attack(a,1,2),"dead target accepted");
+}
+void cyclic_link_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+    rules::IniFile map;
+    const auto hp=rules.read_integer("E1","Strength");
+    auto w=make_world("E1","E1",world::Kind::Infantry,world::Kind::Infantry,hp,hp);
+    w.entities[1].position=sim::Coord{52*256+128,50*256+128,0};
+    w.entities[1].cell=ra2map::Cell{52,50};w.entities[1].resolved_hp=1;
+    w.entities[2].next=2;
+    w.cells.at(50*512+54).heads->ground_head=0;w.cells.at(50*512+52).heads->ground_head=2;
+    sim::PrototypeCombatRuntime combat(rules,map,art,exe);
+    check(combat.attack(w,1,2),"cycle test attack rejected");
+    const auto r=combat.tick(w,0);
+    check(!r.unresolved.empty() && w.entities[1].resolved_hp==1 &&
+          w.cells.at(50*512+52).heads->ground_head==2 && w.entities[2].next==2,
+          "cyclic death chain changed");
 }
 void overlay_and_range_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
     rules::IniFile mode,map;
@@ -101,6 +121,17 @@ void overlay_and_range_test(const rules::IniFile& rules,const rules::IniFile& ar
         if (result.impacts) break;
     }
     check(w.entities[1].resolved_hp==340,"map rules did not override mode and base rules");
+    rules::IniFile duplicate,empty;
+    duplicate.parse("[120mm]\nROF=65\n[120mm]\nDamage=10\n");
+    auto other=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400);
+    sim::PrototypeCombatRuntime first_section(rules,duplicate,empty,art,exe);
+    check(first_section.attack(other,1,2),"duplicate-section test attack rejected");
+    for (std::uint64_t frame=0;frame<100;++frame) {
+        const auto result=first_section.tick(other,frame);
+        if (!result.unresolved.empty()) throw std::runtime_error(result.unresolved.front());
+        if (result.impacts) break;
+    }
+    check(other.entities[1].resolved_hp==310,"duplicate mode section changed original rule lookup");
 }
 void infantry_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
     rules::IniFile map;
@@ -144,6 +175,7 @@ int main(int argc,char** argv) {
         auto rules=load(files,"rules.ini"),art=load(files,"art.ini");
         tank_test(rules,art,std::string(argv[1])+"/game.exe");
         infantry_test(rules,art,std::string(argv[1])+"/game.exe");
+        cyclic_link_test(rules,art,std::string(argv[1])+"/game.exe");
         structure_test(rules,art,std::string(argv[1])+"/game.exe");
         overlay_and_range_test(rules,art,std::string(argv[1])+"/game.exe");
         std::cout<<"Prototype tank, infantry, and structure combat replay passes\n";return 0;
