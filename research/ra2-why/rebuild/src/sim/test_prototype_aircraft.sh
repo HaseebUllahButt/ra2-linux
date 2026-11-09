@@ -2,7 +2,7 @@
 set -eu
 # Usage: test_prototype_aircraft.sh [game-dir]
 script_dir=$(cd "$(dirname "$0")" && pwd)
-game_dir=${1:-/path/to/user/ra2/game}
+game_dir=${1:-/path/to/user/ra2-test-host/game}
 if [[ "$game_dir" != /* ]]; then game_dir="$PWD/$game_dir"; fi
 cd "$script_dir"
 binary=$(mktemp /tmp/ra2-prototype-aircraft.XXXXXX)

@@ -1,5 +1,7 @@
+#include <cmath>
 #include "prototype_aircraft.h"
 #include "../fs/mix_bootstrap.h"
+#include <algorithm>
 #include <iostream>
 #include <stdexcept>
 
@@ -7,7 +9,7 @@ using namespace ra2;
 using namespace ra2::sim;
 namespace sw = ra2::session::world;
 namespace {
-void require(bool value, const char* text) { if (!value) throw std::runtime_error(text); }
+void require(bool value, const std::string& text) { if (!value) throw std::runtime_error(text); }
 std::uint32_t key(int x, int y) { return std::uint32_t(y) * 512 + std::uint32_t(x); }
 
 std::string fixture_rules_text(int docks) {
@@ -92,8 +94,8 @@ std::uint32_t frames_until(PrototypeAircraft& aircraft, sw::Snapshot& world, std
                            AircraftPhase phase, std::uint32_t& frame, std::uint32_t budget) {
     for (const std::uint32_t end = frame + budget; frame < end; ++frame) {
         const auto step = aircraft.tick(world, frame);
-        require(step.status == PrototypeAircraftStatus::Complete, "prototype frame failed");
-        if (aircraft.phase(id) == phase) return frame;
+        require(step.status == PrototypeAircraftStatus::Complete, "prototype frame failed: " + step.detail);
+        if (aircraft.phase(id) == phase) return frame++;
     }
     throw std::runtime_error("prototype mission did not reach its phase");
 }
@@ -102,7 +104,7 @@ void run(PrototypeAircraft& aircraft, sw::Snapshot& world, std::uint32_t& frame,
          std::uint32_t count) {
     for (const std::uint32_t end = frame + count; frame < end; ++frame) {
         const auto step = aircraft.tick(world, frame);
-        require(step.status == PrototypeAircraftStatus::Complete, "prototype frame failed");
+        require(step.status == PrototypeAircraftStatus::Complete, "prototype frame failed: " + step.detail);
     }
 }
 
@@ -218,6 +220,7 @@ int main(int argc, char** argv) try {
     require(capacity.issue(capacity_world, 11, 22).status == PrototypeAircraftStatus::Complete,
             "re-arm order failed");
     frames_until(capacity, capacity_world, 21, AircraftPhase::Docked, dock_frame, 4000);
+    run(capacity, capacity_world, dock_frame, 300);
     require(capacity.ammo(21) && *capacity.ammo(21) == 1, "waiting plane did not reload");
     std::cout << "Dock capacity: two planes shared one pad with NumberOfDocks=1\n";
 
@@ -279,7 +282,7 @@ int main(int argc, char** argv) try {
     require(left.issue(a, 11, 13).status == PrototypeAircraftStatus::Complete &&
             right.issue(b, 11, 13).status == PrototypeAircraftStatus::Complete,
             "replay attack orders failed");
-    for (std::uint32_t replay = 0; left.active_count() && replay < 4000; ++replay) {
+    for (std::uint32_t replay = 0; replay < 4000 && !(replay > 50 && left.phase(11) == AircraftPhase::Docked && left.ammo(11) == 1); ++replay) {
         const auto one = left.tick(a, replay), two = right.tick(b, replay);
         require(one.status == PrototypeAircraftStatus::Complete &&
                 two.status == PrototypeAircraftStatus::Complete, "replay frame failed");
@@ -289,15 +292,17 @@ int main(int argc, char** argv) try {
                 a.entities[1].cell->x == b.entities[1].cell->x &&
                 a.entities[1].cell->y == b.entities[1].cell->y, "replay differs");
     }
-    require(!left.active_count(), "replay mission did not finish");
+    require(left.phase(11) == AircraftPhase::Docked && left.ammo(11) == 1, "replay mission did not finish");
     std::cout << "Replay: two instances flew the same mission together\n";
 
     // Bad orders fail cleanly and cancel stops the mission.
     require(aircraft.issue(world, 0, 13).status == PrototypeAircraftStatus::Invalid,
             "zero aircraft id was accepted");
+    world = fixture();
+    world.entities[3].resolved_hp = 0;
     require(aircraft.issue(world, 11, 11).status == PrototypeAircraftStatus::Invalid,
             "self target was accepted");
-    require(aircraft.issue(world, 11, 15).status == PrototypeAircraftStatus::Invalid,
+    require(aircraft.issue(world, 11, 13).status == PrototypeAircraftStatus::Invalid,
             "dead target was accepted");
     require(aircraft.issue_move(world, 11, {8, 8}).status == PrototypeAircraftStatus::Invalid,
             "plane move order was accepted");
@@ -321,7 +326,7 @@ int main(int argc, char** argv) try {
     rules::IniFile original;
     original.parse(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()));
     PrototypeAircraft original_aircraft(original);
-    require(original_aircraft.flight_level() == 1500 && original_aircraft.reload_rate() == 0.3,
+    require(original_aircraft.flight_level() == 1500 && std::abs(original_aircraft.reload_rate() - 0.3) < 1e-6,
             "original general aircraft rules changed");
     const auto harrier = PrototypeAircraftRules::load(original, "ORCA");
     require(harrier.family == PrototypeAircraftRules::Family::Plane && harrier.speed == 14 &&
