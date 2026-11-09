@@ -102,7 +102,8 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     ui::ScoreAssets score_assets_;
     std::optional<gfx::RgbaImage> score_image_;
     HudState hud_state_;
-    render::Bitmap frame_;
+    render::Bitmap frame_,navigation_base_;
+    render::RadarStyle radar_style_;
     std::map<std::uint32_t,std::uint32_t> attacks_;
     std::map<std::uint32_t,ra2map::Cell> manual_moves_;
     std::set<std::uint32_t> move_destinations_;
@@ -156,6 +157,8 @@ public:
         if (initialized.status!=p::Status::Done) throw std::runtime_error(initialized.detail);
         const auto start=std::find_if(world_.entities.begin(),world_.entities.end(),[&](const auto& e){return live(e)&&e.house_id==player_;});
         if (start!=world_.entities.end()) center(*start);
+        radar_style_=render::battle_radar_style(rules_);
+        radar_style_.houses[player_]={70,255,90};radar_style_.houses[enemy_]={255,65,50};
         refresh_hud();
         std::vector<BuildChoice> icons;
         for(const auto& list:{&catalog_.buildings,&catalog_.units,&catalog_.infantry})
@@ -780,12 +783,23 @@ public:
         // Radar power, shroud and original house palettes remain separate.
         const auto bounds=BattleHud::minimap_bounds();
         auto& radar=hud_state_.minimap;
-        radar={bounds.width,bounds.height,std::vector<std::uint8_t>(std::size_t(bounds.width)*bounds.height*4)};
-        for(int y=0;y<radar.height;++y)for(int x=0;x<radar.width;++x) {
-            const auto source=(std::size_t(y*terrain_.height/radar.height)*terrain_.width+x*terrain_.width/radar.width)*4;
-            const auto to=(std::size_t(y)*radar.width+x)*4;
-            std::copy_n(terrain_.rgba.begin()+source,4,radar.rgba.begin()+to);
+        if(sim::tech::radar_online(rules_,world_,player_)) {
+            render::RadarView radar_view{geometry_,bounds.width,bounds.height,
+                {camera_x_/60+geometry_.local.x,camera_y_/30+geometry_.local.y,
+                 (BattleHud::sidebar_x+59)/60,(BattleHud::view_height+29)/30}};
+            radar=render::draw_battle_radar(world_,assets_.theater(),radar_view,radar_style_,true);
+            return;
         }
+        if(navigation_base_.rgba.empty()) {
+            navigation_base_={bounds.width,bounds.height,
+                std::vector<std::uint8_t>(std::size_t(bounds.width)*bounds.height*4)};
+            for(int y=0;y<bounds.height;++y)for(int x=0;x<bounds.width;++x) {
+                const auto source=(std::size_t(y*terrain_.height/bounds.height)*terrain_.width+x*terrain_.width/bounds.width)*4;
+                const auto to=(std::size_t(y)*bounds.width+x)*4;
+                std::copy_n(terrain_.rgba.begin()+source,4,navigation_base_.rgba.begin()+to);
+            }
+        }
+        radar=navigation_base_;
         for(const auto& e:world_.entities)if(live(e)&&e.house_id && e.kind!=w::Kind::Terrain) {
             const auto a=anchor(e);if(!a)continue;
             const int x=(a->x+camera_x_)*radar.width/terrain_.width;
@@ -794,14 +808,7 @@ public:
                 e.house_id==enemy_?std::array<std::uint8_t,3>{255,65,50}:std::array<std::uint8_t,3>{160,160,160};
             rectangle(radar,x-1,y-1,3,3,color);
         }
-        if(sim::tech::radar_online(rules_,world_,player_)) {
-            auto style=render::battle_radar_style(rules_);
-            style.houses[player_]={70,255,90};style.houses[enemy_]={255,65,50};
-            render::RadarView radar_view{geometry_,bounds.width,bounds.height,
-                {camera_x_/60+geometry_.local.x,camera_y_/30+geometry_.local.y,
-                 (BattleHud::sidebar_x+59)/60,(BattleHud::view_height+29)/30}};
-            radar=render::draw_battle_radar(world_,assets_.theater(),radar_view,style,true);
-        }
+
     }
     void present(const loop::State& state) override {
         // Headless checks compose at fixed intervals and at the final frame.
