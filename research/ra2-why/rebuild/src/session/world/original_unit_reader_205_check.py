@@ -7,6 +7,7 @@ with installed AMCV boolean values. In connected-real-bool mode, the original
 boolean reader uses a separately supplied cache of installed AMCV records.
 In connected-real-art mode, original string and boolean readers also use
 separate supplied caches for installed AMCV rules and MCV art records.
+In connected-real-integer mode, the original integer reader uses both caches.
 Other INI, formatting, enumeration, allocation, and asset services are supplied.
 Mode rules and later loading remain omitted.
 """
@@ -19,12 +20,13 @@ from itertools import product
 from unicorn import UC_HOOK_CODE,UC_HOOK_MEM_READ,UC_HOOK_MEM_WRITE
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EIP,UC_X86_REG_ESP
 
-if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--connected','--connected-real-bool','--connected-real-art')):
-    raise SystemExit('usage: original_unit_reader_205_check.py game.exe unit_flags_case real_map_case game_dir [--connected|--connected-real-bool|--connected-real-art]')
+if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--connected','--connected-real-bool','--connected-real-art','--connected-real-integer')):
+    raise SystemExit('usage: original_unit_reader_205_check.py game.exe unit_flags_case real_map_case game_dir [--connected|--connected-real-bool|--connected-real-art|--connected-real-integer]')
 executable,native,fixture,game=sys.argv[1:5]
 connected=len(sys.argv)==6
-real_bool=connected and sys.argv[5] in ('--connected-real-bool','--connected-real-art')
-real_art=connected and sys.argv[5]=='--connected-real-art'
+real_bool=connected and sys.argv[5] in ('--connected-real-bool','--connected-real-art','--connected-real-integer')
+real_art=connected and sys.argv[5] in ('--connected-real-art','--connected-real-integer')
+real_integer=connected and sys.argv[5]=='--connected-real-integer'
 sys.argv=[sys.argv[0],executable,native,fixture,game]
 if connected:
     techno=runpy.run_path(os.path.join(os.path.dirname(__file__),'original_techno_reader_205_check.py'))
@@ -49,6 +51,9 @@ bool_entries=[]
 art_entries=[]
 art_value_reads=set()
 art_value_ranges={}
+integer_entries=[]
+integer_pending={}
+integer_checked=set()
 
 def trace_write(cpu,access,address,size,value,user):
     if active[0] and address<=m.TYPE+0x205<address+size:
@@ -72,6 +77,10 @@ def parent_reader():
 
 def trace_code(cpu,address,size,user):
     if active[0] and connected:
+        if real_integer and mode==3 and address in integer_pending:
+            key,expected=integer_pending.pop(address)
+            assert cpu.reg_read(UC_X86_REG_EAX)==expected, key
+            integer_checked.add(key)
         if address in (0x70ab40,0x6daf60,0x5d7810,0x4107e0): chain_calls.append(address)
         if address==0x6daf60: calls['parent']+=1
         if real_bool and address==0x50f410:
@@ -98,6 +107,22 @@ def trace_code(cpu,address,size,user):
                 assert section.casefold()=='mcv' and incoming==0x8397f0, (section,hex(incoming))
                 cpu.reg_write(UC_X86_REG_ECX,art_ini)
                 art_entries.append((address,bytes(cpu.mem_read(m.argument(1),64)).split(b'\0',1)[0].decode('ascii')))
+        if real_integer and mode==3 and address==0x50d7f0:
+            section=bytes(cpu.mem_read(m.argument(0),64)).split(b'\0',1)[0].decode('ascii')
+            incoming=cpu.reg_read(UC_X86_REG_ECX)
+            key=bytes(cpu.mem_read(m.argument(1),64)).split(b'\0',1)[0].decode('ascii')
+            if section.casefold()=='amcv':
+                assert incoming==0x100b000
+                cpu.reg_write(UC_X86_REG_ECX,bool_ini)
+            else:
+                assert section.casefold()=='mcv' and incoming==0x8397f0, (section,hex(incoming))
+                cpu.reg_write(UC_X86_REG_ECX,art_ini)
+            integer_entries.append((section,key))
+            expected={'Strength':1000,'Sight':6,'TechLevel':10,'Speed':4,'Cost':3000}
+            if (section=='AMCV' and key in expected) or (section=='MCV' and key=='Facings'):
+                ret=struct.unpack('<I',bytes(cpu.mem_read(cpu.reg_read(UC_X86_REG_ESP),4)))[0]
+                assert ret not in integer_pending
+                integer_pending[ret]=(section+':'+key, expected[key] if section=='AMCV' else m.argument(2))
 
 def pair_reader():
     calls['pair']+=1
@@ -166,6 +191,7 @@ if real_bool:
         m.word(art_section+0x2c,art_array); m.word(art_section+0x30,len(art_values)); m.word(art_section+0x38,1)
         m.word(art_ini+0x24,1); m.word(art_ini+0x30,art_cache)
         string_prologue=bytes(hash_cpu.mem_read(0x50e9a0,3))
+        integer_prologue=bytes(hash_cpu.mem_read(0x50d7f0,3))
 for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
     m.cpu.mem_write(m.TYPE,constructor)
     m.cpu.mem_write(m.TYPE+0x205,bytes([initial]))
@@ -181,17 +207,25 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
                 m.word(art_section+0x3c,0)
                 m.cpu.mem_write(0x50e9a0,string_prologue); m.callbacks.pop(0x50e9a0,None)
                 m.cpu.ctl_remove_cache(0x50e9a0,0x50e9a3)
+            if real_integer:
+                m.cpu.mem_write(0x50d7f0,integer_prologue); m.callbacks.pop(0x50d7f0,None)
+                m.cpu.ctl_remove_cache(0x50d7f0,0x50d7f3)
         else:
             m.word(0x100b000+0x24,0)
             m.bind(0x50f410,12,base['boolean'])
             if real_art:
                 m.bind(0x50e9a0,20,base['string_reader']); m.cpu.ctl_remove_cache(0x50e9a0,0x50e9a3)
+            if real_integer:
+                m.bind(0x50d7f0,12,base['integer']); m.cpu.ctl_remove_cache(0x50d7f0,0x50d7f3)
         m.cpu.ctl_remove_cache(0x50f410,0x50f413)
     calls.update(parent=0,pair=0,format=0,compare=0)
     chain_calls.clear()
     bool_entries.clear()
     art_entries.clear()
     art_value_reads.clear()
+    integer_entries.clear()
+    integer_pending.clear()
+    integer_checked.clear()
     m.cpu.reg_write(UC_X86_REG_ECX,m.TYPE); m.cpu.reg_write(UC_X86_REG_ESP,0x103f000)
     m.cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,0x100b000))
     writes.clear(); active[0]=True
@@ -208,6 +242,9 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
             # Cameo uses the supplied string-copy service. Boolean bytes
             # execute in x86.
             assert {'Voxel','Remapable','Cameo'} <= art_value_reads, art_value_reads
+        if real_integer:
+            assert {('MCV','Facings'),('AMCV','Strength')} <= set(integer_entries)
+            assert integer_checked=={'AMCV:Strength','AMCV:Sight','AMCV:TechLevel','AMCV:Speed','AMCV:Cost','MCV:Facings'} and not integer_pending
     assert calls['parent']==1 and calls['pair']>=1 and calls['format']>=6 and calls['compare']>=1
     if connected: assert chain_calls==[0x70ab40,0x6daf60,0x5d7810,0x4107e0]
 parent_ok[0]=False
@@ -226,4 +263,4 @@ assert not writes and m.cpu.mem_read(m.TYPE+0x205,1)==b'\x01'
 assert calls=={'parent':1,'pair':0,'format':0,'compare':0}
 if connected: assert chain_calls==[0x70ab40,0x6daf60,0x5d7810,0x4107e0]
 print('base x86 %sreader chain preserves supplied Type +205 in %d checked cases'%
-      ('connected real-art ' if real_art else 'connected real-boolean ' if real_bool else 'connected ' if connected else 'UnitType ',9 if connected else 7))
+      ('connected real-integer ' if real_integer else 'connected real-art ' if real_art else 'connected real-boolean ' if real_bool else 'connected ' if connected else 'UnitType ',9 if connected else 7))
