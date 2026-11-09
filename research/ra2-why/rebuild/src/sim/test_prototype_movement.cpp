@@ -523,6 +523,16 @@ int main() try {
         std::cout<<"moved-aside soldier arrived frames="<<frame<<'\n';
     }
     {
+        // An incomplete snapshot: a soldier linked in the same Cell has no
+        // position. Reading spots must keep the remembered spots and not
+        // read the missing position.
+        auto world=field(20,12);PrototypeMovement movement;
+        soldier(world,1,1,5,5,2);soldier(world,2,1,5,5,3);
+        world.entities[1].position.reset();
+        const auto order=movement.issue(world,1,{10,5},10);
+        require(order.status==PrototypeMoveStatus::Complete,"soldier beside an incomplete soldier refused an order");
+    }
+    {
         // QA5: 30 Conscripts packed one per Cell (production puts each on
         // the Cell center with bit 0x20) beside 4 Rhinos. One far group
         // order, driven like the Battle loop. Every Unit must leave the

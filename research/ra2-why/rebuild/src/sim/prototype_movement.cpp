@@ -336,7 +336,8 @@ void read_spots(const World& w,ra2map::Cell at,std::map<std::uint32_t,int>& spot
     std::vector<const Entity*> chain;
     for (auto id=found->second.heads->ground_head;id && chain.size()<64;) {
         const auto* e=find_unit(w,id);
-        if (!e || !e->next) return;
+        // An incomplete link or position leaves the remembered spots as they are.
+        if (!e || !e->next || !e->position) return;
         if (e->kind!=session::world::Kind::Infantry) return;
         chain.push_back(e);id=*e->next;
     }
