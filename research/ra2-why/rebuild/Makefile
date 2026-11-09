@@ -10,11 +10,11 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/render/tmp_decode.cpp src/render/minimap.cpp src/loop/game_loop.cpp \
     src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp src/fs/filename_hash.cpp \
     src/gfx/palette.cpp src/gfx/shp_decode.cpp src/actors/actors.cpp \
-    src/session/session.cpp src/session/map_geometry.cpp src/session/placement_terrain.cpp src/session/world/world.cpp src/session/world/setup.cpp src/session/world/speed_type.cpp src/session/world/movement_zone.cpp src/session/world/unit_flags.cpp src/session/world/cell_occupancy.cpp src/session/world/bridge_footprint.cpp src/weapons/weapons.cpp src/weapons/occupant_order.cpp src/weapons/object_damage.cpp src/weapons/fire_eligibility.cpp src/weapons/cannon_range.cpp src/weapons/cannon_line.cpp src/weapons/projectile_damage.cpp src/weapons/fire_timer.cpp src/weapons/techno_damage.cpp \
+    src/session/session.cpp src/session/map_geometry.cpp src/session/placement_terrain.cpp src/session/world/world.cpp src/session/world/setup.cpp src/session/world/overlay_rules.cpp src/session/world/overlay_shape.cpp src/session/world/overlay_profiles.cpp src/session/world/speed_type.cpp src/session/world/movement_zone.cpp src/session/world/unit_flags.cpp src/session/world/cell_occupancy.cpp src/session/world/bridge_footprint.cpp src/weapons/weapons.cpp src/weapons/occupant_order.cpp src/weapons/object_damage.cpp src/weapons/fire_eligibility.cpp src/weapons/cannon_range.cpp src/weapons/cannon_line.cpp src/weapons/projectile_damage.cpp src/weapons/muzzle.cpp src/weapons/detonation.cpp src/weapons/unit_death.cpp src/weapons/fire_timer.cpp src/weapons/techno_damage.cpp \
     src/ui/ui.cpp src/ui/shell.cpp src/ui/skirmish.cpp src/text/csf.cpp \
     src/pack/map_pack.cpp src/rules/ini_file.cpp src/map/map_file.cpp \
     src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
-    src/sim/combat.cpp src/sim/damage_runtime.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp src/sim/path.cpp src/sim/path_smoothing.cpp src/sim/cell_entry.cpp src/sim/coarse_category.cpp src/sim/regions.cpp src/sim/hierarchy.cpp src/sim/hierarchy_route.cpp src/sim/production.cpp \
+    src/sim/combat.cpp src/sim/damage_runtime.cpp src/sim/goal_runtime.cpp src/sim/unit_mark.cpp src/sim/live_cell_setup.cpp src/sim/unit_visibility.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp src/sim/path.cpp src/sim/path_smoothing.cpp src/sim/cell_entry.cpp src/sim/coarse_category.cpp src/sim/regions.cpp src/sim/hierarchy.cpp src/sim/hierarchy_route.cpp src/sim/production.cpp src/sim/production_runtime.cpp \
     src/sim/world.cpp src/sim/world_init.cpp src/sim/cell_setup.cpp src/sim/drive.cpp src/sim/movement.cpp src/sim/movement_regions.cpp src/sim/component_lookup.cpp src/sim/goal_path.cpp src/sim/retry_edges.cpp src/sim/hierarchy_retry.cpp src/sim/local_reachability.cpp src/sim/search_memory.cpp src/sim/foot_path.cpp src/sim/nearest_cell.cpp src/sim/cell_projection.cpp src/sim/cell_fit.cpp src/sim/overlay_mark.cpp src/sim/replacement.cpp src/sim/build_time.cpp src/voxel/voxel.cpp
 NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
 
@@ -33,11 +33,12 @@ all: test
 
 FS_OBJECTS = build/native/src/fs/mix_archive.o build/native/src/fs/mix_bootstrap.o build/native/src/fs/filename_hash.o
 GFX_OBJECTS = build/native/src/gfx/palette.o build/native/src/gfx/shp_decode.o
-SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS)) build/native/src/weapons/weapons.o
+SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS)) build/native/src/weapons/weapons.o $(SESSION_WORLD_OBJECTS)
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 SESSION_OBJECTS = build/native/src/session/session.o build/native/src/session/map_geometry.o build/native/src/session/placement_terrain.o
+SESSION_WORLD_OBJECTS = build/native/src/session/world/world.o build/native/src/session/world/speed_type.o build/native/src/session/world/movement_zone.o build/native/src/session/world/unit_flags.o $(SESSION_OBJECTS) build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/sim/coarse_category.o build/native/src/sim/cell_setup.o build/native/src/sim/replacement.o build/native/src/sim/world.o build/native/src/sim/floor.o build/native/src/rules/ini_file.o build/native/src/weapons/occupant_order.o
 
-native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-postprocessed-path sim-filtered-path sim-smoothing sim-full-smoothing sim-entry-height sim-category sim-regions sim-movement-regions sim-component-lookup sim-goal-control sim-retry-edges sim-hierarchy-retry sim-local-reachability sim-search-memory sim-foot-path sim-nearest-cell sim-cell-projection sim-nearest-projection sim-cell-fit sim-rectangle-fit sim-nearest-fit sim-hierarchy-memory sim-overlay-mark sim-hierarchy sim-hierarchy-route sim-replacement sim-world sim-cell-setup sim-build-time sim-production session session-terrain session-world weapons combat-runtime
+native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-postprocessed-path sim-filtered-path sim-smoothing sim-full-smoothing sim-entry-height sim-category sim-regions sim-movement-regions sim-component-lookup sim-goal-control sim-retry-edges sim-hierarchy-retry sim-local-reachability sim-search-memory sim-foot-path sim-nearest-cell sim-cell-projection sim-nearest-projection sim-cell-fit sim-rectangle-fit sim-nearest-fit sim-hierarchy-memory sim-overlay-mark sim-hierarchy sim-hierarchy-route sim-replacement sim-world sim-cell-setup sim-build-time sim-production sim-production-runtime sim-goal-runtime sim-goal-runtime-real sim-live-cell-setup sim-unit-visibility session session-terrain session-world weapons combat-runtime
 	build/ra2-native --game-dir ../game --frames 3 --headless
 	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
@@ -327,12 +328,14 @@ session: build/session_test
 build/session_test: $(SESSION_OBJECTS) build/native/src/session/test_main.o build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/rules/ini_file.o $(FS_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-SESSION_WORLD_OBJECTS = build/native/src/session/world/world.o build/native/src/session/world/speed_type.o build/native/src/session/world/movement_zone.o build/native/src/session/world/unit_flags.o $(SESSION_OBJECTS) build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/sim/coarse_category.o build/native/src/sim/cell_setup.o build/native/src/sim/replacement.o build/native/src/sim/world.o build/native/src/sim/floor.o build/native/src/rules/ini_file.o build/native/src/weapons/occupant_order.o
 
 .PHONY: session-world
-session-world: build/session_world_house_updates_cases build/session_world_setup_test build/session_world_unit_flags_test build/session_world_movement_zone_test build/session_world_speed_type_test build/session_world_cell_setup_test build/session_world_snapshot_test build/session_world_map_test build/session_world_target_tile_test build/session_world_cell_occupancy_cases build/session_world_bridge_cases
+session-world: build/session_world_overlay_profiles_cases build/session_world_overlay_shape_cases build/session_world_overlay_rules_cases build/session_world_house_updates_cases build/session_world_setup_test build/session_world_unit_flags_test build/session_world_movement_zone_test build/session_world_speed_type_test build/session_world_cell_setup_test build/session_world_snapshot_test build/session_world_map_test build/session_world_target_tile_test build/session_world_cell_occupancy_cases build/session_world_bridge_cases
 	build/session_world_snapshot_test
 	build/session_world_house_updates_cases > /dev/null
+	build/session_world_overlay_rules_cases ../game > /dev/null
+	build/session_world_overlay_shape_cases ../game > /dev/null
+	build/session_world_overlay_profiles_cases ../game
 	build/session_world_setup_test ../game
 	build/session_world_speed_type_test
 	build/session_world_movement_zone_test
@@ -361,6 +364,15 @@ build/session_world_cell_setup_test: build/native/src/session/world/cell_setup_c
 
 build/session_world_snapshot_test: build/native/src/session/world/test_snapshot.o $(SESSION_WORLD_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/session_world_overlay_profiles_cases: build/native/src/session/world/overlay_profiles_case.o build/native/src/session/world/overlay_profiles.o build/native/src/session/world/overlay_rules.o build/native/src/session/world/overlay_shape.o build/native/src/session/world/setup.o $(SESSION_WORLD_OBJECTS) $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
+
+build/session_world_overlay_shape_cases: build/native/src/session/world/overlay_shape_case.o build/native/src/session/world/overlay_shape.o build/native/src/session/world/setup.o $(SESSION_WORLD_OBJECTS) $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
+
+build/session_world_overlay_rules_cases: build/native/src/session/world/overlay_rules_case.o build/native/src/session/world/overlay_rules.o build/native/src/sim/test_inputs.o $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 build/session_world_house_updates_cases: build/native/src/session/world/house_updates_case.o $(SESSION_WORLD_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@
@@ -430,7 +442,7 @@ build/session_unit_loop_cases: build/native/src/session/session.o build/native/s
 build/session_mission_cases: build/native/src/session/session.o build/native/src/session/mission_cases.o build/native/src/sim/random.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-COMBAT_RUNTIME_OBJECTS = build/native/src/weapons/projectile_damage.o build/native/src/weapons/cannon_line.o build/native/src/weapons/cannon_range.o build/native/src/weapons/fire_eligibility.o build/native/src/weapons/fire_timer.o build/native/src/weapons/techno_damage.o build/native/src/weapons/weapons.o build/native/src/sim/damage_runtime.o build/native/src/sim/random.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o
+COMBAT_RUNTIME_OBJECTS = build/native/src/weapons/unit_death.o build/native/src/weapons/detonation.o build/native/src/weapons/muzzle.o build/native/src/weapons/projectile_damage.o build/native/src/weapons/cannon_line.o build/native/src/weapons/cannon_range.o build/native/src/weapons/fire_eligibility.o build/native/src/weapons/fire_timer.o build/native/src/weapons/techno_damage.o build/native/src/weapons/weapons.o build/native/src/sim/damage_runtime.o build/native/src/sim/random.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o
 
 .PHONY: combat-runtime
 combat-runtime: build/combat_runtime_regression
@@ -608,3 +620,35 @@ run-map:
 		-ldl -o src/map/map_test
 	src/map/map_test ../analysis/extracted/maps/2PEAKS.MAP
 
+
+.PHONY: sim-production-runtime
+sim-production-runtime: build/sim_production_runtime_test
+	build/sim_production_runtime_test
+
+build/sim_production_runtime_test: build/native/src/sim/test_production_runtime.o build/native/src/sim/production_runtime.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+.PHONY: sim-goal-runtime sim-goal-runtime-real sim-live-cell-setup sim-unit-visibility
+sim-goal-runtime: build/sim_goal_runtime_test
+	build/sim_goal_runtime_test ../game/game.exe
+
+sim-goal-runtime-real: build/sim_goal_runtime_real_test
+	build/sim_goal_runtime_real_test ../game
+
+sim-live-cell-setup: build/sim_live_cell_setup_test
+	build/sim_live_cell_setup_test
+
+sim-unit-visibility: build/sim_unit_visibility_test
+	build/sim_unit_visibility_test
+
+build/sim_goal_runtime_test: build/native/src/sim/test_goal_runtime.o $(SIM_OBJECTS) $(MAP_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
+
+build/sim_goal_runtime_real_test: build/native/src/sim/test_goal_runtime_real.o build/native/src/session/world/setup.o $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
+
+build/sim_live_cell_setup_test: build/native/src/sim/test_live_cell_setup.o $(SIM_OBJECTS) $(MAP_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
+
+build/sim_unit_visibility_test: build/native/src/sim/test_unit_visibility.o $(SIM_OBJECTS) $(MAP_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
