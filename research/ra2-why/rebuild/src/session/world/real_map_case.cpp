@@ -17,6 +17,23 @@ int main(int argc, char** argv) {
     map.parse(original_test_ini(argv[1],"MP02T2.MAP",true));
     if (argc==3) {
         const std::string request=argv[2];
+        if (request=="--amcv-speed-info") {
+            rules.parse(original_test_ini(argv[1],"RULES.INI",true));
+            assert(map.key_count("AMCV")==0);
+            assert(rules.read_string("AMCV","Crusher")=="yes");
+            assert(!rules.find("AMCV","SpeedType"));
+            std::cout<<"yes absent\n";
+            return std::cout?0:1;
+        }
+        if (request=="--land-info") {
+            rules.parse(original_test_ini(argv[1],"RULES.INI",true));
+            for (const char* section:{"Clear","Rough","Road","Water","Rock","Wall","Tiberium","Weeds","Beach","Ice","Railroad","Tunnel"}) {
+                assert(map.key_count(section)==0);
+                std::cout<<section<<' '<<rules.read_string(section,"Track")<<' '
+                         <<rules.read_string(section,"Wheel")<<'\n';
+            }
+            return std::cout?0:1;
+        }
         if (request=="--neighbor-info") {
             // Packed-map and static TMP inputs only. Live prior passes can
             // change the tile and ramp values before Cell setup.
@@ -47,12 +64,18 @@ int main(int argc, char** argv) {
     for (const char* section:{"IsoMapPack","IsoMapPack2","IsoMapPack3","IsoMapPack4"})
         assert(map.key_count(section)==0);
     assert(map.key_count("CellTags")==0);
-    assert(map.key_count("AMCV")==0 && map.key_count("Clear")==0 && map.key_count("Water")==0);
+    assert(map.key_count("AMCV")==0 && map.key_count("Clear")==0 && map.key_count("Water")==0 &&
+           map.key_count("Tiberium")==0);
     assert(rules.read_string("AMCV","Strength")=="1000");
     assert(rules.read_string("AMCV","Crusher")=="yes");
     assert(rules.read_string("AMCV","SpeedType").empty());
     assert(rules.read_string("Clear","Track")=="100%");
+    assert(rules.read_string("Clear","Wheel")=="100%");
     assert(rules.read_string("Water","Track")=="0%");
+    assert(rules.read_string("Tiberium","Track")=="70%" && rules.read_string("Tiberium","Wheel")=="50%");
+    const auto track=ra2::rules::IniFile::double_value(rules.read_string("Tiberium","Track"));
+    const auto wheel=ra2::rules::IniFile::double_value(rules.read_string("Tiberium","Wheel"));
+    assert(track && wheel && static_cast<float>(*track)==0.7f && static_cast<float>(*wheel)==0.5f);
     assert(rules.key_count("VehicleTypes")==55 && map.key_count("VehicleTypes")==0);
     const auto* vehicle_types=rules.find_section("VehicleTypes");
     assert(vehicle_types);

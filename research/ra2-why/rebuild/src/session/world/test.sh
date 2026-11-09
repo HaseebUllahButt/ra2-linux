@@ -52,6 +52,8 @@ if [ "${2:-}" = "--original" ]; then
     ${PYTHON:-python3} original_overlay_map_check.py "$game/game.exe" "$build/real_map_case" "$game"
     ${PYTHON:-python3} original_tile_type_check.py "$game/game.exe"
     ${PYTHON:-python3} original_target_bounds_check.py "$game/game.exe" "$build/target_tile_case" "$game"
+    ${PYTHON:-python3} original_land_table_check.py "$game/game.exe" "$build/real_map_case" "$game"
+    ${PYTHON:-python3} original_speed_type_check.py "$game/game.exe" "$build/real_map_case" "$game"
     ${PYTHON:-python3} "$shared/sim/original_cell_setup_check.py" "$game/game.exe" --base --vectors > "$build/original-setup-vectors"
     "$build/cell_setup_case" --vectors > "$build/staged-setup-vectors"
     cmp "$build/original-setup-vectors" "$build/staged-setup-vectors"

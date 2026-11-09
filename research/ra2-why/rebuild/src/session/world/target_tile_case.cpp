@@ -89,6 +89,27 @@ int main(int argc,char** argv) {
         // These runtime values are test inputs, not conclusions about the map.
         // Overlay effects, object loading, bridge setup, Tube and animation
         // creation, and shadow writes were not executed by the two passes.
+        assert(map.key_count("Clear")==0 && map.key_count("Tiberium")==0);
+        const auto clear_wheel=rules::IniFile::double_value(rules.read_string("Clear","Wheel"));
+        const auto clear_track=rules::IniFile::double_value(rules.read_string("Clear","Track"));
+        const auto tiberium_wheel=rules::IniFile::double_value(rules.read_string("Tiberium","Wheel"));
+        const auto tiberium_track=rules::IniFile::double_value(rules.read_string("Tiberium","Track"));
+        assert(clear_wheel && clear_track && tiberium_wheel && tiberium_track && *clear_wheel==1.0 && *clear_track==1.0 &&
+               static_cast<float>(*tiberium_wheel)==0.5f && static_cast<float>(*tiberium_track)==0.7f);
+        Snapshot category_case; category_case.random=sim::Random(1).state();
+        auto& category_cell=category_case.cells[0];
+        category_cell.terrain.emplace(); category_cell.terrain->overlay_type_index=-1;
+        category_cell.terrain->land_type=5; category_cell.usable=true;
+        category_cell.heads=weapons::CellContentHeads{};
+        category_cell.land_wheel=static_cast<float>(*tiberium_wheel);
+        category_cell.unit_land_speed=static_cast<float>(*tiberium_track); // Supplied SpeedType 1.
+        const auto category_profile=coarse_inputs(category_case,0);
+        assert(category_profile && category_profile->land_wheel==0.5f &&
+               category_cell.unit_land_speed==0.7f && sim::original_coarse_category(*category_profile).category==0);
+        category_cell.land_wheel=0.0f;
+        assert(sim::original_coarse_category(*coarse_inputs(category_case,0)).category==6);
+        category_cell.land_wheel=0.5f; category_cell.unit_land_speed=0.0f;
+        assert(sim::original_coarse_category(*coarse_inputs(category_case,0)).category==0);
         Stage stage(sim::Random(42).state());
         const auto house=stage.create_player_house("Player","Americans",10000,0,64);
         assert(house);
@@ -118,7 +139,10 @@ int main(int argc,char** argv) {
         target_cell.terrain->bridge=false; target_cell.cell_flag_100=false;
         target_cell.ground_occupancy_124=0; target_cell.cell_field_54=-1;
         target_cell.cell_field_58=-1; target_cell.tube_field_116=-1;
-        target_cell.unit_land_speed=1.0f; target_cell.land_wheel=1.0f;
+        // The original constructor and AMCV reader fragments select Track 1;
+        // the omitted type-loading and map phases remain fixture assumptions.
+        target_cell.unit_land_speed=static_cast<float>(*clear_track);
+        target_cell.land_wheel=static_cast<float>(*clear_wheel);
         target_cell.usable=true; target_cell.coarse_category=0;
         Stage prepared(std::move(supplied));
         assert(prepared.place_base_unit(*unit,{135,80},32,profile)==PlacementResult::Placed);
@@ -127,12 +151,12 @@ int main(int argc,char** argv) {
         guard.receiver_tile_index=131; guard.animation_index=-1;
         guard.shadow_enabled=false; guard.bounds_height=30;
         auto missing_bounds=guard; missing_bounds.bounds_height.reset();
-        const auto incomplete=prepared.complete_pending_cell_setup(missing_bounds,theater,cliff,{{0,1.0f}});
+        const auto incomplete=prepared.complete_pending_cell_setup(missing_bounds,theater,cliff,{{0,static_cast<float>(*clear_wheel)}});
         assert(incomplete.status==sim::CellSetupStatus::NeedsInput);
         assert(prepared.snapshot().pending_cell_setup && prepared.snapshot().random.table==before.table &&
                prepared.snapshot().random.first==before.first && prepared.snapshot().random.second==before.second &&
                prepared.snapshot().cells.at(target).ground_occupancy_124==0x20);
-        const auto completed=prepared.complete_pending_cell_setup(guard,theater,cliff,{{0,1.0f}});
+        const auto completed=prepared.complete_pending_cell_setup(guard,theater,cliff,{{0,static_cast<float>(*clear_wheel)}});
         if (completed.status!=sim::CellSetupStatus::Complete) {
             std::cerr<<"conditional stage setup needs input: "<<completed.detail<<'\n';
             return 1;
