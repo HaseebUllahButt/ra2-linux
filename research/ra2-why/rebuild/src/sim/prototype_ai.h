@@ -41,6 +41,12 @@ public:
         std::int32_t game_frame);
     void reset() noexcept;
 
+    // Base 004E2E40 starts the House team timer when the difficulty is set:
+    // TeamDelays[difficulty] + 175 * house array index (offset 0x30).
+    // HouseAI 004E4110 calls the team picker 006BED50 only when it expires.
+    static std::int32_t first_team_frame(const rules::IniFile& rules, Difficulty difficulty,
+                                         std::int32_t house_index);
+
     // Read-only state for tests and debug views.
     struct TeamView {
         std::string team_type, trigger;

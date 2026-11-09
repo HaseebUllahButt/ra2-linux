@@ -348,6 +348,11 @@ void PrototypeAI::reset() noexcept {
     seed_ = 1;
 }
 
+std::int32_t PrototypeAI::first_team_frame(const rules::IniFile& rules, Difficulty difficulty,
+                                           std::int32_t house_index) {
+    return std::max(0, by_difficulty(rules, "TeamDelays", difficulty, 2000)) + std::max(0, house_index) * 0xaf;
+}
+
 std::optional<double> PrototypeAI::trigger_weight(const std::string& id) const {
     for (std::size_t i = 0; i < triggers_.size(); ++i) if (triggers_[i].id == id) return weights_[i];
     return {};
@@ -697,7 +702,11 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
     if (computer_house_ != computer_house_id || player_house_ != player_house_id ||
         (last_frame_ && game_frame < *last_frame_)) reset();
     if (last_frame_ == game_frame) return result;
-    if (computer_house_ != computer_house_id) seed_ = 0x9e3779b9u ^ computer_house_id;
+    if (computer_house_ != computer_house_id) {
+        seed_ = 0x9e3779b9u ^ computer_house_id;
+        // The house timer runs from game start, not from the first AI tick.
+        next_team_ = first_team_frame(rules_, difficulty_, computer->original_index.value_or(0));
+    }
     computer_house_ = computer_house_id;
     player_house_ = player_house_id;
     last_frame_ = game_frame;
