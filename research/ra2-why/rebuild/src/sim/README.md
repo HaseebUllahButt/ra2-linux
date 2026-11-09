@@ -703,7 +703,7 @@ The result retains every ordered cache write, including building writes of six t
 It preserves the original overlay zero comparison, the double 0.01 terrain threshold, and unordered float branches.
 Only runtime-type virtual answers and usable-area answers are adapted by the original x86 oracle.
 `original_category_check.py executable [--base]` matches 4,096 cases per edition with hash DA970EA0.
-`test_category.sh` passes 4,115 checks, including five terrain entries from original rulesmd.ini and required-input errors.
+`test_category.sh` passes 4,124 checks, including original Wheel values, distinct Track/Wheel profiles, and required-input errors.
 The same checks pass with address and undefined-behavior sanitizers.
 The producer does not recover overlay constructors, occupant placement order, or the fields it requires from those objects.
 The terrain adapter must supply the resolved original inputs, or keep that cell category unknown.
@@ -1230,3 +1230,49 @@ They also combine retargeting with null-path failure and compare its private des
 The base hash is D51E380B. The expansion hash is 22D0692F.
 Compare both with `test_foot_path.sh base_executable expansion_executable --retarget-vectors`.
 The default native test runs 5,120 vectors and sixty-eight missing-input, unsupported-branch, and private-publication checks.
+
+## Fixed Foot nearest-cell search
+
+`original_foot_nearest_cell` ports base 005502E0 / expansion 0056DC20 with the exact fixed Foot retarget arguments.
+It takes raw map cell dimensions, a `FootNearestQuery`, an explicit helper-specific empty Cell, and the optional current frame.
+Cell metadata, the Cell-based usable-area answer, rectangle eligibility, and projection remain read-only caller inputs.
+The metadata provider must preserve original linear aliases and fallback Cell behavior.
+Unknown cell or fit data returns NeedsInput with no answer. It never becomes a known empty result.
+
+The search visits radius zero twice, then visits the top and bottom pairs from left to right.
+It next visits left and right pairs from top to bottom, excluding the corners already tested.
+It scans radii below `min(map_width + map_height, 32)` and retains at most 24 candidates.
+Each candidate needs a known usable-area result, a true original rectangle answer, and a strict raw-height gap below two.
+Explicit bridge bit 100 contributes four raw levels in the original height calculation.
+The source component value 0xFFFF becomes 0xFFFFFFFF before rectangle calls.
+The fixed rectangle dimensions are one by one, its layer argument is -1, and its final flag is zero.
+
+An actor on the bridge layer stops after the first ring with an admitted candidate.
+Other actors stop after the first complete ring with a candidate whose projection returns the same Cell.
+The candidate cap can stop either case in the middle of a ring.
+The final pass projects every admitted candidate again and preserves two ordered lists, including duplicates.
+Candidates with unchanged projection take priority over all others.
+An empty source selects by original frame modulo the preferred list count.
+A nonempty source selects the first shortest original approximate distance. Equal distances retain the first candidate.
+The implementation uses the recovered distance table rather than replacing it with a generic nearest-point rule.
+
+`NearestEmptyCell` is a separate type from `FootPathInputs.invalid_cell`.
+Base static initializer 005441A0 writes zero words to 00A6F238. Expansion 005618B0 writes zero words to 00ABD480.
+Their registered initializer pointers are at 007CA814 and 00813A98.
+The original check poisons the words, executes each initializer, and confirms the helper's fresh empty value is (0,0).
+The API still requires the caller to resolve that state explicitly.
+Complete results preserve the raw Cell, including zero. Do not translate it into the Foot invalid-Cell sentinel.
+Error results have no answer. The candidate lists are diagnostic and cannot authorize publication without Complete.
+
+`original_nearest_cell_check.py executable [--base] --vectors` checks 512 original searches per edition.
+Both editions match A7F1ECFF. The additional `--edges` set checks 512 searches around 0, 1, 510, and 511 and matches 4E70DF25.
+The original scan, height gates, grouping, frame selection, and distance helper execute unchanged.
+Only usable-area, rectangle, and projection answers are supplied by the fixtures.
+Any call to the shared random generator fails the check.
+Compare with `test_nearest_cell.sh base_executable expansion_executable --vectors` and its `--edges` mode.
+The default native test checks 2,048 searches and twenty-four input, candidate-cap, duplicate, tie, and unused-field cases.
+
+The rectangle body at 00550CF0 / 0056E7C0 and its Cell predicate at 00478760 / 004834A0 remain dependencies.
+Projection at 006A6A50 / 006D6410 and usable-area binding at 0055A740 / 00578540 also remain separate.
+The optional nearest callback in the Foot wrapper is not automatically bound to this module.
+Live goal commands remain disabled until those inputs and the other staged-world dependencies are verified.
