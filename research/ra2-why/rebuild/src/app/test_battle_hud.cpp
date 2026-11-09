@@ -27,6 +27,7 @@ int main(int argc, char** argv) {
     assert(hud.handle_click(916,44,s).kind==HudActionKind::None);
     assert(hud.handle_click(r.x,r.y,s).kind==HudActionKind::None);
     hud.handle_click(808,44,s);
+s.can_deploy=true;
     assert(hud.handle_click(808,117,s).kind==HudActionKind::None);
     assert(hud.handle_click(808,560,s).kind==HudActionKind::Deploy);
     assert(hud.handle_click(808,600,s).kind==HudActionKind::None);
@@ -139,8 +140,8 @@ int main(int argc, char** argv) {
         q.pointer_x=q.pointer_y=-1;
         auto idle=frame(); hud.draw(idle,q);
         assert(gold_hits(idle,{r.x,r.y+r.height,110,14})==0);
-        // DEPLOY shows and clicks only when no yard exists.
-        HudState yard=q; yard.has_yard=true;
+        // DEPLOY shows and clicks only when can_deploy is set.
+        HudState yard=q; yard.can_deploy=false;
         auto with_yard=frame(); hud.draw(with_yard,yard);
         auto ink_row=[&](const render::Bitmap& img,int y) {
             for(int x=808;x<1020;++x) {
@@ -150,19 +151,24 @@ int main(int argc, char** argv) {
             return false;
         };
         assert(!ink_row(with_yard,560));
-        yard.has_yard=false;
+        yard.can_deploy=true;
         auto no_yard=frame(); hud.draw(no_yard,yard);
         assert(ink_row(no_yard,560));
-        yard.has_yard=true;
-        assert(hud.handle_click(808,560,yard).kind==HudActionKind::None);
-        yard.has_yard=false;
+        yard.can_deploy=true;
         assert(hud.handle_click(808,560,yard).kind==HudActionKind::Deploy);
+        yard.can_deploy=false;
+        assert(hud.handle_click(808,560,yard).kind==HudActionKind::None);
         // Labels: the power values and the selected list carry titles.
         HudState lab; lab.choices={{"E1","GI",200,true}};
         lab.power_output=200; lab.power_drain=60; lab.selected_labels={"GI"};
         auto lf=frame(); hud.draw(lf,lab);
         assert(ink_hits(lf,{808,17,212,10})>0);  // POWER OUT ... USE ...
-        assert(ink_hits(lf,{808,596,212,10})>0); // SELECTED UNITS header
+        int edge_hits=0;
+        for(int y=596;y<606;++y) for(int x=808;x<1020;++x) {
+            auto i=(static_cast<std::size_t>(y)*lf.width+x)*4;
+            if(lf.rgba[i]==104&&lf.rgba[i+1]==129&&lf.rgba[i+2]==126) ++edge_hits;
+        }
+        assert(edge_hits>0); // SELECTED UNITS header, dim edge color
         // Active tab: gold frame and dim gold fill; inactive stays plain.
         HudState t; t.choices={{"E1","GI",200,true,0,BuildCategory::Infantry}};
         hud.handle_click(808+42,44,t); // INF tab

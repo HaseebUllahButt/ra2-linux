@@ -115,7 +115,7 @@ HudAction BattleHud::handle_click(int x,int y,const HudState& s) const {
             return {HudActionKind::Build,c.type,{}};
         ++slot;
     }
-    if(!s.has_yard && inside(x,y,deploy_bounds())) return {HudActionKind::Deploy,{}, {}};
+    if(s.can_deploy && inside(x,y,deploy_bounds())) return {HudActionKind::Deploy,{}, {}};
     auto r=minimap_bounds();
     if(inside(x,y,r) && s.map_width>0 && s.map_height>0)
         return {HudActionKind::Minimap,{},
@@ -128,7 +128,7 @@ bool BattleHud::same_panel(const HudState& s) const {
     return panel_valid_&&panel_category_==active_category_&&old.cash==s.cash&&
         old.power_output==s.power_output&&old.power_drain==s.power_drain&&
         old.status==s.status&&old.result==s.result&&old.selected_labels==s.selected_labels&&
-        old.has_yard==s.has_yard&&
+        old.can_deploy==s.can_deploy&&
         old.choices.size()==s.choices.size()&&std::equal(old.choices.begin(),old.choices.end(),s.choices.begin(),
             [](const auto& a,const auto& b) {
                 return a.type==b.type&&a.name==b.name&&a.cost==b.cost&&a.enabled==b.enabled&&
@@ -219,7 +219,7 @@ void BattleHud::draw_panel(render::Bitmap& b,const HudState& s) const {
             text(b,r.x+r.width-w-1,r.y+r.height-8,n,gold,214,1);
         }
     }
-    if(!s.has_yard) {
+    if(s.can_deploy) {
         border(b,deploy_bounds(),ink); text(b,816,577,"DEPLOY",ink,190);
     }
     text(b,808,596,"SELECTED UNITS",edge,212);
@@ -239,7 +239,7 @@ void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
         draw_panel(panel_,s);
         panel_state_.cash=s.cash;panel_state_.power_output=s.power_output;panel_state_.power_drain=s.power_drain;
         panel_state_.selected_labels=s.selected_labels;panel_state_.choices=s.choices;
-        panel_state_.status=s.status;panel_state_.result=s.result;panel_state_.has_yard=s.has_yard;
+        panel_state_.status=s.status;panel_state_.result=s.result;panel_state_.can_deploy=s.can_deploy;
         panel_category_=active_category_;panel_valid_=true;
     }
     const int right=std::min(b.width,view_width),bottom=std::min(b.height,minimap_y);

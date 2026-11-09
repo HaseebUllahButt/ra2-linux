@@ -53,7 +53,7 @@ struct HudState {
     std::string result;                       // Empty, or VICTORY / DEFEAT / DRAW end banner.
     int pointer_x = -1;                       // Mouse position, view pixels. -1 hides the tooltip.
     int pointer_y = -1;
-    bool has_yard = false;                    // True once a construction yard exists. DEPLOY shows only when false.
+    bool can_deploy = false;                   // Root sets this from selected live MCVs. DEPLOY shows only when true.
 };
 
 // Click results. The root executes them and moves the camera.
