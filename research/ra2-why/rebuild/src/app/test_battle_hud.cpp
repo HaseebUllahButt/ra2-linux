@@ -178,6 +178,27 @@ s.can_deploy=true;
         auto j=(45*1024+855)*4;
         assert(tf.rgba[j]==58&&tf.rgba[j+1]==50&&tf.rgba[j+2]==18);   // dim gold fill
     }
+    // Status fits on two short rows; long text wraps, short text stays
+    // on one row. Rows sit clear of the selected list and the minimap.
+    {
+        auto ink_count=[&](const render::Bitmap& img,render::Rectangle box) {
+            int hits=0;
+            for(int y=box.y;y<box.y+box.height;++y) for(int x=box.x;x<box.x+box.width;++x) {
+                auto i=(static_cast<std::size_t>(y)*img.width+x)*4;
+                if(img.rgba[i]==224&&img.rgba[i+1]==230&&img.rgba[i+2]==192) ++hits;
+            }
+            return hits;
+        };
+        HudState st; st.choices={{"E1","GI",200,true}};
+        st.status="BUILDING ORE REFINERY. WAIT FOR THE DELIVERY TRUCK";
+        auto two=frame(); hud.draw(two,st);
+        assert(ink_count(two,{808,649,212,11})>0); // row 1
+        assert(ink_count(two,{808,661,212,11})>0); // row 2
+        st.status="OK";
+        auto short_row=frame(); hud.draw(short_row,st);
+        assert(ink_count(short_row,{808,649,212,11})>0);
+        assert(ink_count(short_row,{808,661,212,11})==0);
+    }
     if (argc > 1) {
         fs::MixFileSystem files(argv[1]);
         files.mount_language(fs::GameVariant::RedAlert2);

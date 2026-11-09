@@ -228,7 +228,18 @@ void BattleHud::draw_panel(render::Bitmap& b,const HudState& s) const {
         if(y>642) break;
         text(b,808,y,label,ink,212); y+=13;
     }
-    text(b,808,658,s.status,ink,212);
+    // Status on two short rows so long text does not cut off. Rows sit
+    // below the selected list (ends y 643) and above the minimap (y 672).
+    const std::string& st=s.status;
+    std::string row1=st,row2;
+    if(st.size()>26) {
+        auto cut=st.rfind(' ',26);
+        if(cut==std::string::npos) cut=26;
+        row1=st.substr(0,cut);
+        row2=st.substr(cut+(st[cut]==' '?1:0));
+    }
+    text(b,808,650,row1,ink,212);
+    text(b,808,662,row2,ink,212);
 }
 void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
     loop::profile::Timer probe(loop::profile::Phase::HudDraw);
