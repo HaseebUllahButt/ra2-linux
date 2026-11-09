@@ -141,6 +141,9 @@ struct Snapshot {
     std::optional<std::vector<std::uint32_t>> cell_order;
     std::optional<double> veteran_reload_multiplier; // Base Rules +5B0.
     std::optional<double> veteran_firepower_multiplier; // Base Rules +590.
+    // Global fallback Cell +24 and +44. A missing map Cell can change +24.
+    std::optional<StartPoint> fallback_cell_coordinate;
+    std::optional<std::int32_t> fallback_overlay_index;
 };
 enum class PlacementResult { Placed, Blocked, Unresolved };
 // Checks every head and shared next chain. Invalid and cyclic snapshots fail.
