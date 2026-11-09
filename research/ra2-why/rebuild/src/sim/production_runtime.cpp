@@ -779,7 +779,11 @@ std::optional<bool> legal(const w::Snapshot& s,const Catalog& c,const TypeFacts&
 std::optional<Outcome> unlimbo_failure(const w::Snapshot& s,const Catalog& c,std::uint32_t id,CellXY origin) {
     const auto* b=entity_of(s,id); if (!b) return fail(Status::NeedsInput,"building missing");
     const auto* t=facts_of(c,*b); if (!t) return fail(Status::NeedsInput,"building type missing");
-    if (t->factory==Rtti::AircraftType || t->placement.to_overlay || t->wall)
+    // Permit base radar foundations and the factory bookkeeping below.
+    // Base C export 00438CE0 sets radio link capacity in the constructor.
+    // Other aircraft factories still require recovery of their dock behavior.
+    const bool base_radar=t->id=="AMRADR" || t->id=="GAAIRC";
+    if ((t->factory==Rtti::AircraftType && !base_radar) || t->placement.to_overlay || t->wall)
         return fail(Status::Unsupported,"dock, wall and overlay building unlimbo is not recovered");
     const auto ok=legal(s,c,*t,origin);                                    // Can_Enter_Cell 004453B0.
     if (!ok) return fail(Status::NeedsInput,"placement cells unresolved");
