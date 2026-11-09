@@ -121,6 +121,9 @@ struct Dialog {
 };
 // Reads the original 32-bit PE dialog templates; no Windows dependency.
 Dialog load_dialog(const std::vector<std::uint8_t>& exe, Page page, const ra2text::CsfFile& strings);
+// Any original dialog template by resource ID, for example 181 (in-game options).
+Dialog load_dialog_resource(const std::vector<std::uint8_t>& exe, std::uint16_t id,
+                            const ra2text::CsfFile& strings);
 // Original map picker template, resource 107.
 Dialog load_map_selection_dialog(const std::vector<std::uint8_t>& exe, const ra2text::CsfFile& strings);
 class GameFont {
