@@ -2,7 +2,8 @@
 """Compare the firing eligibility prefix with base game.exe.
 
 Build: g++ -std=c++17 -O2 -Wall -Wextra -Werror -I rebuild/src \
-  rebuild/src/weapons/fire_eligibility{,_test}.cpp -o /tmp/ra2_fire_eligibility
+  rebuild/src/weapons/fire_eligibility{,_test}.cpp rebuild/src/weapons/fire_timer.cpp \
+  rebuild/src/sim/random.cpp -o /tmp/ra2_fire_eligibility
 Run: RA2_GAME_DIR=/path/to/game python3 rebuild/src/weapons/verify_fire_eligibility_x86.py /tmp/ra2_fire_eligibility
 """
 import os

@@ -25,3 +25,38 @@ struct FireEligibilityPrefixResult {
 };
 FireEligibilityPrefixResult base_fire_eligibility_prefix(const FireEligibilityPrefixInput&);
 }
+
+#include "fire_timer.h"
+namespace ra2::weapons {
+// Guarded continuation of the Unit virtual +364 check. All optionals are
+// resolved original actor, weapon, warhead, and cell values. The two *_clear
+// fields mean every listed original flag is explicitly known to be zero.
+struct OrdinaryUnitFireInput {
+    FireEligibilityPrefixInput prefix;
+    std::optional<bool> shooter_is_unit, target_is_unit, weapon_present, primary_weapon_index_zero;
+    // Weapon +125, +10D, +105, +106, +109, +10C, +10F are all zero.
+    std::optional<bool> weapon_special_flags_clear;
+    // The original separately reads slot 1 and checks its four effect flags
+    // against live effect pointers, even when slot 0 is selected.
+    std::optional<bool> alternate_weapon_effects_clear;
+    // Warhead +153, +154, +156, +158 are all zero.
+    std::optional<bool> warhead_special_flags_clear, warhead_present;
+    std::optional<bool> target_virtual_1bc, warhead_flag_157;
+    std::optional<bool> target_virtual_54;
+    std::optional<int> target_cell_land_type;
+    std::optional<bool> target_virtual_50;
+    std::optional<int> shooter_type_54c;
+    // False means the Unit barrel/burst override did not replace the timer.
+    std::optional<bool> barrel_override_active;
+    std::optional<FireTimer> timer;
+    std::optional<int> frame, ammo_field_254;
+    std::optional<bool> shooter_type_af2;
+    std::optional<double> warhead_armor_verse;
+    std::optional<bool> target_flag_325, matching_bridge_flags;
+    std::optional<bool> shooter_type_b47, shooter_virtual_328;
+};
+// A result code of zero means the original +364 virtual check passed in this
+// guarded slice. It does not select a target, turn the turret, test range, or
+// execute a shot. Missing or exceptional state returns no code.
+FireEligibilityPrefixResult base_ordinary_unit_fire_check(const OrdinaryUnitFireInput&);
+}

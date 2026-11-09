@@ -174,3 +174,12 @@ warhead immunity before Object damage. Type +5D0 side effects still block that
 path. The original comparison covers 5,000 prefix cases. Foot and Unit derived
 effects, Object callbacks, trigger execution and death/removal are not complete.
 These APIs do not enable live Attack or replace the derived damage handlers.
+
+`base_ordinary_unit_fire_check()` continues that prefix through the original
+Unit +364 check. It supports a primary weapon against a Unit on ordinary land,
+with matching bridge flags, standard timer, and the listed special weapon and
+warhead flags clear. It also requires the separately selected secondary slot's
+live effect checks to be clear. A zero result passes this one original virtual
+check; range, turret facing, target assignment and projectile creation remain
+separate. The original comparison covers 3,000 complete checks and all six
+results in this slice. Unknown inputs block the decision.
