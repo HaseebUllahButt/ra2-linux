@@ -192,12 +192,15 @@ int main(int argc, char **argv) {
                       shadow.pixels.size());
       return std::cout ? 0 : 1;
     }
-    if (argc == 5 && (std::string(argv[1]) == "--vehicle-case" ||
+    if ((argc == 5 || argc == 6) && (std::string(argv[1]) == "--vehicle-case" ||
                       std::string(argv[1]) == "--vehicle-parts-case")) {
       std::string name(argv[2]);
       int facing = std::stoi(argv[3]), offset = std::stoi(argv[4]);
+      const int turret_facing = argc == 6 ? std::stoi(argv[5]) : facing;
       if (facing < 0 || facing > 255)
         throw std::runtime_error("invalid map facing");
+      if (turret_facing < 0 || turret_facing > 255)
+        throw std::runtime_error("invalid turret facing");
       auto hull = read_vxl(get((name + ".vxl").c_str()));
       auto hull_hva = read_hva(get((name + ".hva").c_str()));
       auto turret = read_vxl(get((name + "tur.vxl").c_str()));
@@ -206,6 +209,7 @@ int main(int argc, char **argv) {
       auto barrel_hva = read_hva(get((name + "barl.hva").c_str()));
       auto lighting = read_vpl(get("voxels.vpl"));
       auto input = vehicle_pose_from_map(static_cast<std::uint8_t>(facing));
+      input.turret_facing = std::uint16_t(turret_facing) << 8;
       input.turret_offset = offset;
       input.hull = {&hull, &hull_hva};
       input.turret = {&turret, &turret_hva};

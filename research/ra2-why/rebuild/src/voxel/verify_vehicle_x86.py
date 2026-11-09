@@ -22,13 +22,16 @@ base = 0x1000000
 stack = 0x20FFF00
 stop = 0x3000000
 if len(sys.argv) < 2:
-    raise SystemExit("usage: verify_vehicle_x86.py voxel_test [0|16]")
+    raise SystemExit("usage: verify_vehicle_x86.py voxel_test [0|16 [model [hull_facing [turret_facing]]]]")
 test = sys.argv[1]
 turret_offset = int(sys.argv[2]) if len(sys.argv) > 2 else 16
 model = sys.argv[3] if len(sys.argv) > 3 else "htnk"
 facing = int(sys.argv[4]) if len(sys.argv) > 4 else 64
+turret_facing = int(sys.argv[5]) if len(sys.argv) > 5 else facing
 if not (0 <= facing <= 255):
     raise SystemExit("invalid facing")
+if not (0 <= turret_facing <= 255):
+    raise SystemExit("invalid turret facing")
 if turret_offset not in (0, 16):
     raise SystemExit("offset must be 0 or 16")
 
@@ -77,8 +80,11 @@ for i, value in enumerate(ident):
     f(stack + 0x58 + 4 * i, value)
 
 
+phase_facing = turret_facing
+
+
 def face_hook(cpu, address, size, unused):
-    w(faceptr, 0x4000 if cpu.reg_read(UC_X86_REG_ECX) == obj + 0x2C8 else facing << 8)
+    w(faceptr, 0x4000 if cpu.reg_read(UC_X86_REG_ECX) == obj + 0x2C8 else phase_facing << 8)
     sp = cpu.reg_read(UC_X86_REG_ESP)
     ret = struct.unpack("<I", cpu.mem_read(sp, 4))[0]
     cpu.reg_write(UC_X86_REG_EAX, faceptr)
@@ -92,7 +98,8 @@ u.reg_write(UC_X86_REG_ESP, stack)
 u.emu_start(0x43AF89, 0x43B10E, count=1000000)
 turret = struct.unpack("<12f", u.mem_read(stack + 0x58, 48))
 barrel = struct.unpack("<12f", u.mem_read(stack + 0x88, 48))
-# The base locomotion matrix reads the same map facing for the hull.
+# The base locomotion matrix reads the hull facing separately.
+phase_facing = facing
 w(base + 0x6000 + 8, obj)
 call(0x53D030, args=(base + 0x6000, base + 0x6100, 0))
 hull = struct.unpack("<12f", u.mem_read(base + 0x6100, 48))
@@ -100,11 +107,11 @@ locals_by_name = {model: hull, model + "tur": turret, model + "barl": barrel}
 
 screen = {}
 parts_data = subprocess.check_output(
-    [test, "--vehicle-parts-case", model, str(facing), str(turret_offset)]
+    [test, "--vehicle-parts-case", model, str(facing), str(turret_offset), str(turret_facing)]
 )
 assert struct.unpack_from("<I", parts_data)[0] == 3
 part_offset = 4
-quadrant = (((facing << 8) >> 13) + 1) >> 1 & 3
+quadrant = (((turret_facing << 8) >> 13) + 1) >> 1 & 3
 part_names = (
     [model, model + "barl", model + "tur"]
     if quadrant in (0, 3)
@@ -199,7 +206,7 @@ for name in part_names:
                 if color:
                     screen[(rx + x, ry + y)] = color
 p = subprocess.check_output(
-    [test, "--vehicle-case", model, str(facing), str(turret_offset)]
+    [test, "--vehicle-case", model, str(facing), str(turret_offset), str(turret_facing)]
 )
 left, top = struct.unpack_from("<2i", p)
 pix = p[8:]
@@ -215,6 +222,7 @@ original = {
 allxy = set(original) | set(native)
 mism = [xy for xy in allxy if original.get(xy) != native.get(xy)]
 assert not mism, f"{len(mism)} visible pixels differ"
-print(
-    f"Base game.exe: {model} facing {facing} offset {turret_offset} matches {len(original)} visible RGBA pixels"
-)
+description = f"{model} facing {facing}"
+if turret_facing != facing:
+    description += f" turret {turret_facing}"
+print(f"Base game.exe: {description} offset {turret_offset} matches {len(original)} visible RGBA pixels")
