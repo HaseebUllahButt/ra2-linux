@@ -151,10 +151,11 @@ void infantry_test(const rules::IniFile& rules,const rules::IniFile& art,const s
     check(shots>0 && killed==1 && w.entities[1].resolved_hp==0,"infantry did not fight and die");
     check(w.cells.at(50*512+52).heads->ground_head==3,"infantry death link");
 }
-void yard_volley_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+void yard_volley_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe,
+                      const std::string& yard) {
     rules::IniFile map;
-    auto w=make_world("HTNK","NACNST",world::Kind::Unit,world::Kind::Structure,400,
-                      rules.read_integer("NACNST","Strength"));
+    auto w=make_world("HTNK",yard,world::Kind::Unit,world::Kind::Structure,400,
+                      rules.read_integer(yard,"Strength"));
     for (unsigned id : {4u,5u}) { auto tank=w.entities.front(); tank.id=id; w.entities.push_back(tank); }
     sim::PrototypeCombatRuntime combat(rules,map,art,exe);
     for (unsigned id : {1u,4u,5u}) check(combat.attack(w,id,2),"Rhino yard order rejected");
@@ -162,12 +163,31 @@ void yard_volley_test(const rules::IniFile& rules,const rules::IniFile& art,cons
     for (unsigned frame=0;frame<3000;++frame) {
         const auto result=combat.tick(w,frame);
         check(result.unresolved.empty(),"Rhino yard volley unresolved");
+        std::size_t recorded_shots=0,recorded_deaths=0;
+        for (const auto& event:result.events) {
+            check(event.frame==frame && event.fired_frame<=frame,"event frame is wrong");
+            check(event.weapon=="120mm" && event.warhead=="AP" &&
+                  event.source_type=="HTNK" && event.target_type==yard &&
+                  event.target_id==2 && event.source_house==101 && event.target_house==102,
+                  "yard damage attribution is wrong");
+            if (event.kind==sim::PrototypeCombatEventKind::Shot) {
+                ++recorded_shots;
+                check(event.fired_frame==frame && event.hp_before==event.hp_after,"shot changed health");
+            } else {
+                check(event.fired_frame<frame && event.hp_after<event.hp_before,"impact lost flight timing");
+                if (event.kind==sim::PrototypeCombatEventKind::Death) {
+                    ++recorded_deaths;check(event.hp_after==0,"death retained health");
+                }
+            }
+        }
+        check(recorded_shots==result.fired && recorded_deaths==result.destroyed,
+              "shot or death diagnostic is missing");
         shots+=result.fired;
         if (result.impacts && !first_impact) first_impact=frame;
         if (result.destroyed) { death=frame; break; }
     }
-    check(first_impact>0 && death>first_impact && shots>3,"yard vanished without repeated Rhino hits");
-    std::cout<<"Three HTNK at four cells: first fire=0 first impact="<<first_impact
+    check(first_impact==11 && death==406 && shots==21,"yard volley timing or shot count changed");
+    std::cout<<"Three HTNK against "<<yard<<" at four cells: first fire=0 first impact="<<first_impact
              <<" yard death="<<death<<" shots="<<shots<<'\n';
 }
 void idle_defense_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
@@ -225,7 +245,8 @@ int main(int argc,char** argv) {
         if (argc!=2) throw std::runtime_error("usage: prototype_combat_test GAME_DIR");
         fs::MixFileSystem files(argv[1]);files.bootstrap(fs::GameVariant::RedAlert2);files.mount("conquer.mix",false);
         auto rules=load(files,"rules.ini"),art=load(files,"art.ini");
-        yard_volley_test(rules,art,std::string(argv[1])+"/game.exe");
+        yard_volley_test(rules,art,std::string(argv[1])+"/game.exe","NACNST");
+        yard_volley_test(rules,art,std::string(argv[1])+"/game.exe","GACNST");
         idle_defense_test(rules,art,std::string(argv[1])+"/game.exe");
         for (const auto* type : {"HTNK","DRON","NALASR"}) {
             const auto weapon=rules.read_string(type,"Primary");

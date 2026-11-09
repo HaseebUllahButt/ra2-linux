@@ -115,11 +115,23 @@ namespace ra2::sim {
 struct PrototypeCombatProjectile {
     std::uint32_t source_id=0, target_id=0;
     std::string weapon, warhead;
+    std::uint64_t fired_frame=0;
     int damage=0;
     FlatProjectile flight{};
 };
+// Value records remain valid after entity death and projectile removal.
+enum class PrototypeCombatEventKind { Shot, Damage, Death };
+struct PrototypeCombatEvent {
+    PrototypeCombatEventKind kind;
+    std::uint64_t frame=0, fired_frame=0;
+    std::uint32_t source_id=0, target_id=0, source_house=0, target_house=0;
+    std::string source_type, target_type, weapon, warhead;
+    Coord source_position{}, target_position{};
+    int raw_damage=0, hp_before=0, hp_after=0;
+};
 struct PrototypeCombatTick {
     std::size_t fired=0, impacts=0, destroyed=0;
+    std::vector<PrototypeCombatEvent> events;
     std::vector<std::string> unresolved;
     // Source and target IDs that need an approach route this frame.
     std::vector<std::pair<std::uint32_t,std::uint32_t>> out_of_range;
