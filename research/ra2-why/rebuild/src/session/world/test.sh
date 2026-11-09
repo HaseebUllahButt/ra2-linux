@@ -18,8 +18,9 @@ ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} c
 ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} bridge_footprint.cpp bridge_footprint_case.cpp -o "$build/bridge_footprint_case"
 ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} speed_type.cpp speed_type_case.cpp -o "$build/speed_type_case"
 ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} -I "$shared" movement_zone.cpp movement_zone_case.cpp -o "$build/movement_zone_case"
+${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} unit_flags.cpp unit_flags_case.cpp -o "$build/unit_flags_case"
 ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -I "$shared/render" \
-    world.cpp speed_type.cpp movement_zone.cpp ../session.cpp ../map_geometry.cpp ../placement_terrain.cpp target_tile_case.cpp \
+    world.cpp speed_type.cpp movement_zone.cpp unit_flags.cpp ../session.cpp ../map_geometry.cpp ../placement_terrain.cpp target_tile_case.cpp \
     "$shared"/sim/{test_inputs,world,world_init,cell_setup,coarse_category,replacement,floor,random,distance}.cpp \
     "$shared/weapons/occupant_order.cpp" \
     "$shared"/render/{minimap,tmp_decode}.cpp "$shared/gfx/palette.cpp" \
@@ -36,6 +37,7 @@ ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -
 "$build/bridge_footprint_case" > /dev/null
 "$build/speed_type_case"
 "$build/movement_zone_case"
+"$build/unit_flags_case"
 "$build/real_map_case" "$game"
 "$build/target_tile_case" "$game"
 "$build/target_tile_case" "$game" --stage
@@ -59,6 +61,7 @@ if [ "${2:-}" = "--original" ]; then
     ${PYTHON:-python3} original_land_table_check.py "$game/game.exe" "$build/real_map_case" "$game"
     ${PYTHON:-python3} original_speed_type_check.py "$game/game.exe" "$build/real_map_case" "$game" "$build/speed_type_case"
     ${PYTHON:-python3} original_movement_zone_check.py "$game/game.exe" "$build/real_map_case" "$game" "$build/movement_zone_case"
+    ${PYTHON:-python3} original_unit_flags_check.py "$game/game.exe" "$build/real_map_case" "$game" "$build/unit_flags_case"
     ${PYTHON:-python3} "$shared/sim/original_cell_setup_check.py" "$game/game.exe" --base --vectors > "$build/original-setup-vectors"
     "$build/cell_setup_case" --vectors > "$build/staged-setup-vectors"
     cmp "$build/original-setup-vectors" "$build/staged-setup-vectors"

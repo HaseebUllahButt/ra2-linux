@@ -5,6 +5,7 @@
 #include "world.h"
 #include "speed_type.h"
 #include "movement_zone.h"
+#include "unit_flags.h"
 #include <cassert>
 #include <cstdint>
 #include <iostream>
@@ -98,9 +99,20 @@ int main(int argc,char** argv) {
         const auto tiberium_track=rules::IniFile::double_value(rules.read_string("Tiberium","Track"));
         assert(clear_wheel && clear_track && tiberium_wheel && tiberium_track && *clear_wheel==1.0 && *clear_track==1.0 &&
                static_cast<float>(*tiberium_wheel)==0.5f && static_cast<float>(*tiberium_track)==0.7f);
+        BaseUnitFlagInput flag_input;
+        flag_input.initial_is_train=false; flag_input.initial_crusher=false;
+        const auto* train_key=rules.find("AMCV","IsTrain");
+        const auto* crusher_key=rules.find("AMCV","Crusher");
+        flag_input.is_train.state=train_key?UnitFlagKeyState::Present:UnitFlagKeyState::Absent;
+        flag_input.crusher.state=crusher_key?UnitFlagKeyState::Present:UnitFlagKeyState::Absent;
+        if (train_key) flag_input.is_train.value=train_key->value;
+        if (crusher_key) flag_input.crusher.value=crusher_key->value;
+        const auto flags=resolve_base_unit_flags(flag_input);
+        assert(flags.is_train.status==UnitFlagStatus::Complete && flags.is_train.value==false &&
+               flags.crusher.status==UnitFlagStatus::Complete && flags.crusher.value==true);
         BaseSpeedTypeInput type_input;
         type_input.initial_type=-1; // The base UnitType constructor prefix writes -1.
-        type_input.crusher=rules::IniFile::bool_value(rules.read_string("AMCV","Crusher"));
+        type_input.crusher=flags.crusher.value;
         const auto* speed_key=rules.find("AMCV","SpeedType");
         type_input.key_state=speed_key?SpeedKeyState::Present:SpeedKeyState::Absent;
         if (speed_key) type_input.key_value=speed_key->value;
@@ -145,7 +157,7 @@ int main(int argc,char** argv) {
         assert(stage.install_base_cells(*geometry,std::move(staged_cells),{},{}));
         BaseUnitProfile profile;
         profile.restricted_land=-1; profile.movement_mode=-1; profile.placement_mode=2;
-        profile.speed_type=type.index; profile.level_height=104; profile.type_flag_aa0=false;
+        profile.speed_type=type.index; profile.level_height=104; profile.type_flag_aa0=flags.is_train.value;
         profile.unit_flag_32c=false; profile.linked_team=false; profile.type_flag_205=true;
         profile.unit_flag_32a=false; profile.type_flag_bb0=false; profile.type_flag_bb1=false;
         assert(stage.place_base_unit(*unit,{135,80},32,profile)==PlacementResult::Unresolved);

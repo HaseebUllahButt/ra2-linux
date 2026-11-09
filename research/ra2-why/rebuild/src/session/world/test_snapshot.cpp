@@ -151,6 +151,8 @@ int main() {
     assert(guarded_bridge.place_base_unit(*battle_unit,{54,69},32,profile)==PlacementResult::Unresolved);
     auto missing=profile; missing.linked_team.reset();
     assert(battle.place_base_unit(*battle_unit,{54,69},32,missing)==PlacementResult::Unresolved);
+    auto train=profile; train.type_flag_aa0=true;
+    assert(battle.place_base_unit(*battle_unit,{54,69},32,train)==PlacementResult::Unresolved);
     assert(battle.snapshot().entities[0].on_map==false);
     assert(battle.place_base_unit(*battle_unit,{56,69},32,profile)==PlacementResult::Blocked);
     assert(battle.snapshot().entities[0].on_map==true && battle.snapshot().entities[0].lifetime==Lifetime::Created);
