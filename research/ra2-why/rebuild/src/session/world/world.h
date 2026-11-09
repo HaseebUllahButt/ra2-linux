@@ -33,6 +33,7 @@ struct House {
 };
 struct BaseUnitProfile {
     std::optional<std::int32_t> restricted_land, movement_mode, placement_mode, speed_type, level_height;
+    std::optional<std::int32_t> leptons_per_sight_increase; // Rules +1324, independent of map level height.
     std::optional<bool> type_flag_aa0, unit_flag_32c, linked_team;
     std::optional<bool> type_flag_205, unit_flag_32a, type_flag_bb0, type_flag_bb1;
 };

@@ -134,6 +134,7 @@ int main() {
     profile.restricted_land=-1; profile.movement_mode=-1; profile.placement_mode=2;
     profile.speed_type=1;
     profile.level_height=104;
+    profile.leptons_per_sight_increase=2000;
     profile.type_flag_aa0=false; profile.unit_flag_32c=false; profile.linked_team=false;
     profile.type_flag_205=true; profile.unit_flag_32a=false;
     profile.type_flag_bb0=false; profile.type_flag_bb1=false;
@@ -151,6 +152,25 @@ int main() {
     assert(guarded_bridge.place_base_unit(*battle_unit,{54,69},32,profile)==PlacementResult::Unresolved);
     auto missing=profile; missing.linked_team.reset();
     assert(battle.place_base_unit(*battle_unit,{54,69},32,missing)==PlacementResult::Unresolved);
+    const auto before_divisor=battle.snapshot();
+    auto missing_divisor=profile; missing_divisor.leptons_per_sight_increase.reset();
+    assert(battle.place_base_unit(*battle_unit,{54,69},32,missing_divisor)==PlacementResult::Unresolved);
+    missing_divisor.leptons_per_sight_increase=0;
+    assert(battle.place_base_unit(*battle_unit,{54,69},32,missing_divisor)==PlacementResult::Unresolved);
+    auto bad_spacing=profile; bad_spacing.level_height=105;
+    assert(battle.place_base_unit(*battle_unit,{54,69},32,bad_spacing)==PlacementResult::Unresolved);
+    assert(battle.snapshot().random.table==before_divisor.random.table &&
+           battle.snapshot().random.first==before_divisor.random.first &&
+           battle.snapshot().random.second==before_divisor.random.second &&
+           battle.snapshot().entities[0].lifetime==before_divisor.entities[0].lifetime &&
+           battle.snapshot().entities[0].on_map==before_divisor.entities[0].on_map &&
+           battle.snapshot().entities[0].next==before_divisor.entities[0].next &&
+           battle.snapshot().entities[0].cell.has_value()==before_divisor.entities[0].cell.has_value() &&
+           battle.snapshot().entities[0].position.has_value()==before_divisor.entities[0].position.has_value() &&
+           battle.snapshot().houses[0].placed_unit_counts==before_divisor.houses[0].placed_unit_counts &&
+           battle.snapshot().pending_cell_setup==before_divisor.pending_cell_setup &&
+           battle.snapshot().cells.at(69*512+54).ground_occupancy_124==
+               before_divisor.cells.at(69*512+54).ground_occupancy_124);
     auto train=profile; train.type_flag_aa0=true;
     assert(battle.place_base_unit(*battle_unit,{54,69},32,train)==PlacementResult::Unresolved);
     assert(battle.snapshot().entities[0].on_map==false);

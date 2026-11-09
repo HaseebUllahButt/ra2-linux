@@ -49,6 +49,9 @@ int main(int argc,char** argv) {
     profile.restricted_land=-1;profile.movement_mode=-1;profile.placement_mode=2;
     profile.speed_type=1;
     profile.level_height=104;
+    // Legacy original comparisons use a synthetic divisor unless supplied.
+    const char* sight_divisor=std::getenv("RA2_SIGHT_DIVISOR");
+    profile.leptons_per_sight_increase=sight_divisor?std::atoi(sight_divisor):104;
     profile.type_flag_aa0=false;profile.unit_flag_32c=false;profile.linked_team=false;
     profile.type_flag_205=true;profile.unit_flag_32a=false;profile.type_flag_bb0=false;profile.type_flag_bb1=false;
     for (const auto point:{StartPoint{static_cast<std::int16_t>(center_x+2),static_cast<std::int16_t>(center_y)},

@@ -1,6 +1,7 @@
 #include "../placement_terrain.h"
 #include "sim/test_inputs.h"
 #include "sim/world_init.h"
+#include "sim/floor.h"
 #include "render/minimap.h"
 #include "world.h"
 #include "speed_type.h"
@@ -125,6 +126,11 @@ int main(int argc,char** argv) {
         if (zone_key) zone_input.key_value=zone_key->value;
         const auto zone=resolve_base_movement_zone(zone_input);
         assert(zone.status==ZoneStatus::Complete && zone.zone==0 && zone.raw_flag_af5==false);
+        const auto* base_sight=rules.find("General","LeptonsPerSightIncrease");
+        const auto* map_sight=map.find("General","LeptonsPerSightIncrease");
+        const auto sight=map_sight?rules::IniFile::integer_value(map_sight->value):
+                         base_sight?rules::IniFile::integer_value(base_sight->value):std::optional<std::int32_t>(50);
+        assert(sight && *sight==2000);
         Snapshot category_case; category_case.random=sim::Random(1).state();
         auto& category_cell=category_case.cells[0];
         category_cell.terrain.emplace(); category_cell.terrain->overlay_type_index=-1;
@@ -157,7 +163,8 @@ int main(int argc,char** argv) {
         assert(stage.install_base_cells(*geometry,std::move(staged_cells),{},{}));
         BaseUnitProfile profile;
         profile.restricted_land=-1; profile.movement_mode=-1; profile.placement_mode=2;
-        profile.speed_type=type.index; profile.level_height=104; profile.type_flag_aa0=flags.is_train.value;
+        profile.speed_type=type.index; profile.level_height=sim::original_level_height;
+        profile.leptons_per_sight_increase=*sight; profile.type_flag_aa0=flags.is_train.value;
         profile.unit_flag_32c=false; profile.linked_team=false; profile.type_flag_205=true;
         profile.unit_flag_32a=false; profile.type_flag_bb0=false; profile.type_flag_bb1=false;
         assert(stage.place_base_unit(*unit,{135,80},32,profile)==PlacementResult::Unresolved);
@@ -198,6 +205,8 @@ int main(int argc,char** argv) {
         assert(after.terrain->bridge==false && after.unit_land_speed==1.0f);
         assert(result.entities.at(0).lifetime==Lifetime::Placed && result.entities.at(0).cell &&
                result.entities.at(0).cell->x==135 && result.entities.at(0).cell->y==80);
+        assert(result.entities.at(0).position && result.entities.at(0).position->z==416 &&
+               result.entities.at(0).height_byte==0);
         for (int dy=-1;dy<=1;++dy) for (int dx=-1;dx<=1;++dx) if (dx || dy)
             assert(result.cells.at(std::uint32_t(80+dy)*512+135+dx).neighbor_count==1);
         assert(result.random.table==before.table && result.random.first==before.first && result.random.second==before.second);

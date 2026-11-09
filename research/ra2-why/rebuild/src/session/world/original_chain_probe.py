@@ -42,7 +42,11 @@ else:
     cpu.reg_write(UC_X86_REG_ECX,scenario+0x218);cpu.reg_write(UC_X86_REG_ESP,0x103f000)
     cpu.mem_write(0x103f000,struct.pack('<I',0x103e000));cpu.emu_start(0x638840,0x103e000,count=100000)
 map_rules=fixture.rules if full_battle else r.RULES
-m.word(map_rules+0x1324,104)
+# Legacy comparisons supplied 104. This is Rules/LeptonsPerSightIncrease,
+# not map LevelHeight; newer cases pass the separate original rule value.
+sight_divisor=int(os.environ.get('RA2_SIGHT_DIVISOR','104'))
+if sight_divisor<=0: raise SystemExit('sight divisor must be positive')
+m.word(map_rules+0x1324,sight_divisor)
 if not full_battle: m.word(m.FOOT+0x114,0)
 size=100 if real_fixture else 80
 m.word(0x8324e0+0xf0,size);m.word(0x8324e0+0xf4,size)
@@ -120,6 +124,7 @@ for speed in (0.0,1.0):
     try: cpu.emu_start(0x6fc940,0x103e000,count=100000)
     except UcError:
         print('unresolved chain dependency',hex(cpu.reg_read(UC_X86_REG_EIP)),[hex(a) for a in m.recent]);raise
+    assert cpu.reg_read(UC_X86_REG_EIP)==0x103e000, 'original Unit placement did not return'
     result=cpu.reg_read(UC_X86_REG_EAX)&0xff
     on_map=cpu.mem_read(m.FOOT+0x32d,1)[0]
     head=m.read(destination+0xe4)

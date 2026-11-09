@@ -1,4 +1,5 @@
 #include "world.h"
+#include "sim/floor.h"
 #include <map>
 #include <limits>
 #include <set>
@@ -150,7 +151,8 @@ PlacementResult Stage::place_base_unit(std::uint32_t unit_id, StartPoint point,
         !profile.movement_mode || *profile.movement_mode!=-1 ||
         !profile.placement_mode || *profile.placement_mode!=2 ||
         !profile.speed_type || *profile.speed_type!=1 ||
-        !profile.level_height || *profile.level_height<=0 ||
+        !profile.level_height || *profile.level_height!=sim::original_level_height ||
+        !profile.leptons_per_sight_increase || *profile.leptons_per_sight_increase<=0 ||
         !profile.type_flag_aa0 || *profile.type_flag_aa0 || !profile.unit_flag_32c || *profile.unit_flag_32c ||
         !profile.linked_team || *profile.linked_team || !profile.type_flag_205 || !*profile.type_flag_205 ||
         !profile.unit_flag_32a || *profile.unit_flag_32a || !profile.type_flag_bb0 || *profile.type_flag_bb0 ||
@@ -238,8 +240,10 @@ PlacementResult Stage::place_base_unit(std::uint32_t unit_id, StartPoint point,
     unit->layer=Layer::Ground; unit->lifetime=Lifetime::Placed;
     unit->hull_facing=facing; unit->turret_facing=facing;
     unit->timer_length=0; unit->timer_active=false; // Unit 006FC9AB.
-    // 006C47B9 divides world Z by LevelHeight and stores the low byte times 10.
-    unit->height_byte=static_cast<std::uint8_t>((*terrain.floor_world_height / *profile.level_height)*10);
+    // 006C47B9 divides world Z by Rules +1324, then stores the low byte times 10.
+    const auto height_units=std::int64_t(*terrain.floor_world_height) / *profile.leptons_per_sight_increase;
+    const auto height_low=static_cast<std::uint8_t>(height_units);
+    unit->height_byte=static_cast<std::uint8_t>(unsigned(height_low)*10u);
     // 0054AB70 invokes Cell setup 00472540 after linking. The test oracle
     // supplies that body, so its resulting category and side effects remain
     // unknown. Require a resolved snapshot before another placement.

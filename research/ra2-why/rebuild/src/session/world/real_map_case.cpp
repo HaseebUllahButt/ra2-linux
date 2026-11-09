@@ -17,6 +17,16 @@ int main(int argc, char** argv) {
     map.parse(original_test_ini(argv[1],"MP02T2.MAP",true));
     if (argc==3) {
         const std::string request=argv[2];
+        if (request=="--sight-info") {
+            rules.parse(original_test_ini(argv[1],"RULES.INI",true));
+            const auto* base=rules.find("General","LeptonsPerSightIncrease");
+            const auto* local=map.find("General","LeptonsPerSightIncrease");
+            const auto parsed=local?ra2::rules::IniFile::integer_value(local->value):
+                              base?ra2::rules::IniFile::integer_value(base->value):std::optional<std::int32_t>(50);
+            assert(parsed && *parsed>0);
+            std::cout<<*parsed<<'\n';
+            return std::cout?0:1;
+        }
         if (request=="--amcv-flags-info") {
             rules.parse(original_test_ini(argv[1],"RULES.INI",true));
             assert(map.key_count("AMCV")==0);
