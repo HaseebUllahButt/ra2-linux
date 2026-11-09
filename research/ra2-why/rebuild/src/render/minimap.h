@@ -23,6 +23,9 @@ public:
     const DecodedTile& resolved_tile(std::uint32_t index, std::uint8_t subtile);
     const TmpRecord& metadata(std::uint32_t index, std::uint8_t subtile);
     const TmpRecord& resolved_metadata(std::uint32_t index, std::uint8_t subtile);
+    // Like resolved_tile: the clear sentinel 0xFFFF reads the clear tile's
+    // subtile 0. Use for drawing; plain metadata keeps rejecting it.
+    const TmpRecord& drawn_metadata(std::uint32_t resolved_index, std::uint8_t subtile);
     std::size_t resolved_subtile_count(std::uint32_t index);
     bool resolved_subtile_present(std::uint32_t index, std::uint8_t subtile);
     // Wire-to-runtime translation. Preserve the original clear sentinel.

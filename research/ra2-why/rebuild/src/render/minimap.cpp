@@ -185,6 +185,11 @@ const TmpRecord& TheaterArt::resolved_metadata(std::uint32_t index, std::uint8_t
     return records[subtile];
 }
 
+const TmpRecord& TheaterArt::drawn_metadata(std::uint32_t index, std::uint8_t subtile) {
+    if (index == 0xffff || index == 0xffffffff) { index = clear_; subtile = 0; }
+    return resolved_metadata(index, subtile);
+}
+
 std::size_t TheaterArt::resolved_subtile_count(std::uint32_t index) {
     return container(index).records().size();
 }

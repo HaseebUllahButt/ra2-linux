@@ -2,6 +2,9 @@
 #include "../loop/profile.h"
 #include <algorithm>
 #include <cmath>
+#include <map>
+#include <unordered_map>
+#include <vector>
 
 namespace ra2::render {
 namespace {
@@ -59,22 +62,72 @@ Bitmap draw_battle_radar(const session::world::Snapshot& w, TheaterArt& art,
     if (!powered) return {};
     if (!valid(v)) throw RenderError("Invalid battle radar bounds");
     Bitmap image{v.width, v.height, Bytes(std::size_t(v.width) * v.height * 4, 0)};
-    for (int y = 0; y < v.height; ++y) for (int x = 0; x < v.width; ++x) {
-        pixel(image, x, y, {0, 0, 0});
-        const auto cell = cell_at(w, v, x, y);
-        if (!cell) continue;
-        const auto& state = w.cells.at(cell->y * 512u + cell->x);
+    // Which Cell each pixel shows, and on which half of its diamond, depends
+    // only on the view geometry. Keep it for the last view.
+    struct Layout {
+        int x = -1, y = 0, width = 0, height = 0, map_width = 0, pixels_x = 0, pixels_y = 0;
+        std::vector<std::uint32_t> keys; // 0xffffffff: outside the Cell array.
+        std::vector<std::uint8_t> left;
+        std::vector<std::uint8_t> shown; // Per packed key: some pixel shows it.
+    };
+    static thread_local Layout layout;
+    const auto& l = v.map.local;
+    if (layout.x != l.x || layout.y != l.y || layout.width != l.width || layout.height != l.height ||
+        layout.map_width != v.map.size.width || layout.pixels_x != v.width || layout.pixels_y != v.height) {
+        layout = {l.x, l.y, l.width, l.height, v.map.size.width, v.width, v.height, {}, {}, {}};
+        layout.shown.assign(512u * 512u, 0);
+        layout.keys.resize(std::size_t(v.width) * v.height);
+        layout.left.resize(layout.keys.size());
+        for (int y = 0; y < v.height; ++y) for (int x = 0; x < v.width; ++x) {
+            const auto i = std::size_t(y) * v.width + x;
+            const double u = l.x + (x + .5) * l.width / v.width;
+            const double t = l.y + (y + .5) * l.height / v.height;
+            // Flat form of original 006D1F10 projection; no elevation on radar.
+            const int cx = int(std::floor(u + t + .5));
+            const int cy = int(std::floor(t - u + v.map.size.width + .5));
+            if (cx < 0 || cy < 0 || cx >= 512 || cy >= 512) { layout.keys[i] = 0xffffffffu; continue; }
+            layout.keys[i] = std::uint32_t(cy * 512 + cx);
+            layout.shown[layout.keys[i]] = 1;
+            const double center = (cx - cy + v.map.size.width) / 2.;
+            layout.left[i] = u < center;
+        }
+    }
+    // One pass over the Cell map resolves the colours of every shown Cell
+    // from its live state. Pixels then read a table. A stamp marks the
+    // entries written by this call.
+    struct CellColors { std::uint32_t stamp = 0; RadarColor left{}, right{}; };
+    static thread_local std::vector<CellColors> colors(512u * 512u);
+    static thread_local std::uint32_t stamp = 0;
+    if (++stamp == 0) { for (auto& item : colors) item.stamp = 0; stamp = 1; }
+    std::unordered_map<std::uint64_t, const TmpRecord*> metas;
+    const TmpRecord* last_meta = nullptr;
+    std::uint64_t last_id = ~std::uint64_t(0);
+    for (const auto& [key, state] : w.cells) {
+        if (key >= 512u * 512u || !layout.shown[key] || state.allocated == false || !state.terrain) continue;
         const auto& t = *state.terrain;
-        const auto& meta = t.resolved_tile_index ? art.resolved_metadata(*t.resolved_tile_index, t.subtile)
-                                               : art.metadata(t.tile_index, t.subtile);
-        const double u = v.map.local.x + (x + .5) * v.map.local.width / v.width;
-        const double center = (int(cell->x) - int(cell->y) + v.map.size.width) / 2.;
-        auto color = u < center ? meta.radar_left : meta.radar_right;
+        const std::uint64_t id = (t.resolved_tile_index ? (std::uint64_t(1) << 40) | *t.resolved_tile_index :
+            std::uint64_t(t.tile_index)) << 8 | t.subtile;
+        if (id != last_id) {
+            auto& meta = metas[id];
+            // The clear sentinel draws the clear tile, as on the terrain image.
+            if (!meta) meta = t.resolved_tile_index ? &art.drawn_metadata(*t.resolved_tile_index, t.subtile)
+                                                    : &art.metadata(t.tile_index, t.subtile);
+            last_meta = meta; last_id = id;
+        }
+        auto& item = colors[key];
+        item.stamp = stamp; item.left = last_meta->radar_left; item.right = last_meta->radar_right;
         if (t.overlay_type_index) {
             const auto r = style.resources.find(*t.overlay_type_index);
-            if (r != style.resources.end()) color = r->second;
+            if (r != style.resources.end()) item.left = item.right = r->second;
         }
-        pixel(image, x, y, color);
+    }
+    for (std::size_t i = 0; i < layout.keys.size(); ++i) {
+        auto* const out = image.rgba.data() + i * 4;
+        out[3] = 255;
+        const auto key = layout.keys[i];
+        if (key == 0xffffffffu || colors[key].stamp != stamp) continue;
+        const auto& color = layout.left[i] ? colors[key].left : colors[key].right;
+        out[0] = color[0]; out[1] = color[1]; out[2] = color[2];
     }
     // TODO-ORIGINAL RadarClass: shroud, cloak, building foundations and marker sizes.
     // First playable match draws placed actors as single dots, buildings as 3x3.
