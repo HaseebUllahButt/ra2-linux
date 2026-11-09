@@ -5,6 +5,7 @@
 #include "techno_damage.h"
 #include "projectile_damage.h"
 #include "muzzle.h"
+#include "detonation.h"
 #include <sim/damage_runtime.h>
 #include <array>
 #include <cstdint>
@@ -164,6 +165,17 @@ void check_projectile(const std::string& path,const sim::OriginalDistance& dista
           "original HTNK muzzle point");
     muzzle.flat_drive_locomotor.reset();
     check(!base_flat_unit_muzzle(muzzle),"unknown locomotor muzzle accepted");
+    UnitCannonImpactInput impact{{0,0,0},true,sim::Coord{41,0,0},true};
+    auto adjusted=base_unit_cannon_impact_position(impact,distance);
+    check(adjusted && adjusted->x==41,"original Unit impact adjustment");
+    impact.unit_position=sim::Coord{80,0,0};adjusted=base_unit_cannon_impact_position(impact,distance);
+    check(adjusted && adjusted->x==0,"distant Unit impact adjustment");
+    impact.ordinary_ground_target.reset();
+    check(!base_unit_cannon_impact_position(impact,distance),"unknown impact state accepted");
+    sim::Random impact_rng(0);
+    check(!base_complete_single_cluster_scatter({},impact_rng) && impact_rng.first()==0,"unknown impact changed RNG");
+    check(base_complete_single_cluster_scatter(true,impact_rng) && impact_rng.first()==2 &&
+          impact_rng.second()==105 && hash(impact_rng.state())==1127516651u,"original impact RNG order");
     const auto angles=BaseBallisticAngles::from_executable(path);
     const std::array<std::int32_t,3> delta{{512,128,0}};
     const int range=distance.between({0,0,0},{512,128,0},true);

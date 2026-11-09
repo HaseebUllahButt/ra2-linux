@@ -236,3 +236,13 @@ recipient immediately before the damage request, and waits for the caller to
 finish the real derived damage callback before advancing. Repeated IDs remain
 repeated. Missing recipient state blocks the cursor. This is dispatch support;
 it does not execute triggers, damage, death or projectile removal.
+
+`base_unit_cannon_impact_position()` recovers the ordinary ground Unit impact
+position adjustment in 00461DE0. It checks original distance and rejects unknown
+projectile, target or warhead state. The original comparison covers 3,000
+positions. `base_complete_single_cluster_scatter()` preserves the original
+post-impact RNG operations after a completed area callback. For an active
+projectile, the final cluster still draws 256..512 and one direction word.
+Inactive projectiles draw neither. All 250 words and both indexes match the
+original in 1,200 checks. The caller must prove the single-cluster, non-airburst
+path and complete every original impact callback before this step.
