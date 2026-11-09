@@ -37,7 +37,7 @@ SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS))
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 SESSION_OBJECTS = build/native/src/session/session.o build/native/src/session/map_geometry.o build/native/src/session/placement_terrain.o
 
-native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-postprocessed-path sim-filtered-path sim-smoothing sim-full-smoothing sim-entry-height sim-category sim-regions sim-movement-regions sim-goal-control sim-retry-edges sim-hierarchy-retry sim-local-reachability sim-search-memory sim-overlay-mark sim-hierarchy sim-hierarchy-route sim-replacement sim-world sim-build-time sim-production session session-terrain session-world weapons
+native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-postprocessed-path sim-filtered-path sim-smoothing sim-full-smoothing sim-entry-height sim-category sim-regions sim-movement-regions sim-goal-control sim-retry-edges sim-hierarchy-retry sim-local-reachability sim-search-memory sim-hierarchy-memory sim-overlay-mark sim-hierarchy sim-hierarchy-route sim-replacement sim-world sim-build-time sim-production session session-terrain session-world weapons
 	build/ra2-native --game-dir ../game --frames 3 --headless
 	build/ra2-native --game-dir ../game --frames 3 --headless --yuri
 	build/ra2-native --game-dir ../game --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
@@ -186,6 +186,13 @@ sim-search-memory: build/sim_search_memory_test
 	build/sim_search_memory_test ../game/game.exe ../game/gamemd.exe
 
 build/sim_search_memory_test: build/native/src/sim/test_search_memory.o build/native/src/sim/search_memory.o build/native/src/sim/path.o build/native/src/sim/path_smoothing.o build/native/src/sim/cell_entry.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+.PHONY: sim-hierarchy-memory
+sim-hierarchy-memory: build/sim_hierarchy_memory_test
+	build/sim_hierarchy_memory_test
+
+build/sim_hierarchy_memory_test: build/native/src/sim/test_hierarchy_memory.o build/native/src/sim/search_memory.o build/native/src/sim/hierarchy_route.o build/native/src/sim/hierarchy.o build/native/src/sim/regions.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 .PHONY: sim-overlay-mark
