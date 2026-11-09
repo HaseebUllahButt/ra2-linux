@@ -119,6 +119,64 @@ actors::ScreenPoint Scene::map_anchor(const sim::Entity& entity) const {
     return actors::project_world(position(entity), map_camera_);
 }
 
+namespace {
+constexpr int pick_bucket = 64; // Pixels per grid bucket side.
+}
+void Scene::prepare_pick() const {
+    pick_ready_ = true;
+    std::vector<PickCell> all;
+    all.reserve(cells_.size());
+    try {
+        for (const auto& [key, cell] : cells_) {
+            (void)key;
+            if (!cell.floor_world_height) continue;
+            sim::Entity probe;
+            probe.cell = cell.cell; probe.kind = sim::Kind::Unit;
+            probe.position = sim::Coord{int(cell.cell.x) * 256 + 128, int(cell.cell.y) * 256 + 128, *cell.floor_world_height};
+            const auto anchor = map_anchor(probe);
+            all.push_back({std::int64_t(int(anchor.x)), std::int64_t(int(anchor.y)),
+                std::uint32_t(cell.cell.y) * 512 + cell.cell.x, cell.cell});
+        }
+    } catch (const std::exception& error) {
+        // The full scan throws on such a Cell for every point. Keep that.
+        pick_error_ = error.what();
+        return;
+    }
+    if (all.empty()) return;
+    pick_left_ = all.front().x; pick_top_ = all.front().y;
+    std::int64_t right = pick_left_, bottom = pick_top_;
+    for (const auto& item : all) {
+        pick_left_ = std::min(pick_left_, item.x); pick_top_ = std::min(pick_top_, item.y);
+        right = std::max(right, item.x); bottom = std::max(bottom, item.y);
+    }
+    pick_columns_ = int((right - pick_left_) / pick_bucket) + 1;
+    pick_rows_ = int((bottom - pick_top_) / pick_bucket) + 1;
+    pick_buckets_.assign(std::size_t(pick_columns_) * pick_rows_, {});
+    for (const auto& item : all)
+        pick_buckets_[std::size_t((item.y - pick_top_) / pick_bucket) * pick_columns_ +
+            std::size_t((item.x - pick_left_) / pick_bucket)].push_back(item);
+}
+
+std::optional<ra2map::Cell> Scene::pick_cell(std::int64_t map_x, std::int64_t map_y) const {
+    if (!pick_ready_) prepare_pick();
+    if (!pick_error_.empty()) throw std::runtime_error(pick_error_);
+    if (pick_buckets_.empty()) return {};
+    // A match needs |dx| < 46 and |dy| < 23.
+    const auto column = [&](std::int64_t x) { return std::clamp<std::int64_t>((x - pick_left_) / pick_bucket, 0, pick_columns_ - 1); };
+    const auto row = [&](std::int64_t y) { return std::clamp<std::int64_t>((y - pick_top_) / pick_bucket, 0, pick_rows_ - 1); };
+    if (map_x + 46 < pick_left_ || map_y + 23 < pick_top_) return {};
+    int best = 46; std::uint32_t best_key = 0; std::optional<ra2map::Cell> result;
+    for (auto r = row(map_y - 23); r <= row(map_y + 23); ++r)
+        for (auto c = column(map_x - 46); c <= column(map_x + 46); ++c)
+            for (const auto& item : pick_buckets_[std::size_t(r) * pick_columns_ + std::size_t(c)]) {
+                const auto distance = std::abs(item.x - map_x) + 2 * std::abs(item.y - map_y);
+                if (distance < best || (result && distance == best && item.key < best_key)) {
+                    best = int(distance); best_key = item.key; result = item.cell;
+                }
+            }
+    return result;
+}
+
 SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& state,
                          render::Rectangle viewport) {
     loop::profile::Timer probe(loop::profile::Phase::Scene);
@@ -128,55 +186,64 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
         std::size_t(viewport.width) * viewport.height > 16 * 1024 * 1024)
         throw std::runtime_error("Invalid scene viewport");
     SceneFrame result;
-    result.image = {viewport.width, viewport.height,
-        std::vector<std::uint8_t>(std::size_t(viewport.width) * viewport.height * 4)};
     const int copy_width = std::max(0, std::min(viewport.width, terrain.width - viewport.x));
     const int copy_height = std::max(0, std::min(viewport.height, terrain.height - viewport.y));
-    for (int y = 0; copy_width > 0 && y < copy_height; ++y)
-        std::copy_n(terrain.rgba.begin() + (std::size_t(y + viewport.y) * terrain.width + viewport.x) * 4,
-            std::size_t(copy_width) * 4, result.image.rgba.begin() + std::size_t(y) * viewport.width * 4);
+    const auto size = std::size_t(viewport.width) * viewport.height * 4;
+    std::vector<std::uint8_t> pixels;
+    if (copy_width == viewport.width && copy_height == viewport.height) {
+        // The terrain covers the whole view: append its rows without first
+        // clearing the buffer.
+        pixels.reserve(size);
+        for (int y = 0; y < copy_height; ++y) {
+            const auto row = terrain.rgba.begin() + (std::size_t(y + viewport.y) * terrain.width + viewport.x) * 4;
+            pixels.insert(pixels.end(), row, row + std::size_t(copy_width) * 4);
+        }
+    } else {
+        pixels.assign(size, 0);
+        for (int y = 0; copy_width > 0 && y < copy_height; ++y)
+            std::copy_n(terrain.rgba.begin() + (std::size_t(y + viewport.y) * terrain.width + viewport.x) * 4,
+                std::size_t(copy_width) * 4, pixels.begin() + std::size_t(y) * viewport.width * 4);
+    }
+    result.image = {viewport.width, viewport.height, std::move(pixels)};
 
     struct Draw {
         const sim::Entity* entity;
-        const ra2map::TerrainObject* terrain;
         actors::WorldPosition position;
         std::int64_t key;
     };
     std::vector<Draw> draws;
+    draws.reserve(state.entities.size());
     for (const auto& entity : state.entities) {
         if (entity.dead) continue;
         try {
             const auto world = position(entity);
             const auto key = entity.kind == sim::Kind::Structure ?
                 actors::building_y_sort(world, rules_, entity.type) : actors::object_y_sort(world);
-            draws.push_back({&entity, nullptr, world, key});
+            draws.push_back({&entity, world, key});
         } catch (const std::exception& error) {
             result.gaps.push_back("Entity " + std::to_string(entity.id) + ": " + error.what());
         }
     }
-    for (const auto& object : terrain_objects_) {
-        try {
-            const auto cell = cells_.find(cell_key(object.cell));
-            if (cell == cells_.end() || !cell->second.floor_world_height)
-                throw std::runtime_error("Terrain object floor height is unresolved");
-            // Tiberium spawners use a different palette and a -16 Y adjustment.
-            if (rules_.read_bool(object.type, "SpawnsTiberium", false))
-                throw std::runtime_error("Tiberium spawner drawing is unresolved");
-            const auto world = actors::terrain_position(object.cell, *cell->second.floor_world_height);
-            draws.push_back({nullptr, &object, world, actors::object_y_sort(world)});
-        } catch (const std::exception& error) {
-            result.gaps.push_back("Terrain " + object.type + ": " + error.what());
-        }
-    }
+    if (!terrain_ready_) prepare_terrain(terrain_gaps_);
+    result.gaps.insert(result.gaps.end(), terrain_gaps_.begin(), terrain_gaps_.end());
+    // Entities come before terrain objects in the original single list, and
+    // that list is stable-sorted by key. Merging the two stable-sorted lists,
+    // with entities first on equal keys, gives the same order.
     std::stable_sort(draws.begin(), draws.end(), [](const Draw& a, const Draw& b) { return a.key < b.key; });
+    auto draw_terrain = [&](const TerrainDraw& item) {
+        if (!item.sprite) { result.gaps.push_back(item.error); return; }
+        result.drawn += blit(result.image, *item.sprite,
+            {item.origin.x - viewport.x, item.origin.y - viewport.y});
+    };
+    auto next_terrain = terrain_draws_.begin();
     for (const auto& draw : draws) {
-        const auto label = draw.entity ? "Entity " + std::to_string(draw.entity->id) : "Terrain " + draw.terrain->type;
+        for (; next_terrain != terrain_draws_.end() && next_terrain->key < draw.key; ++next_terrain) draw_terrain(*next_terrain);
         try {
             auto anchor = actors::project_world(draw.position, map_camera_);
             anchor.x -= viewport.x;
             anchor.y -= viewport.y;
-            if (draw.entity && draw.entity->kind == sim::Kind::Unit) {
-                const auto& entity = *draw.entity;
+            const auto& entity = *draw.entity;
+            if (entity.kind == sim::Kind::Unit) {
                 if (entity.map_health != 256 && !prototype_)
                     throw std::runtime_error("Damaged vehicle drawing states are unresolved");
                 if (entity.facing < 0 || entity.facing > 255)
@@ -194,35 +261,76 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
                     {anchor.x + sprite.left, anchor.y + sprite.top});
                 continue;
             }
-            const auto kind = !draw.entity ? actors::Kind::Terrain :
-                draw.entity->kind == sim::Kind::Structure ? actors::Kind::Building : actors::Kind::Infantry;
-            const auto& type = draw.entity ? draw.entity->type : draw.terrain->type;
-            const auto key = std::make_pair(kind, type);
+            const auto kind = entity.kind == sim::Kind::Structure ? actors::Kind::Building : actors::Kind::Infantry;
+            const auto key = std::make_pair(kind, entity.type);
             auto found = assets_.find(key);
             if (found == assets_.end()) {
                 found = assets_.emplace(key, Asset{actors::ActorArt::load(files_, art_, rules_,
-                    type, kind, theater_), {}}).first;
+                    entity.type, kind, theater_), {}}).first;
             }
             auto& asset = found->second;
             // Only stationary, full-health main images are established here.
             // Gameplay transitions and damaged building frames remain separate.
-            if (draw.entity && draw.entity->map_health != 256 && !prototype_)
+            if (entity.map_health != 256 && !prototype_)
                 throw std::runtime_error("Damaged actor frame selection is unresolved");
             const auto frame = kind == actors::Kind::Infantry ?
-                asset.art.frame_for_map("Ready", static_cast<std::uint8_t>(draw.entity->facing), 0) :
-                kind == actors::Kind::Terrain ? actors::terrain_initial_frame(rules_, type) : 0;
+                asset.art.frame_for_map("Ready", static_cast<std::uint8_t>(entity.facing), 0) : 0;
             auto image = asset.frames.find(frame);
             if (image == asset.frames.end())
-                image = asset.frames.emplace(frame, asset.art.draw_frame(frame,
-                    kind == actors::Kind::Terrain ? terrain_palette_ : palette_)).first;
+                image = asset.frames.emplace(frame, asset.art.draw_frame(frame, palette_)).first;
             const auto origin = asset.art.main_canvas_origin(anchor);
-            const auto& sprite = image->second;
-            result.drawn += blit(result.image, sprite, origin);
+            result.drawn += blit(result.image, image->second, origin);
         } catch (const std::exception& error) {
-            result.gaps.push_back(label + ": " + error.what());
+            result.gaps.push_back("Entity " + std::to_string(draw.entity->id) + ": " + error.what());
         }
     }
-    for (std::size_t p = 3; p < result.image.rgba.size(); p += 4) result.image.rgba[p] = 255;
+    for (; next_terrain != terrain_draws_.end(); ++next_terrain) draw_terrain(*next_terrain);
+    // Local pointer and size: byte stores cannot then alias the vector itself.
+    auto* const rgba = result.image.rgba.data();
+    for (std::size_t p = 3; p < size; p += 4) rgba[p] = 255;
     return result;
+}
+
+void Scene::prepare_terrain(std::vector<std::string>& position_gaps) {
+    // Same checks and messages as the per-frame pass they replace.
+    for (const auto& object : terrain_objects_) {
+        try {
+            const auto cell = cells_.find(cell_key(object.cell));
+            if (cell == cells_.end() || !cell->second.floor_world_height)
+                throw std::runtime_error("Terrain object floor height is unresolved");
+            // Tiberium spawners use a different palette and a -16 Y adjustment.
+            if (rules_.read_bool(object.type, "SpawnsTiberium", false))
+                throw std::runtime_error("Tiberium spawner drawing is unresolved");
+            const auto world = actors::terrain_position(object.cell, *cell->second.floor_world_height);
+            TerrainDraw draw;
+            draw.object = &object; draw.position = world; draw.key = actors::object_y_sort(world);
+            terrain_draws_.push_back(std::move(draw));
+        } catch (const std::exception& error) {
+            position_gaps.push_back("Terrain " + object.type + ": " + error.what());
+        }
+    }
+    std::stable_sort(terrain_draws_.begin(), terrain_draws_.end(),
+        [](const TerrainDraw& a, const TerrainDraw& b) { return a.key < b.key; });
+    for (auto& draw : terrain_draws_) {
+        const auto& type = draw.object->type;
+        try {
+            const auto anchor = actors::project_world(draw.position, map_camera_);
+            const auto key = std::make_pair(actors::Kind::Terrain, type);
+            auto found = assets_.find(key);
+            if (found == assets_.end())
+                found = assets_.emplace(key, Asset{actors::ActorArt::load(files_, art_, rules_,
+                    type, actors::Kind::Terrain, theater_), {}}).first;
+            auto& asset = found->second;
+            const auto frame = actors::terrain_initial_frame(rules_, type);
+            auto image = asset.frames.find(frame);
+            if (image == asset.frames.end())
+                image = asset.frames.emplace(frame, asset.art.draw_frame(frame, terrain_palette_)).first;
+            draw.origin = asset.art.main_canvas_origin(anchor);
+            draw.sprite = &image->second;
+        } catch (const std::exception& error) {
+            draw.error = "Terrain " + type + ": " + error.what();
+        }
+    }
+    terrain_ready_ = true;
 }
 } // namespace ra2::app
