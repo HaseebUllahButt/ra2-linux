@@ -7,8 +7,8 @@ INI, allocation, Cell parent/registration, lighting lookups, category cache,
 and region builders are supplied. Object and lighting vectors are empty.
 The default tile index is supplied. An optional source adds decoded MP02T2
 tiles and the four recognised Overlay root branches. Stream, type identity,
-eligibility, and map lookup are supplied. Full Overlay processing and later
-Battle phases remain outside the check.
+eligibility, direction table, and map lookup are supplied. Full Overlay
+processing and later Battle phases remain outside the check.
 """
 import struct
 import subprocess
@@ -237,7 +237,7 @@ if tile_source:
         m.cpu.emu_start(0x5da970,0x5daa31,count=100000)
         assert m.cpu.reg_read(UC_X86_REG_EIP)==0x5daa31
         roots+=1
-    assert roots>0
+    assert roots==9
     for index in range(262144):
         cell=m.read(vector+index*4)
         if cell:
