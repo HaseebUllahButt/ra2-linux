@@ -8,7 +8,7 @@ CXX ?= g++
 FEATURE_GAME_DIR ?= $(abspath $(TEST_GAME_DIR))
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O2
 SDL_FLAGS = $(shell pkg-config --cflags --libs sdl2)
-NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cpp src/app/scene.cpp src/app/vehicle_art.cpp \
+NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cpp src/app/scene.cpp src/app/resource_render.cpp src/app/vehicle_art.cpp \
     src/render/tmp_decode.cpp src/render/minimap.cpp src/loop/game_loop.cpp \
     src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp src/fs/filename_hash.cpp \
     src/gfx/palette.cpp src/gfx/shp_decode.cpp src/actors/actors.cpp \
@@ -538,7 +538,7 @@ build/weapons_object_damage_path_test: build/native/src/weapons/object_damage_pa
 scene: build/scene_test
 	build/scene_test $(TEST_GAME_DIR) ../analysis/extracted/maps/2PEAKS.MAP
 
-build/scene_test: build/native/src/app/scene.o build/native/src/app/vehicle_art.o build/native/src/app/terrain_inputs.o build/native/src/app/test_scene.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
+build/scene_test: build/native/src/app/resource_render.o build/native/src/app/scene.o build/native/src/app/vehicle_art.o build/native/src/app/terrain_inputs.o build/native/src/app/test_scene.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
@@ -546,7 +546,7 @@ build/scene_test: build/native/src/app/scene.o build/native/src/app/vehicle_art.
 base-move: build/base_move_test
 	build/base_move_test $(TEST_GAME_DIR)
 
-build/base_move_test: build/native/src/app/scene.o build/native/src/app/vehicle_art.o build/native/src/app/terrain_inputs.o build/native/src/app/test_base_move.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
+build/base_move_test: build/native/src/app/resource_render.o build/native/src/app/scene.o build/native/src/app/vehicle_art.o build/native/src/app/terrain_inputs.o build/native/src/app/test_base_move.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 .PHONY: world-maps
@@ -584,7 +584,8 @@ skirmish-check: native skirmish-tests
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --frames 3
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --autoplay --frames 12000
 
-skirmish-tests: build/battle_status_test build/battle_formation_test build/prototype_economy_test build/battle_audio_test build/prototype_movement_test build/battle_effects_test build/battle_queue_test build/battle_radar_test build/battle_radar_world_test build/battle_help_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test
+skirmish-tests: build/resource_render_test build/battle_status_test build/battle_formation_test build/prototype_economy_test build/battle_audio_test build/prototype_movement_test build/battle_effects_test build/battle_queue_test build/battle_radar_test build/battle_radar_world_test build/battle_help_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test
+	build/resource_render_test $(TEST_GAME_DIR)
 	build/battle_status_test
 	build/battle_formation_test
 	build/prototype_economy_test $(TEST_GAME_DIR)
@@ -612,6 +613,9 @@ build/battle_effects_test: build/native/src/rules/ini_file.o build/native/src/ap
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/battle_audio_test: build/native/src/app/test_battle_audio.o build/native/src/app/battle_audio.o build/native/src/app/platform.o build/native/src/audio/game_audio.o build/native/src/audio/audio.o build/native/src/audio/lookup.o build/native/src/rules/ini_file.o $(FS_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
+
+build/resource_render_test: build/native/src/app/test_resource_render.o $(PROTOTYPE_TEST_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
 
 build/battle_status_test: build/native/src/app/test_battle_status.o

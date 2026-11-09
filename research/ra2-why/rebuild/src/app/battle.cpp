@@ -202,7 +202,7 @@ public:
         // Compose the initial view while loading. The first event pump can
         // change the camera, selection or help; overlays stay live below.
         initial_camera_x_=camera_x_;initial_camera_y_=camera_y_;
-        initial_scene_=scene_.render(terrain_,battle_scene_state(world_,0),{camera_x_,camera_y_,1024,768});
+        initial_scene_=scene_.render(terrain_,battle_scene_state(world_,0),{camera_x_,camera_y_,1024,768},&world_);
     }
     const w::Snapshot& world() const {return world_;}
     sim::Victory result() const {return victory_.result;}
@@ -945,7 +945,7 @@ public:
                 loop::profile::Timer probe(loop::profile::Phase::SceneState);
                 return battle_scene_state(world_,state.frame_counter);
             }();
-            return scene_.render(terrain_,drawing,{camera_x_,camera_y_,1024,768});
+            return scene_.render(terrain_,drawing,{camera_x_,camera_y_,1024,768},&world_);
         }();
         initial_scene_.reset();
         for(const auto& detail:scene.gaps)gaps_.insert(detail);
