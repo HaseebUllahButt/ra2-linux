@@ -125,7 +125,8 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     std::set<std::int32_t> keys_;
     std::set<std::string> gaps_;
     int camera_x_=0,camera_y_=0,pointer_x_=-1,pointer_y_=-1;
-    std::uint64_t status_time_=0;
+    std::uint64_t status_time_=0,pan_time_=0;
+    std::uint64_t pan_remainder_x_=0,pan_remainder_y_=0;
     std::string placement_,status_="Select MCV. D deploys.";
     bool quit_=false,autoplay_moved_=false,autoplay_deployed_=false;
     bool help_visible_=true,show_score_=false;
@@ -157,6 +158,7 @@ public:
         score_assets_=ui::ScoreAssets::load(files,labels_);
         help_visible_=!args_.autoplay;
         status_time_=clock_.now_ms();
+        pan_time_=status_time_;
         for(const auto& slot:args_.setup.opponents)if(slot.opponent && *slot.opponent!=ui::Opponent::Closed) {
             difficulty_=*slot.opponent;break;
         }
@@ -584,7 +586,7 @@ public:
         case 9: {
             const auto* e=find(world_,human_target_);require(e,"Human input: target vanished");
             const auto at=anchor(*e);require(at.has_value(),"Human input: target has no anchor");
-            require(state.frame_counter-human_wait_frame_<300,"Human input: camera did not reach enemy");
+            require(state.frame_counter-human_wait_frame_<600,"Human input: camera did not reach enemy");
             if(at->x<40||at->x>760||at->y<40||at->y>720) {test_pan_to(*at);break;}
             test_pan_to({400,380});
             test_click(at->x,at->y);human_stage_=10;break;
@@ -782,10 +784,20 @@ public:
     void update(loop::State& state) {
         const auto frame=state.frame_counter; // All match subsystems use this frame.
         const bool edge=pointer_x_>=0 && pointer_x_<1024 && pointer_y_>=0 && pointer_y_<768;
-        pan(12*(int(keys_.count(SDLK_RIGHT))-int(keys_.count(SDLK_LEFT))+
-                int(edge&&pointer_x_>=1016)-int(edge&&pointer_x_<8)),
-            8*(int(keys_.count(SDLK_DOWN))-int(keys_.count(SDLK_UP))+
-                int(edge&&pointer_y_>=760)-int(edge&&pointer_y_<8)));
+        // Camera speed follows elapsed time, including at unlimited game speed.
+        const auto now=clock_.now_ms();
+        const auto elapsed=args_.headless?std::max<std::uint64_t>(16,now-pan_time_):
+            std::min<std::uint64_t>(100,now-pan_time_);
+        pan_time_=now;
+        const int horizontal=int(keys_.count(SDLK_RIGHT))-int(keys_.count(SDLK_LEFT))+
+            int(edge&&pointer_x_>=1016)-int(edge&&pointer_x_<8);
+        const int vertical=int(keys_.count(SDLK_DOWN))-int(keys_.count(SDLK_UP))+
+            int(edge&&pointer_y_>=760)-int(edge&&pointer_y_<8);
+        pan_remainder_x_+=elapsed*400;
+        pan_remainder_y_+=elapsed*260;
+        pan(std::clamp(horizontal,-1,1)*int(pan_remainder_x_/1000),
+            std::clamp(vertical,-1,1)*int(pan_remainder_y_/1000));
+        pan_remainder_x_%=1000;pan_remainder_y_%=1000;
         if(victory_.settled())return;
         run_build_queue(frame);
         if(args_.autoplay)autoplay(frame);
