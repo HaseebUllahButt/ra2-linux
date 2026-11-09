@@ -34,6 +34,9 @@ public:
     BaseBattleAssets& operator=(const BaseBattleAssets&)=delete;
     const rules::IniFile& rules() const;
     const rules::IniFile& art_ini() const;
+    const rules::IniFile& mode_catalog() const;
+    const rules::IniFile& battle_rules() const;
+    const std::string& battle_rules_name() const;
     const rules::IniFile& map_ini() const;
     const ra2map::MapFile& map() const;
     render::TheaterArt& theater();

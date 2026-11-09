@@ -30,7 +30,8 @@ MapRectangle rectangle(const rules::IniFile& ini,const char* key) {
 struct BaseBattleAssets::Data {
     explicit Data(const std::filesystem::path& game):files(game) {}
     fs::MixFileSystem files;
-    rules::IniFile rules,art_ini,map_ini;
+    rules::IniFile rules,art_ini,map_ini,mode_catalog,battle_rules;
+    std::string battle_rules_name;
     ra2map::MapFile map;
     std::unique_ptr<render::TheaterArt> theater;
     PlacementGeometry geometry;
@@ -50,6 +51,14 @@ BaseBattleAssets BaseBattleAssets::load(const std::filesystem::path& game,const 
     data->files.mount_resources();
     data->rules=read_ini(data->files,"RULES.INI");
     data->art_ini=read_ini(data->files,"ART.INI");
+    data->mode_catalog=read_ini(data->files,"MPModes.ini");
+    const auto* battle=data->mode_catalog.find("Battle","1");
+    if (!battle) throw std::runtime_error("Missing original Battle mode");
+    const auto mode_fields=rules::IniFile::split_list(battle->value);
+    if (mode_fields.size()<4 || mode_fields[2].empty())
+        throw std::runtime_error("Invalid original Battle mode");
+    data->battle_rules_name=mode_fields[2];
+    data->battle_rules=read_ini(data->files,data->battle_rules_name);
     data->map_ini=read_ini(data->files,map_name,true);
     const auto geometry=resolve_placement_geometry(rectangle(data->map_ini,"Size"),rectangle(data->map_ini,"LocalSize"));
     if (!geometry) throw std::runtime_error("Unsupported map geometry");
@@ -87,6 +96,9 @@ BaseBattleAssets BaseBattleAssets::load(const std::filesystem::path& game,const 
 }
 const rules::IniFile& BaseBattleAssets::rules() const { return data_->rules; }
 const rules::IniFile& BaseBattleAssets::art_ini() const { return data_->art_ini; }
+const rules::IniFile& BaseBattleAssets::mode_catalog() const { return data_->mode_catalog; }
+const rules::IniFile& BaseBattleAssets::battle_rules() const { return data_->battle_rules; }
+const std::string& BaseBattleAssets::battle_rules_name() const { return data_->battle_rules_name; }
 const rules::IniFile& BaseBattleAssets::map_ini() const { return data_->map_ini; }
 const ra2map::MapFile& BaseBattleAssets::map() const { return data_->map; }
 render::TheaterArt& BaseBattleAssets::theater() { return *data_->theater; }

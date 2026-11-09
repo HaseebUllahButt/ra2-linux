@@ -18,6 +18,14 @@ int main(int argc, char** argv) {
     map.parse(original_test_ini(argv[1],"MP02T2.MAP",true));
     if (argc==3) {
         const std::string request=argv[2];
+        if (request=="--battle-rules") {
+            std::cout<<original_test_ini(argv[1],"MPBattle.ini",true);
+            return std::cout?0:1;
+        }
+        if (request=="--mp-modes") {
+            std::cout<<original_test_ini(argv[1],"MPModes.ini",true);
+            return std::cout?0:1;
+        }
         if (request=="--base-rule-art") {
             rules.parse(original_test_ini(argv[1],"RULES.INI",true));
             art.parse(original_test_ini(argv[1],"ART.INI",true));

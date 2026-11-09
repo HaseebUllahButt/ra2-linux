@@ -205,3 +205,8 @@ reader preserves previous values when keys are absent and applies the original
 Clear-to-Tiberium change. The original x86 slice matches 221 installed base
 rule sections with INI and art services supplied. CellAnim, image loading,
 other type fields, subsequent layers, and Overlay placement remain unresolved.
+
+The asset loader also reads the installed multiplayer mode catalog and its
+Battle rules file. For MP02T2, the map and Battle file do not override the
+checked Overlay reader fields for packed Overlay types. This does not prove
+the rest of type loading or establish final runtime type values.

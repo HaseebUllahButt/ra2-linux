@@ -23,6 +23,8 @@ int main(int argc,char** argv) {
     assert(assets.rules().read_list("General","BaseUnit").size()>=2);
     assert(assets.rules().key_count("VehicleTypes")==55);
     assert(assets.art_ini().key_count("MCV")>0);
+    assert(assets.mode_catalog().find("Battle","1") && assets.battle_rules_name()=="MPBattle.ini");
+    assert(assets.battle_rules().read_string("MultiplayerDialogSettings","AlliesAllowed")=="yes");
     assert(assets.geometry().width==100 && assets.geometry().height==100);
     assert(assets.overlays_in_scan_order().size()==407);
     if (argc==3 && std::string(argv[2])=="--overlay-scan") {
