@@ -144,6 +144,7 @@ struct Snapshot {
     // Global fallback Cell +24 and +44. A missing map Cell can change +24.
     std::optional<StartPoint> fallback_cell_coordinate;
     std::optional<std::int32_t> fallback_overlay_index;
+    std::optional<std::uint8_t> fallback_overlay_data;
 };
 enum class PlacementResult { Placed, Blocked, Unresolved };
 // Checks every head and shared next chain. Invalid and cyclic snapshots fail.
