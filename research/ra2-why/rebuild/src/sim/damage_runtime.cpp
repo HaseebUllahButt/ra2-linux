@@ -1,4 +1,5 @@
 #include "damage_runtime.h"
+#include "../loop/profile.h"
 #include <map>
 #include <set>
 
@@ -512,6 +513,7 @@ void PrototypeCombatRuntime::stop(session::world::Snapshot& world,std::uint32_t 
 }
 
 PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world,std::uint64_t frame) {
+    loop::profile::Scope probe(loop::profile::Phase::Combat);
     PrototypeCombatTick report;
     if (world.edition!=session::world::Edition::Base || world.pending_cell_setup ||
         world.random.first>=250 || world.random.second>=250 ||

@@ -1,4 +1,5 @@
 #include "prototype_production.h"
+#include "../loop/profile.h"
 #include "session/world/world.h"
 #include <algorithm>
 #include <limits>
@@ -30,6 +31,7 @@ w::House* house(w::Snapshot& world,std::uint32_t id) {
 // uses a private candidate with prototype inputs, then restores the marker.
 template<class F>
 Outcome transaction(w::Snapshot& world,FactorySet& factories,F&& callback) {
+    loop::profile::Scope probe(loop::profile::Phase::Production);
     if (!ready(world)) return fail(Status::NeedsInput,"prototype setup is not complete");
     auto candidate=world;
     auto next_factories=factories;
@@ -441,6 +443,7 @@ Outcome place(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,st
 }
 
 Outcome tick(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,std::uint64_t frame) {
+    loop::profile::Scope probe(loop::profile::Phase::Production);
     if (!ready(world)) return fail(Status::NeedsInput,"prototype setup is not complete");
     bool needed=false,waiting_for_exit=false;
     for (const auto& item:factories.power_dirty) if (item.second) { needed=true; break; }

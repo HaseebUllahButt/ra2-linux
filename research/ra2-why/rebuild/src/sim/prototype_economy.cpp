@@ -1,4 +1,5 @@
 #include "prototype_economy.h"
+#include "../loop/profile.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -48,6 +49,7 @@ int PrototypeEconomy::resource(const sw::CellState& c) const {
     return found==overlay_resources_.end()?-1:found->second;
 }
 void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
+    loop::profile::Scope probe(loop::profile::Phase::Economy);
     if(w.setup_progress!=sw::SetupProgress::PrototypeComplete || w.pending_cell_setup || (last_ && frame<=*last_)) return;
     last_=frame;
     movement_.tick(w,frame);

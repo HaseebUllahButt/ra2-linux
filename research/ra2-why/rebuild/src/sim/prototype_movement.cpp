@@ -1,4 +1,5 @@
 #include "prototype_movement.h"
+#include "../loop/profile.h"
 #include "../weapons/occupant_order.h"
 #include <algorithm>
 #include <array>
@@ -160,6 +161,7 @@ void PrototypeMovement::cancel(World& world,std::uint32_t id) {
     if (auto* actor=find_unit(world,id)) actor->locomotor_moving=false;
 }
 PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
+    loop::profile::Scope probe(loop::profile::Phase::Movement);
     if (world.setup_progress!=session::world::SetupProgress::PrototypeComplete)
         return fail(PrototypeMoveStatus::NeedsInput,"prototype Battle setup is unfinished");
     if (last_frame_) {
