@@ -183,3 +183,8 @@ live effect checks to be clear. A zero result passes this one original virtual
 check; range, turret facing, target assignment and projectile creation remain
 separate. The original comparison covers 3,000 complete checks and all six
 results in this slice. Unknown inputs block the decision.
+
+`combat_runtime_regression.cpp` is the fixed native regression entry point. Pass
+it the owned base `game.exe` path. It checks firing, reload RNG replay, Techno
+damage guards, shared cell order, allied masking, projectile replay and unknown
+state rejection. The expected replay values were checked against game.exe.
