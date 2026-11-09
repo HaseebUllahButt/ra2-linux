@@ -186,7 +186,11 @@ void BattleHud::draw_panel(render::Bitmap& b,const HudState& s) const {
             const auto& src=*image;
             for (int y=1;y<r.height-1;++y) for (int x=1;x<r.width-1;++x) {
                 auto p=(static_cast<std::size_t>(y-1)*src.height/(r.height-2)*src.width+(x-1)*src.width/(r.width-2))*4;
-                if (src.rgba[p+3]) pixel(b,r.x+x,r.y+y,{src.rgba[p],src.rgba[p+1],src.rgba[p+2],src.rgba[p+3]});
+                if (src.rgba[p+3]) {
+                    const int shade=c.enabled?5:2;
+                    pixel(b,r.x+x,r.y+y,{std::uint8_t(src.rgba[p]*shade/5),
+                        std::uint8_t(src.rgba[p+1]*shade/5),std::uint8_t(src.rgba[p+2]*shade/5),src.rgba[p+3]});
+                }
             }
         }
         auto color=c.enabled?ink:edge;

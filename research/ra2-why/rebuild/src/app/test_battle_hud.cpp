@@ -238,6 +238,20 @@ int main(int argc, char** argv) {
                            {"MTNK","",700,true,0}};
         hud.load_assets(files,rules,art,originals.choices);
         auto screen=frame(); hud.draw(screen,originals);
+        auto unavailable=originals;unavailable.choices[0].enabled=false;
+        auto dimmed=frame();hud.draw(dimmed,unavailable);
+        const auto fixed_slot=BattleHud::build_button_bounds(0);
+        bool darker=false;
+        for(int y=1;y<fixed_slot.height-1;++y)for(int x=1;x<fixed_slot.width-1;++x) {
+            const auto pixel=(std::size_t(fixed_slot.y+y)*screen.width+fixed_slot.x+x)*4;
+            for(int c=0;c<3;++c) {
+                assert(dimmed.rgba[pixel+c]<=screen.rgba[pixel+c]);
+                darker|=dimmed.rgba[pixel+c]<screen.rgba[pixel+c];
+            }
+        }
+        assert(darker && hud.handle_click(fixed_slot.x+2,fixed_slot.y+2,unavailable).kind==HudActionKind::None);
+        hud.draw(screen,originals);
+
         int i=0;
         for (const char* name : {"POWRICON.SHP","BRRKICON.SHP","GTNKICON.SHP"}) {
             auto bytes=files.read_file(name); assert(bytes);
