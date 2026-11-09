@@ -1,5 +1,6 @@
 #include "game_loop.h"
 #include "profile.h"
+#include "trace.h"
 
 #include <algorithm>
 #include <chrono>
@@ -107,21 +108,27 @@ FrameResult GameLoop::step() {
 }
 
 void GameLoop::pump() {
+    trace::phase("pump begin",state_.frame_counter,state_.window_active,state_.paused);
     ++ticks_.pump;
     pump_.pump(state_);
+    trace::phase("pump end",state_.frame_counter,state_.window_active,state_.paused);
 }
 
 void GameLoop::service() {
+    trace::phase("service begin",state_.frame_counter,state_.window_active,state_.paused);
     ++ticks_.service;
     // 0x0048D1E0 pumps and services the connection manager for sessions 3/4.
     if (config_.session == 3 || config_.session == 4) pump();
     if (hooks_.service) hooks_.service(state_);
+    trace::phase("service end",state_.frame_counter,state_.window_active,state_.paused);
 }
 
 void GameLoop::update() {
+    trace::phase("update begin",state_.frame_counter,state_.window_active,state_.paused);
     ++ticks_.update;
     profile::Timer timer(profile::Phase::Update);
     if (hooks_.update) hooks_.update(state_);
+    trace::phase("update end",state_.frame_counter,state_.window_active,state_.paused);
 }
 
 void GameLoop::post_event(Event event) {
@@ -130,6 +137,7 @@ void GameLoop::post_event(Event event) {
 }
 
 void GameLoop::dispatch() {
+    trace::phase("dispatch begin",state_.frame_counter,state_.window_active,state_.paused);
     ++ticks_.dispatch;
     if (!local_session() && hooks_.coordinate_events &&
         !hooks_.coordinate_events(state_)) {
@@ -141,15 +149,18 @@ void GameLoop::dispatch() {
     std::deque<Event> batch;
     batch.swap(events_);
     for (auto& event : batch) event(state_);
+    trace::phase("dispatch end",state_.frame_counter,state_.window_active,state_.paused);
 }
 
 void GameLoop::present() {
+    trace::phase("present begin",state_.frame_counter,state_.window_active,state_.paused);
     ++ticks_.present;
     {
         profile::Timer timer(profile::Phase::Present);
         renderer_.present(state_);
     }
     if (profile::enabled()) profile::instance().first_present();
+    trace::phase("present end",state_.frame_counter,state_.window_active,state_.paused);
 }
 
 void GameLoop::pace() {

@@ -1,5 +1,6 @@
 #include "platform.h"
 #include "../loop/profile.h"
+#include "../loop/trace.h"
 #include <SDL.h>
 
 #include <limits>
@@ -9,21 +10,7 @@
 
 namespace ra2::app {
 namespace {
-FILE* debug_log() {
-    static FILE* log=[]()->FILE* {
-        if(!std::getenv("RA2_DEBUG_LOOP"))return nullptr;
-        char path[]="/tmp/ra2-debug-loop.XXXXXX";
-        const int fd=mkstemp(path);
-        if(fd<0)return nullptr;
-        FILE* out=fdopen(fd,"w");
-        if(out) {
-            setvbuf(out,nullptr,_IOLBF,0);
-            std::fprintf(stderr,"Debug loop log: %s\n",path);
-        }
-        return out;
-    }();
-    return log;
-}
+using loop::trace::debug_log;
 [[noreturn]] void error(const char* operation) {
     throw std::runtime_error(std::string(operation) + ": " + SDL_GetError());
 }
