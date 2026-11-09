@@ -769,16 +769,18 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
             const auto& side = context.side;
             std::int64_t power = 0;
             for (const WorldEntity* building : buildings) power += rules_.read_integer(building->type, "Power");
-            // TODO-ORIGINAL: Build one power plant, refinery, barracks and war
-            // factory. Replace lost buildings and add power when consumption wins.
-            for (const char* role : {"BuildPower", "BuildRefinery", "BuildBarracks", "BuildWeapons"}) {
+            // Base 004EF890 seeds the plan with the yard and power, then
+            // orders barracks before other prerequisite-ready candidates.
+            // TODO-ORIGINAL: repeated refineries and defense nodes in that plan.
+            for (const char* role : {"BuildPower", "BuildBarracks", "BuildRefinery", "BuildWeapons"}) {
                 const auto types = rules_.read_list("AI", role);
                 const bool have = std::any_of(types.begin(), types.end(),
                     [&](const auto& type) { return owns(buildings, type); });
                 if (have && !(equal_name(role, "BuildPower") && power < 0)) continue;
                 for (const auto& type : types) {
                     const auto* planning_side = rules_.find(type, "AIBasePlanningSide");
-                    if (planning_side && (!side || rules_.read_integer(type, "AIBasePlanningSide", -1) != *side)) continue;
+                    if (planning_side && rules_.read_integer(type, "AIBasePlanningSide", -1) != -1 &&
+                        (!side || rules_.read_integer(type, "AIBasePlanningSide") != *side)) continue;
                     if (!registered(rules_, "BuildingTypes", type) ||
                         !buildable(rules_, *computer, actors, buildings, type, cash)) continue;
                     result.push_back(order(skirmish::OrderKind::Build, computer_house_id, *construction, type));
@@ -786,6 +788,25 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
                     break;
                 }
                 if (!result.empty() && result.back().kind == skirmish::OrderKind::Build) break;
+            }
+        }
+        // Base 004EF890 filters the complete BuildingTypes registry through
+        // AIBuildThis, side and tech gates. Keep advancing beyond the opening.
+        if (teams_on && (result.empty() || result.back().kind != skirmish::OrderKind::Build)) {
+            if (const auto* construction = factory(rules_, buildings, "BuildingType")) {
+                if (const auto* registry = rules_.find_section("BuildingTypes"))
+                    for (const auto& entry : registry->entries) {
+                        const auto& type = entry.value;
+                        if (owns(buildings, type) || !rules_.read_bool(type, "AIBuildThis", true) ||
+                            equal_name(type, "GAPLUG")) continue;
+                        const auto* planning_side = rules_.find(type, "AIBasePlanningSide");
+                        if (planning_side && rules_.read_integer(type, "AIBasePlanningSide", -1) != -1 &&
+                            (!context.side || rules_.read_integer(type, "AIBasePlanningSide") != *context.side)) continue;
+                        if (!buildable(rules_, *computer, actors, buildings, type, cash)) continue;
+                        result.push_back(order(skirmish::OrderKind::Build, computer_house_id, *construction, type));
+                        cash -= rules_.read_integer(type, "Cost");
+                        break;
+                    }
             }
         }
         if (teams_on) fill_teams(context, &result);

@@ -417,6 +417,29 @@ void check_original_trigger_gates() {
     require(no_limit.teams().size() == 1, "Negative team Max prevented all creation");
 }
 
+void check_base_plan_continues() {
+    const auto rules = parse(
+        "[General]\n[BuildingTypes]\n0=YARD\n1=POWER\n2=BARR\n3=REF\n4=WORK\n5=SKIP\n6=RADAR\n"
+        "[AI]\nBuildPower=POWER\nBuildBarracks=BARR\nBuildRefinery=REF\nBuildWeapons=WORK\n"
+        "[YARD]\nConstructionYard=yes\nFactory=BuildingType\n"
+        "[POWER]\nPower=100\n[BARR]\n[REF]\n[WORK]\n"
+        "[SKIP]\nCost=100\nTechLevel=1\nOwner=Local\nAIBuildThis=no\n"
+        "[RADAR]\nCost=200\nTechLevel=1\nOwner=Local\nAIBuildThis=yes\nAIBasePlanningSide=-1\nPrerequisite=WORK\n");
+    const auto ai = parse(
+        "[TaskForces]\n0=TF\n[TF]\n0=1,GI\n[TeamTypes]\n0=T\n[T]\nTaskForce=TF\n"
+        "[AITriggerTypes]\nTR=Attack,T,<all>,0,-1,<none>,0,50,1,100,1,0,0,0,<none>,1,1,1\n");
+    sw::Snapshot world;
+    world.houses = {house(computer, "Local", false), house(player, "Enemy", true)};
+    unsigned id = 1;
+    for (const auto* name : {"YARD", "POWER", "BARR", "REF", "WORK"})
+        world.entities.push_back(actor(rules, id++, computer, name, sw::Kind::Structure, {10,10}));
+    world.entities.push_back(actor(rules, 20, player, "YARD", sw::Kind::Structure, {40,40}));
+    PrototypeAI policy(rules, &ai);
+    const auto orders = policy.tick(world, computer, player, 0);
+    require(orders.size() == 1 && orders[0].kind == OrderKind::Build && orders[0].type == "RADAR",
+        "Base plan stopped after its opening or ignored AIBuildThis");
+}
+
 void check_enemy_power_triggers() {
     const auto rules = parse("[InfantryTypes]\n0=GI\n");
     sw::Snapshot world;
@@ -589,8 +612,8 @@ int main(int argc, char** argv) try {
     require(bytes.has_value(), "Installed base RULES.INI is missing");
     IniFile rules;
     rules.parse(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()));
-    const Faction allied{"Americans", "AMCV", "GACNST", "MTNK", {{"GAPOWR", "GAREFN", "GAPILE", "GAWEAP"}}};
-    const Faction soviet{"Russians", "SMCV", "NACNST", "HTNK", {{"NAPOWR", "NAREFN", "NAHAND", "NAWEAP"}}};
+    const Faction allied{"Americans", "AMCV", "GACNST", "MTNK", {{"GAPOWR", "GAPILE", "GAREFN", "GAWEAP"}}};
+    const Faction soviet{"Russians", "SMCV", "NACNST", "HTNK", {{"NAPOWR", "NAHAND", "NAREFN", "NAWEAP"}}};
     check_base_match(rules, allied);
     check_base_match(rules, soviet);
     check_rule_filters();
@@ -605,6 +628,7 @@ int main(int argc, char** argv) try {
     }
     check_team_leader();
     check_original_trigger_gates();
+    check_base_plan_continues();
     check_enemy_power_triggers();
     check_defense_cap_release();
     check_team_policy();
