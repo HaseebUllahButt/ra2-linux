@@ -2,8 +2,8 @@
 """Check the base AMCV Crusher and missing SpeedType reader fragments.
 
 The real map has no AMCV section. The base rules provide Crusher=yes and
-omit SpeedType. The original boolean and string readers run with supplied
-hash and INI record lookup services. Other type-loading phases remain omitted.
+omit SpeedType. The original hash, boolean, and string readers run with supplied
+INI record lookup services. Other type-loading phases remain omitted.
 """
 import struct
 import subprocess
@@ -29,16 +29,27 @@ from original_image import load_original
 def cstring(address):
     return bytes(m.cpu.mem_read(address, 64)).split(b'\0', 1)[0].decode('ascii')
 
+def original_hashes():
+    cpu=load_original(executable)
+    cpu.mem_map(0x1000000,0x10000)
+    result={}
+    for name in ('AMCV','Crusher','SpeedType'):
+        cpu.mem_write(0x1001000,bytes(16))
+        cpu.mem_write(0x1002000,name.encode('ascii')+b'\0')
+        cpu.mem_write(0x100e000,struct.pack('<III',0x100f000,0x1002000,len(name)))
+        cpu.reg_write(UC_X86_REG_ECX,0x1001000)
+        cpu.reg_write(UC_X86_REG_ESP,0x100e000)
+        cpu.emu_start(0x493fc0,0x100f000,count=10000)
+        assert cpu.reg_read(UC_X86_REG_EIP)==0x100f000, 'original INI hash did not return'
+        result[name]=cpu.reg_read(UC_X86_REG_EAX)
+    return result
+
+key_hashes=original_hashes()
 hashes=[]
-def key_hash():
-    name=cstring(m.argument(0))
-    assert name in ('AMCV','Crusher','SpeedType')
-    hashes.append(name)
-    m.cpu.reg_write(UC_X86_REG_EAX, {'AMCV':0x1234,'Crusher':0x5678,'SpeedType':0x9abc}[name])
 
 selected = [None]
 def find_entry():
-    assert m.read(m.argument(0))==0x9abc
+    assert m.read(m.argument(0))==key_hashes['SpeedType']
     m.cpu.reg_write(UC_X86_REG_EAX, 0 if selected[0] is None else 0x100d500)
 
 def compare_names():
@@ -50,7 +61,6 @@ original=load_original(executable)
 m.cpu.mem_write(0x50f410, bytes(original.mem_read(0x50f410, 3)))
 m.cpu.ctl_remove_cache(0x50f410,0x50f413)
 m.callbacks.pop(0x50f410)
-m.bind(0x493fc0, 8, key_hash)
 m.bind(0x510dd0, 4, m.ret(1))
 m.bind(0x511150, 4, find_entry)
 m.bind(0x781f20, 0, compare_names)
@@ -59,11 +69,11 @@ m.cpu.mem_write(0x100a000, b'AMCV\0')
 # original parser reads the actual value bytes and interprets the first byte.
 ini, section_cache, section, entry, node, value = 0x100b000,0x100d000,0x100d100,0x100d200,0x100d300,0x100d400
 m.word(ini+0x24,1); m.word(ini+0x30,section_cache)
-m.word(section_cache,0x1234); m.word(section_cache+4,section)
+m.word(section_cache,key_hashes['AMCV']); m.word(section_cache+4,section)
 m.word(section+0x30,1); m.word(section+0x3c,entry)
-m.word(entry,0x5678); m.word(entry+4,node); m.word(node+0x10,value)
+m.word(entry,key_hashes['Crusher']); m.word(entry+4,node); m.word(node+0x10,value)
 m.cpu.mem_write(value,b'yes\0')
-m.word(0x100d500,0x9abc); m.word(0x100d504,0x100d600)
+m.word(0x100d500,key_hashes['SpeedType']); m.word(0x100d504,0x100d600)
 m.word(0x100d610,0x100d700); m.cpu.mem_write(0x100d700,b'Wheel\0')
 # Execute the UnitType constructor through the parent write of +5A4.
 # Parent object construction and collection helpers are supplied.
@@ -75,6 +85,8 @@ parser_calls=[]
 def trace_parser(cpu,address,size,user):
     if address in (0x50f410,0x50e9a0):
         parser_calls.append(address)
+    if address==0x493fc0:
+        hashes.append(cstring(m.argument(0)))
 m.cpu.hook_add(UC_HOOK_CODE,trace_parser)
 def trace_read(cpu,access,address,size,value,user):
     if 0x850ea0<=address<0x851054:
