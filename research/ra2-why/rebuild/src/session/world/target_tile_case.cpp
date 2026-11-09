@@ -101,7 +101,8 @@ int main(int argc,char** argv) {
         assert(clear_wheel && clear_track && tiberium_wheel && tiberium_track && *clear_wheel==1.0 && *clear_track==1.0 &&
                static_cast<float>(*tiberium_wheel)==0.5f && static_cast<float>(*tiberium_track)==0.7f);
         BaseUnitFlagInput flag_input;
-        flag_input.initial_is_train=false; flag_input.initial_crusher=false;
+        const auto constructor=base_unit_type_constructor_fields();
+        flag_input.initial_is_train=constructor.is_train; flag_input.initial_crusher=constructor.crusher;
         const auto* train_key=rules.find("AMCV","IsTrain");
         const auto* crusher_key=rules.find("AMCV","Crusher");
         flag_input.is_train.state=train_key?UnitFlagKeyState::Present:UnitFlagKeyState::Absent;
@@ -112,7 +113,7 @@ int main(int argc,char** argv) {
         assert(flags.is_train.status==UnitFlagStatus::Complete && flags.is_train.value==false &&
                flags.crusher.status==UnitFlagStatus::Complete && flags.crusher.value==true);
         BaseSpeedTypeInput type_input;
-        type_input.initial_type=-1; // The base UnitType constructor prefix writes -1.
+        type_input.initial_type=constructor.speed_type;
         type_input.crusher=flags.crusher.value;
         const auto* speed_key=rules.find("AMCV","SpeedType");
         type_input.key_state=speed_key?SpeedKeyState::Present:SpeedKeyState::Absent;
@@ -120,7 +121,7 @@ int main(int argc,char** argv) {
         const auto type=resolve_base_speed_type(type_input);
         assert(type.status==SpeedTypeStatus::Complete && type.index==1);
         BaseMovementZoneInput zone_input;
-        zone_input.initial_zone=0; // The original UnitType constructor prefix writes zero.
+        zone_input.initial_zone=constructor.movement_zone;
         const auto* zone_key=rules.find("AMCV","MovementZone");
         zone_input.key_state=zone_key?ZoneKeyState::Present:ZoneKeyState::Absent;
         if (zone_key) zone_input.key_value=zone_key->value;

@@ -8,7 +8,17 @@ using namespace ra2::session::world;
 
 int main(int argc,char** argv) {
     const bool vectors=argc==2 && std::string(argv[1])=="--vectors";
-    if (argc!=1 && !vectors) return 2;
+    const bool constructor_vectors=argc==2 && std::string(argv[1])=="--constructor-vectors";
+    if (argc!=1 && !vectors && !constructor_vectors) return 2;
+    const auto defaults=base_unit_type_constructor_fields();
+    assert(defaults.raw_205 && !defaults.is_train && !defaults.crusher && !defaults.raw_bb0 &&
+           !defaults.raw_bb1 && defaults.speed_type==-1 && defaults.movement_zone==0);
+    if (constructor_vectors) {
+        std::cout<<int(defaults.raw_205)<<' '<<int(defaults.is_train)<<' '<<int(defaults.crusher)<<' '
+                 <<int(defaults.raw_bb0)<<' '<<int(defaults.raw_bb1)<<' '
+                 <<defaults.speed_type<<' '<<defaults.movement_zone<<'\n';
+        return 0;
+    }
     const std::vector<std::pair<std::string,std::string>> cases={
         {"","yes"},{"yes","no"},{"true","false"},{"1","0"},
         {"no","yes"},{"false","true"},{"0","1"},{"YeS","nO"},{"TrUe","FaLsE"},{"",""}};

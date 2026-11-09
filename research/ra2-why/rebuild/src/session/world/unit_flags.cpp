@@ -23,6 +23,10 @@ UnitFlagResult resolve(const std::optional<bool>& initial,const UnitFlagKey& key
     return {UnitFlagStatus::Unsupported,{}};
 }
 }
+BaseUnitTypeConstructorFields base_unit_type_constructor_fields() {
+    // Base 005D58CE, 006D9B40, and 0070A67F write these constructor fields.
+    return {true,false,false,false,false,-1,0};
+}
 BaseUnitFlagResults resolve_base_unit_flags(const BaseUnitFlagInput& input) {
     return {resolve(input.initial_is_train,input.is_train),resolve(input.initial_crusher,input.crusher)};
 }
