@@ -8,6 +8,12 @@ inline unsigned original_movement_zone_count(DriveEdition edition) {
     if (edition==DriveEdition::YurisRevenge) return 13;
     throw std::invalid_argument("original movement-zone edition is invalid");
 }
+// Static remap used by Foot retargeting: base 007A1200 / expansion 007E8BF0.
+inline unsigned original_retarget_movement_zone(DriveEdition edition,unsigned zone) {
+    constexpr unsigned remap[]={0,0,0,5,5,5,6,7,7,9,10,11,0};
+    if (zone>=original_movement_zone_count(edition)) throw std::invalid_argument("original retarget movement-zone index is invalid");
+    return remap[zone];
+}
 // Base 007E00C4 / expansion 0082A594. The first twelve rows match.
 inline unsigned original_movement_compatibility(DriveEdition edition,unsigned zone,unsigned category) {
     constexpr unsigned table[][8]={

@@ -24,6 +24,7 @@ FootPathResult original_unit_basic_path(const FootPathState& in,const FootPathIn
     FootPathResult out; out.state=in;
     try {
         auto state=in;
+        auto search_goal=input.goal;
         const auto append=require(input.append_offset,"Foot path append offset is unresolved");
         const auto mode=require(input.mark_mode,"Foot path mark mode is unresolved");
         if (append>24 || input.goal.x>511 || input.goal.y>511)
@@ -48,8 +49,7 @@ FootPathResult original_unit_basic_path(const FootPathState& in,const FootPathIn
         out.steps.push_back(FootPathStep::EnterGoal);
         if (!cb.enter_goal) throw Missing{"Foot goal-entry body is missing"};
         const auto entry=require(cb.enter_goal(input.goal),"Foot goal-entry result is unresolved");
-        if (entry==6 && *out.initial_distance>require(input.close_enough,"Foot CloseEnough is unresolved"))
-            throw Unsupported{"Foot goal retarget decisions are not recovered"};
+        bool retarget=entry==6 && *out.initial_distance>require(input.close_enough,"Foot CloseEnough is unresolved");
         if (entry==7) {
             out.steps.push_back(FootPathStep::GoalContents);
             if (!cb.goal_contents) throw Missing{"Foot goal Building lookup inputs are missing"};
@@ -57,9 +57,67 @@ FootPathResult original_unit_basic_path(const FootPathState& in,const FootPathIn
             // Base 004717B0 / expansion 0047C520 scans the original ground list only when enabled.
             if (require(contents.enabled,"Foot goal Building lookup flag is unresolved")) {
                 const auto kinds=require(contents.ordered_kinds,"Foot goal ground occupant order is unresolved");
-                for (const auto& kind:kinds)
-                    if (require(kind,"Foot goal occupant runtime type is unresolved")==6)
-                        throw Unsupported{"Foot Building-goal retarget decisions are not recovered"};
+                for (const auto& kind:kinds) {
+                    if (require(kind,"Foot goal occupant runtime type is unresolved")==6) { retarget=true; break; }
+                }
+            }
+        }
+        if (retarget) {
+            const auto type=require(input.retarget,"Foot retarget UnitType fields are unresolved");
+            const auto edition=require(type.edition,"Foot retarget edition is unresolved");
+            const auto zone=require(type.movement_zone,"Foot retarget MovementZone is unresolved");
+            if (zone<0) throw Unsupported{"Foot retarget MovementZone is outside the recovered table"};
+            const auto mapped=original_retarget_movement_zone(edition,static_cast<unsigned>(zone));
+            if (require(type.field_d2c,"Foot retarget Type +D2C/+AF5 is unresolved"))
+                throw Unsupported{"Foot retarget Type +D2C/+AF5 true branch is not recovered"};
+            out.steps.push_back(FootPathStep::RetargetBridgeLayer);
+            if (!cb.above_bridge) throw Missing{"Foot retarget actor layer getter is missing"};
+            const auto layer=require(cb.above_bridge(),"Foot retarget actor layer is unresolved");
+            const auto current=[&]() {
+                out.steps.push_back(FootPathStep::CurrentCell);
+                if (!cb.current_cell) throw Missing{"Foot retarget current-cell getter is missing"};
+                return require(cb.current_cell(),"Foot retarget current cell is unresolved");
+            };
+            const auto source=current();
+            const auto component_cell=current();
+            out.steps.push_back(FootPathStep::RetargetComponent);
+            if (!cb.retarget_component) throw Missing{"Foot retarget component lookup is missing"};
+            const auto component=require(cb.retarget_component(component_cell,mapped,layer),"Foot retarget component is unresolved");
+            const auto speed=require(type.speed_type,"Foot retarget SpeedType is unresolved");
+            out.steps.push_back(FootPathStep::NearestCell);
+            if (!cb.nearest_cell) throw Missing{"Foot nearest-cell search body is missing"};
+            const auto candidate=require(cb.nearest_cell({search_goal,source,speed,mapped,component,layer,edition}),"Foot nearest-cell search is unresolved");
+            bool use_candidate=true;
+            if (entry==6) {
+                const auto invalid=require(input.invalid_cell,"Foot invalid Cell sentinel is unresolved");
+                use_candidate=candidate.x!=invalid.x || candidate.y!=invalid.y;
+            }
+            if (use_candidate && (candidate.x>511 || candidate.y>511))
+                throw Unsupported{"Foot retarget candidate is outside the recovered map domain"};
+            if (use_candidate && entry==6) {
+                out.steps.push_back(FootPathStep::RetargetDistance);
+                const Coord center{candidate.x*256+128,candidate.y*256+128,0};
+                // Base 004C3314 compares with initial actor distance, not CloseEnough.
+                use_candidate=distance.between(center,goal,true)<*out.initial_distance;
+                if (use_candidate) {
+                    const auto bridge=[&](ra2map::Cell cell) {
+                        out.steps.push_back(FootPathStep::GoalBridge);
+                        if (!cb.goal_bridge) throw Missing{"Foot retarget Cell bridge getter is missing"};
+                        return require(cb.goal_bridge(cell),"Foot retarget Cell bridge flag is unresolved");
+                    };
+                    const auto goal_layer=bridge(search_goal),candidate_layer=bridge(candidate);
+                    out.steps.push_back(FootPathStep::EstimatePath);
+                    if (!cb.estimate_path) throw Missing{"Foot retarget path estimate body is missing"};
+                    const auto estimate=require(cb.estimate_path({candidate,search_goal,candidate_layer,goal_layer,-1}),"Foot retarget path estimate is unresolved");
+                    const auto gap=std::max(std::abs(int(candidate.x)-search_goal.x),std::abs(int(candidate.y)-search_goal.y));
+                    use_candidate=estimate<=gap+6;
+                }
+            }
+            if (use_candidate) {
+                out.steps.push_back(FootPathStep::RetargetDestination);
+                if (!cb.set_destination) throw Missing{"Foot retarget destination body is missing"};
+                (void)require(cb.set_destination(candidate,true),"Foot retarget destination body is unresolved");
+                search_goal=candidate;
             }
         }
         const auto mark=[&](bool inserted) {
@@ -71,7 +129,7 @@ FootPathResult original_unit_basic_path(const FootPathState& in,const FootPathIn
         if (!append) state.words[0]=-1;
         out.steps.push_back(FootPathStep::Find);
         if (!cb.find) throw Missing{"Foot goal search body is missing"};
-        const auto path=require(cb.find({input.goal,2000,append,mode}),"Foot goal search is unresolved");
+        const auto path=require(cb.find({search_goal,2000,append,mode}),"Foot goal search is unresolved");
         if (path.present && require(path.cost_key,"Foot path result cost key is unresolved")!=0) {
             const auto words=require(path.words,"Foot path result words are unresolved");
             if (words.size()>2000) throw Unsupported{"Foot path result exceeds its supplied direction storage"};
@@ -106,14 +164,14 @@ FootPathResult original_unit_basic_path(const FootPathState& in,const FootPathIn
             // The original reads actor coordinates after this virtual, not the earlier getter result.
             out.steps.push_back(FootPathStep::FailurePosition);
             const auto after_stop=require(cb.position(),"Foot position after locomotor stop is unresolved");
-            bool dispatch=std::max(std::abs(signed_cell(after_stop.x)-input.goal.x),std::abs(signed_cell(after_stop.y)-input.goal.y))>1;
+            bool dispatch=std::max(std::abs(signed_cell(after_stop.x)-search_goal.x),std::abs(signed_cell(after_stop.y)-search_goal.y))>1;
             if (!dispatch) {
                 out.steps.push_back(FootPathStep::FailureBridgeLayer);
                 if (!cb.above_bridge) throw Missing{"Foot actor bridge layer getter is missing"};
                 if (!require(cb.above_bridge(),"Foot actor bridge layer is unresolved")) {
                     out.steps.push_back(FootPathStep::GoalBridge);
                     if (!cb.goal_bridge) throw Missing{"Foot goal bridge flag getter is missing"};
-                    dispatch=require(cb.goal_bridge(input.goal),"Foot goal bridge flag is unresolved");
+                    dispatch=require(cb.goal_bridge(search_goal),"Foot goal bridge flag is unresolved");
                 }
             }
             if (dispatch) {

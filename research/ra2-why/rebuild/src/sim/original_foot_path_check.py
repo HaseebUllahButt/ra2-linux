@@ -204,13 +204,14 @@ def run(seed):
         for value in after_position: mix(value)
     return h
 
-total=2166136261
-seeds=range(8) if '--trace' in sys.argv else range(512)
-for seed in seeds:
-    digest=run(seed)
-    if '--vectors' in sys.argv: print(seed,f'{digest:08x}')
-    total=((total^digest)*16777619)&0xffffffff
-print(len(seeds),'original ordinary Foot path cases',f'{total:08x}',file=sys.stderr)
-if '--asymmetric' in sys.argv and '--trace' not in sys.argv:
-    assert all(axes), 'original vectors missed zero axes or opposite signs'
-    print('zero-X, zero-Y, opposite-sign cases:',*axes,file=sys.stderr)
+if __name__=='__main__':
+    total=2166136261
+    seeds=range(8) if '--trace' in sys.argv else range(512)
+    for seed in seeds:
+        digest=run(seed)
+        if '--vectors' in sys.argv: print(seed,f'{digest:08x}')
+        total=((total^digest)*16777619)&0xffffffff
+    print(len(seeds),'original ordinary Foot path cases',f'{total:08x}',file=sys.stderr)
+    if '--asymmetric' in sys.argv and '--trace' not in sys.argv:
+        assert all(axes), 'original vectors missed zero axes or opposite signs'
+        print('zero-X, zero-Y, opposite-sign cases:',*axes,file=sys.stderr)

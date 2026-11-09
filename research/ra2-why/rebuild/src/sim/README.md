@@ -1128,7 +1128,7 @@ Entry status 7 continues when the original goal-cell Building lookup proves empt
 `FootGoalContents` preserves the lookup-enable flag and original ordered ground occupants' runtime types.
 Base 004717B0 / expansion 0047C520 skips traversal when the flag is clear.
 When enabled, the native code checks each known type in order and stops at the first Building type 6.
-Unknown flags, links, or types remain NeedsInput. A Building reaches the still unsupported retarget branch.
+Unknown flags, links, or types remain NeedsInput. A Building reaches the bounded retarget branch below.
 
 A known null path updates the failure timer before stopping the locomotor.
 It writes the frame, retains signed source-Y minus goal-center-Y, and writes truncated `PathDelay * 900`.
@@ -1162,7 +1162,7 @@ That body must remain unresolved through this API. The tests do not prove that s
 
 Only Complete returns publishable queue state. Error results preserve the input state.
 Callbacks must use a private staged world because marking precedes later unresolved calls.
-Linked-object distance, train handling, retargeting, and linked-Unit propagation remain unsupported.
+Linked-object distance, train handling, and linked-Unit propagation remain unsupported.
 Unknown bridge state remains unknown. Terrain and overlay absence do not supply bridge flags.
 The called guard, mark, entry, and goal-search bodies remain separate dependencies.
 This module does not enable live goal commands or create missing staged-world state.
@@ -1192,4 +1192,41 @@ Some stop callbacks move the actor from a distant position to a nearby position.
 The initial raw Y delta must stay unchanged, while the later branch must read the new position.
 Vectors compare call order, destination, mission, owner bytes, global mode, actor position, queue, and raw fields.
 Both editions match hash FFDCED71. Compare with native `--distant-vectors`.
-The default native test runs all four sets and forty-six unresolved input, unsupported branch, and atomic-result checks.
+The four original native sets retain their hashes and callback-contract checks.
+
+## Bounded Foot retarget decisions
+
+Retargeting requires resolved UnitType MovementZone, SpeedType, and a false base +AF5 / expansion +D2C flag.
+The true flag branch calls base 0047C200 / expansion 00486FF0 and remains Unsupported.
+`original_retarget_movement_zone` preserves the table at base 007A1200 / expansion 007E8BF0.
+The table has twelve base entries and thirteen expansion entries.
+The wrapper reads the current cell twice, then queries the remapped movement component.
+`FootNearestQuery` preserves the original goal, source cell, SpeedType, component, remapped zone, and actor bridge layer.
+The original fixed nearest-cell arguments are 1,1,0,1,false,1,source,0.
+Expansion supplies one additional final zero. The query keeps its edition explicit.
+
+For entry status 6, the resolved invalid-Cell sentinel skips the candidate.
+Otherwise the candidate's planar center distance must be strictly less than the initial actor-to-goal distance.
+This comparison uses the initial distance, not Rules CloseEnough.
+The goal bridge flag is read before the candidate bridge flag.
+The resolved path estimate must be no greater than the maximum cell-axis gap plus six.
+The estimate query preserves override -1 for the false Type flag branch.
+For a Building at an entry-status-7 goal, the original skips both candidate filters.
+The bounded API accepts candidates within 0..511 and rejects other nonsentinel coordinates explicitly.
+It also rejects an out-of-domain status-7 candidate instead of guessing fallback Cell behavior.
+
+An accepted candidate calls the destination virtual before marking and searching.
+The later search receives that candidate as its goal.
+Raw timer fields retain the original Y delta calculated before retargeting and callbacks.
+Component lookup, nearest-cell search, path estimation, and destination bodies remain resolved callback dependencies.
+Their original addresses are 0054F8F0/0056D230, 005502E0/0056DC20, and 0042AA30/0042D170.
+The private-state and working-queue callback limits still apply. Live goal commands stay disabled.
+
+`original_foot_retarget_check.py executable [--base] --vectors` runs 512 full original calls per edition.
+It executes the actual movement-zone table, Cell Building traversal, distance comparisons, queue copy, and raw field writes.
+Building runtime kind, movement component, nearest-cell result, path estimate, and mutation bodies are supplied inputs.
+The cases include invalid candidates, equal-distance rejection, candidates beyond CloseEnough, estimate equality, and negative or maximal estimates.
+They also combine retargeting with null-path failure and compare its private destination, mission, owner, mode, and position changes.
+The base hash is D51E380B. The expansion hash is 22D0692F.
+Compare both with `test_foot_path.sh base_executable expansion_executable --retarget-vectors`.
+The default native test runs 5,120 vectors and sixty-eight missing-input, unsupported-branch, and private-publication checks.
