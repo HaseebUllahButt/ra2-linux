@@ -1,6 +1,7 @@
 #include "prototype_production.h"
 #include "prototype_tech.h"
 #include "build_time.h"
+#include "damage_runtime.h"
 #include "sim.h"
 #include "session/world/setup.h"
 #include <algorithm>
@@ -263,6 +264,38 @@ int main(int argc,char** argv) try {
     build(world,factories,catalog,player,"GAPILE",frame,false);
     place_building(world,factories,catalog,player,"GAPILE",frame,base);
     done(proto::tick(world,factories,catalog,++frame),"barracks power update");
+    // 00449290 -> 004498FD: construction finishes in Guard, enabling acquisition.
+    {
+        auto defense_world=world;
+        auto defense_factories=factories;
+        auto defense_frame=frame;
+        for (const auto* type:{"NAPOWR","NAHAND"}) {
+            build(defense_world,defense_factories,catalog,enemy,type,defense_frame,false);
+            place_building(defense_world,defense_factories,catalog,enemy,type,defense_frame,enemy_base);
+            done(proto::tick(defense_world,defense_factories,catalog,++defense_frame),"defense prerequisite power");
+        }
+        const auto gun=build(defense_world,defense_factories,catalog,enemy,"NALASR",defense_frame,false);
+        place_building(defense_world,defense_factories,catalog,enemy,"NALASR",defense_frame,enemy_base);
+        done(proto::tick(defense_world,defense_factories,catalog,++defense_frame),"defense power update");
+        require(actor(defense_world,gun).mission==5,"constructed defense stayed in Construction");
+        auto target=std::find_if(defense_world.entities.begin(),defense_world.entities.end(),[&](const auto& item) {
+            return item.house_id==player && item.kind==w::Kind::Unit && item.lifetime==w::Lifetime::Placed;
+        });
+        require(target!=defense_world.entities.end(),"defense target missing");
+        // Keep the target's live identity; move its aim point into weapon range.
+        target->position=actor(defense_world,gun).position;
+        target->position->x+=256;
+        target->collision_virtual_position=target->position;
+        target->locomotor_moving=false;
+        sim::PrototypeCombatRuntime combat(assets.rules(),assets.map_ini(),assets.art_ini(),std::string(argv[1])+"/game.exe");
+        bool fired=false;
+        for (int tick=0;tick<64 && !fired;++tick) {
+            const auto report=combat.tick(defense_world,++defense_frame);
+            for (const auto& event:report.events)
+                if (event.kind==sim::PrototypeCombatEventKind::Shot && event.source_id==gun) fired=true;
+        }
+        require(fired,"constructed defense did not acquire and fire");
+    }
     // A completed soldier must be abandoned when the last barracks is lost.
     {
         auto lost=world;
@@ -323,6 +356,7 @@ int main(int argc,char** argv) try {
     require(actor(world,infantry).kind==w::Kind::Infantry && actor(world,infantry).active==true &&
             actor(world,infantry).in_limbo==false && actor(world,infantry).cell,
             "infantry did not leave the barracks");
+    require(actor(world,infantry).mission==0,"factory infantry left without an idle mission");
     require_in_front(world,catalog,player,"GAPILE",actor(world,infantry));
     const auto foot=*actor(world,infantry).cell;
     require((*world.cells.at(std::uint32_t(foot.y)*512+foot.x).ground_occupancy_124&0x20)!=0,
