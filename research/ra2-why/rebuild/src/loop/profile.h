@@ -43,7 +43,9 @@ public:
     }
     ~Profile() { if (enabled_) report(); }
     bool enabled() const { return enabled_; }
-    void begin_frame(std::uint64_t frame) { frame_=frame; frame_ms_.fill(0); }
+    std::uint64_t frame() const { return frame_; }
+    bool in_frame() const { return in_frame_; }
+    void begin_frame(std::uint64_t frame) { in_frame_=true;frame_=frame; frame_ms_.fill(0); }
     void add(Phase phase, double ms, double cpu) {
         auto& stat = stats_[std::size_t(phase)];
         static const char* names[]={"update","movement","combat","economy","ai","production","tech",
@@ -96,6 +98,7 @@ private:
     std::array<Stat, std::size_t(Phase::Count)> stats_{};
     std::array<double,std::size_t(Phase::Count)> frame_ms_{};
     std::uint64_t frame_=0;
+    bool in_frame_=false;
 };
 
 inline Profile& instance() { static Profile profile; return profile; }
@@ -167,5 +170,14 @@ private:
     Clock::time_point start_;
     double cpu_start_=0;
 };
+
+// Optional first-use detail. Keep its logging outside measured work.
+inline void asset_event(const char* kind,const char* type,int first=-1,int second=-1) {
+    if(!enabled()||!std::getenv("RA2_BENCH_ASSETS"))return;
+    const Exclude logging;
+    std::fprintf(stderr,"RA2_BENCH cold %s frame=%llu kind=%s type=%s first=%d second=%d\n",
+        instance().in_frame()?"play":"startup",static_cast<unsigned long long>(instance().frame()),
+        kind,type,first,second);
+}
 
 } // namespace ra2::loop::profile

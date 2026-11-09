@@ -17,6 +17,7 @@ public:
     const VehicleSprite& draw(std::uint8_t map_facing);
     const VehicleSprite& draw(std::uint8_t hull_facing, std::uint8_t turret_facing);
 private:
+    std::string type_;
     struct Part { voxel::Model model; voxel::Animation animation; };
     Part hull_;
     std::optional<Part> turret_, barrel_;

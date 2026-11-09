@@ -1,4 +1,5 @@
 #include "vehicle_art.h"
+#include "../loop/profile.h"
 #include <algorithm>
 #include <stdexcept>
 
@@ -16,7 +17,7 @@ VehicleArt VehicleArt::load(const fs::MixFileSystem& files, const rules::IniFile
         throw std::runtime_error("Vehicle model is outside the verified flat tank set");
     if (!art.read_bool(image, "Voxel", false))
         throw std::runtime_error("Vehicle art does not select an original voxel model");
-    VehicleArt result;
+    VehicleArt result;result.type_=std::string(type);
     auto load_part = [&](const std::string& name) -> std::optional<Part> {
         // Original object-type art loader 005F8110 uses Image, ImageTUR,
         // and ImageBARL with paired VXL/HVA files. Keep HVA data unscaled.
@@ -50,6 +51,7 @@ const VehicleSprite& VehicleArt::draw(std::uint8_t facing, std::uint8_t turret_f
     const auto key = std::make_pair(facing, turret_facing);
     auto found = images_.find(key);
     if (found != images_.end()) return found->second;
+    loop::profile::asset_event("pose",type_.c_str(),facing,turret_facing);
     auto pose = voxel::vehicle_pose_from_map(facing);
     pose.turret_facing = std::uint16_t(turret_facing) << 8;
     pose.hull.model = &hull_.model;
