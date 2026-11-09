@@ -49,6 +49,11 @@ public:
     bool visible_now(std::uint32_t house, ra2map::Cell cell) const;
     // Objects in the cell show to the house (revealed, or visible_now with fog).
     bool objects_shown(std::uint32_t house, ra2map::Cell cell) const;
+    // The same test for a world coordinate (leptons, 256 per cell). Use it to
+    // wrap BattleEffects::Project: return no point for a hidden coordinate.
+    // BattleEffects drops an effect when either end has no point, so hidden
+    // attackers lose their flash and tracer, and hidden targets their hit.
+    bool coord_shown(std::uint32_t house, sim::Coord coord) const;
 
     // The house may see, select, hover and target this entity. Own entities
     // always show. Others show when any footprint cell shows its objects.

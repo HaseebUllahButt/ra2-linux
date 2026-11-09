@@ -58,6 +58,13 @@ bool BattleShroud::objects_shown(std::uint32_t house, ra2map::Cell cell) const {
     return fog_of_war_ ? visible_now(house, cell) : revealed(house, cell);
 }
 
+bool BattleShroud::coord_shown(std::uint32_t house, sim::Coord coord) const {
+    if (coord.x < 0 || coord.y < 0) return false;
+    const auto x = coord.x / 256, y = coord.y / 256;
+    if (x >= grid_size || y >= grid_size) return false;
+    return objects_shown(house, to_cell(x, y));
+}
+
 bool BattleShroud::entity_visible(std::uint32_t house, const Entity& entity) const {
     if (!placed(entity)) return false;
     if (house != 0 && entity.house_id == house) return true;

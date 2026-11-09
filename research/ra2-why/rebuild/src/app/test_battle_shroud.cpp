@@ -72,6 +72,12 @@ void visibility() {
     require(shroud.revealed(1, cell(54, 50)) && !shroud.revealed(1, cell(55, 50)),
         "sight four ends at four cells");
 
+    // Effect coordinates use the same test: 256 leptons per cell.
+    require(shroud.coord_shown(1, sim::Coord{53 * 256 + 128, 50 * 256 + 128, 0}),
+        "coordinate in sight shows");
+    require(!shroud.coord_shown(1, sim::Coord{90 * 256 + 128, 90 * 256 + 128, 0}),
+        "coordinate in the black hides");
+    require(!shroud.coord_shown(1, sim::Coord{-5, 10, 0}), "negative coordinate hides");
     // Base skirmish has no fog: explored ground keeps showing objects.
     world.entities[0].cell = cell(60, 60);
     shroud.update(world, rules);
