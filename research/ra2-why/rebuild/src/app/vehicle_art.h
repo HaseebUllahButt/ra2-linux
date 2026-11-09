@@ -13,7 +13,7 @@ struct VehicleSprite { gfx::RgbaImage image; int left, top; };
 class VehicleArt {
 public:
     static VehicleArt load(const fs::MixFileSystem& files, const rules::IniFile& art,
-                            const rules::IniFile& rules, std::string_view type);
+                            const rules::IniFile& rules, std::string_view type, bool prototype = false);
     const VehicleSprite& draw(std::uint8_t map_facing);
     const VehicleSprite& draw(std::uint8_t hull_facing, std::uint8_t turret_facing);
 private:

@@ -25,7 +25,8 @@ class Scene {
 public:
     Scene(const fs::MixFileSystem& files, rules::IniFile art, rules::IniFile rules,
           const render::MapGeometry& geometry, const sim::TerrainCells& terrain,
-          std::string_view theater, std::vector<ra2map::TerrainObject> objects = {});
+          std::string_view theater, std::vector<ra2map::TerrainObject> objects = {},
+          bool prototype = false);
     SceneFrame render(const render::Bitmap& terrain, const sim::Snapshot& state,
                       render::Rectangle viewport);
     actors::ScreenPoint map_anchor(const sim::Entity& entity) const;
@@ -44,5 +45,6 @@ private:
     std::map<std::pair<actors::Kind, std::string>, Asset> assets_;
     std::map<std::string, VehicleArt> vehicles_;
     std::vector<ra2map::TerrainObject> terrain_objects_;
+    bool prototype_ = false;
 };
 } // namespace ra2::app

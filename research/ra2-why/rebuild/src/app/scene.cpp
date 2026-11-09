@@ -62,13 +62,13 @@ rules::IniFile overlay_rules(const rules::IniFile& base, const rules::IniFile& m
 
 Scene::Scene(const fs::MixFileSystem& files, rules::IniFile art, rules::IniFile rules,
              const render::MapGeometry& geometry, const sim::TerrainCells& terrain,
-             std::string_view theater, std::vector<ra2map::TerrainObject> objects)
+             std::string_view theater, std::vector<ra2map::TerrainObject> objects, bool prototype)
     : files_(files), art_(std::move(art)), rules_(std::move(rules)),
       // Original tile caller 006D7F20 projects cell*256 then subtracts 30
       // from X. Align actor projection with render_minimap's diamond origin.
       map_camera_{geometry.local.x * 60 - geometry.size.width * 30,
                   geometry.local.y * 30 + (geometry.size.width + 1) * 15}, theater_(0),
-      terrain_objects_(std::move(objects)) {
+      terrain_objects_(std::move(objects)), prototype_(prototype) {
     for (const auto& entry : theaters) if (theater == entry.name) {
         theater_ = entry.code;
         const auto bytes = files.read_file(entry.palette);
@@ -100,7 +100,7 @@ actors::WorldPosition Scene::position(const sim::Entity& entity) const {
         return actors::building_draw_position(entity.cell, *cell.floor_world_height);
     if (entity.kind == sim::Kind::Unit) {
         if (!entity.position) throw std::runtime_error("Vehicle world position is unresolved");
-        if (*cell.ramp_index != 0) throw std::runtime_error("Vehicle slope drawing is unresolved");
+        if (*cell.ramp_index != 0 && !prototype_) throw std::runtime_error("Vehicle slope drawing is unresolved");
         return {entity.position->x, entity.position->y, entity.position->z};
     }
     if (entity.kind != sim::Kind::Infantry)
@@ -175,7 +175,7 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
             anchor.y -= viewport.y;
             if (draw.entity && draw.entity->kind == sim::Kind::Unit) {
                 const auto& entity = *draw.entity;
-                if (entity.map_health != 256)
+                if (entity.map_health != 256 && !prototype_)
                     throw std::runtime_error("Damaged vehicle drawing states are unresolved");
                 if (entity.facing < 0 || entity.facing > 255)
                     throw std::runtime_error("Vehicle map facing is outside its original byte range");
@@ -185,7 +185,7 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
                     throw std::runtime_error("Vehicle turret facing is outside its original byte range");
                 auto asset = vehicles_.find(entity.type);
                 if (asset == vehicles_.end())
-                    asset = vehicles_.emplace(entity.type, VehicleArt::load(files_, art_, rules_, entity.type)).first;
+                    asset = vehicles_.emplace(entity.type, VehicleArt::load(files_, art_, rules_, entity.type, prototype_)).first;
                 const auto& sprite = asset->second.draw(static_cast<std::uint8_t>(entity.facing),
                     static_cast<std::uint8_t>(*entity.turret_facing));
                 result.drawn += blit(result.image, sprite.image,
@@ -204,7 +204,7 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
             auto& asset = found->second;
             // Only stationary, full-health main images are established here.
             // Gameplay transitions and damaged building frames remain separate.
-            if (draw.entity && draw.entity->map_health != 256)
+            if (draw.entity && draw.entity->map_health != 256 && !prototype_)
                 throw std::runtime_error("Damaged actor frame selection is unresolved");
             const auto frame = kind == actors::Kind::Infantry ?
                 asset.art.frame_for_map("Ready", static_cast<std::uint8_t>(draw.entity->facing), 0) :

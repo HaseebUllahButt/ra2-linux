@@ -229,7 +229,8 @@ std::vector<Menu::Button> Menu::buttons() const {
         const bool enabled = (page() == Page::Main && (id == 1667 || id == 1006)) ||
                              (page() == Page::SinglePlayer && (id == 1401 || id == 1670)) ||
                              (page() == Page::Skirmish && !choosing_map_ &&
-                              (id == 1472 || (id==1450 && !maps_.empty() && !modes_.empty()))) ||
+                              (id == 1472 || (id==1559 && prototype_start_) ||
+                               (id==1450 && !maps_.empty() && !modes_.empty()))) ||
                              (choosing_map_ && (id==1472 || (id==1733 && pending_map_ && pending_mode_)));
         result.push_back({id, {644, y, 156, 42}, control.label, enabled});
     }
@@ -529,6 +530,8 @@ Action Menu::pointer_up(int x, int y) {
         hovered_.reset();
         return Action::None;
     }
+    if (prototype_start_ && page()==Page::Skirmish && *activated==SkirmishControls::start)
+        return Action::StartMatch;
     auto result = navigation_.activate(*activated);
     if (result == Action::PageChanged) hovered_.reset();
     return result;

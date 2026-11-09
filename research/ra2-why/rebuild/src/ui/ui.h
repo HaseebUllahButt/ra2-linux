@@ -24,7 +24,7 @@ struct Control {
 };
 enum class Page { Main, SinglePlayer, Skirmish };
 // Quit is returned after confirmation.
-enum class Action { None, PageChanged, SetupChanged, Quit };
+enum class Action { None, PageChanged, SetupChanged, Quit, StartMatch };
 enum class Key { Escape };
 enum class Opponent { Closed = 1, Hard = 4, Medium = 5, Easy = 6 };
 struct SkirmishOpponentChoice {
@@ -154,6 +154,7 @@ public:
     bool choosing_map() const noexcept { return choosing_map_; }
     const SkirmishSetup& skirmish_setup() const noexcept { return setup_; }
     const SkirmishSetup& setup() const noexcept { return setup_; }
+    void enable_prototype_start(bool enabled) noexcept { prototype_start_=enabled; }
     gfx::RgbaImage render() const;
     void pointer_move(int x, int y);
     void pointer_down(int x, int y);
@@ -196,6 +197,7 @@ private:
     std::optional<std::uint32_t> held_map_list_;
     std::optional<std::size_t> held_map_row_;
     bool credit_changed_ = false;
+    bool prototype_start_ = false;
     SkirmishSetup setup_;
     std::vector<SkirmishCountry> countries_;
     std::vector<SkirmishColor> colors_;

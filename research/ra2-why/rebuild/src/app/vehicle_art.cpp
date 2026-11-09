@@ -4,13 +4,15 @@
 
 namespace ra2::app {
 VehicleArt VehicleArt::load(const fs::MixFileSystem& files, const rules::IniFile& art,
-                            const rules::IniFile& rules, std::string_view type) {
+                            const rules::IniFile& rules, std::string_view type, bool prototype) {
     if (files.variant() != fs::GameVariant::RedAlert2)
         throw std::runtime_error("Expansion vehicle scene lighting is unresolved");
     const auto image = rules.read_string(type, "Image", type);
     auto upper = image;
     for (auto& c : upper) if (c >= 'a' && c <= 'z') c = char(c - 'a' + 'A');
-    if (upper != "HTNK" && upper != "MTNK" && upper != "4TNK")
+    // TODO-ORIGINAL: recover each model's locomotor pose, damage and lighting.
+    // The playable path uses the same flat voxel pose for other base vehicles.
+    if (!prototype && upper != "HTNK" && upper != "MTNK" && upper != "4TNK")
         throw std::runtime_error("Vehicle model is outside the verified flat tank set");
     if (!art.read_bool(image, "Voxel", false))
         throw std::runtime_error("Vehicle art does not select an original voxel model");
