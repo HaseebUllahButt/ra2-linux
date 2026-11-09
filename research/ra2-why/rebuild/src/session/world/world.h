@@ -17,6 +17,8 @@ enum class Lifetime { Created, Placed, Destroyed };
 enum class Layer { Ground, Bridge };
 enum class CreatedKind { House, Entity };
 enum class HouseRole { Player, Neutral, Special };
+// Only a completed original scenario may enter the live runtime.
+enum class SetupProgress { Unknown, PackedMapRead, Complete };
 struct CreatedObject { CreatedKind kind; std::uint32_t id; };
 struct House {
     std::uint32_t id=0;
@@ -45,14 +47,7 @@ struct Entity {
     std::string type;
     std::optional<sim::Coord> position;
     std::optional<ra2map::Cell> cell;
-    std::optional<std::int32_t> resolved_hp, maximum_hp, hull_facing, turret_facing;
-    // These combat fields remain empty until their original load phase resolves.
-    std::optional<bool> active, in_limbo, collision_eligible, has_trigger;
-    std::optional<sim::Coord> collision_virtual_position;
-    // Zero is no target; an empty optional is unresolved.
-    std::optional<std::uint32_t> target_id;
-    // Base Techno +244 and +24C. The intervening +248 is unresolved.
-    std::optional<std::int32_t> weapon_timer_start_frame, weapon_timer_duration;
+    std::optional<std::int32_t> resolved_hp, hull_facing, turret_facing;
     std::optional<double> threat_field_428, resolved_threat;
     std::optional<std::int32_t> original_type_index;
     std::optional<bool> excluded_from_house_tracking;
@@ -66,6 +61,14 @@ struct Entity {
     std::optional<sim::CoarseOccupantState> category;
     std::optional<BaseUnitProfile> base_profile;
     bool constructor_complete=false;
+    // Combat fields remain empty until their original load phase resolves.
+    std::optional<std::int32_t> maximum_hp;
+    std::optional<bool> active, in_limbo, collision_eligible, has_trigger;
+    std::optional<sim::Coord> collision_virtual_position;
+    // Zero is no target; an empty optional is unresolved.
+    std::optional<std::uint32_t> target_id;
+    // Base Techno +244 and +24C. The intervening +248 is unresolved.
+    std::optional<std::int32_t> weapon_timer_start_frame, weapon_timer_duration;
 };
 struct CellState {
     std::optional<bool> allocated; // The original allocated Cell, not the fallback receiver.
@@ -81,7 +84,6 @@ struct CellState {
     std::optional<bool> cell_flag_20000;
     // Base 004710B5 clears this byte. Unit entry 00703087 reads its bits.
     std::optional<std::uint8_t> ground_occupancy_124;
-    std::optional<std::uint8_t> cell_field_122, bridge_occupancy_128;
     std::optional<bool> cell_flag_100;   // Base Cell +140 bit 100.
     std::optional<bool> cell_flag_40000; // Base Cell +140 bit 40000.
     std::optional<bool> cell_flag_200;   // Separate Cell +140 bit 200.
@@ -89,8 +91,9 @@ struct CellState {
     // Base Cell +54/+58 and signed +116. Constructors set -1, but later
     // state is not proved. Only +116 is known to index the TubeClass vector.
     std::optional<std::int32_t> cell_field_54, cell_field_58;
-    std::optional<std::int32_t> wall_owner;
     std::optional<std::int16_t> tube_field_116;
+    std::optional<std::uint8_t> cell_field_122, bridge_occupancy_128;
+    std::optional<std::int32_t> wall_owner;
 };
 // An owning snapshot. IDs use zero as null. Original creation order does not
 // depend on the storage order of houses and entities. The shared next field is
@@ -110,6 +113,9 @@ struct Snapshot {
     std::optional<std::int32_t> session_field_838;
     std::optional<std::int32_t> tube_vector_count;
     sim::RandomState random;
+    SetupProgress setup_progress=SetupProgress::Unknown;
+    // Original map iteration order, expressed as y*512+x. Empty means unknown.
+    std::optional<std::vector<std::uint32_t>> cell_order;
 };
 enum class PlacementResult { Placed, Blocked, Unresolved };
 // Checks every head and shared next chain. Invalid and cyclic snapshots fail.
