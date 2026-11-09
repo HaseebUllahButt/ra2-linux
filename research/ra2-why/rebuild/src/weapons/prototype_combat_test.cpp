@@ -3,7 +3,9 @@
 #include <sim/damage_runtime.h>
 #include <weapons/detonation.h>
 #include <weapons/fire_timer.h>
+#include <array>
 #include <iostream>
+#include <vector>
 #include <stdexcept>
 #include <string_view>
 
@@ -66,8 +68,9 @@ void tank_test(const rules::IniFile& rules,const rules::IniFile& art,const std::
               a.entities[0].weapon_timer_start_frame==b.entities[0].weapon_timer_start_frame &&
               a.entities[0].weapon_timer_duration==b.entities[0].weapon_timer_duration,"replay state differs");
         same_rng(a.random,b.random);
-        if (frame==0) {
-            check(r.fired==1 && a.entities[0].weapon_timer_start_frame==0 &&
+        if (frame<11) check(r.fired==0 && !a.random.first,"tank fired before its turret turned");
+        if (frame==11) {
+            check(r.fired==1 && a.entities[0].weapon_timer_start_frame==11 &&
                   a.entities[0].weapon_timer_duration==67,"real 120mm reload");
             same_rng(a.random,oracle.state());
         }
@@ -159,7 +162,7 @@ void yard_volley_test(const rules::IniFile& rules,const rules::IniFile& art,cons
     for (unsigned id : {4u,5u}) { auto tank=w.entities.front(); tank.id=id; w.entities.push_back(tank); }
     sim::PrototypeCombatRuntime combat(rules,map,art,exe);
     for (unsigned id : {1u,4u,5u}) check(combat.attack(w,id,2),"Rhino yard order rejected");
-    unsigned first_impact=0,death=0; std::size_t shots=0;
+    unsigned first_impact=0,death=0,first_shot=0; std::size_t shots=0;
     for (unsigned frame=0;frame<3000;++frame) {
         const auto result=combat.tick(w,frame);
         check(result.unresolved.empty(),"Rhino yard volley unresolved");
@@ -182,12 +185,16 @@ void yard_volley_test(const rules::IniFile& rules,const rules::IniFile& art,cons
         }
         check(recorded_shots==result.fired && recorded_deaths==result.destroyed,
               "shot or death diagnostic is missing");
+        if (result.fired && !shots) first_shot=frame;
         shots+=result.fired;
         if (result.impacts && !first_impact) first_impact=frame;
         if (result.destroyed) { death=frame; break; }
     }
-    check(first_impact==11 && death==406 && shots==21,"yard volley timing or shot count changed");
-    std::cout<<"Three HTNK against "<<yard<<" at four cells: first fire=0 first impact="<<first_impact
+    // Base 004B8A30/004B8BE0 with HTNK ROT=5: the turret turns 1280 raw
+    // steps per frame from north to east and 00704C00 lets it fire within
+    // 2048 raw steps, at frame 11. Before turret turning it fired at frame 0.
+    check(first_shot==11 && first_impact==22 && death==417 && shots==21,"yard volley timing or shot count changed");
+    std::cout<<"Three HTNK against "<<yard<<" at four cells: first fire="<<first_shot<<" first impact="<<first_impact
              <<" yard death="<<death<<" shots="<<shots<<'\n';
 }
 void idle_defense_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
@@ -221,7 +228,105 @@ void idle_defense_test(const rules::IniFile& rules,const rules::IniFile& art,con
     sim::PrototypeCombatRuntime guard(rules,map,art,exe);
     check(guard.tick(tank,0).fired==0,"moving tank acquired a target");
     tank.entities[0].locomotor_moving=false;
-    check(guard.tick(tank,1).fired==1,"idle tank did not defend");
+    // The turret starts north and the enemy is east: it turns first.
+    unsigned defended=0;
+    for (unsigned frame=1;frame<40 && !defended;++frame) if (guard.tick(tank,frame).fired) defended=frame;
+    check(defended==12,"idle tank did not defend after its turret turned");
+}
+// Base 004B8A30/004B8BE0 turret turning and 00704C00 fire facing check.
+void turret_turn_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+    rules::IniFile map;
+    auto w=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400);
+    sim::PrototypeCombatRuntime combat(rules,map,art,exe);
+    check(combat.attack(w,1,2),"turret test attack rejected");
+    // The original direction to the east target is 16383 raw steps. ROT=5
+    // gives 16383/1280=12 timer frames and a step of 16383/12=1365, so frame 0
+    // already shows 3 steps of turn (Current divides before it multiplies).
+    const std::array<std::pair<unsigned,std::uint16_t>,4> expected{{{0,3},{6,8193},{10,13653},{11,15018}}};
+    std::size_t next=0;
+    for (unsigned frame=0;frame<=12;++frame) {
+        const auto r=combat.tick(w,frame);
+        check(r.unresolved.empty(),"turret test unresolved");
+        if (next<expected.size() && expected[next].first==frame) {
+            check(w.entities[0].turret_facing_raw==expected[next].second,"original turret interpolation");
+            ++next;
+        }
+        check(r.fired==(frame==11?1u:0u),"turret fired outside the original facing tolerance");
+    }
+    check(w.entities[0].turret_facing_raw==16383 && w.entities[0].turret_facing==63,"turret did not finish the turn");
+    // A turret already on target fires on the order frame.
+    auto ready=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400);
+    ready.entities[0].turret_facing_raw=16384;
+    sim::PrototypeCombatRuntime aligned(rules,map,art,exe);
+    check(aligned.attack(ready,1,2) && aligned.tick(ready,0).fired==1,"aligned turret waited");
+}
+// Base 006C9C00 burst branch and the 006CB2D9..006CB2F3 burst count.
+void burst_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+    const auto shots=[&](const char* text,std::vector<unsigned>& frames,std::vector<int>& indices) {
+        rules::IniFile map;map.parse(text);
+        auto w=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,4000);
+        w.entities[0].turret_facing_raw=16384;
+        sim::PrototypeCombatRuntime combat(rules,map,art,exe);
+        check(combat.attack(w,1,2),"burst test attack rejected");
+        for (unsigned frame=0;frame<150;++frame) {
+            const auto r=combat.tick(w,frame);
+            check(r.unresolved.empty(),"burst test unresolved");
+            if (r.fired) {frames.push_back(frame);indices.push_back(*w.entities[0].burst_index);}
+        }
+        return w;
+    };
+    std::vector<unsigned> frames;std::vector<int> indices;
+    shots("[120mm]\nBurst=2\n",frames,indices);
+    sim::Random oracle(0);
+    const int gap=oracle.ranged(3,5);
+    const int reload=weapons::base_single_shot_unit_delay({65,1,false,false,false,false,1},oracle);
+    check(frames.size()>=3 && frames[0]==0 && frames[1]==unsigned(gap) &&
+          frames[2]==unsigned(gap+reload) && indices[0]==1 && indices[1]==0,"original Random(3,5) burst delay");
+    frames.clear();indices.clear();
+    shots("[120mm]\nBurst=2\n[HTNK]\nBurstDelay0=7\n",frames,indices);
+    sim::Random fixed(0);
+    const int fixed_reload=weapons::base_single_shot_unit_delay({65,1,false,false,false,false,1},fixed);
+    check(frames.size()>=3 && frames[1]==7 && frames[2]==unsigned(7+fixed_reload),"Unit BurstDelay0");
+}
+// Oracle duels at middle speed (reference/REFERENCE.md). Returns the
+// impact frames until the target dies.
+std::vector<unsigned> duel(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe,
+                           const char* shooter,world::Kind shooter_kind,const char* victim,world::Kind victim_kind,int cells) {
+    rules::IniFile map;
+    auto w=make_world(shooter,victim,shooter_kind,victim_kind,rules.read_integer(shooter,"Strength"),
+                      rules.read_integer(victim,"Strength"));
+    w.entities[1].position=sim::Coord{(50+cells)*256+128,50*256+128,0};
+    w.entities[1].cell=ra2map::Cell{std::uint16_t(50+cells),50};
+    w.entities[1].collision_virtual_position=w.entities[1].position;
+    w.cells.at(50*512+54).heads->ground_head=0;w.cells.at(50*512+50+cells).heads->ground_head=2;
+    sim::PrototypeCombatRuntime combat(rules,map,art,exe);
+    check(combat.attack(w,1,2),"duel attack rejected");
+    std::vector<unsigned> hits;
+    for (unsigned frame=0;frame<3000;++frame) {
+        const auto r=combat.tick(w,frame);
+        check(r.unresolved.empty(),"duel unresolved");
+        for (const auto& e:r.events) if (e.kind==sim::PrototypeCombatEventKind::Damage && e.hp_after<e.hp_before) hits.push_back(frame);
+        if (r.destroyed) break;
+    }
+    std::cout<<shooter<<" vs "<<victim<<": hits="<<hits.size();
+    if (hits.size()>1) std::cout<<" mean gap="<<double(hits.back()-hits.front())/(hits.size()-1)<<" frames";
+    std::cout<<" kill="<<(hits.empty()?0:hits.back())<<" frames\n";
+    return hits;
+}
+void oracle_duel_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+    // 20.7 frames/s. Grizzly 5 hits 2.93 s apart (60.7 frames), Rhino 5 hits
+    // 3.19 s apart (66.0 frames), GI ~12 hits 1.06 s apart (21.9 frames).
+    const auto gap=[](const std::vector<unsigned>& h){return double(h.back()-h.front())/(h.size()-1);};
+    const auto mtnk=duel(rules,art,exe,"MTNK",world::Kind::Unit,"MTNK",world::Kind::Unit,4);
+    check(mtnk.size()==5 && gap(mtnk)>=59 && gap(mtnk)<=63,"Grizzly duel differs from the original");
+    const auto htnk=duel(rules,art,exe,"HTNK",world::Kind::Unit,"HTNK",world::Kind::Unit,4);
+    check(htnk.size()==5 && gap(htnk)>=64 && gap(htnk)<=68,"Rhino duel differs from the original");
+    const auto gi=duel(rules,art,exe,"E1",world::Kind::Infantry,"E1",world::Kind::Infantry,2);
+    // SA ProneDamage=70%: the first hit is 15, then the prone GI takes 10.
+    check(gi.size()==12 && gap(gi)>=20 && gap(gi)<=24,"GI duel differs from the original");
+    // Pillbox vs GI: 4 bursts about 1.2 s (25 frames) apart in the original.
+    const auto pill=duel(rules,art,exe,"GAPILL",world::Kind::Structure,"E1",world::Kind::Infantry,2);
+    check(pill.size()==4 && gap(pill)>=24 && gap(pill)<=29,"Pillbox duel differs from the original");
 }
 void structure_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
     rules::IniFile map;
@@ -258,6 +363,9 @@ int main(int argc,char** argv) {
         infantry_test(rules,art,std::string(argv[1])+"/game.exe");
         cyclic_link_test(rules,art,std::string(argv[1])+"/game.exe");
         structure_test(rules,art,std::string(argv[1])+"/game.exe");
+        turret_turn_test(rules,art,std::string(argv[1])+"/game.exe");
+        burst_test(rules,art,std::string(argv[1])+"/game.exe");
+        oracle_duel_test(rules,art,std::string(argv[1])+"/game.exe");
         overlay_and_range_test(rules,art,std::string(argv[1])+"/game.exe");
         std::cout<<"Prototype tank, infantry, and structure combat replay passes\n";return 0;
     } catch (const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}

@@ -72,7 +72,43 @@ void check_direction_and_distance() {
 }
 }
 
+// Base FacingClass 004B8A30/004B8BE0/004B8C90/004B8E90 and the UnitClass
+// facing tolerance at 00704E2D..00704E8E.
+void check_base_facing() {
+    using namespace ra2::sim;
+    require(base_facing_rot(5)==1280 && base_facing_rot(127)==0x7f00 && base_facing_rot(300)==0x7f00,
+            "Set_ROT clamps at 127 and shifts by eight bits");
+    require(base_facing_rot(-1)==-256, "a negative rate keeps its low byte");
+    BaseFacing f; f.rot=base_facing_rot(5);
+    base_facing_set_current(f, 0, 100);
+    require(!base_facing_rotating(f, 100) && base_facing_current(f, 100)==0, "Set_Current stops the turn");
+    require(!base_facing_set_desired(f, 0, 100), "an equal desired facing is ignored");
+    require(base_facing_set_desired(f, 16383, 100) && f.timer_duration==12, "turn length is |diff|/ROT");
+    require(base_facing_current(f, 100)==3 && base_facing_current(f, 106)==8193 &&
+            base_facing_current(f, 112)==16383, "Current divides before it multiplies");
+    require(base_facing_rotating(f, 111) && !base_facing_rotating(f, 112), "Is_Rotating follows the timer");
+    // A new desired facing mid-turn starts from the present facing.
+    require(base_facing_set_desired(f, 0, 106) && f.start==8193 && f.timer_duration==6, "retarget mid-turn");
+    // A turn across north takes the short way.
+    base_facing_set_current(f, 65000, 0);
+    require(base_facing_set_desired(f, 500, 0) && f.timer_duration==(1036/1280), "wrap across north");
+    BaseFacing still; still.rot=0;
+    require(base_facing_set_desired(still, 9000, 0) && base_facing_current(still, 0)==9000, "ROT zero snaps");
+    require(base_unit_facing_ready(0, 2048, false) && !base_unit_facing_ready(0, 2049, false) &&
+            base_unit_facing_ready(65535-4095, 0, true) && !base_unit_facing_ready(0, 4097, true),
+            "fire facing tolerance is 8 or 16 facings");
+    const std::int32_t none[4]={-1,-1,-1,-1}, set[4]={7,-1,-1,-1};
+    require(!base_burst_delay(1, 1, true, none).in_burst, "Burst=1 uses ROF");
+    const auto random=base_burst_delay(1, 2, true, none);
+    require(random.in_burst && random.needs_random, "burst gap without BurstDelay is Random(3,5)");
+    const auto fixed=base_burst_delay(1, 2, true, set);
+    require(fixed.in_burst && !fixed.needs_random && fixed.delay==7, "Unit BurstDelay0");
+    require(base_burst_delay(1, 2, false, set).needs_random, "BurstDelay is for Units only");
+    require(!base_burst_delay(2, 2, true, set).in_burst, "finished burst uses ROF");
+}
+
 int main() try {
+    check_base_facing();
     check_facing_difference();
     check_aim();
     check_ready_to_fire();
