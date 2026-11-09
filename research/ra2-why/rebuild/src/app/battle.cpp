@@ -1174,7 +1174,7 @@ int run_prototype_battle(const BattleOptions& requested) {
         if(const auto* speed=std::getenv("RA2_AI_OPENING_SPEED"))args.setup.game_speed=std::stoi(speed);
         if(!args.headless || !args.autoplay)throw std::runtime_error("Opening check needs headless autoplay");
     }
-    auto assets=w::BaseBattleAssets::load(args.game_directory,args.map);
+    auto assets=w::BaseBattleAssets::load(args.game_directory,args.map,args.setup.map_archive.value_or(""));
     // Merge the rules while the world is set up. Both only read the loaded
     // rules; overlay_rules keeps the result for the Battle's own request.
     auto rules_job=std::async(std::launch::async,[&]{
@@ -1216,7 +1216,9 @@ int run_prototype_battle(const BattleOptions& requested) {
     auto terrain_job=std::async(std::launch::async,[&]{
         return render::render_minimap(initialized,geometry,assets.theater(),render::TileIndexSpace::LiveCell);
     });
-    fs::MixFileSystem files(args.game_directory);files.mount_language(fs::GameVariant::RedAlert2);
+    fs::MixFileSystem files(args.game_directory);
+    if(args.setup.map_archive && !args.setup.map_archive->empty())files.mount(*args.setup.map_archive);
+    files.mount_language(fs::GameVariant::RedAlert2);
     files.bootstrap(fs::GameVariant::RedAlert2);files.mount_overlays();files.mount_resources();
     auto scene_art=render::TheaterArt::load(files,assets.map_ini().read_string("Map","Theater"));
     (void)scene_art;

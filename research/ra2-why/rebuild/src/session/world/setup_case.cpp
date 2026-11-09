@@ -305,5 +305,26 @@ int main(int argc,char** argv) {
     try { (void)BaseBattleAssets::load(argv[1],"missing-battle-map.map"); }
     catch (const std::runtime_error&) { missing=true; }
     assert(missing);
+    if(std::filesystem::is_regular_file(std::filesystem::path(argv[1])/"Round.mmx")) {
+        auto round=BaseBattleAssets::load(argv[1],"Round.MAP","Round.mmx");
+        assert(round.map_ini().read_string("Map","Theater")=="SNOW");
+        assert(round.geometry().width==68 && round.geometry().height==78);
+        assert(round.read_asset("Round.MAP"));
+        PrototypeBattleSetup custom;
+        custom.players={{"Player","Americans",10000,0,-1,10,true},{"Computer","Russians",10000,1,-1,10,false}};
+        const auto started=prototype_battle(round,custom,sim::Random(42).state());
+        assert(started && validate(started->snapshot));
+        bool wrong_entry=false;
+        try {(void)BaseBattleAssets::load(argv[1],"missing.MAP","Round.mmx");}
+        catch(const std::runtime_error&){wrong_entry=true;}
+        assert(wrong_entry);
+        std::cout<<"Roundhouse Kick loads from its MMX and starts a valid battle\n";
+    }
+    for(const auto& archive:{"../Round.mmx","Round.yro"}) {
+        bool invalid_archive=false;
+        try {(void)BaseBattleAssets::load(argv[1],"MP02T2.MAP",archive);}
+        catch(const std::invalid_argument&){invalid_archive=true;}
+        assert(invalid_archive);
+    }
     std::cout<<"Base Battle assets and house constructor boundary passed; later phases remain unresolved\n";
 }

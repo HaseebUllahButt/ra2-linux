@@ -128,6 +128,18 @@ int main(int argc,char** argv) {
     default_menu.configure_maps(base_maps,base_modes);
     assert(default_menu.page()==ui::Page::Main);
     assert(default_menu.setup().game_mode==1 && default_menu.setup().map_filename=="MP02T2.MAP");
+    auto fallback_maps=base_maps;
+    for(auto& map:fallback_maps)if(map.filename=="MP02T2.MAP")map.available=false;
+    default_menu.configure_maps(fallback_maps,base_modes);
+    const auto fallback=std::find_if(fallback_maps.begin(),fallback_maps.end(),[&](const auto& map) {
+        return map.filename==default_menu.setup().map_filename && map.source_archive==default_menu.setup().map_archive;
+    });
+    assert(fallback!=fallback_maps.end() && fallback->available && fallback->built_in && fallback->source_archive.empty());
+    auto custom_only=base_maps;
+    for(auto& map:custom_only)if(map.built_in)map.available=false;
+    default_menu.configure_maps(custom_only,base_modes);
+    assert(!default_menu.setup().map_filename && !default_menu.setup().map_archive);
+
 
     assert(base_modes.size()==8 && expansion_modes.size()==9);
     assert(base_modes[0].id==1 && base_modes[0].map_filter=="standard" && !base_modes[0].name.empty());

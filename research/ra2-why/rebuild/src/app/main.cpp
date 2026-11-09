@@ -18,6 +18,7 @@
 namespace {
 struct Options {
     std::filesystem::path game, map;
+    std::string map_archive;
     std::size_t frames = 0;
     bool headless = false;
     bool skirmish = false, autoplay = false,human_input_check=false;
@@ -32,10 +33,11 @@ Options options(int argc, char** argv) {
         else if (arg == "--autoplay") result.autoplay = true;
         else if (arg == "--human-input-check") result.human_input_check = true;
         else if (arg == "--yuri") result.variant = ra2::fs::GameVariant::YurisRevenge;
-        else if (arg == "--game-dir" || arg == "--map" || arg == "--frames") {
+        else if (arg == "--game-dir" || arg == "--map" || arg == "--map-archive" || arg == "--frames") {
             if (++i == argc) throw std::runtime_error("Missing value for " + arg);
             if (arg == "--game-dir") result.game = argv[i];
             else if (arg == "--map") result.map = argv[i];
+            else if (arg == "--map-archive") result.map_archive = argv[i];
             else {
                 const std::string value = argv[i];
                 std::size_t parsed = 0;
@@ -47,11 +49,13 @@ Options options(int argc, char** argv) {
         } else throw std::runtime_error("Unknown argument: " + arg);
     }
     if (result.game.empty())
-        throw std::runtime_error("Usage: ra2-native --game-dir <owned-game-folder> [--map <map-file>] [--yuri] [--frames N] [--headless]");
+        throw std::runtime_error("Usage: ra2-native --game-dir <owned-game-folder> [--map <map-file>] [--map-archive <file.mmx>] [--yuri] [--frames N] [--headless]");
     if (result.headless && !result.frames)
         throw std::runtime_error("Headless checks need a frame budget");
     if (result.skirmish && result.variant != ra2::fs::GameVariant::RedAlert2)
         throw std::runtime_error("Playable prototype supports base RA2 only");
+    if (!result.map_archive.empty() && !result.skirmish)
+        throw std::runtime_error("Map archives need --skirmish");
     if (result.autoplay && !result.skirmish)
         throw std::runtime_error("Autoplay needs --skirmish");
     if(result.human_input_check&&result.variant!=ra2::fs::GameVariant::RedAlert2)
@@ -259,6 +263,7 @@ int main(int argc, char** argv) {
             ra2::app::BattleOptions battle;
             battle.game_directory = args.game;
             if (!args.map.empty()) battle.map = args.map.string();
+            if (!args.map_archive.empty())battle.setup.map_archive=args.map_archive;
             battle.frames = args.frames;
             battle.headless = args.headless;
             battle.autoplay = args.autoplay;

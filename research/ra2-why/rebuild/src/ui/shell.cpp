@@ -580,13 +580,19 @@ void Menu::configure_maps(std::vector<SkirmishMap> maps, std::vector<SkirmishMod
     modes_=std::move(modes);
     setup_.map_filename.reset();
     setup_.map_archive.reset();
-    // The playable client uses MP02T2 when no map is supplied.
+    // Default to an available map from the mounted base catalog.
     if(prototype_start_) {
-        const auto map=std::find_if(maps_.begin(),maps_.end(),[](const auto& item) {
-            return item.available && item.filename=="MP02T2.MAP" && item.source_archive.empty();
-        });
         const auto mode=std::find_if(modes_.begin(),modes_.end(),[](const auto& item){return item.id==1;});
-        if(map!=maps_.end() && mode!=modes_.end() && skirmish_map_matches_mode(*map,*mode)) {
+        if(mode==modes_.end())return;
+        const auto playable=[&](const auto& item) {
+            return item.built_in && item.available && item.source_archive.empty() &&
+                skirmish_map_matches_mode(item,*mode);
+        };
+        auto map=std::find_if(maps_.begin(),maps_.end(),[&](const auto& item) {
+            return playable(item) && item.filename=="MP02T2.MAP";
+        });
+        if(map==maps_.end())map=std::find_if(maps_.begin(),maps_.end(),playable);
+        if(map!=maps_.end()) {
             setup_.game_mode=1;setup_.map_filename=map->filename;setup_.map_archive=map->source_archive;
         }
     }

@@ -26,7 +26,8 @@ struct BaseOverlayInput {
 class BaseBattleAssets {
 public:
     static BaseBattleAssets load(const std::filesystem::path& game_directory,
-                                 const std::string& map_name_or_path);
+                                 const std::string& map_name_or_path,
+                                 const std::string& map_archive={});
     ~BaseBattleAssets();
     BaseBattleAssets(BaseBattleAssets&&) noexcept;
     BaseBattleAssets& operator=(BaseBattleAssets&&) noexcept;

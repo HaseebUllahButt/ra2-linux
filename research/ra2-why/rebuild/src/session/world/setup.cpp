@@ -46,9 +46,21 @@ BaseBattleAssets::BaseBattleAssets(std::unique_ptr<Data> data):data_(std::move(d
 BaseBattleAssets::~BaseBattleAssets()=default;
 BaseBattleAssets::BaseBattleAssets(BaseBattleAssets&&) noexcept=default;
 BaseBattleAssets& BaseBattleAssets::operator=(BaseBattleAssets&&) noexcept=default;
-BaseBattleAssets BaseBattleAssets::load(const std::filesystem::path& game,const std::string& map_name) {
+BaseBattleAssets BaseBattleAssets::load(const std::filesystem::path& game,const std::string& map_name,const std::string& map_archive) {
     if (map_name.empty()) throw std::invalid_argument("Map name is empty");
     auto data=std::make_unique<Data>(game);
+    std::optional<std::vector<std::uint8_t>> selected_map;
+    if (!map_archive.empty()) {
+        const std::filesystem::path archive_path(map_archive);
+        auto extension=archive_path.extension().string();
+        for(auto& c:extension)if(c>='a'&&c<='z')c=char(c-'a'+'A');
+        if (archive_path.filename()!=archive_path || extension!=".MMX")
+            throw std::invalid_argument("Base multiplayer map archive must be an installed MMX file");
+        const auto archive=data->files.mount(map_archive);
+        const auto* entry=archive->find(map_name);
+        if (!entry)throw std::runtime_error("Selected map archive does not contain: "+map_name);
+        selected_map=archive->read(*entry);
+    }
     data->files.mount_language(fs::GameVariant::RedAlert2);
     data->files.bootstrap(fs::GameVariant::RedAlert2);
     data->files.mount_overlays();
@@ -63,7 +75,9 @@ BaseBattleAssets BaseBattleAssets::load(const std::filesystem::path& game,const 
         throw std::runtime_error("Invalid original Battle mode");
     data->battle_rules_name=mode_fields[2];
     data->battle_rules=read_ini(data->files,data->battle_rules_name);
-    data->map_ini=read_ini(data->files,map_name,true);
+    if(selected_map)data->map_ini.parse(std::string_view(
+        reinterpret_cast<const char*>(selected_map->data()),selected_map->size()));
+    else data->map_ini=read_ini(data->files,map_name,true);
     const auto geometry=resolve_placement_geometry(rectangle(data->map_ini,"Size"),rectangle(data->map_ini,"LocalSize"));
     if (!geometry) throw std::runtime_error("Unsupported map geometry");
     data->geometry=*geometry;
