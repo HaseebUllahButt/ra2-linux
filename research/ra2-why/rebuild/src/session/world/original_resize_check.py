@@ -5,10 +5,12 @@ The original reader, Cell reset, resize wrapper, allocation loop, Cell
 constructor, coordinate setter, resize suffix, and early Cell pass execute.
 INI, allocation, Cell parent/registration, lighting lookups, category cache,
 and region builders are supplied. Object and lighting vectors are empty.
-The trace stops before tile data, overlays, and later Battle phases.
+The default tile index is supplied. The trace stops before packed tile data,
+overlays, and later Battle phases.
 """
 import struct
 import sys
+from unicorn import UC_HOOK_CODE
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_ESP,UC_X86_REG_EIP
 if len(sys.argv)!=2:
     raise SystemExit('usage: original_resize_check.py game.exe')
@@ -92,8 +94,14 @@ m.word(region_vtable+0xc,0x1013000)
 m.bind(0x1013000,0,m.ret(0))
 for offset in (0x88,0xa0,0xb8):
     m.word(map_object+offset,region_vtable)
+call_counts={0x5499c0:0,0x54b2e0:0,0x472540:0}
+def count_call(cpu,address,size,data):
+    call_counts[address]+=1
+for address in call_counts:
+    m.cpu.hook_add(UC_HOOK_CODE,count_call,begin=address,end=address)
 m.cpu.emu_start(0x549981,0x49d066,count=200000000)
 assert m.cpu.reg_read(UC_X86_REG_EIP)==0x49d066
+assert call_counts=={0x5499c0:1,0x54b2e0:1,0x472540:19900},call_counts
 count=0
 for index in range(262144):
     cell=m.read(vector+index*4)
@@ -107,3 +115,26 @@ for index in range(262144):
     assert m.cpu.mem_read(cell+0x122,1)==b'\0' and m.cpu.mem_read(cell+0x124,1)==b'\0'
 assert count==19900
 print('base x86 early Cell pass preserves tested fields in all 19900 fresh cells')
+
+# The reader next assigns a default tile to every allocated Cell. The INI
+# lookups and string comparison are supplied, with default tile index 7.
+m.word(0xa52f00,7)
+m.bind(0x50d7f0,12,m.ret(0))
+m.bind(0x50e9a0,20,m.ret(0))
+m.bind(0x781f20,0,m.ret(1))
+m.cpu.emu_start(0x49d066,0x49d0f9,count=50000000)
+assert m.cpu.reg_read(UC_X86_REG_EIP)==0x49d0f9
+count=0
+for index in range(262144):
+    cell=m.read(vector+index*4)
+    if not cell:
+        continue
+    count+=1
+    assert m.read(cell+0x38)==7
+    assert not (m.read(cell+0x140)&0x180)
+    assert m.read(cell+0x54)==0xffffffff and m.read(cell+0x58)==0xffffffff
+    assert struct.unpack('<h',m.cpu.mem_read(cell+0x116,2))[0]==-1
+    assert m.read(cell+0xe4)==0 and m.read(cell+0xe8)==0
+    assert m.cpu.mem_read(cell+0x122,1)==b'\0' and m.cpu.mem_read(cell+0x124,1)==b'\0'
+assert count==19900
+print('base x86 default tile assignment preserves tested fields in all 19900 cells')
