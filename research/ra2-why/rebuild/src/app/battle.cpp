@@ -17,6 +17,7 @@
 #include "scene.h"
 #include "terrain_inputs.h"
 #include "../session/world/setup.h"
+#include "battle_setup.h"
 #include "../sim/prototype_ai.h"
 #include "../sim/prototype_economy.h"
 #include "../sim/prototype_movement.h"
@@ -103,6 +104,7 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     sim::PrototypeEconomy economy_;
     sim::PrototypeAI ai_;
     sim::VictoryState victory_;
+    sim::VictoryRules victory_rules_;
     Window& window_;
     Scene& scene_;
     const render::Bitmap& terrain_;
@@ -186,6 +188,11 @@ public:
         ai_=sim::PrototypeAI(rules_,&ai_ini,ai_difficulty);
         if(!ai_.uses_ai_ini())throw std::runtime_error("Base AI.INI has no usable team triggers");
         std::cout<<"Computer policy: base AI.INI triggers="<<ai_.trigger_count()<<" difficulty="<<int(ai_difficulty)<<'\n';
+        // Base 004E4110 reads Short Game (00A3D2C2) and the first two BaseUnit types.
+        victory_rules_.short_game=short_game_choice(args_.setup,rules_);
+        victory_rules_.base_units=rules_.read_list("General","BaseUnit");
+        // Base 004E3832 reads Super Weapons (00A3D2C3) in House::Can_Build.
+        factories_.flags.super_weapons=super_weapons_choice(args_.setup,rules_);
         const auto initialized=proto::initialize(world_,factories_,catalog_,player_);
         if (initialized.status!=p::Status::Done) throw std::runtime_error(initialized.detail);
         refresh_power_damage();
@@ -945,7 +952,7 @@ public:
         sim::tech::update(rules_,world_);
         orders_.sync(world_);
         infantry=std::max(infantry,std::size_t(std::count_if(world_.entities.begin(),world_.entities.end(),[](const auto& e){return live(e)&&e.kind==w::Kind::Infantry;})));
-        victory_.update(world_,player_,enemy_);
+        victory_.update(world_,player_,enemy_,victory_rules_);
         if(args_.autoplay && frame%600==0) {
             std::size_t ours=0,theirs=0;
             for(const auto& e:world_.entities)if(live(e)) {
@@ -1185,14 +1192,15 @@ int run_prototype_battle(const BattleOptions& requested) {
     if(!country_registry||country_registry->entries.empty())throw std::runtime_error("Base countries are missing");
     auto country=args.setup.country.value_or("Americans");
     if(!assets.rules().find_section(country)||assets.rules().read_string(country,"Side").empty())country="Americans";
-    const auto enemy=assets.rules().read_string(country,"Side")=="GDI"?"Russians":"Americans";
     const int credits=std::clamp(args.setup.credits.value_or(10000),2500,10000);
     const int count=std::clamp(args.setup.unit_count.value_or(2),0,24);
     const int color=std::clamp(args.setup.color.value_or(0),0,7);
+    const auto opponent=first_opponent_choice(args.setup,assets.rules(),country,color);
     // TODO-ORIGINAL: This first match supports one human and one computer,
     // Battle rules, two deterministic starting waypoints, and base factions.
+    // Opponent slots after the first open one are not used.
     setup.players.push_back({"Player",country,credits,color,-1,count,true});
-    setup.players.push_back({"Computer",enemy,credits,(color+1)%8,-1,count,false});
+    setup.players.push_back({"Computer",opponent.country,credits,opponent.color,-1,count,false});
     const auto seed=sim::Random(0x524132).state();
     auto battle=w::prototype_battle(assets,setup,seed);
     if(!battle)throw std::runtime_error("Cannot create prototype Battle setup for "+args.map);

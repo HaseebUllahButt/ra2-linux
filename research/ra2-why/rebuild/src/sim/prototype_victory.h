@@ -5,6 +5,8 @@
 // prototype_victory.cpp.
 #include "../session/world/world.h"
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace ra2::sim {
 // One verdict per snapshot. The app shows the first settled verdict.
@@ -18,7 +20,28 @@ struct VictoryState {
     // Feed every new snapshot. Returns the verdict to display.
     Victory update(const session::world::Snapshot& world,
         std::uint32_t player_house, std::uint32_t enemy_house);
+    // The same latch with the original rule.
+    Victory update(const session::world::Snapshot& world,
+        std::uint32_t player_house, std::uint32_t enemy_house, const struct VictoryRules& rules);
 };
+
+// Original automatic defeat rule, base game.exe HouseClass::AI 004E4110
+// (the block that calls 004E7DF0 and 004E77F0). It runs for each multiplayer
+// house that is not passive and not yet defeated, after frame 0.
+struct VictoryRules {
+    // 00A3D2C2, the Short Game setup option. On: a house falls when it owns
+    // no building and none of the first two [General] BaseUnit types.
+    // Off: a house falls when it owns no building, aircraft, infantry or unit.
+    bool short_game=true;
+    // [General] BaseUnit. The original reads entries 0 and 1 only.
+    std::vector<std::string> base_units;
+};
+// Verdict from the original rule. Only objects on the map count (Placed).
+// TODO-ORIGINAL: 004E7DF0 then destroys every object of the fallen house, and
+// Harvester Truce (scenario flag 0x800) removes HarvesterUnit types from the
+// unit count. Both are not modeled. Throws like evaluate_prototype_victory.
+Victory evaluate_original_victory(const session::world::Snapshot& world,
+    std::uint32_t player_house, std::uint32_t enemy_house, const VictoryRules& rules);
 
 // Pure verdict for one snapshot, from the simplified prototype defeat rule.
 // Counts surviving Units, Infantry and Structures with positive health that

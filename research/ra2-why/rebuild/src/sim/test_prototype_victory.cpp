@@ -183,6 +183,58 @@ int main() {
         world.entities[0].lifetime=sw::Lifetime::Destroyed;
         expect(state.update(world,1,2),Victory::PlayerLost,"late loss settles");
     }
+    {
+        // Original rule, base 004E4110.
+        using ra2::sim::VictoryRules;
+        using ra2::sim::evaluate_original_victory;
+        VictoryRules quick; quick.short_game=true; quick.base_units={"AMCV","SMCV","IGNORED"};
+        VictoryRules full=quick; full.short_game=false;
+        auto world=world_with(player,enemy);
+        auto add=[&](std::uint32_t id,std::uint32_t house,sw::Kind kind,const char* type,
+                     sw::Lifetime life=sw::Lifetime::Placed,std::optional<std::int32_t> hp=100) {
+            auto e=make_entity(id,house,kind,life,hp); e.type=type; world.entities.push_back(e);
+        };
+        // Match start: each side has only its base unit.
+        add(10,1,sw::Kind::Unit,"amcv"); add(11,2,sw::Kind::Unit,"SMCV");
+        expect(evaluate_original_victory(world,1,2,quick),Victory::InProgress,"short game: base units keep both alive");
+        // The enemy keeps tanks and infantry, but has no building and no base unit.
+        world.entities[1].type="HTNK"; add(12,2,sw::Kind::Infantry,"E2");
+        expect(evaluate_original_victory(world,1,2,quick),Victory::PlayerWon,"short game: army alone does not save a house");
+        expect(evaluate_original_victory(world,1,2,full),Victory::InProgress,"long game: army keeps a house alive");
+        // The third BaseUnit entry is not read, as in the original.
+        world.entities[1].type="IGNORED";
+        expect(evaluate_original_victory(world,1,2,quick),Victory::PlayerWon,"short game: only two base unit types count");
+        // One building keeps a house alive in both modes.
+        add(13,2,sw::Kind::Structure,"NAPOWR");
+        expect(evaluate_original_victory(world,1,2,quick),Victory::InProgress,"short game: one building keeps a house alive");
+        // A building that is not on the map, or a dead one, does not count.
+        world.entities.back().lifetime=sw::Lifetime::Created;
+        expect(evaluate_original_victory(world,1,2,quick),Victory::PlayerWon,"short game: unplaced building does not count");
+        world.entities.back().lifetime=sw::Lifetime::Placed; world.entities.back().resolved_hp=0;
+        expect(evaluate_original_victory(world,1,2,quick),Victory::PlayerWon,"short game: dead building does not count");
+        // Long game: aircraft alone keep a house alive; nothing left is a loss.
+        world.entities.erase(world.entities.begin()+1,world.entities.end());
+        add(14,2,sw::Kind::Aircraft,"ORCA");
+        expect(evaluate_original_victory(world,1,2,full),Victory::InProgress,"long game: aircraft count");
+        expect(evaluate_original_victory(world,1,2,quick),Victory::PlayerWon,"short game: aircraft do not count");
+        world.entities.pop_back();
+        expect(evaluate_original_victory(world,1,2,full),Victory::PlayerWon,"long game: empty house falls");
+        // The player falls by the same rule; both fallen is a draw.
+        world.entities[0].type="MTNK"; add(15,2,sw::Kind::Structure,"NACNST");
+        expect(evaluate_original_victory(world,1,2,quick),Victory::PlayerLost,"short game: player without base falls");
+        world.entities.pop_back();
+        expect(evaluate_original_victory(world,1,2,quick),Victory::Draw,"short game: both fallen");
+        VictoryState latch;
+        add(16,2,sw::Kind::Structure,"NACNST"); world.entities[0].type="AMCV";
+        expect(latch.update(world,1,2,quick),Victory::InProgress,"original latch stays open");
+        world.entities.pop_back();
+        expect(latch.update(world,1,2,quick),Victory::PlayerWon,"original latch settles");
+        add(17,2,sw::Kind::Structure,"NACNST");
+        expect(latch.update(world,1,2,quick),Victory::PlayerWon,"original latch holds");
+        bool thrown=false;
+        try { (void)evaluate_original_victory(world,1,1,quick); } catch (const std::invalid_argument&) { thrown=true; }
+        if (!thrown) throw std::runtime_error("original rule accepted equal houses");
+    }
     std::cout<<"Prototype victory spot checks passed: empty armies, one side gone, "
                "both gone, living construction yards, filters, errors and the latch.\n";
     return 0;
