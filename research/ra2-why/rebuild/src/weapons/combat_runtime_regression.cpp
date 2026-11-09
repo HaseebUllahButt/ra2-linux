@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <iostream>
 #include <map>
+#include <limits>
 #include <stdexcept>
 #include <string>
 using namespace ra2;
@@ -46,7 +47,10 @@ void check_fire_and_damage() {
     check(result.stage==TechnoDamageStage::ObjectDamage && result.damage==50,"Techno damage multiplier");
     d.invulnerable_virtual=true;result=base_techno_damage_prefix(d);
     check(result.stage==TechnoDamageStage::InvulnerabilityEffect && result.damage==50,"invulnerability callback order");
-    d.invulnerable_virtual=false;d.type_has_side_effect_5d0=true;
+    d.invulnerable_virtual=false;d.house_armor_multiplier=std::numeric_limits<double>::infinity();
+    bool rejected=false;try { (void)base_techno_damage_prefix(d); } catch (const std::invalid_argument&) { rejected=true; }
+    check(rejected,"nonfinite Techno armor accepted");d.house_armor_multiplier=2;
+    d.type_has_side_effect_5d0=true;
     check(base_techno_damage_prefix(d).stage==TechnoDamageStage::NeedsTypeSideEffect,"unknown Techno effect accepted");
 }
 void check_world(const sim::OriginalDistance& distance) {

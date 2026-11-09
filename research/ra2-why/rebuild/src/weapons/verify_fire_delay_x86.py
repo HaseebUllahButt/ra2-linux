@@ -48,10 +48,9 @@ for case,line in zip(cases,lines):
  u.mem_write(kind+0x270,bytes((vflag,)));u.mem_write(kind+0x282,bytes((eflag,)))
  w(stack,stop);w(stack+4,0);u.reg_write(UC_X86_REG_ECX,actor);u.reg_write(UC_X86_REG_ESP,stack);u.reg_write(UC_X86_REG_FPCW,0xe7f)
  u.emu_start(0x6c9c00,stop,count=10000)
- delay=signed=u.reg_read(UC_X86_REG_EAX);delay=delay if delay<0x80000000 else delay-0x100000000
- state=scenario+0x218;words=struct.unpack('<250I',u.mem_read(state+12,1000));h=2166136261
- for n in words:h=((h^n)*16777619)&0xffffffff
- actual=(delay,read(state+4),read(state+8),h);expected=tuple(map(int,line.split()))
+ delay=u.reg_read(UC_X86_REG_EAX);delay=delay if delay<0x80000000 else delay-0x100000000
+ state=scenario+0x218;words=struct.unpack('<250I',u.mem_read(state+12,1000))
+ actual=(delay,read(state+4),read(state+8),*words);expected=tuple(map(int,line.split()))
  assert actual==expected,(case,actual,expected)
 assert len(lines)==len(cases)
 print(f'Base game.exe: {len(cases)} reload delays and full RNG states match')

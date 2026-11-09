@@ -17,14 +17,15 @@ TechnoDamageResult base_techno_damage_prefix(const TechnoDamageInput &in) {
   int damage = in.raw_damage;
   const bool negative = damage < 0;
   if (!in.bypass_armor && !negative) {
-    if (!(in.house_armor_multiplier > 0) || !(in.object_armor_multiplier > 0))
+    if (!std::isfinite(in.house_armor_multiplier) || !std::isfinite(in.object_armor_multiplier) ||
+        !(in.house_armor_multiplier > 0) || !(in.object_armor_multiplier > 0))
       throw std::invalid_argument("Techno armor multipliers must be positive");
     const double divisor = sim::fp::multiply(in.house_armor_multiplier,
                                              in.object_armor_multiplier);
     damage = original_integer(sim::fp::divide(damage, divisor));
     if ((in.veteran && in.veteran_armor) ||
         (in.elite && (in.veteran_armor || in.elite_armor))) {
-      if (!(in.veteran_armor_multiplier > 0))
+      if (!std::isfinite(in.veteran_armor_multiplier) || !(in.veteran_armor_multiplier > 0))
         throw std::invalid_argument("veteran armor multiplier must be positive");
       damage = original_integer(sim::fp::divide(damage, in.veteran_armor_multiplier));
     }
