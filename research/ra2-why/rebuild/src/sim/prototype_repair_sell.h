@@ -34,7 +34,9 @@ struct PrototypeRepairSellRules {
 // no repair-bay selling of docked units.
 class PrototypeRepairSell {
 public:
-    explicit PrototypeRepairSell(const rules::IniFile& base_rules);
+    // The art INI is optional; without it every footprint is one cell.
+    explicit PrototypeRepairSell(const rules::IniFile& base_rules,
+        const rules::IniFile* art_rules = nullptr);
 
     // Credits for one repair step of the building type. RA1 shape
     // (TechnoTypeClass::Repair_Cost): Cost / (Strength / RepairStep) times
@@ -86,8 +88,10 @@ public:
     RepairTick tick(session::world::Snapshot& world, std::uint32_t game_frame);
 
 private:
-    PrototypeRepairSellRules rules_;
-    std::optional<std::int32_t> last_frame_;
+    rules::IniFile rules_;
+    const rules::IniFile* art_ = nullptr;
+    PrototypeRepairSellRules limits_;
+    std::optional<std::uint32_t> last_frame_;
     std::vector<std::uint32_t> repairing_; // Building ids, ascending.
 };
 
