@@ -44,12 +44,20 @@ PrototypeEconomy::PrototypeEconomy(const rules::IniFile& r):rules_(r) {
         }
         resource.growth=std::max(1,r.read_integer(resource.section,"Growth",2200));
         resource.interval=std::max(1,r.read_integer(resource.section,"Spread",2200));
+        resource.value=std::max(0,r.read_integer(resource.section,"Value",0));
         resources_.push_back(std::move(resource));
     }
     grows_=r.read_bool("General","TiberiumGrows",true);
     spreads_=r.read_bool("General","TiberiumSpreads",true);
+    // 00640B80 defaults: HarvesterLoadRate=2 frames per animation step and
+    // HarvesterDumpRate=.016 minutes. 00647F40 reads both from [General].
+    // 007025A0 harvests when Animation.Value reaches 9. 00701580 unloads when
+    // Animation.Value (one step per frame) is no longer below rate * 900.
+    load_frames_=9*std::max(1,r.read_integer("General","HarvesterLoadRate",2));
+    const long double dump=static_cast<long double>(r.read_double("General","HarvesterDumpRate",0.016))*900.0L;
+    dump_frames_=dump<1?1:dump>1e6L?1000000:int(std::floor(dump))+(dump==std::floor(dump)?0:1);
 }
-int PrototypeEconomy::load(std::uint32_t id) const { auto i=cargo_.find(id);return i==cargo_.end()?0:i->second.bails; }
+int PrototypeEconomy::load(std::uint32_t id) const { auto i=cargo_.find(id);return i==cargo_.end()?0:i->second.total; }
 int PrototypeEconomy::resource(const sw::CellState& c) const {
     if (!c.terrain || !c.overlay_data_11e) return -1;
     int index=c.terrain->overlay_type_index.value_or(-1);
@@ -132,22 +140,39 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
                 }
             }
         }
-        if(movement_.moving(e.id) || frame<bag.next) continue;
+        if(movement_.moving(e.id)) { bag.loading=false;continue; }
+        if(frame<bag.next) continue;
         sw::Entity* refinery=nullptr;int best=std::numeric_limits<int>::max();
         for(auto& b:w.entities) if(alive(b) && b.kind==sw::Kind::Structure && b.house_id==e.house_id && (b.type=="GAREFN" || b.type=="NAREFN")) {
             int d=distance(*e.cell,*b.cell);if(d<best || (d==best && refinery && b.id<refinery->id)) {best=d;refinery=&b;}
         }
         if(!refinery) continue;
         const int capacity=std::max(1,rules_.read_integer(e.type,"Storage",e.type=="CMIN"?20:40));
-        if(bag.bails>=capacity) bag.returning=true;
+        auto current=w.cells.find(key(*e.cell));
+        const bool on_resource=current!=w.cells.end() && resource(current->second)>=0;
+        // 007025A0 case 1 starts the load animation; the first bail waits for it.
+        if(!bag.returning && !bag.loading && bag.total<capacity && on_resource) {
+            bag.loading=true;bag.next=frame+std::uint32_t(load_frames_);continue;
+        }
+        if(bag.total>=capacity) bag.returning=true;
         if(bag.returning) {
+            bag.loading=false;
             // TODO-ORIGINAL UnitClass::Mission_Harvest: adjacent docking replaces building radio and dock animations.
             if(distance(*e.cell,*refinery->cell)<=2) {
-                for(auto& h:w.houses) if(h.id==e.house_id && h.cash) {
-                    *h.cash=int(std::min<std::int64_t>(std::numeric_limits<int>::max(),std::int64_t(*h.cash)+bag.credits));bag={};bag.next=frame+1;break;
-                }
+                // 00701580 state 3: dock, wait, then give all of the first
+                // non-empty resource. Repeat until the cargo is empty.
+                if(!bag.docked) { bag.docked=true;bag.next=frame+std::uint32_t(dump_frames_);continue; }
+                sw::House* house=nullptr;
+                for(auto& h:w.houses) if(h.id==e.house_id && h.cash) { house=&h;break; }
+                if(!house) continue;
+                auto full=std::find_if(bag.bails.begin(),bag.bails.end(),[](int b){return b>0;});
+                if(full==bag.bails.end()) { bag={};bag.next=frame+1;continue; }
+                const auto credits=std::int64_t(*full)*resources_[std::size_t(full-bag.bails.begin())].value;
+                *house->cash=int(std::min<std::int64_t>(std::numeric_limits<int>::max(),std::int64_t(*house->cash)+credits));
+                bag.total-=*full;*full=0;bag.next=frame+std::uint32_t(dump_frames_);
                 continue;
             }
+            bag.docked=false;
             for(int dy=-1;dy<=1;++dy) for(int dx=-1;dx<=1;++dx) {
                 int x=int(refinery->cell->x)+dx,y=int(refinery->cell->y)+dy;
                 if((!dx&&!dy)||x<0||y<0||x>=512||y>=512||movement_.moving(e.id)) continue;
@@ -164,10 +189,10 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
             }
             continue;
         }
-        auto current=w.cells.find(key(*e.cell));
-        if(current!=w.cells.end() && resource(current->second)>=0) {
+        if(bag.loading && on_resource) {
             auto& c=current->second;int r=resource(c);
-            ++bag.bails;bag.credits+=std::max(0,rules_.read_integer(resources_[r].section,"Value",0));
+            if(bag.bails.size()<resources_.size()) bag.bails.resize(resources_.size(),0);
+            ++bag.bails[std::size_t(r)];++bag.total;
             // 00475DB0 removes the overlay after its last (data + 1) bail.
             // 00472540 restores tile land; scene redraw remains an integration task.
             if(*c.overlay_data_11e==0) {
@@ -175,10 +200,11 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
                 c.terrain->land_type=c.terrain->tmp_terrain
                     ? std::optional<int>(original_tmp_land_type(*c.terrain->tmp_terrain)) : std::nullopt;
             } else --*c.overlay_data_11e;
-            // TODO-ORIGINAL UnitClass::Harvesting: pickup/unload animation timing uses a simple frame delay.
-            bag.next=frame+std::max(1,rules_.read_integer(e.type,"HarvestRate",rules_.read_integer("General","OreDumpRate",15)));
+            // 007013A0 takes one bail, then restarts the HarvesterLoadRate animation.
+            bag.next=frame+std::uint32_t(load_frames_);
             continue;
         }
+        bag.loading=false;
         std::vector<std::uint32_t> fields;
         sw::walk_cells(std::as_const(w.cells),field_ahead,[&](const auto& item) {
             if(resource(item.second)>=0 && open(item.second)) fields.push_back(item.first);
@@ -187,7 +213,7 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
         std::sort(fields.begin(),fields.end(),[&](auto a,auto b){int da=distance(*e.cell,coord(a)),db=distance(*e.cell,coord(b));return da!=db?da<db:a<b;});
         bool found=false;
         for(auto k:fields) if(movement_.issue(w,e.id,coord(k),original_rule_speed(rules_.read_integer(e.type,"Speed",4))).status==PrototypeMoveStatus::Complete) {bag.target=coord(k);found=true;break;}
-        if(!found && bag.bails) bag.returning=true;
+        if(!found && bag.total) bag.returning=true;
     }
     for(auto i=cargo_.begin();i!=cargo_.end();) if(!live.count(i->first)) {movement_.cancel(w,i->first);i=cargo_.erase(i);} else ++i;
 }

@@ -14,8 +14,9 @@ public:
     void tick(session::world::Snapshot& world, std::uint32_t frame);
     int load(std::uint32_t miner) const;
 private:
-    struct Cargo { int bails=0, credits=0; std::uint32_t next=0; bool returning=false; std::optional<ra2map::Cell> target; };
-    struct Resource { std::string section; int first_overlay=-1; int growth=1, interval=1; };
+    // Bails per resource index. Docked unloading gives one resource at a time.
+    struct Cargo { std::vector<int> bails; int total=0; std::uint32_t next=0; bool returning=false, loading=false, docked=false; std::optional<ra2map::Cell> target; };
+    struct Resource { std::string section; int first_overlay=-1; int growth=1, interval=1, value=0; };
     std::vector<Resource> resources_;
     // Live OverlayType index to resource index, or -1. The first resource
     // that names an overlay keeps it.
@@ -25,6 +26,9 @@ private:
     std::map<std::uint32_t,Cargo> cargo_;
     std::optional<std::uint32_t> last_;
     bool grows_=true, spreads_=true; // General TiberiumGrows and TiberiumSpreads.
+    // Frames per bail (9 animation steps of General HarvesterLoadRate) and
+    // frames per docked resource unload (General HarvesterDumpRate minutes).
+    int load_frames_=18, dump_frames_=15;
     int resource(const session::world::CellState&) const;
 };
 }

@@ -43,6 +43,43 @@ int main(int argc,char** argv) {
         assert(teleported==(std::string(type)=="CMIN"));
         assert(first==rules.read_integer(type,"Storage")*rules.read_integer(overlay==gem?"Cruentus":"Riparius","Value"));
     }
+    // Base rules.ini has no HarvesterLoadRate, OreDumpRate or HarvestRate.
+    // 00640B80 defaults HarvesterLoadRate to 2. 007025A0 calls 007013A0 when
+    // Animation.Value reaches 9, so one bail takes 9 * 2 = 18 frames.
+    assert(!rules.find("General","HarvesterLoadRate") && !rules.find("General","OreDumpRate") && !rules.find("HARV","HarvestRate"));
+    for(auto type:{"CMIN","HARV"}) {
+        auto w=fixture(type,-1);auto& c=w.cells[4*512+3];c.terrain->overlay_type_index=ore;c.overlay_data_11e=11;
+        sim::PrototypeEconomy economy(rules);std::vector<unsigned> bails;
+        for(unsigned frame=0;frame<100;++frame) {
+            const int before=economy.load(1);economy.tick(w,frame);
+            if(economy.load(1)!=before) bails.push_back(frame);
+        }
+        assert(bails.size()>=3 && bails[0]==18 && bails[1]==36 && bails[2]==54);
+    }
+    // 00701580: the docked miner gives the whole first non-empty resource
+    // after Animation.Value reaches HarvesterDumpRate * 900 frames, then
+    // resets the count for the next resource. OreDumpRate is not a key here.
+    {
+        rules::IniFile timed;
+        timed.parse("[General]\nHarvesterLoadRate=3\nHarvesterDumpRate=.025\nOreDumpRate=1\n"
+                    "[HARV]\nStorage=2\nHarvestRate=1\n"
+                    "[OverlayTypes]\n0=GEM01\n1=TIB01\n[GEM01]\nTiberium=yes\n[TIB01]\nTiberium=yes\n"
+                    "[Tiberiums]\n0=Poor\n1=Rich\n[Poor]\nImage=1\nValue=30\n[Rich]\nImage=2\nValue=70\n");
+        auto w=fixture("HARV",-1);
+        auto& here=w.cells[4*512+3];here.terrain->overlay_type_index=1;here.overlay_data_11e=0;
+        auto& gem_cell=w.cells[4*512+5];gem_cell.terrain->overlay_type_index=0;gem_cell.overlay_data_11e=11;
+        sim::PrototypeEconomy economy(timed);
+        std::vector<std::pair<unsigned,int>> bails,cash;
+        for(unsigned frame=0;frame<2000 && cash.size()<2;++frame) {
+            const int load=economy.load(1),money=*w.houses[0].cash;
+            economy.tick(w,frame);
+            if(economy.load(1)>load) bails.push_back({frame,economy.load(1)});
+            if(*w.houses[0].cash!=money) cash.push_back({frame,*w.houses[0].cash});
+        }
+        assert(bails.size()==2 && bails[0].first==27);
+        assert(cash.size()==2 && cash[0].second==30 && cash[1].second==100);
+        assert(cash[1].first-cash[0].first==23 && cash[0].first>=bails[1].first+27+23);
+    }
     // Row 7 puts the new field beyond the previous adjacent-only scan.
     for(auto type:{"CMIN","HARV"}) for(int ore_y:{4,5,7}) {
         auto nearby=fixture(type,-1);
@@ -60,7 +97,8 @@ int main(int argc,char** argv) {
     auto& last_cell=last_bail.cells.at(4*512+3);
     last_cell.terrain->overlay_type_index=ore;last_cell.overlay_data_11e=0;
     last_cell.terrain->tmp_terrain=9;last_cell.terrain->land_type=5;
-    sim::PrototypeEconomy depletion(rules);depletion.tick(last_bail,0);
+    sim::PrototypeEconomy depletion(rules);for(unsigned f=0;f<18;++f) depletion.tick(last_bail,f);
+    assert(depletion.load(1)==0 && last_cell.overlay_data_11e==0);depletion.tick(last_bail,18);
     assert(depletion.load(1)==1 && last_cell.overlay_data_11e==0);
     assert(last_cell.terrain->overlay_type_index==-1 && last_cell.terrain->land_type==2);
     auto destroyed=fixture("HARV",105);destroyed.entities[0].resolved_hp=0;
@@ -84,11 +122,13 @@ int main(int argc,char** argv) {
     auto terrain=pack::load_terrain(map);
     assert(std::count(terrain.overlay.begin(),terrain.overlay.end(),ore)==303);
     assert(std::count(terrain.overlay.begin(),terrain.overlay.end(),gem)==59);
+    // The edited growth rules above would grow this cell during the load wait.
+    rules::IniFile base_rules;base_rules.parse(std::string_view(reinterpret_cast<const char*>(bytes->data()),bytes->size()));
     for(int overlay:{ore,gem}) {
         auto k=std::size_t(std::find(terrain.overlay.begin(),terrain.overlay.end(),overlay)-terrain.overlay.begin());
         auto actual=fixture("CMIN",-1);auto& cell=actual.cells[4*512+3];
         cell.terrain->overlay_type_index=terrain.overlay[k];cell.overlay_data_11e=terrain.overlay_data[k];
-        sim::PrototypeEconomy from_map(rules);from_map.tick(actual,0);assert(from_map.load(1)==1);
+        sim::PrototypeEconomy from_map(base_rules);for(unsigned f=0;f<=18;++f) from_map.tick(actual,f);assert(from_map.load(1)==1);
         const auto& harvested=actual.cells.at(4*512+3);
         assert(harvested.overlay_data_11e==terrain.overlay_data[k]-1 || harvested.terrain->overlay_type_index==-1);
     }
