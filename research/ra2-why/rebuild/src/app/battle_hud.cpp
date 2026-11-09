@@ -269,7 +269,7 @@ void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
                 const int w=4*static_cast<int>(tip.size())+6;
                 const Rectangle box{r.x+r.width-w,r.y+r.height+1,w,11};
                 fill(b,box,dark); border(b,box,edge);
-                text(b,box.x+3,box.y+3,tip,gold,w-4);
+                text(b,box.x+3,box.y+3,tip,gold,w-4,1);
                 break;
             }
         }
