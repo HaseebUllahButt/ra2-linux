@@ -8,6 +8,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ra2::session::world {
@@ -41,6 +42,11 @@ struct House {
         buildings_ever_54a0, units_owned_5430, units_ever_54b0, infantry_owned_5440,
         infantry_ever_54c0, aircraft_owned_5450, aircraft_ever_54d0;
     std::optional<double> firepower_multiplier; // Base House +D0.
+    // Ordered House +54F8 records: stable attacker House ID, accumulated value.
+    std::optional<std::vector<std::pair<std::uint32_t,std::int32_t>>> attacker_damage_records;
+    std::optional<std::int32_t> attacker_damage_count, selected_enemy_index;
+    std::optional<bool> observer_flag_13d;
+    std::optional<std::uint32_t> alliance_mask_5674;
 };
 struct BaseUnitProfile {
     std::optional<std::int32_t> restricted_land, movement_mode, placement_mode, speed_type, level_height;
