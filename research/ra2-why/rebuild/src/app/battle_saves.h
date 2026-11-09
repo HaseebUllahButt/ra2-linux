@@ -4,6 +4,9 @@
 // The content is native, not the original .SAV layout: a small header with
 // the player's description, then the caller's payload, for example
 // session::save::encode(game). TODO-ORIGINAL: original .SAV container.
+// Limit: session::save stores the world, factories and pending moves only.
+// It omits AI teams and timers, order queues and other battle state, so
+// keep Load and Save disabled in the options menu until it stores them.
 #include <cstdint>
 #include <filesystem>
 #include <optional>
