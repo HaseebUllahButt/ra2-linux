@@ -1091,6 +1091,8 @@ The cases include sentinel and invalid tiles, invalid subtiles, replacement rece
 Animation cases cover absent indexes, matching subtiles with bit 20000 set, and mismatched subtiles.
 Shadow cases cover a false flag and a real getter that returns an empty footprint.
 The check asserts unchanged placed-Unit bytes and all raw Cell flags.
+All 4,096 calls include a linked Unit and the original ground occupancy value 32 at Cell +124.
+The check also asserts unchanged ground and bridge heads, occupancy words, raw owner fields, Tube reference, and neighbor count.
 Any original shared RNG call fails the check.
 Both editions match every native vector and aggregate hash 0A4940C2.
 Compare with `test_cell_setup.sh --vectors`.

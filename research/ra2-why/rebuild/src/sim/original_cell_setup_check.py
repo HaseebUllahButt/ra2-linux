@@ -73,7 +73,7 @@ def inputs(seed):
         value=(value*1664525+1013904223)&0xffffffff
         return value>>16
     tile=32+next_value()%32; level=next_value()%17-8; cliff=next_value()%3
-    field=next_value()&255; usable=next_value()%8!=0; unit=bool(next_value()%2); subtile=0
+    field=next_value()&255; usable=next_value()%8!=0; next_value(); unit=True; subtile=0
     if seed%8==0: tile=0xffff
     if seed%8==1: tile=96
     if seed%8==2: tile=32; subtile=3
@@ -100,6 +100,12 @@ def run(seed):
     cpu.mem_write(ACTOR+0x88,struct.pack('<iii',11111,22222,33333))
     actor_before=bytes(cpu.mem_read(ACTOR,0x400))
     word(CELL+0xe4,ACTOR if state['unit'] else 0)
+    # Original Unit +E8 sets ground occupancy bit 20 before this setup call.
+    # Preserve links, raw owner fields, Tube reference, neighbor count, and both occupancy words.
+    word(CELL+0x54,-1); word(CELL+0x58,-1); word(CELL+0x116,-1)
+    cpu.mem_write(CELL+0x122,bytes([seed&255])); word(CELL+0x124,32); word(CELL+0x128,0)
+    kept=((0x54,4),(0x58,4),(0x116,4),(0x122,1),(0x124,4),(0x128,4),(0xe4,4),(0xe8,4))
+    kept_before=[bytes(cpu.mem_read(CELL+offset,size)) for offset,size in kept]
     cpu.mem_write(RULES+(0x584 if base else 0x664),bytes([state['cliff']]))
     table=0x850ea8 if base else 0x89ea48
     for land in range(16): word(table+land*36,0x3f800000 if (seed+land)%3 else 0)
@@ -113,6 +119,7 @@ def run(seed):
     assert cpu.reg_read(UC_X86_REG_EIP)==STOP,'original Cell setup bound exceeded'
     assert read(CELL+0x140)==flags,'original checked setup changed flags'
     assert actor_before==bytes(cpu.mem_read(ACTOR,0x400)),'original checked setup changed the placed Unit'
+    assert kept_before==[bytes(cpu.mem_read(CELL+offset,size)) for offset,size in kept], 'original setup changed linked Unit occupancy or preserved Cell fields'
     if '--trace' in sys.argv and seed in (3,4,5,6,7):
         print('trace',seed,'input',state['tile'],'output',read(CELL+0x38),cpu.mem_read(CELL+0x11a,1)[0],cpu.mem_read(CELL+0x11c,1)[0],read(CELL+0xec),cpu.mem_read(CELL+0x11d,1)[0],bool(flags&0x100),bool(flags&0x20000),read(CELL+0x4c),cpu.mem_read(COARSE+index*4+1,1)[0])
     h=2166136261

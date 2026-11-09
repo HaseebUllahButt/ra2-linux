@@ -29,7 +29,7 @@ struct CellSetupFixture {
         cell.height_level=int(next()%17)-8; cliff=next()%3;
         const auto flags=seed*2654435761u;
         cell.bridge=(flags&0x100)!=0; state.animated_20000=(flags&0x20000)!=0;
-        state.field_11d=static_cast<std::uint8_t>(next()); usable=next()%8!=0; unit=next()%2;
+        state.field_11d=static_cast<std::uint8_t>(next()); usable=next()%8!=0; (void)next(); unit=true;
         if (seed%8==0) cell.tile_index=0xffff;
         if (seed%8==1) cell.tile_index=96;
         if (seed%8==2) { cell.tile_index=32; cell.subtile=3; }
