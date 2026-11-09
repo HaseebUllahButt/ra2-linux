@@ -151,6 +151,43 @@ void infantry_test(const rules::IniFile& rules,const rules::IniFile& art,const s
     check(shots>0 && killed==1 && w.entities[1].resolved_hp==0,"infantry did not fight and die");
     check(w.cells.at(50*512+52).heads->ground_head==3,"infantry death link");
 }
+void yard_volley_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+    rules::IniFile map;
+    auto w=make_world("HTNK","NACNST",world::Kind::Unit,world::Kind::Structure,400,
+                      rules.read_integer("NACNST","Strength"));
+    for (unsigned id : {4u,5u}) { auto tank=w.entities.front(); tank.id=id; w.entities.push_back(tank); }
+    sim::PrototypeCombatRuntime combat(rules,map,art,exe);
+    for (unsigned id : {1u,4u,5u}) check(combat.attack(w,id,2),"Rhino yard order rejected");
+    unsigned first_impact=0,death=0; std::size_t shots=0;
+    for (unsigned frame=0;frame<3000;++frame) {
+        const auto result=combat.tick(w,frame);
+        check(result.unresolved.empty(),"Rhino yard volley unresolved");
+        shots+=result.fired;
+        if (result.impacts && !first_impact) first_impact=frame;
+        if (result.destroyed) { death=frame; break; }
+    }
+    check(first_impact>0 && death>first_impact && shots>3,"yard vanished without repeated Rhino hits");
+    std::cout<<"Three HTNK at four cells: first fire=0 first impact="<<first_impact
+             <<" yard death="<<death<<" shots="<<shots<<'\n';
+}
+void idle_defense_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+    rules::IniFile map;
+    auto w=make_world("NALASR","HTNK",world::Kind::Structure,world::Kind::Unit,400,400);
+    w.entities[0].mission=0;
+    sim::PrototypeCombatRuntime combat(rules,map,art,exe);
+    w.entities[1].position->x+=8*256;
+    check(combat.tick(w,0).fired==0,"Sentry fired beyond range");
+    w.entities[1].position->x-=8*256;
+    check(combat.tick(w,1).fired==1 && w.entities[0].target_id==2,"idle Sentry did not fire in range");
+    check(combat.tick(w,2).fired==0,"idle Sentry bypassed reload");
+    auto tank=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400);
+    tank.entities[0].mission=0;
+    tank.entities[0].locomotor_moving=true;
+    sim::PrototypeCombatRuntime guard(rules,map,art,exe);
+    check(guard.tick(tank,0).fired==0,"moving tank acquired a target");
+    tank.entities[0].locomotor_moving=false;
+    check(guard.tick(tank,1).fired==1,"idle tank did not defend");
+}
 void structure_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
     rules::IniFile map;
     const int strength=rules.read_integer("NAPOWR","Strength");
@@ -173,6 +210,14 @@ int main(int argc,char** argv) {
         if (argc!=2) throw std::runtime_error("usage: prototype_combat_test GAME_DIR");
         fs::MixFileSystem files(argv[1]);files.bootstrap(fs::GameVariant::RedAlert2);files.mount("conquer.mix",false);
         auto rules=load(files,"rules.ini"),art=load(files,"art.ini");
+        yard_volley_test(rules,art,std::string(argv[1])+"/game.exe");
+        idle_defense_test(rules,art,std::string(argv[1])+"/game.exe");
+        for (const auto* type : {"HTNK","DRON","NALASR"}) {
+            const auto weapon=rules.read_string(type,"Primary");
+            std::cout<<type<<" weapon="<<weapon<<" range="<<rules.read_string(weapon,"Range")
+                     <<" ROF="<<rules.read_string(weapon,"ROF")<<" damage="<<rules.read_string(weapon,"Damage")<<'\n';
+        }
+        std::cout<<"TeamDelays="<<rules.read_string("General","TeamDelays")<<'\n';
         tank_test(rules,art,std::string(argv[1])+"/game.exe");
         infantry_test(rules,art,std::string(argv[1])+"/game.exe");
         cyclic_link_test(rules,art,std::string(argv[1])+"/game.exe");
