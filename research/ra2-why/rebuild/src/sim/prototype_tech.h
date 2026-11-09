@@ -27,7 +27,7 @@ struct HousePower {
 HousePower house_power(const rules::IniFile& rules,
                        const session::world::Snapshot& world, std::uint32_t house_id);
 
-// Build time multiplier while low on power. Base RULES.INI [General]
+// Build duration multiplier (greater than one) while low on power. Base RULES.INI [General]
 // MinLowPowerProductionSpeed=.5, MaxLowPowerProductionSpeed=.8 and
 // LowPowerPenaltyModifier=1 give speeds from .8 (barely short) down to
 // .5 (blackout). Full power is 1. TODO-ORIGINAL: exact original arithmetic;
@@ -43,7 +43,11 @@ struct BuildList {
     std::vector<std::string> buildings, units, infantry, aircraft;
 };
 
-// TODO-ORIGINAL: base game.exe HouseClass::Can_Build 004E3660.
+// Uses checked HouseClass::Can_Build 004E3660 with prototype snapshot defaults.
+// TODO-ORIGINAL 005D5FC0: captured factory ownership and aircraft dock capacity.
+// TODO-ORIGINAL 004E3660: upgrade slots and queued limits need factory state.
+// Missing tech level defaults to 10; stolen tech defaults to false.
+// Missing lifetime build counters default to zero. Owner uses the country mask.
 BuildList buildable_types(const rules::IniFile& rules,
                           const session::world::Snapshot& world,
                           std::uint32_t house_id);
@@ -57,3 +61,10 @@ std::string side_of(const rules::IniFile& rules,
                     const session::world::Snapshot& world, std::uint32_t house_id);
 
 } // namespace ra2::sim::tech
+
+namespace ra2::sim::tech {
+// Recount each frame, including after damage, capture, placement, or destruction.
+void update(const rules::IniFile&, session::world::Snapshot&);
+bool building_online(const rules::IniFile&, const HousePower&, const std::string& type);
+bool radar_online(const rules::IniFile&, const session::world::Snapshot&, std::uint32_t house_id);
+}
