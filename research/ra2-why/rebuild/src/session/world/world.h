@@ -88,7 +88,9 @@ struct Entity {
     std::optional<std::uint16_t> hull_facing_raw;
     std::optional<bool> locomotor_moving;
     std::optional<std::int32_t> mission;
-    std::optional<std::uint8_t> unit_field_7d, techno_field_1b8, foot_field_5a1, object_field_75;
+    std::optional<std::uint8_t> unit_field_7d;
+    std::optional<std::int32_t> techno_field_1b8;
+    std::optional<std::uint8_t> foot_field_5a1, object_field_75;
     std::optional<double> firepower_multiplier; // Base Techno +128.
     std::optional<double> veterancy; // Base Techno +118.
     std::optional<bool> veteran_firepower, elite_firepower, veteran_rof, elite_rof;
