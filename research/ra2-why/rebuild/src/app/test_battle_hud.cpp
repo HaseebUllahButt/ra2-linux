@@ -175,7 +175,7 @@ s.can_deploy=true;
         assert(edge_hits>0); // SELECTED UNITS header, dim edge color
         // Active tab: gold frame and dim gold fill; inactive stays plain.
         HudState t; t.choices={{"E1","GI",200,true,0,BuildCategory::Infantry}};
-        hud.handle_click(808+42,44,t); // INF tab
+        hud.handle_click(808+42,44,t); // BLD tab: 808+42 picks tab 1, Buildings.
         auto tf=frame(); hud.draw(tf,t);
         auto i=(37*1024+852)*4;
         assert(tf.rgba[i]==255&&tf.rgba[i+1]==214&&tf.rgba[i+2]==64); // gold frame
@@ -203,6 +203,7 @@ s.can_deploy=true;
         assert(ink_count(short_row,{808,649,212,11})>0);
         assert(ink_count(short_row,{808,661,212,11})==0);
     }
+    hud.handle_click(808,44,t); // Back to All so the real-art checks see every choice.
     if (argc > 1) {
         fs::MixFileSystem files(argv[1]);
         files.mount_language(fs::GameVariant::RedAlert2);
