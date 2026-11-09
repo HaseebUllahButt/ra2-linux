@@ -51,6 +51,73 @@ world::Snapshot make_world(const std::string& source_type,const std::string& tar
 void same_rng(const sim::RandomState& a,const sim::RandomState& b) {
     check(a.first==b.first && a.second==b.second && a.table==b.table,"replay RNG differs");
 }
+void air_ground_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+    rules::IniFile map;
+    auto w=make_world("GAPILL","ZEP",world::Kind::Structure,world::Kind::Unit,400,2000);
+    w.entities[0].mission=5;
+    w.entities[1].position->z=750;
+    sim::PrototypeCombatRuntime pill(rules,map,art,exe);
+    check(!pill.can_attack(w,1,2) && !pill.attack(w,1,2),"Pillbox accepted an airborne Kirov");
+    const auto rng=w.random;
+    for(unsigned frame=0;frame<80;++frame)check(pill.tick(w,frame).fired==0,"Pillbox auto-fired at air");
+    same_rng(rng,w.random);
+    w.entities[1].position->z=0;
+    check(!pill.can_attack(w,1,2),"Pillbox accepted a Kirov with unresolved flight height");
+    w.entities[1].type="HTNK";
+    // The original threshold is inclusive. Ground height is relative to terrain.
+    w.entities[1].position->z=207;
+    check(pill.can_attack(w,1,2),"low object was treated as airborne");
+    w.entities[1].position->z=208;
+    check(!pill.can_attack(w,1,2),"air threshold was off by one");
+    w.entities[1].position->z=416;
+    w.cells.at(50*512+54).terrain->floor_world_height=416;
+    check(pill.can_attack(w,1,2),"ground object on a hill was treated as air");
+    w.cells.at(50*512+54).terrain->floor_world_height=0;
+    w.entities[0].type="NAFLAK";w.entities[0].mission=13;
+    check(pill.can_attack(w,1,2),"Flak Cannon rejected air");
+    w.entities[1].type="ZEP";w.entities[1].position->z=0;
+    check(pill.can_attack(w,1,2),"Flak Cannon rejected the Kirov flight class");
+    w.entities[1].type="HTNK";
+    w.entities[1].position->z=0;
+    check(!pill.can_attack(w,1,2),"AA-only Flak Cannon accepted ground");
+    w.entities[1].position->z=750;
+    check(pill.attack(w,1,2),"Flak Cannon air order rejected");
+    const auto flak=pill.tick(w,80);
+    if(!flak.unresolved.empty())throw std::runtime_error(flak.unresolved.front());
+    check(flak.fired>0,"Flak Cannon did not fire at air");
+    pill.stop(w,1);w.entities[0].weapon_timer_start_frame=-1;w.entities[0].weapon_timer_duration=0;
+    w.entities[1].position->z=0;
+    w.entities[0].type="FLAKT";w.entities[0].kind=world::Kind::Infantry;
+    w.entities[1].type="HTNK";w.entities[1].resolved_hp=w.entities[1].maximum_hp=400;
+    check(pill.attack(w,1,2),"Flak Trooper did not choose its ground weapon");
+    bool fired=false;
+    for(unsigned frame=100;frame<130 && !fired;++frame)for(const auto& e:pill.tick(w,frame).events)
+        if(e.kind==sim::PrototypeCombatEventKind::Shot && e.source_id==1) {
+            check(e.weapon==rules.read_string("FLAKT","Primary"),"wrong Flak Trooper ground weapon");
+            fired=true;
+        }
+    check(fired,"Flak Trooper ground weapon stayed silent");
+    pill.stop(w,1);w.entities[0].weapon_timer_start_frame=-1;w.entities[0].weapon_timer_duration=0;
+    w.entities[1].position->z=750;
+    check(pill.attack(w,1,2),"Flak Trooper did not choose its air weapon");
+    bool air_fired=false;
+    for(unsigned frame=150;frame<180 && !air_fired;++frame)for(const auto& e:pill.tick(w,frame).events)
+        if(e.kind==sim::PrototypeCombatEventKind::Shot && e.source_id==1) {
+            check(e.weapon==rules.read_string("FLAKT","Secondary"),"wrong Flak Trooper air weapon");
+            air_fired=true;
+        }
+    check(air_fired,"Flak Trooper air weapon stayed silent");
+    w.entities[1].position->z=0;
+    // An existing order must be rejected when its target takes off.
+    pill.stop(w,1);w.entities[0].type="GAPILL";w.entities[0].kind=world::Kind::Structure;
+    w.entities[0].weapon_timer_start_frame=-1;w.entities[0].weapon_timer_duration=0;w.entities[0].mission=13;
+    check(pill.attack(w,1,2),"ground order rejected before takeoff");
+    w.entities[1].position->z=750;
+    const auto took_off=pill.tick(w,181);
+    check(took_off.fired==0 && took_off.unresolved.empty() && w.entities[0].target_id==0,
+          "Pillbox kept firing after takeoff");
+    std::cout<<"Projectile AA/AG, height threshold, hills, secondary weapons and takeoff passed\n";
+}
 void tank_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
     rules::IniFile map;
     auto a=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400),b=a;
@@ -487,6 +554,7 @@ int main(int argc,char** argv) {
                      <<" ROF="<<rules.read_string(weapon,"ROF")<<" damage="<<rules.read_string(weapon,"Damage")<<'\n';
         }
         std::cout<<"TeamDelays="<<rules.read_string("General","TeamDelays")<<'\n';
+        air_ground_test(rules,art,std::string(argv[1])+"/game.exe");
         tank_test(rules,art,std::string(argv[1])+"/game.exe");
         infantry_test(rules,art,std::string(argv[1])+"/game.exe");
         cyclic_link_test(rules,art,std::string(argv[1])+"/game.exe");

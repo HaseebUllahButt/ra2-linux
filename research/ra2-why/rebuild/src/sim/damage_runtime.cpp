@@ -326,6 +326,7 @@ struct PrototypeWeapon {
     double prone_damage=1; // Original WarheadType +F8.
     float spread=0,percent=0;
     bool arcing=false,lobber=false;
+    bool anti_air=false,anti_ground=true; // BulletType +274/+275 (004644E0).
     bool omni_fire=false;      // Original WeaponType +107.
     bool projectile_rot=false; // Original BulletType +2AC is not zero.
     std::array<int,3> fire_flh{{0,0,0}};
@@ -346,6 +347,8 @@ std::optional<PrototypeWeapon> prototype_weapon(const IniFile& base,const IniFil
     out.projectile=prototype_string(base,map,out.name,"Projectile");
     if (out.warhead.empty() || out.projectile.empty()) return {};
     out.arcing=prototype_bool(base,map,out.projectile,"Arcing");
+    out.anti_air=prototype_bool(base,map,out.projectile,"AA");
+    out.anti_ground=prototype_bool(base,map,out.projectile,"AG",true);
     out.burst=prototype_int(base,map,out.name,"Burst").value_or(1);
     if (out.burst<1) return {}; // 006CB2F3 divides by Burst.
     out.omni_fire=prototype_bool(base,map,out.name,"OmniFire");
@@ -364,7 +367,9 @@ std::optional<PrototypeWeapon> prototype_weapon(const IniFile& base,const IniFil
         return {};
     auto image=prototype_string(base,map,source.type,"Image");
     if (image.empty()) image=source.type;
-    const auto flh=art.read_list(image,"PrimaryFireFLH");
+    const bool secondary=!weapon_name.empty() && weapon_name==prototype_string(base,map,source.type,"Secondary") &&
+        weapon_name!=prototype_string(base,map,source.type,"Primary");
+    const auto flh=art.read_list(image,secondary?"SecondaryFireFLH":"PrimaryFireFLH");
     if (flh.size()==3) {
         for (std::size_t i=0;i<3;++i) {
             const auto value=IniFile::integer_value(flh[i]);
@@ -402,6 +407,29 @@ int prototype_floor(const Snapshot& w,Coord p) {
     // TODO-ORIGINAL: Resolve ramp and bridge floor instead of using zero.
     if (it==w.cells.end() || !it->second.terrain || !it->second.terrain->floor_world_height) return 0;
     return *it->second.terrain->floor_world_height;
+}
+// Base 004CCE70 / 005D5410 IsInAir: on-map height is at least two levels.
+// TODO-ORIGINAL: jumpjet locomotion is not connected to this adapter, so
+// non-landing airships and hover infantry still carry a ground position.
+// Their declared flight family supplies the air class until that state exists.
+bool prototype_air_target(const IniFile& base,const IniFile& map,const Snapshot& world,const Entity& target) {
+    const bool permanent_air=!prototype_bool(base,map,target.type,"Landable") &&
+        (prototype_bool(base,map,target.type,"BalloonHover") || prototype_bool(base,map,target.type,"JumpJet"));
+    return permanent_air || (target.position &&
+        std::int64_t(target.position->z)-prototype_floor(world,*target.position)>=208);
+}
+std::optional<PrototypeWeapon> prototype_target_weapon(const IniFile& base,const IniFile& map,
+    const IniFile& art,const Snapshot& world,const Entity& source,const Entity& target) {
+    const bool airborne=prototype_air_target(base,map,world,target);
+    // Base 006C9260: IsInAir requires AA; a ground object requires AG.
+    // TODO-ORIGINAL: recover the remaining primary/secondary preference gates.
+    for(const auto* slot:{"Primary","Secondary"}) {
+        const auto name=prototype_string(base,map,source.type,slot);
+        if(name.empty())continue;
+        const auto weapon=prototype_weapon(base,map,art,source,name);
+        if(weapon && (airborne?weapon->anti_air:weapon->anti_ground))return weapon;
+    }
+    return {};
 }
 // Remove a dead actor from all known ordered chains without changing the
 // order of survivors. The original Unit marking and occupancy callbacks are
@@ -510,7 +538,7 @@ bool PrototypeCombatRuntime::can_attack(const session::world::Snapshot& world,
     // TODO-ORIGINAL: Resolve alliances beyond matching House IDs.
     if (!prototype_alive(source) || !prototype_alive(target) || source->house_id==target->house_id)
         return false;
-    const auto weapon=prototype_weapon(base_,map_,art_,*source);
+    const auto weapon=prototype_target_weapon(base_,map_,art_,world,*source,*target);
     if (!weapon) return false;
     const auto verse=prototype_verse(base_,map_,*weapon,*target);
     return verse && std::isfinite(*verse) && *verse>0;
@@ -773,8 +801,8 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
         }
         auto* source=prototype_find(world,it->first);
         const auto* target=prototype_find(world,it->second.target);
-        const auto weapon=prototype_alive(source)?prototype_weapon(base_,map_,art_,*source):
-            std::optional<PrototypeWeapon>{};
+        const auto weapon=prototype_alive(source) && prototype_alive(target)?
+            prototype_target_weapon(base_,map_,art_,world,*source,*target):std::optional<PrototypeWeapon>{};
         // A Guard target ends when the actor moves or the target leaves the
         // scan range. An Area Guard actor may drive toward its target.
         // Base 004C5C1D..004C5CA3 (Area Guard): a stopped actor farther than
@@ -837,10 +865,11 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             it=orders_.erase(it);continue;
         }
         try {
-            const auto weapon=prototype_weapon(base_,map_,art_,*source);
+            const auto weapon=prototype_target_weapon(base_,map_,art_,world,*source,*target);
             const auto verse=weapon?prototype_verse(base_,map_,*weapon,*target):std::optional<double>{};
             if (!weapon || !verse || !std::isfinite(*verse) || *verse<=0) {
-                if (!weapon || !verse || !std::isfinite(*verse))
+                if ((!weapon && !prototype_weapon(base_,map_,art_,*source)) ||
+                    (weapon && (!verse || !std::isfinite(*verse))))
                     report.unresolved.push_back("weapon or target armor is unresolved");
                 source->target_id=0;it=orders_.erase(it);continue;
             }
@@ -943,7 +972,7 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
         if (!prototype_alive(victim) || !prototype_alive(attacker) || orders_.count(victim_id) ||
             victim->target_id.value_or(0) || victim->house_id==attacker->house_id ||
             !prototype_bool(base_,map_,victim->type,"CanRetaliate",true)) continue;
-        const auto weapon=prototype_weapon(base_,map_,art_,*victim);
+        const auto weapon=prototype_target_weapon(base_,map_,art_,world,*victim,*attacker);
         if (!weapon || !legal_guard_target(*victim,*attacker)) continue;
         const auto* owner=prototype_house(world,victim->house_id);
         const bool human=owner && owner->human_controlled.value_or(false);
