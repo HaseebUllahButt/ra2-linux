@@ -1,5 +1,6 @@
 #pragma once
 #include "production_runtime.h"
+#include <utility>
 
 // TODO-ORIGINAL: A playable adapter around the checked production slices.
 // The caller owns one PrototypeComplete Snapshot and one FactorySet.
