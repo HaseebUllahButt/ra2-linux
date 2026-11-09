@@ -163,3 +163,30 @@ before the final debug draw. It does not verify the stubbed work.
 AI extra units. `original_mission_check.py` verifies both original x86 branches
 in each edition with the house-control flag supplied. The base-unit mission is
 still unresolved.
+
+`world/setup.h` loads the installed base rules, art, map, and theater into an
+owning asset object. It preserves packed records in original cell order.
+`read_base_packed_map` and `packed_map_snapshot` cover only the map-reader
+boundary after packed tiles, before tubes, overlays, and map objects. The
+snapshot has `SetupProgress::PackedMapRead`; it cannot enter the live runtime.
+The constructor only proves the low occupancy byte at this boundary, so the
+full 32-bit occupancy fields remain unknown. No bridge or occupancy result
+from this early phase may be used after later phases without executing them.
+
+The original Battle start pass writes the selected cell center with Z zero.
+`battle_start_position` follows its checked x86 instructions. The direct base
+Unit helper stages a constructor, its first placement, and Cell setup together.
+The retry helper stages the checked original radius search after a blocked
+direct attempt. Both require real resolved type, map, and phase inputs. An
+unresolved input leaves the snapshot and all 250 RNG words unchanged. A full
+search failure stays unresolved because Unit destruction is not yet staged.
+The asset-backed placement test supplies runtime fields and is not a live map
+load. The map objects, overlay effects, complete type loading, House updates,
+extra infantry, remaining scenario phases, and live handoff remain incomplete.
+`construct_house_fragments` covers only constructor fragments; it omits calls
+between houses and does not supply a complete House phase RNG state.
+
+`world/original_battle_start_check.py` compares the native start coordinate
+with base x86. The optional world resize check compares 19,900 MP02T2 cells
+at the packed-map boundary. `original_real_map_check.py` also compares direct
+placement at the real Battle start Z, with explicitly supplied runtime state.

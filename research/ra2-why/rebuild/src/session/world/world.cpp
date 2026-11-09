@@ -107,6 +107,8 @@ std::optional<std::uint32_t> Stage::create_unit(std::uint32_t house_id, std::str
     unit.kind=Kind::Unit; unit.lifetime=Lifetime::Created; unit.resolved_hp=resolved_hp;
     unit.constructor_random=constructor_random;
     unit.next=0; unit.on_map=false; unit.hull_facing=0; unit.turret_facing=0;
+    // Fresh Unit constructor values checked against the base executable.
+    unit.object_field_74=0; unit.object_field_76=1; unit.techno_field_370=0;
     unit.occupancy_tracking=true; // Foot constructor 004C2B6E.
     unit.category.emplace();
     unit.category->runtime_type=1; // Unit virtual +2C, base 0070A2D0.
@@ -144,6 +146,14 @@ bool Stage::install_base_cells(PlacementGeometry geometry, std::map<std::uint32_
 }
 PlacementResult Stage::place_base_unit(std::uint32_t unit_id, StartPoint point,
     std::uint8_t facing, const BaseUnitProfile& profile) {
+    if (point.x<0 || point.y<0 || point.x>=512 || point.y>=512) return PlacementResult::Unresolved;
+    const auto found=snapshot_.cells.find(std::uint32_t(point.y)*512+point.x);
+    if (found==snapshot_.cells.end() || !found->second.terrain || !found->second.terrain->floor_world_height)
+        return PlacementResult::Unresolved;
+    return place_base_unit_at(unit_id,point,*found->second.terrain->floor_world_height,facing,profile);
+}
+PlacementResult Stage::place_base_unit_at(std::uint32_t unit_id, StartPoint point,
+    std::int32_t world_z, std::uint8_t facing, const BaseUnitProfile& profile) {
     // This slice is the ordinary, unlinked, single-cell ground Unit path.
     // 00703040 and 004C8CA0 have many additional branches.
     if (snapshot_.pending_cell_setup || !snapshot_.geometry || point.x<1 || point.y<1 || point.x>510 || point.y>510 ||
@@ -164,7 +174,8 @@ PlacementResult Stage::place_base_unit(std::uint32_t unit_id, StartPoint point,
         if (it->id==unit_id) { unit=it; break; }
     if (unit==candidate.entities.end() || unit->kind!=Kind::Unit || unit->lifetime!=Lifetime::Created ||
         !unit->resolved_hp || !unit->original_type_index || !unit->next || *unit->next!=0 ||
-        !unit->occupancy_tracking || !*unit->occupancy_tracking)
+        !unit->occupancy_tracking || !*unit->occupancy_tracking ||
+        unit->object_field_74!=0 || unit->object_field_76!=1 || unit->techno_field_370!=0)
         return PlacementResult::Unresolved;
     auto house=candidate.houses.end();
     for (auto it=candidate.houses.begin();it!=candidate.houses.end();++it)
@@ -190,6 +201,7 @@ PlacementResult Stage::place_base_unit(std::uint32_t unit_id, StartPoint point,
         !terrain.land_type || (*terrain.land_type!=0 && *terrain.land_type!=2) ||
         !terrain.floor_world_height ||
         std::int64_t(*terrain.floor_world_height)!=std::int64_t(*terrain.height_level) * *profile.level_height ||
+        (world_z!=0 && world_z!=*terrain.floor_world_height) ||
         cell->second.heads->ground_head || cell->second.heads->bridge_head ||
         (*cell->second.unit_land_speed!=0.0f && *cell->second.unit_land_speed!=1.0f))
         return PlacementResult::Unresolved;
@@ -235,19 +247,22 @@ PlacementResult Stage::place_base_unit(std::uint32_t unit_id, StartPoint point,
         auto& value=*candidate.cells.at(neighbor).neighbor_count;
         value=static_cast<std::uint8_t>(value+1); // Foot 004C5F6A, byte wrap.
     }
+    unit->object_field_74=1; unit->object_field_76=0;
     unit->cell=ra2map::Cell{static_cast<std::uint16_t>(point.x),static_cast<std::uint16_t>(point.y)};
-    unit->position=sim::Coord{int(point.x)*256+128,int(point.y)*256+128,*terrain.floor_world_height};
+    unit->position=sim::Coord{int(point.x)*256+128,int(point.y)*256+128,world_z};
     unit->layer=Layer::Ground; unit->lifetime=Lifetime::Placed;
     unit->hull_facing=facing; unit->turret_facing=facing;
     unit->timer_length=0; unit->timer_active=false; // Unit 006FC9AB.
     // 006C47B9 divides world Z by Rules +1324, then stores the low byte times 10.
-    const auto height_units=std::int64_t(*terrain.floor_world_height) / *profile.leptons_per_sight_increase;
+    const auto height_units=std::int64_t(world_z) / *profile.leptons_per_sight_increase;
     const auto height_low=static_cast<std::uint8_t>(height_units);
     unit->height_byte=static_cast<std::uint8_t>(unsigned(height_low)*10u);
     // 0054AB70 invokes Cell setup 00472540 after linking. The test oracle
     // supplies that body, so its resulting category and side effects remain
     // unknown. Require a resolved snapshot before another placement.
     cell->second.coarse_category.reset();
+    // Cell setup can write +140 bits; do not retain a stale full word.
+    cell->second.cell_flags_140.reset();
     cell->second.coarse_category_writes.reset();
     cell->second.coarse_cache_height.reset();
     cell->second.hierarchy_cache_height.reset();
@@ -330,6 +345,16 @@ sim::CellSetupResult Stage::complete_pending_cell_setup(const sim::CellSetupStat
 }
 bool validate(const Snapshot& snapshot) {
     if (snapshot.edition!=Edition::Base && snapshot.edition!=Edition::Yuri) return false;
+    if (snapshot.setup_progress!=SetupProgress::Unknown && snapshot.setup_progress!=SetupProgress::PackedMapRead &&
+        snapshot.setup_progress!=SetupProgress::Complete) return false;
+    if (snapshot.cell_order) {
+        std::set<std::uint32_t> seen;
+        for (const auto key:*snapshot.cell_order) {
+            const auto found=snapshot.cells.find(key);
+            if (found==snapshot.cells.end() || !found->second.allocated || !*found->second.allocated ||
+                !seen.insert(key).second) return false;
+        }
+    }
     if (snapshot.pending_setup_cell && (!snapshot.pending_cell_setup ||
         *snapshot.pending_setup_cell>=512u*512u || !snapshot.cells.count(*snapshot.pending_setup_cell))) return false;
     try { (void)sim::Random(snapshot.random); } catch (...) { return false; }
@@ -379,6 +404,17 @@ bool validate(const Snapshot& snapshot) {
         complete.insert(chain.begin(),chain.end());
     }
     for (const auto& item:snapshot.cells) {
+        const auto& cell=item.second;
+        if (cell.cell_flags_140) {
+            const auto same=[&](const std::optional<bool>& field,std::uint32_t bit) {
+                return !field || *field==bool(*cell.cell_flags_140 & bit);
+            };
+            if (!same(cell.cell_flag_100,0x100) || !same(cell.cell_flag_200,0x200) ||
+                !same(cell.cell_flag_20000,0x20000) || !same(cell.cell_flag_40000,0x40000) ||
+                (cell.terrain && !same(cell.terrain->bridge,0x100))) return false;
+        }
+        if (cell.terrain && cell.cell_flag_100 && cell.terrain->bridge &&
+            *cell.cell_flag_100!=*cell.terrain->bridge) return false;
         if (item.first>=512*512) return false;
         if (item.second.terrain && (item.second.terrain->cell.x>=512 || item.second.terrain->cell.y>=512 ||
             std::uint32_t(item.second.terrain->cell.y)*512+item.second.terrain->cell.x!=item.first)) return false;

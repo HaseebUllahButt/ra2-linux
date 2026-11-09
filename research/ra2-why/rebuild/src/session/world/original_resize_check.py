@@ -15,10 +15,11 @@ import subprocess
 import sys
 from unicorn import UC_HOOK_CODE
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_ESP,UC_X86_REG_EIP
-if len(sys.argv) not in (2,4):
+if len(sys.argv) not in (2,4,5):
     raise SystemExit('usage: original_resize_check.py game.exe [real_map_case game_dir]')
 executable=sys.argv[1]
-tile_source=tuple(sys.argv[2:])
+tile_source=tuple(sys.argv[2:4])
+native=sys.argv[4] if len(sys.argv)==5 else None
 sys.argv=[sys.argv[0],executable,'--base']
 import original_move_trace as m
 map_object=0x8324e0
@@ -194,6 +195,27 @@ if tile_source:
         assert m.cpu.mem_read(cell+0x122,1)==b'\0' and m.cpu.mem_read(cell+0x124,1)==b'\0'
     assert count==len(expected)==19900 and target_index in expected
     print(f'base x86 reads {len(expected)} MP02T2 packed tiles and preserves tested fields in 19900 cells')
+
+    if native:
+        rows=subprocess.check_output([native,game,'--cells'],text=True).splitlines()
+        actual={}
+        for row in rows:
+            fields=tuple(map(int,row.split()))
+            assert len(fields)==10 and fields[0] not in actual
+            actual[fields[0]]=fields[1:]
+        assert len(actual)==count
+        for index,values in actual.items():
+            cell=m.read(vector+index*4)
+            assert cell
+            signed=lambda value: value if value<0x80000000 else value-0x100000000
+            level=struct.unpack('<b',m.cpu.mem_read(cell+0x11b,1))[0]
+            oracle=(m.read(cell+0x38),level,signed(m.read(cell+0x54)),signed(m.read(cell+0x58)),
+                    struct.unpack('<h',m.cpu.mem_read(cell+0x116,2))[0],
+                    m.cpu.mem_read(cell+0x122,1)[0],
+                    int(bool(m.read(cell+0x140)&0x100)),m.read(cell+0xe4),m.read(cell+0xe8))
+            assert values==oracle,(index,values,oracle)
+        print('native packed map state matches 19900 original x86 cells')
+
 
     # Replay only the four recognised Overlay root indexes from the real map.
     # Registry identity, parent eligibility and Cell lookup are supplied.

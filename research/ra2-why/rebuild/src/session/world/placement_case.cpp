@@ -56,10 +56,17 @@ int main(int argc,char** argv) {
     profile.type_flag_205=true;profile.unit_flag_32a=false;profile.type_flag_bb0=false;profile.type_flag_bb1=false;
     for (const auto point:{StartPoint{static_cast<std::int16_t>(center_x+2),static_cast<std::int16_t>(center_y)},
                           StartPoint{static_cast<std::int16_t>(center_x),static_cast<std::int16_t>(center_y)}}) {
-        const auto result=stage.place_base_unit(*unit,point,32,profile);
+        const char* initial_z=std::getenv("RA2_INITIAL_Z");
+        const char* facing_text=std::getenv("RA2_INITIAL_FACING");
+        const auto facing=static_cast<std::uint8_t>(facing_text?std::atoi(facing_text):32);
+        const auto result=initial_z?stage.place_base_unit_at(*unit,point,std::atoi(initial_z),facing,profile):
+                                    stage.place_base_unit(*unit,point,facing,profile);
         if (result==PlacementResult::Unresolved) return 1;
         const auto& s=stage.snapshot();const auto& u=s.entities.at(0);const auto& h=s.houses.at(0);
         const auto count=h.placed_unit_counts->find(0);
+        if (std::getenv("RA2_RUNTIME_FIELDS"))
+            std::cout<<"RUNTIME_FIELDS "<<int(*u.object_field_74)<<' '<<int(*u.object_field_76)<<' '
+                     <<int(*u.techno_field_370)<<'\n';
         std::cout<<(result==PlacementResult::Placed?1:0)<<' '<<int(*u.on_map)<<' '
                  <<s.cells.at(point.y*512+point.x).heads->ground_head<<' '
                  <<int(*s.cells.at(point.y*512+point.x).ground_occupancy_124)<<' '

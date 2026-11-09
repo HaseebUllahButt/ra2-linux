@@ -55,6 +55,10 @@ int main() {
     auto unknown=s; unknown.entities[1].category.reset();
     const auto incomplete=coarse_inputs(unknown,69*512+55);
     assert(incomplete && incomplete->occupants && !(*incomplete->occupants)[1].runtime_type);
+    auto inconsistent=s;
+    inconsistent.cells.begin()->second.cell_flags_140=0x100;
+    inconsistent.cells.begin()->second.cell_flag_100=false;
+    assert(!validate(inconsistent));
     auto invalid=s; invalid.entities[1].next=2; assert(!validate(invalid));
     invalid=s; invalid.entities[1].next=77; assert(!validate(invalid));
     invalid=s; invalid.cells.begin()->second.heads->bridge_head=77; assert(!validate(invalid));

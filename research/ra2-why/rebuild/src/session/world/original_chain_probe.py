@@ -114,13 +114,15 @@ for speed in (0.0,1.0):
     cpu.mem_write(destination+0x116,struct.pack('<h',-1))
     m.word(destination+0x54,-1);m.word(destination+0x58,-1)
     m.word(destination+0x140,(0x40000 if mark else 0) | (0x200 if '--flag200' in sys.argv else 0))
-    m.coord(point,(x*256+128,center_y*256+128,level*104))
+    initial_z=int(os.environ.get('RA2_INITIAL_Z',str(level*104)))
+    m.coord(point,(x*256+128,center_y*256+128,initial_z))
     land=2 if speed==0 else 0
     m.word(destination+0xec,land)
     cpu.mem_write(0x850ea0+(land*9+1)*4,struct.pack('<f',speed))
     m.word(destination+0x4c,4 if speed==0 else 0)
     cpu.reg_write(UC_X86_REG_ECX,m.FOOT);cpu.reg_write(UC_X86_REG_ESP,0x103f000)
-    cpu.mem_write(0x103f000,struct.pack('<III',0x103e000,point,32))
+    facing=int(os.environ.get('RA2_INITIAL_FACING','32'))
+    cpu.mem_write(0x103f000,struct.pack('<III',0x103e000,point,facing))
     try: cpu.emu_start(0x6fc940,0x103e000,count=100000)
     except UcError:
         print('unresolved chain dependency',hex(cpu.reg_read(UC_X86_REG_EIP)),[hex(a) for a in m.recent]);raise
@@ -142,6 +144,8 @@ for speed in (0.0,1.0):
     z=m.signed(m.FOOT+0x90) if result else -1
     height=cpu.mem_read(m.FOOT+0x378,1)[0] if result else -1
     occupancy=cpu.mem_read(destination+0x124,1)[0]
+    if os.environ.get('RA2_RUNTIME_FIELDS'):
+        print('RUNTIME_FIELDS',*(cpu.mem_read(m.FOOT+offset,1)[0] for offset in (0x74,0x76,0x370)))
     assert len(setup_calls)==int(bool(result))
     if result: assert setup_calls[-1]==destination
     print('PLACE_RESULT',result,on_map,4 if head==m.FOOT else 0,occupancy,int(bool(setup_calls)),house_count,m.read(m.FOOT+0x30),

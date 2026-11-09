@@ -101,5 +101,7 @@ if '--unit' in sys.argv:
     dynamic=m.read(house+0x5434)
     dynamic_count=m.read(dynamic+4*type_index) if dynamic else 0
     fixed_count=m.read(house+0x1278+4*type_index)
+    if '--runtime-fields' in sys.argv:
+        print('CONSTRUCTOR_FIELDS',*(cpu.mem_read(m.FOOT+offset,1)[0] for offset in (0x74,0x76,0x370)))
     print('UNIT_RESULT',low,m.read(m.FOOT+0x30),on_map,m.read(m.FOOT+0x6c),hull,turret,cpu.mem_read(m.FOOT+0x5a0,1)[0],
           m.read(house+0x228),dynamic_count,fixed_count,*indexes,*table)

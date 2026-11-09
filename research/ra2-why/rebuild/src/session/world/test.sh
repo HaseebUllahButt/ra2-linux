@@ -31,6 +31,13 @@ ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -
     "$shared/gfx/palette.cpp" "$shared"/fs/{mix_archive,mix_bootstrap,filename_hash}.cpp \
     "$shared/rules/ini_file.cpp" "$shared/map/map_file.cpp" "$shared/pack/map_pack.cpp" \
     -ldl -o "$build/real_map_case"
+${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -I "$shared/render" \
+    setup.cpp setup_case.cpp world.cpp ../session.cpp ../map_geometry.cpp ../placement_terrain.cpp \
+    "$shared"/sim/{random,distance,coarse_category,cell_setup,replacement,world,world_init,floor}.cpp \
+    "$shared/weapons/occupant_order.cpp" "$shared"/render/{minimap,tmp_decode}.cpp \
+    "$shared/gfx/palette.cpp" "$shared"/fs/{mix_archive,mix_bootstrap,filename_hash}.cpp \
+    "$shared/rules/ini_file.cpp" "$shared/map/map_file.cpp" "$shared/pack/map_pack.cpp" -ldl -o "$build/setup_case"
+"$build/setup_case" "$game"
 "$build/test_snapshot"
 "$build/cell_setup_case"
 "$build/cell_occupancy_case" > /dev/null
@@ -41,10 +48,17 @@ ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -
 "$build/real_map_case" "$game"
 "$build/target_tile_case" "$game"
 "$build/target_tile_case" "$game" --stage
+if [ "${2:-}" = "--resize-original" ]; then
+    export PYTHONPATH="$shared/sim${PYTHONPATH:+:$PYTHONPATH}"
+    ${PYTHON:-python3} original_resize_check.py "$game/game.exe" "$build/real_map_case" "$game" "$build/setup_case"
+    ${PYTHON:-python3} original_battle_start_check.py "$game/game.exe" "$build/setup_case"
+    ${PYTHON:-python3} original_real_map_check.py "$game/game.exe" "$build/placement_case" "$build/real_map_case" "$game"
+fi
 if [ "${2:-}" = "--original" ]; then
     export PYTHONPATH="$shared/sim${PYTHONPATH:+:$PYTHONPATH}"
     ${PYTHON:-python3} original_base_local_check.py "$game/game.exe" "$build/geometry_cases"
     ${PYTHON:-python3} original_house_check.py "$game/game.exe" "$build/house_case"
+    ${PYTHON:-python3} original_battle_start_check.py "$game/game.exe" "$build/setup_case"
     ${PYTHON:-python3} original_constructor_check.py "$game/game.exe" "$build/constructor_case"
     ${PYTHON:-python3} original_joint_check.py "$game/game.exe" "$build/constructor_case"
     ${PYTHON:-python3} original_placement_check.py "$game/game.exe" "$build/placement_case"
@@ -53,7 +67,7 @@ if [ "${2:-}" = "--original" ]; then
     ${PYTHON:-python3} original_bridge_check.py "$game/game.exe" "$build/bridge_footprint_case"
     ${PYTHON:-python3} original_map_order_check.py "$game/game.exe"
     ${PYTHON:-python3} original_reset_order_check.py "$game/game.exe"
-    ${PYTHON:-python3} original_resize_check.py "$game/game.exe" "$build/real_map_case" "$game"
+    ${PYTHON:-python3} original_resize_check.py "$game/game.exe" "$build/real_map_case" "$game" "$build/setup_case"
     ${PYTHON:-python3} original_overlay_registry_check.py "$game/game.exe"
     ${PYTHON:-python3} original_overlay_map_check.py "$game/game.exe" "$build/real_map_case" "$game"
     ${PYTHON:-python3} original_tile_type_check.py "$game/game.exe"
