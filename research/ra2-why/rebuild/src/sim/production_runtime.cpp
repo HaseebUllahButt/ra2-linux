@@ -304,6 +304,11 @@ Catalog Catalog::from(const IniFile& rules,const IniFile& art,const IniFile& map
     Catalog c;
     c.countries=registry(rules,map,"Countries");
     const auto building_names=registry(rules,map,"BuildingTypes");
+    const auto super_names=registry(rules,map,"SuperWeaponTypes");
+    for (std::size_t i=0;i<super_names.size();++i) {
+        bool disableable=false; read_bool(rules,map,super_names[i],"DisableableFromShell",disableable);
+        c.super_weapon_disableable[std::int32_t(i)]=disableable;
+    }
     auto country_bits=[&](const std::string& value) {
         // 0046A590 / 00482DE0 / 004F94D0: comma tokens, <random> is -2.
         std::uint32_t bits=0;
@@ -351,7 +356,12 @@ Catalog Catalog::from(const IniFile& rules,const IniFile& art,const IniFile& map
             bool naval=false; read_bool(rules,map,id,"Naval",naval); t.placement.naval=naval;
             if (rtti==Rtti::UnitType) if (const auto v=text(rules,map,id,"DeploysInto")) t.deploys_into=*v;
             if (rtti==Rtti::BuildingType) {
-                if (const auto v=text(rules,map,id,"SuperWeapon")) if (!v->empty() && !same_text(*v,"<none>")) t.can.super_weapon=0;
+                if (const auto v=text(rules,map,id,"SuperWeapon")) if (!v->empty() && !same_text(*v,"<none>")) {
+                    // An unlisted name keeps the old index 0.
+                    t.can.super_weapon=0;
+                    for (std::size_t i=0;i<super_names.size();++i)
+                        if (same_text(super_names[i],*v)) { t.can.super_weapon=std::int32_t(i); break; }
+                }
                 read_int(rules,map,id,"Adjacent",t.adjacent);
                 read_bool(rules,map,id,"BaseNormal",t.base_normal);
                 read_bool(rules,map,id,"EligibileForAllyBuilding",t.eligible_ally);
@@ -548,6 +558,7 @@ CanBuildHouse can_build_house(const w::Snapshot& s,const FactorySet& f,const Cat
     CanBuildHouse in;
     in.tech_level=h.tech_level; in.stolen_allied=h.stolen_tech_205; in.stolen_soviet=h.stolen_tech_204;
     in.country=h.country_index; in.flag_134=h.human_controlled; in.flag_135=h.house_flag_135;
+    in.super_weapon_disabled=c.super_weapon_disableable; // House +1A0[i] -> type +24 -> +DF.
     if (h.stolen_mask_208 && h.stolen_mask_20c && h.stolen_mask_210 && h.stolen_mask_214)
         in.stolen_masks=std::array<std::uint32_t,4>{*h.stolen_mask_208,*h.stolen_mask_20c,*h.stolen_mask_210,*h.stolen_mask_214};
     in.active_buildings=h.buildings_active_5460;

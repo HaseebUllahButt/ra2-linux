@@ -177,6 +177,9 @@ struct Catalog {
     float minimum_low_power=0, maximum_low_power=0, low_power_penalty=0, multiple_factory=0;
     double wall_coefficient=0;
     std::vector<std::string> pad_aircraft; bool separate_aircraft=false;
+    // [SuperWeaponTypes] index -> DisableableFromShell (type +DF). Base 004E3832
+    // refuses the building of such a type when Super Weapons is off.
+    std::map<std::int32_t,bool> super_weapon_disableable;
     std::vector<std::string> gaps;        // Inputs the reader could not resolve.
     static Catalog from(const rules::IniFile& rules,const rules::IniFile& art,const rules::IniFile& map);
     const TypeFacts* find(const std::string& id) const;

@@ -20,7 +20,7 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/sim/world.cpp src/sim/world_init.cpp src/sim/cell_setup.cpp src/sim/drive.cpp src/sim/movement.cpp src/sim/movement_regions.cpp src/sim/component_lookup.cpp src/sim/goal_path.cpp src/sim/retry_edges.cpp src/sim/hierarchy_retry.cpp src/sim/local_reachability.cpp src/sim/search_memory.cpp src/sim/foot_path.cpp src/sim/nearest_cell.cpp src/sim/cell_projection.cpp src/sim/cell_fit.cpp src/sim/overlay_mark.cpp src/sim/replacement.cpp src/sim/build_time.cpp src/voxel/voxel.cpp
 NATIVE_SOURCES += src/app/battle.cpp src/app/battle_scene.cpp src/app/battle_orders.cpp src/app/battle_hud.cpp \
     src/app/battle_audio.cpp src/audio/game_audio.cpp src/audio/audio.cpp src/audio/lookup.cpp \
-    src/app/battle_effects.cpp src/app/battle_help.cpp src/app/battle_cursor.cpp src/ui/score_screen.cpp \
+    src/app/battle_effects.cpp src/app/battle_help.cpp src/app/battle_setup.cpp src/app/battle_cursor.cpp src/ui/score_screen.cpp \
     src/sim/prototype_movement.cpp src/sim/prototype_ai.cpp src/sim/prototype_infantry.cpp \
     src/sim/prototype_victory.cpp src/sim/prototype_production.cpp src/sim/prototype_economy.cpp \
     src/sim/prototype_tech.cpp src/render/battle_radar.cpp
@@ -584,7 +584,7 @@ skirmish-check: native skirmish-tests
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --frames 3
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --autoplay --frames 12000
 
-skirmish-tests: build/battle_score_test build/resource_render_test build/battle_status_test build/battle_formation_test build/prototype_economy_test build/battle_audio_test build/prototype_movement_test build/battle_effects_test build/battle_queue_test build/battle_radar_test build/battle_radar_world_test build/battle_help_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test
+skirmish-tests: build/battle_score_test build/resource_render_test build/battle_status_test build/battle_formation_test build/prototype_economy_test build/battle_audio_test build/prototype_movement_test build/battle_effects_test build/battle_queue_test build/battle_radar_test build/battle_radar_world_test build/battle_help_test build/battle_setup_test build/super_weapon_option_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test
 	build/resource_render_test $(TEST_GAME_DIR)
 	build/battle_status_test
 	build/battle_formation_test
@@ -598,6 +598,8 @@ skirmish-tests: build/battle_score_test build/resource_render_test build/battle_
 	build/battle_radar_test $(TEST_GAME_DIR)
 	build/battle_radar_world_test $(TEST_GAME_DIR)
 	build/battle_help_test
+	build/battle_setup_test
+	build/super_weapon_option_test $(TEST_GAME_DIR)
 	build/battle_cursor_test $(TEST_GAME_DIR)
 	build/battle_hud_test $(TEST_GAME_DIR)
 	build/battle_orders_test
@@ -643,6 +645,9 @@ build/battle_hud_test: build/native/src/app/test_battle_hud.o build/native/src/a
 build/battle_help_test: build/native/src/app/test_battle_help.o build/native/src/app/battle_help.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
+build/battle_setup_test: build/native/src/app/test_battle_setup.o build/native/src/app/battle_setup.o build/native/src/rules/ini_file.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
 build/battle_cursor_test: build/native/src/app/test_battle_cursor.o build/native/src/app/battle_cursor.o $(FS_OBJECTS) $(GFX_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
@@ -650,6 +655,9 @@ build/battle_orders_test: build/native/src/app/test_battle_orders.o build/native
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/prototype_production_test: build/native/src/sim/test_prototype_production.o $(PROTOTYPE_TEST_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
+
+build/super_weapon_option_test: build/native/src/sim/test_super_weapon_option.o $(PROTOTYPE_TEST_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
 
 build/prototype_combat_test: build/native/src/weapons/prototype_combat_test.o $(PROTOTYPE_TEST_OBJECTS)

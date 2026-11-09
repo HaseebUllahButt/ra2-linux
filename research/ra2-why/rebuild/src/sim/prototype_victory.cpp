@@ -1,4 +1,6 @@
 #include "prototype_victory.h"
+#include <algorithm>
+#include <cctype>
 #include <stdexcept>
 
 namespace ra2::sim {
@@ -34,9 +36,8 @@ bool auxiliary_house(const session::world::House& house) {
     return house.role && (*house.role==session::world::HouseRole::Neutral ||
                           *house.role==session::world::HouseRole::Special);
 }
-}
 
-Victory evaluate_prototype_victory(const session::world::Snapshot& world,
+void require_houses(const session::world::Snapshot& world,
     std::uint32_t player_house, std::uint32_t enemy_house) {
     if (!player_house || !enemy_house)
         throw std::invalid_argument("victory house ids use zero as null");
@@ -57,6 +58,51 @@ Victory evaluate_prototype_victory(const session::world::Snapshot& world,
     }
     if (!player_found || !enemy_found)
         throw std::invalid_argument("victory house ids must exist in the snapshot");
+}
+bool same_type(const std::string& a, const std::string& b) {
+    return a.size()==b.size() && std::equal(a.begin(),a.end(),b.begin(),[](unsigned char x,unsigned char y){
+        return std::tolower(x)==std::tolower(y);
+    });
+}
+// House +228, +230, +234, +238 and the two BaseUnit counts of 004E4110.
+struct Owned { int units=0, buildings=0, infantry=0, aircraft=0, base_units=0; };
+bool fallen(const Owned& owned, bool short_game) {
+    if (short_game) return owned.buildings==0 && owned.base_units<1;
+    return owned.buildings==0 && owned.aircraft==0 && owned.infantry==0 && owned.units<=0;
+}
+}
+
+Victory evaluate_original_victory(const session::world::Snapshot& world,
+    std::uint32_t player_house, std::uint32_t enemy_house, const VictoryRules& rules) {
+    require_houses(world,player_house,enemy_house);
+    Owned player, enemy;
+    for (const auto& entity:world.entities) {
+        if (entity.lifetime!=session::world::Lifetime::Placed) continue;
+        if (entity.resolved_hp && *entity.resolved_hp<=0) continue;
+        Owned* owned=entity.house_id==player_house ? &player : entity.house_id==enemy_house ? &enemy : nullptr;
+        if (!owned) continue;
+        switch (entity.kind) {
+            case session::world::Kind::Structure: ++owned->buildings; break;
+            case session::world::Kind::Infantry: ++owned->infantry; break;
+            case session::world::Kind::Aircraft: ++owned->aircraft; break;
+            case session::world::Kind::Unit:
+                ++owned->units;
+                for (std::size_t i=0;i<rules.base_units.size() && i<2;++i)
+                    if (same_type(entity.type,rules.base_units[i])) { ++owned->base_units; break; }
+                break;
+            default: break;
+        }
+    }
+    const bool player_alive=!fallen(player,rules.short_game), enemy_alive=!fallen(enemy,rules.short_game);
+    if (player_alive && enemy_alive) return Victory::InProgress;
+    if (player_alive) return Victory::PlayerWon;
+    if (enemy_alive) return Victory::PlayerLost;
+    return Victory::Draw;
+}
+
+Victory evaluate_prototype_victory(const session::world::Snapshot& world,
+    std::uint32_t player_house, std::uint32_t enemy_house) {
+    require_houses(world,player_house,enemy_house);
     bool player_alive=false, enemy_alive=false;
     for (const auto& entity:world.entities) {
         if (!surviving_entity(entity)) continue;
@@ -72,6 +118,12 @@ Victory evaluate_prototype_victory(const session::world::Snapshot& world,
 Victory VictoryState::update(const session::world::Snapshot& world,
     std::uint32_t player_house, std::uint32_t enemy_house) {
     if (!settled()) result=evaluate_prototype_victory(world,player_house,enemy_house);
+    return result;
+}
+
+Victory VictoryState::update(const session::world::Snapshot& world,
+    std::uint32_t player_house, std::uint32_t enemy_house, const VictoryRules& rules) {
+    if (!settled()) result=evaluate_original_victory(world,player_house,enemy_house,rules);
     return result;
 }
 }
