@@ -66,6 +66,8 @@ bool inside(int x,int y,Rectangle r) {
 }
 void BattleHud::load_assets(const fs::MixFileSystem& files, const rules::IniFile& rules,
                             const rules::IniFile& art, const std::vector<BuildChoice>& choices) {
+    panel_valid_=false;
+    if(panel_.rgba.empty())panel_={view_width,minimap_y,render::Bytes(std::size_t(view_width)*minimap_y*4)};
     cameos_.clear();cameo_names_.clear();cameo_palette_.reset();
     cameo_files_=&files;
     const auto pal=files.read_file("cameo.pal");
@@ -121,10 +123,19 @@ HudAction BattleHud::handle_click(int x,int y,const HudState& s) const {
              static_cast<int>(static_cast<std::int64_t>(y-r.y)*s.map_height/r.height)}};
     return {};
 }
-void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
-    loop::profile::Timer probe(loop::profile::Phase::HudDraw);
-    if(!valid(b)) return;
-    fill(b,{sidebar_x,0,sidebar_width,view_height},dark);
+bool BattleHud::same_panel(const HudState& s) const {
+    const auto& old=panel_state_;
+    return panel_valid_&&panel_category_==active_category_&&old.cash==s.cash&&
+        old.power_output==s.power_output&&old.power_drain==s.power_drain&&
+        old.status==s.status&&old.result==s.result&&old.selected_labels==s.selected_labels&&
+        old.choices.size()==s.choices.size()&&std::equal(old.choices.begin(),old.choices.end(),s.choices.begin(),
+            [](const auto& a,const auto& b) {
+                return a.type==b.type&&a.name==b.name&&a.cost==b.cost&&a.enabled==b.enabled&&
+                    a.progress==b.progress&&a.category==b.category;
+            });
+}
+void BattleHud::draw_panel(render::Bitmap& b,const HudState& s) const {
+    fill(b,{sidebar_x,0,sidebar_width,minimap_y},dark);
     text(b,808,3,"CREDITS $"+std::to_string(s.cash),ink,212);
     text(b,808,17,"POWER "+std::to_string(s.power_output)+"/"+std::to_string(s.power_drain),ink,212);
     fill(b,{808,29,212,6},edge);
@@ -201,6 +212,23 @@ void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
         text(b,808,y,label,ink,212); y+=13;
     }
     text(b,808,658,s.status,ink,212);
+}
+void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
+    loop::profile::Timer probe(loop::profile::Phase::HudDraw);
+    if(!valid(b))return;
+    if(!same_panel(s)) {
+        panel_valid_=false;
+        if(panel_.rgba.empty())panel_={view_width,minimap_y,render::Bytes(std::size_t(view_width)*minimap_y*4)};
+        draw_panel(panel_,s);
+        panel_state_.cash=s.cash;panel_state_.power_output=s.power_output;panel_state_.power_drain=s.power_drain;
+        panel_state_.selected_labels=s.selected_labels;panel_state_.choices=s.choices;
+        panel_state_.status=s.status;panel_state_.result=s.result;
+        panel_category_=active_category_;panel_valid_=true;
+    }
+    const int right=std::min(b.width,view_width),bottom=std::min(b.height,minimap_y);
+    if(right>sidebar_x)for(int y=0;y<bottom;++y)
+        std::copy_n(panel_.rgba.begin()+(std::size_t(y)*view_width+sidebar_x)*4,
+            std::size_t(right-sidebar_x)*4,b.rgba.begin()+(std::size_t(y)*b.width+sidebar_x)*4);
     auto r=minimap_bounds(); fill(b,r,{8,15,12,255});
     if(valid(s.minimap)) for(int y=0;y<r.height;++y) for(int x=0;x<r.width;++x) {
         const auto i=(static_cast<std::size_t>(y)*s.minimap.height/r.height*s.minimap.width+

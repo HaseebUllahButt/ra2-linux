@@ -50,6 +50,8 @@ int main(int argc, char** argv) {
     hud.draw(changed,s);
     for(auto region: {render::Rectangle{808,0,212,31},{808,606,212,40},{808,658,212,6},r})
         assert(!same(b,changed,region));
+    auto repeated=frame();hud.draw(repeated,s);
+    assert(repeated.rgba==changed.rgba); // Cached controls must fully cover a fresh frame.
     s.minimap={2,1,{10,20,30,255,40,50,60,255}};
     hud.draw(b,s);
     assert(b.rgba[(700*1024+805)*4]==10);

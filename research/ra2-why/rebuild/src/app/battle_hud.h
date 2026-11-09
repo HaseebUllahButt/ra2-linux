@@ -101,6 +101,12 @@ public:
     static render::Rectangle deploy_bounds();
 private:
     mutable BuildCategory active_category_ = BuildCategory::All;
+    mutable bool panel_valid_=false;
+    mutable BuildCategory panel_category_=BuildCategory::All;
+    mutable HudState panel_state_;
+    mutable render::Bitmap panel_;
+    bool same_panel(const HudState& state) const;
+    void draw_panel(render::Bitmap& frame,const HudState& state) const;
     const fs::MixFileSystem* cameo_files_=nullptr;
     std::optional<gfx::Palette> cameo_palette_;
     std::unordered_map<std::string,std::string> cameo_names_;
