@@ -154,7 +154,11 @@ public:
     bool choosing_map() const noexcept { return choosing_map_; }
     const SkirmishSetup& skirmish_setup() const noexcept { return setup_; }
     const SkirmishSetup& setup() const noexcept { return setup_; }
-    void enable_prototype_start(bool enabled) noexcept { prototype_start_=enabled; }
+    void enable_prototype_start(bool enabled) noexcept {
+        // Native play starts on Easy even when the original saved an older choice.
+        if(enabled&&!prototype_start_)setup_.opponents[0].opponent=Opponent::Easy;
+        prototype_start_=enabled;
+    }
     gfx::RgbaImage render() const;
     void pointer_move(int x, int y);
     void pointer_down(int x, int y);

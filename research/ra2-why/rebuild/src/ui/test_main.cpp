@@ -247,7 +247,13 @@ int main(int argc,char** argv) {
     const int start_y=249;
     menu.pointer_down(start_x,start_y);
     assert(menu.pointer_up(start_x,start_y)==ui::Action::None);
+    menu.select_opponent(1,ui::Opponent::Hard);
     menu.enable_prototype_start(true);
+    assert(menu.skirmish_setup().opponents[0].opponent==ui::Opponent::Easy);
+    menu.select_opponent(1,ui::Opponent::Hard);
+    menu.enable_prototype_start(true);
+    assert(menu.skirmish_setup().opponents[0].opponent==ui::Opponent::Hard);
+    menu.select_opponent(1,ui::Opponent::Easy);
     menu.pointer_down(start_x,start_y);
     assert(menu.pointer_up(start_x,start_y)==ui::Action::StartMatch);
     menu.enable_prototype_start(false);

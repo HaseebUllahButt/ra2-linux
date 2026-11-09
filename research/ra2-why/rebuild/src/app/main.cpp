@@ -205,7 +205,6 @@ int run_menu(const Options& args, ra2::fs::MixFileSystem& files) {
     strings.parse(csf->data(), csf->size());
     auto menu = ra2::ui::Menu::load(files, *exe, strings);
     menu.enable_prototype_start(!expansion);
-    if(!expansion)menu.select_opponent(1,ra2::ui::Opponent::Easy);
     files.mount_resources();
     menu.configure_maps(ra2::ui::load_skirmish_maps(files, strings),
                         ra2::ui::load_skirmish_modes(files, strings));
