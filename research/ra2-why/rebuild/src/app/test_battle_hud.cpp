@@ -105,6 +105,73 @@ int main(int argc, char** argv) {
     assert(tabframe.rgba[(57*1024+809)*4]!=17); // bottom border row
     assert(tabframe.rgba[(35*1024+809)*4]==22); // power bar row: plain sidebar dark
     assert(tabframe.rgba[(58*1024+809)*4]==22); // gap above the buttons
+    // Sidebar QA fixes: queue count, hover cost tooltip, tab highlight,
+    // labels and the DEPLOY gate.
+    {
+        auto gold_hits=[&](const render::Bitmap& img,render::Rectangle box) {
+            int hits=0;
+            for(int y=box.y;y<box.y+box.height;++y) for(int x=box.x;x<box.x+box.width;++x) {
+                auto i=(static_cast<std::size_t>(y)*img.width+x)*4;
+                if(img.rgba[i]==255&&img.rgba[i+1]==214&&img.rgba[i+2]==64) ++hits;
+            }
+            return hits;
+        };
+        auto ink_hits=[&](const render::Bitmap& img,render::Rectangle box) {
+            int hits=0;
+            for(int y=box.y;y<box.y+box.height;++y) for(int x=box.x;x<box.x+box.width;++x) {
+                auto i=(static_cast<std::size_t>(y)*img.width+x)*4;
+                if(img.rgba[i]==224&&img.rgba[i+1]==230&&img.rgba[i+2]==192) ++hits;
+            }
+            return hits;
+        };
+        // Queue count: a badge with the number shows only when queued > 1.
+        HudState q;
+        q.choices={{"E1","GI",200,true,0,BuildCategory::Infantry,2}};
+        auto one=frame(); hud.draw(one,q);
+        assert(gold_hits(one,{r.x+88,r.y+44,16,12})>0);
+        q.choices[0].queued=0;
+        auto none=frame(); hud.draw(none,q);
+        assert(gold_hits(none,{r.x+88,r.y+44,16,12})==0);
+        // Hover tooltip: the cost shows only when the pointer is on the cameo.
+        q.pointer_x=r.x+10; q.pointer_y=r.y+10;
+        auto hover=frame(); hud.draw(hover,q);
+        assert(gold_hits(hover,{r.x,r.y+r.height,110,14})>0);
+        q.pointer_x=q.pointer_y=-1;
+        auto idle=frame(); hud.draw(idle,q);
+        assert(gold_hits(idle,{r.x,r.y+r.height,110,14})==0);
+        // DEPLOY shows and clicks only when no yard exists.
+        HudState yard=q; yard.has_yard=true;
+        auto with_yard=frame(); hud.draw(with_yard,yard);
+        auto ink_row=[&](const render::Bitmap& img,int y) {
+            for(int x=808;x<1020;++x) {
+                auto i=(static_cast<std::size_t>(y)*img.width+x)*4;
+                if(img.rgba[i]==224&&img.rgba[i+1]==230) return true;
+            }
+            return false;
+        };
+        assert(!ink_row(with_yard,560));
+        yard.has_yard=false;
+        auto no_yard=frame(); hud.draw(no_yard,yard);
+        assert(ink_row(no_yard,560));
+        yard.has_yard=true;
+        assert(hud.handle_click(808,560,yard).kind==HudActionKind::None);
+        yard.has_yard=false;
+        assert(hud.handle_click(808,560,yard).kind==HudActionKind::Deploy);
+        // Labels: the power values and the selected list carry titles.
+        HudState lab; lab.choices={{"E1","GI",200,true}};
+        lab.power_output=200; lab.power_drain=60; lab.selected_labels={"GI"};
+        auto lf=frame(); hud.draw(lf,lab);
+        assert(ink_hits(lf,{808,17,212,10})>0);  // POWER OUT ... USE ...
+        assert(ink_hits(lf,{808,596,212,10})>0); // SELECTED UNITS header
+        // Active tab: gold frame and dim gold fill; inactive stays plain.
+        HudState t; t.choices={{"E1","GI",200,true,0,BuildCategory::Infantry}};
+        hud.handle_click(808+42,44,t); // INF tab
+        auto tf=frame(); hud.draw(tf,t);
+        auto i=(37*1024+852)*4;
+        assert(tf.rgba[i]==255&&tf.rgba[i+1]==214&&tf.rgba[i+2]==64); // gold frame
+        auto j=(45*1024+855)*4;
+        assert(tf.rgba[j]==58&&tf.rgba[j+1]==50&&tf.rgba[j+2]==18);   // dim gold fill
+    }
     if (argc > 1) {
         fs::MixFileSystem files(argv[1]);
         files.mount_language(fs::GameVariant::RedAlert2);
