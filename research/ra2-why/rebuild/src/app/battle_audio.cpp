@@ -19,7 +19,12 @@ rules::IniFile ini(const fs::MixFileSystem& files,const char* name) {
 }
 }
 BattleAudio::BattleAudio(const fs::MixFileSystem& files,const rules::IniFile& rules,
-                        std::uint32_t player,std::string side,bool enabled) noexcept :player_(player) {
+                        std::uint32_t player,std::string side,bool enabled,unsigned frame_delay_ms) noexcept :player_(player) {
+    if(frame_delay_ms>32) {
+        const auto delay=std::min(frame_delay_ms,250u);
+        queue_target_=(22050u*(delay+64u)+999u)/1000u;
+        queue_low_=(22050u*(delay+32u)+999u)/1000u;
+    }
     if(!enabled)return; // Headless runs do not open hardware or decode samples.
     try {
         device_=std::make_unique<AudioQueue>(22050,1);
@@ -104,11 +109,12 @@ void BattleAudio::service(bool paused) noexcept {
     try {
         device_->pause(paused);
         if(paused)return;
-        // Keep 46..93 ms buffered. Rapid simulation ticks cannot fill seconds
-        // of sound. Slow draws cannot cause unbounded catch-up work.
+        // Fast settings keep the original 46..93 ms buffer. Slower settings
+        // cover one configured wait plus 32..64 ms for drawing and device work.
+        // The delay cap bounds both latency and work per service call.
         const auto queued=device_->queued_samples();
-        if(queued>=1024)return;
-        buffer_.assign(2048-queued,0);
+        if(queued>=queue_low_)return;
+        buffer_.assign(queue_target_-queued,0);
         mixer_.render(buffer_);device_->append(buffer_);mixed_samples_+=buffer_.size();
     } catch(const std::exception& e) {
         failure_=e.what();device_.reset();

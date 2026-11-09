@@ -11,7 +11,7 @@ namespace ra2::app {
 class BattleAudio {
 public:
     BattleAudio(const fs::MixFileSystem&, const rules::IniFile&, std::uint32_t player,
-                std::string speech_side, bool enabled=true) noexcept;
+                std::string speech_side, bool enabled=true, unsigned frame_delay_ms=32) noexcept;
     BattleAudio(const BattleAudio&)=delete;
     BattleAudio& operator=(const BattleAudio&)=delete;
     void observe(const session::world::Snapshot&, std::uint64_t frame);
@@ -40,6 +40,7 @@ private:
     std::uint32_t player_=0;
     std::uint64_t frame_=0;
     std::size_t fire_events_=0,death_events_=0,mixed_samples_=0;
+    std::size_t queue_target_=2048,queue_low_=1024;
     bool ready_=false;
 };
 }

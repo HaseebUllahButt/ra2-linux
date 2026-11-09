@@ -100,5 +100,23 @@ int main(int argc,char** argv) {
         audio.observe(world,1);assert(audio.death_events()==0);
         audio.service(false);assert(!loud(audio.last_pcm()));
     }
-    std::cout<<"base fire and EVA PCM, first tick, pause, queue pacing, and death filters passed\n";
+    {
+        // Speed 6 waits 96 ms. Include 16 ms of drawing work between pumps.
+        app::BattleAudio audio(files,rules,1,"Allied",true,96);assert(audio.enabled());
+        auto world=state();audio.observe(world,0);
+        world.entities[0].resolved_hp=0;audio.observe(world,0);
+        audio.service(false);
+        assert(audio.last_pcm().size()>2048&&audio.queued_samples()<=3528);
+        for(unsigned tick=0;tick<4;++tick) {
+            SDL_Delay(112);
+            assert(audio.queued_samples()>0); // Speech has no empty device queue.
+            const auto before=audio.mixed_samples();
+            audio.service(false);
+            assert(audio.mixed_samples()>before&&audio.queued_samples()<=3528);
+        }
+        audio.service(true);const auto queued=audio.queued_samples();
+        const auto mixed=audio.mixed_samples();SDL_Delay(112);audio.service(true);
+        assert(audio.queued_samples()==queued&&audio.mixed_samples()==mixed);
+    }
+    std::cout<<"base fire and EVA PCM, first tick, pause, fast/slow pacing, and death filters passed\n";
 }
