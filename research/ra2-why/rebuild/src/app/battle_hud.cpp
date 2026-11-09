@@ -12,7 +12,8 @@ namespace {
 using render::Rectangle;
 using Color = std::array<unsigned char, 4>;
 constexpr Color ink{224, 230, 192, 255}, dark{22, 29, 32, 255},
-    edge{104, 129, 126, 255}, green{70, 190, 90, 255}, red{220, 75, 60, 255};
+    edge{104, 129, 126, 255}, green{70, 190, 90, 255}, red{220, 75, 60, 255},
+    gold{255, 214, 64, 255};
 bool valid(const render::Bitmap& b) {
     return b.width > 0 && b.height > 0 &&
         static_cast<std::uint64_t>(b.width)*b.height*4 <= b.rgba.size();
@@ -31,7 +32,8 @@ void border(render::Bitmap& b, Rectangle r, Color c) {
     fill(b,{r.x,r.y,1,r.height},c); fill(b,{r.x+r.width-1,r.y,1,r.height},c);
 }
 // TODO-ORIGINAL: replace the embedded 3x5 font with original game typography.
-void text(render::Bitmap& b, int x, int y, const std::string& s, Color c, int limit) {
+void text(render::Bitmap& b, int x, int y, const std::string& s, Color c, int limit,
+          int scale=1) {
     const std::string chars="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$:/-?.";
     const char* glyphs[]={"010101111101101","110101110101110","011100100100011",
         "110101101101110","111100110100111","111100110100100","011100101101011",
@@ -46,11 +48,11 @@ void text(render::Bitmap& b, int x, int y, const std::string& s, Color c, int li
         "000000111000000","110001010000010","000000000000010"};
     int end=x+limit;
     for (unsigned char raw:s) {
-        if (x+3>end) break;
+        if (x+3*scale>end) break;
         auto n=chars.find(static_cast<char>(std::toupper(raw)));
         if(n!=std::string::npos) for(int j=0;j<15;++j)
-            if(glyphs[n][j]=='1') pixel(b,x+j%3,y+j/3,c);
-        x+=4;
+            if(glyphs[n][j]=='1') fill(b,{x+(j%3)*scale,y+(j/3)*scale,scale,scale},c);
+        x+=4*scale;
     }
 }
 bool inside(int x,int y,Rectangle r) {
@@ -116,8 +118,15 @@ void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
         if(right>x && bottom>y) border(b,{r.x+x,r.y+y,right-x,bottom-y},ink);
     }
     if(!s.result.empty()) {
-        fill(b,{100,330,604,60},dark); border(b,{100,330,604,60},ink);
-        text(b,120,354,s.result,ink,564);
+        // Clear end banner: VICTORY green, DEFEAT red, DRAW gold.
+        const bool win=s.result.find("VICT")!=std::string::npos;
+        const Color tone=win?green:s.result.find("DEFEAT")!=std::string::npos?red:gold;
+        const Rectangle box{(sidebar_x-604)/2,330,604,60};
+        fill(b,box,dark); border(b,box,tone);
+        // TODO-ORIGINAL: original end-of-match banner art and animation.
+        const int scale=8, w=static_cast<int>(s.result.size())*4*scale-scale;
+        text(b,box.x+std::max(0,(box.width-w)/2),box.y+(box.height-5*scale)/2,
+             s.result,tone,box.width-16,scale);
     }
 }
 } // namespace ra2::app

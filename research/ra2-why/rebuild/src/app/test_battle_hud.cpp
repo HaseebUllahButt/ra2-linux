@@ -53,6 +53,24 @@ int main() {
     assert(!same(b,changed,{804,672,220,96}));
     s.result="VICTORY";hud.draw(changed,s);
     assert(!same(b,changed,{100,330,604,60}));
+    // The banner is large, centered and color-coded: VICTORY green,
+    // DEFEAT red, DRAW gold. It never paints into the sidebar.
+    auto banner=frame();
+    const auto count_rgb=[&](unsigned char r,unsigned char g,unsigned char bl) {
+        int hits=0;
+        for(int y=330;y<390;++y) for(int x=100;x<704;++x) {
+            const auto i=(static_cast<std::size_t>(y)*1024+x)*4;
+            if(banner.rgba[i]==r&&banner.rgba[i+1]==g&&banner.rgba[i+2]==bl) ++hits;
+        }
+        return hits;
+    };
+    hud.draw(banner,s);
+    assert(count_rgb(70,190,90)>400);
+    s.result="DEFEAT";hud.draw(banner,s);
+    assert(count_rgb(220,75,60)>400 && count_rgb(70,190,90)==0);
+    s.result="DRAW";hud.draw(banner,s);
+    assert(count_rgb(255,214,64)>400 && count_rgb(220,75,60)==0);
+    assert(banner.rgba[(360*1024+99)*4]==17 && banner.rgba[(360*1024+705)*4]==17);
     auto small=frame(810,50);hud.draw(small,s);
     assert(small.rgba.size()==810*50*4);
     render::Bitmap malformed{1024,768,{1,2,3}};hud.draw(malformed,s);
