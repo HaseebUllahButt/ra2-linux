@@ -2,6 +2,8 @@
 #include "depth.h"
 
 #include <algorithm>
+#include <cstring>
+#include <thread>
 #include <fstream>
 #include <iomanip>
 #include <limits>
@@ -224,37 +226,67 @@ TerrainFrame render_terrain(const pack::Terrain& terrain, const MapGeometry& geo
         if (a->x+a->y != b->x+b->y) return a->x+a->y < b->x+b->y;
         return int(a->x)-a->y < int(b->x)-b->y;
     });
-    for (const auto* tile : order) {
+    // Decode every tile first, in draw order, so a failure reports the same
+    // first tile. Drawing then reads only the decoded art.
+    std::vector<const DecodedTile*> art_of;
+    art_of.reserve(order.size());
+    for (const auto* tile : order)
+        art_of.push_back(&(indexes == TileIndexSpace::LiveCell ?
+            art.resolved_tile(tile->index, tile->subtile) : art.tile(tile->index, tile->subtile)));
+    // Each pixel depends only on earlier writes to the same pixel, so
+    // horizontal bands of the image can be drawn at the same time, each in
+    // the original tile order.
+    auto draw_band = [&](int band_top, int band_bottom) {
+    for (std::size_t item = 0; item < order.size(); ++item) {
+        const auto* tile = order[item];
         // 0x006D1F10 projection, normalized to the rectangular map diamond.
         const int x = (int(tile->x)-tile->y+geometry.size.width-1)*(tw/2)-local.x*tw;
         const int ground_y = (int(tile->x)+tile->y-geometry.size.width-1)*(th/2);
         // Cell +11B is signed (00480350). Map records store its raw byte.
         const int level = tile->height < 128 ? int(tile->height) : int(tile->height) - 256;
         const int y = ground_y-level*(th/2)-local.y*th;
-        const auto& decoded = indexes == TileIndexSpace::LiveCell ?
-            art.resolved_tile(tile->index, tile->subtile) : art.tile(tile->index, tile->subtile);
+        const auto& decoded = *art_of[item];
         auto draw = [&](const TileLayer& layer) {
             const auto& b = layer.bitmap;
             const int left = x+layer.x, top = y+layer.y;
-            const int x0 = std::max(0, -left), y0 = std::max(0, -top);
-            const int x1 = std::min(b.width, image.width-left), y1 = std::min(b.height, image.height-top);
+            const int x0 = std::max(0, -left), y0 = std::max({0, -top, band_top-top});
+            const int x1 = std::min(b.width, image.width-left);
+            const int y1 = std::min({b.height, image.height-top, band_bottom-top});
+            // Raw pointers: byte stores through a vector would force the
+            // compiler to reload every vector's data pointer per pixel.
+            const std::uint8_t* const from = b.rgba.data();
+            std::uint8_t* const to = image.rgba.data();
+            std::uint16_t* const depth = result.depth.data();
+            const bool z_test = !layer.z.empty();
+            const auto* const zs = layer.z.data();
+            const auto base = result.depth_base;
+            const auto origin_y = result.depth_origin_y;
+            const auto signed_level = static_cast<std::int8_t>(level);
+            const auto width = std::size_t(image.width);
             for (int sy = y0; sy < y1; ++sy) for (int sx = x0; sx < x1; ++sx) {
                 const auto source = std::size_t(sy)*b.width+sx;
-                if (!b.rgba[source*4+3]) continue;
-                const auto target = std::size_t(top+sy)*image.width+left+sx;
+                if (!from[source*4+3]) continue;
+                const auto target = std::size_t(top+sy)*width+left+sx;
                 // The original non-Z path copies colors without a depth test.
-                if (!layer.z.empty()) {
-                    const auto z = original_tile_depth(result.depth_base, result.depth_origin_y,
-                        y, static_cast<std::int8_t>(level), layer.z[source]);
-                    if (z > result.depth[target]) continue;
-                    result.depth[target] = z;
+                if (z_test) {
+                    const auto z = original_tile_depth(base, origin_y, y, signed_level, zs[source]);
+                    if (z > depth[target]) continue;
+                    depth[target] = z;
                 }
-                std::copy_n(b.rgba.begin()+source*4, 4, image.rgba.begin()+target*4);
+                std::memcpy(to+target*4, from+source*4, 4);
             }
         };
         draw(decoded.diamond);
         if (decoded.extra) draw(*decoded.extra);
     }
+    };
+    const int bands = std::clamp(int(std::thread::hardware_concurrency()), 1, 8);
+    const int band_height = (image.height + bands - 1) / bands;
+    std::vector<std::thread> workers;
+    for (int band = 1; band < bands; ++band)
+        workers.emplace_back(draw_band, band * band_height, std::min(image.height, (band + 1) * band_height));
+    draw_band(0, std::min(image.height, band_height));
+    for (auto& worker : workers) worker.join();
     return result;
 }
 
