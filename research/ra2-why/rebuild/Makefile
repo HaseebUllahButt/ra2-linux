@@ -583,7 +583,9 @@ skirmish-check: native skirmish-tests
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --frames 3
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --autoplay --frames 12000
 
-skirmish-tests: build/battle_help_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test
+skirmish-tests: build/battle_radar_test build/battle_radar_world_test build/battle_help_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test
+	build/battle_radar_test $(TEST_GAME_DIR)
+	build/battle_radar_world_test $(TEST_GAME_DIR)
 	build/battle_help_test
 	build/battle_cursor_test $(TEST_GAME_DIR)
 	build/battle_hud_test $(TEST_GAME_DIR)
@@ -593,6 +595,12 @@ skirmish-tests: build/battle_help_test build/battle_cursor_test build/battle_hud
 	build/prototype_victory_test
 	build/prototype_ai_test $(TEST_GAME_DIR)
 	build/prototype_infantry_test $(TEST_GAME_DIR)
+
+build/battle_radar_test: build/native/src/render/test_battle_radar.o $(PROTOTYPE_TEST_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
+
+build/battle_radar_world_test: build/native/src/render/test_battle_radar_world.o $(PROTOTYPE_TEST_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
 
 build/battle_hud_test: build/native/src/app/test_battle_hud.o build/native/src/app/battle_hud.o $(FS_OBJECTS) $(GFX_OBJECTS) build/native/src/rules/ini_file.o
 	$(CXX) $(CXXFLAGS) $^ -o $@

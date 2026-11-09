@@ -45,7 +45,23 @@ int main(int argc,char** argv) {
         terrain.overlay_type_index=r.first;
         b=draw_battle_radar(w,art,v,style,true); assert(rgb(b,16,16)==r.second);
     }
-    terrain.overlay_type_index.reset(); terrain.resolved_tile_index=art.translate_map_index(0);
+    terrain.overlay_type_index.reset();
+    const auto clear_set=art.settings().read_integer("General","ClearTile",0);
+    const auto& clear=art.resolved_metadata(art.tile_sets().at(clear_set).first,0);
+    const double clear_center=(int(c.x)-int(c.y)+v.map.size.width)/2.;
+    const auto expected=(v.map.local.x+16.5*v.map.local.width/v.width)<clear_center?
+        clear.radar_left:clear.radar_right;
+    for(const auto sentinel:{0xffffu,0xffffffffu}) {
+        terrain.resolved_tile_index=sentinel; terrain.subtile=255;
+        b=draw_battle_radar(w,art,v,style,true);
+        assert(rgb(b,16,16)==expected);
+        bool rejected=false;
+        try { art.resolved_metadata(sentinel,0); }
+        catch(const RenderError&) { rejected=true; }
+        assert(rejected); // Only drawing resolves the clear marker.
+    }
+    terrain.subtile=0;
+    terrain.resolved_tile_index=art.translate_map_index(0);
     style.houses[1]={250,20,40};
     session::world::Entity e; e.house_id=1; e.cell=ra2map::Cell{8,8};
     e.lifetime=session::world::Lifetime::Placed; w.entities.push_back(e);
@@ -61,5 +77,5 @@ int main(int argc,char** argv) {
     v.width=0; assert(!click_battle_radar(w,v,0,0,true));
     bool threw=false; try { draw_battle_radar(w,art,v,style,true); }
     catch(const RenderError&) { threw=true; } assert(threw);
-    std::cout<<"battle radar tests passed (real base TMP and rules)\n";
+    std::cout<<"battle radar tests passed (real base TMP and clear markers)\n";
 }
