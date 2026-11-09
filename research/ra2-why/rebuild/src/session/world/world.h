@@ -116,6 +116,7 @@ struct CellState {
     std::optional<std::uint8_t> overlay_data_11e;
     std::optional<std::uint32_t> cell_flags_140;
     std::optional<bool> cell_flag_80;
+    std::optional<std::uint8_t> cell_field_12c;
 };
 // An owning snapshot. IDs use zero as null. Original creation order does not
 // depend on the storage order of houses and entities. The shared next field is
