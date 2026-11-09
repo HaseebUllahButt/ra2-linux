@@ -6,7 +6,7 @@ game=${2:-"$root/../game"}
 captures=$(mktemp -d /tmp/ra2-human-input.XXXXXX)
 printf 'Input check captures: %s\n' "$captures"
 RA2_MATCH_CAPTURE="$captures/play.ppm" "$binary" --game-dir "$game" \
-    --skirmish --headless --human-input-check --frames 14000 >"$captures/run.log" 2>&1
+    --headless --human-input-check --frames 14000 >"$captures/run.log" 2>&1
 cat "$captures/run.log"
 python3 - "$captures" <<'PY'
 import pathlib
@@ -38,6 +38,6 @@ for name in names[:-1]:
     assert 'Human input checkpoint: ' + name in log, name
 assert 'world=PrototypeComplete' in log
 assert 'result=DEFEAT' in log or 'result=VICTORY' in log
-assert 'Native base RA2 menu: 3 frames presented.' in log
+assert 'Native base RA2 menu: 6 frames presented.' in log
 print('Human SDL input, result, camera, menu, and capture checks passed.')
 PY

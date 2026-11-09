@@ -2,10 +2,27 @@
 #include <SDL.h>
 
 #include <limits>
+#include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 
 namespace ra2::app {
 namespace {
+FILE* debug_log() {
+    static FILE* log=[]()->FILE* {
+        if(!std::getenv("RA2_DEBUG_LOOP"))return nullptr;
+        char path[]="/tmp/ra2-debug-loop.XXXXXX";
+        const int fd=mkstemp(path);
+        if(fd<0)return nullptr;
+        FILE* out=fdopen(fd,"w");
+        if(out) {
+            setvbuf(out,nullptr,_IOLBF,0);
+            std::fprintf(stderr,"Debug loop log: %s\n",path);
+        }
+        return out;
+    }();
+    return log;
+}
 [[noreturn]] void error(const char* operation) {
     throw std::runtime_error(std::string(operation) + ": " + SDL_GetError());
 }
@@ -35,6 +52,7 @@ Window::Window(const std::string& title, int width, int height, bool visible)
         error("Initialize native video");
     impl_->initialized = true;
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+    SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
     const auto flags = SDL_WINDOW_RESIZABLE | (visible ? SDL_WINDOW_SHOWN : SDL_WINDOW_HIDDEN);
     impl_->window = SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_CENTERED,
                                      SDL_WINDOWPOS_CENTERED, width, height, flags);
@@ -47,17 +65,27 @@ Window::Window(const std::string& title, int width, int height, bool visible)
         error("Set native border color");
 }
 Window::~Window() = default;
+void Window::set_visible(bool visible) {
+    if(visible) {
+        SDL_ShowWindow(impl_->window);
+        SDL_RaiseWindow(impl_->window);
+    } else SDL_HideWindow(impl_->window);
+}
 
 void Window::inject_for_test(const Input& input) {
     SDL_Event event{};
     const auto id=SDL_GetWindowID(impl_->window);
+    int x=input.x,y=input.y;
+    // SDL filters pushed mouse events from window to logical coordinates too.
+    if(input.kind==InputKind::Button || input.kind==InputKind::Motion)
+        SDL_RenderLogicalToWindow(impl_->renderer,float(input.x),float(input.y),&x,&y);
     if(input.kind==InputKind::Button) {
         event.type=input.pressed?SDL_MOUSEBUTTONDOWN:SDL_MOUSEBUTTONUP;
         event.button.windowID=id;event.button.button=static_cast<Uint8>(input.key);
         event.button.state=input.pressed?SDL_PRESSED:SDL_RELEASED;
-        event.button.x=input.x;event.button.y=input.y;
+        event.button.x=x;event.button.y=y;
     } else if(input.kind==InputKind::Motion) {
-        event.type=SDL_MOUSEMOTION;event.motion.windowID=id;event.motion.x=input.x;event.motion.y=input.y;
+        event.type=SDL_MOUSEMOTION;event.motion.windowID=id;event.motion.x=x;event.motion.y=y;
     } else if(input.kind==InputKind::Key) {
         event.type=input.pressed?SDL_KEYDOWN:SDL_KEYUP;
         event.key.windowID=id;event.key.state=input.pressed?SDL_PRESSED:SDL_RELEASED;
@@ -109,10 +137,15 @@ std::vector<Input> Window::poll() {
         default: break;
         }
     }
+    if(auto* log=debug_log())for(const auto& input:inputs)
+        std::fprintf(log,"SDL %u window=%u input=%d pressed=%d key=%d x=%d y=%d\n",
+            SDL_GetTicks(),window_id,int(input.kind),input.pressed,input.key,input.x,input.y);
     return inputs;
 }
 
 void Window::present(const std::uint8_t* rgba, int width, int height, std::size_t size) {
+    if(auto* log=debug_log())std::fprintf(log,"SDL %u window=%u present begin\n",
+        SDL_GetTicks(),SDL_GetWindowID(impl_->window));
     if (!rgba || size != image_size(width, height))
         throw std::runtime_error("Native frame dimensions differ from pixel buffer");
     if (!impl_->texture || width != impl_->texture_width || height != impl_->texture_height) {
@@ -135,6 +168,8 @@ void Window::present(const std::uint8_t* rgba, int width, int height, std::size_
         SDL_RenderCopy(impl_->renderer, impl_->texture, nullptr, nullptr) != 0)
         error("Draw native frame");
     SDL_RenderPresent(impl_->renderer);
+    if(auto* log=debug_log())std::fprintf(log,"SDL %u window=%u present end\n",
+        SDL_GetTicks(),SDL_GetWindowID(impl_->window));
 }
 void Window::title(const std::string& text) { SDL_SetWindowTitle(impl_->window, text.c_str()); }
 std::vector<std::uint8_t> Window::capture(int& width, int& height) const {

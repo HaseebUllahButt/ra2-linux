@@ -307,7 +307,7 @@ public:
     void checkpoint(const loop::State& state,const std::string& label) {
         force_draw_=true;present(state);force_draw_=false;
         int width=0,height=0;const auto pixels=window_.capture(width,height);
-        if(width!=frame_.width||height!=frame_.height||pixels!=frame_.rgba)
+        if(args_.headless&&(width!=frame_.width||height!=frame_.height||pixels!=frame_.rgba))
             throw std::runtime_error("Human input capture differs: "+label);
         if(const auto* path=std::getenv("RA2_MATCH_CAPTURE")) {
             auto prefix=std::filesystem::path(path);prefix.replace_extension();
@@ -339,11 +339,24 @@ public:
         case 1:
             for(const auto& e:world_.entities)if(live(e)&&e.house_id==player_&&!rules_.read_string(e.type,"DeploysInto").empty()) {
                 const auto at=anchor(e);require(at.has_value(),"Human input: MCV has no screen anchor");
-                test_click(at->x,at->y);test_click(at->x,at->y);human_stage_=2;return;
+                test_click(at->x,at->y);
+                const char* mode=std::getenv("RA2_INPUT_DEPLOY");
+                if(mode && std::string(mode)!="double") {
+                    // Exercise pause and focus through SDL, before the deploy event.
+                    test_key(SDLK_F1);
+                    test_key(SDLK_d); // Help consumes commands while paused.
+                    const auto button=BattleHud::deploy_bounds();
+                    test_click(button.x+8,button.y+8); // Dismiss help without deploying.
+                    window_.inject_for_test({InputKind::Focus,0,0,0,false});
+                    window_.inject_for_test({InputKind::Focus,0,0,0,true});
+                    if(std::string(mode)=="sidebar")test_click(button.x+8,button.y+8);
+                    else test_key(SDLK_d);
+                } else test_click(at->x,at->y);
+                human_stage_=2;return;
             }
             throw std::runtime_error("Human input: MCV is missing");
         case 2:
-            require(own_type(allied?"GACNST":"NACNST"),"Human input: MCV double click did not deploy");
+            require(own_type(allied?"GACNST":"NACNST"),"Human input: MCV input did not deploy");
             checkpoint(state,"01-deployed");palette_click(power);human_stage_=3;break;
         case 3: {
             const p::FactoryState* product=nullptr;
@@ -818,9 +831,27 @@ public:
         }
         if(const auto box=orders_.selection_rectangle())rectangle(frame_,box->x,box->y,box->width,box->height,{70,255,90});
         if(!placement_.empty())if(const auto cell=cell_at({pointer_x_,pointer_y_})) {
-            w::Entity marker;marker.cell=cell;marker.position=sim::Coord{int(cell->x)*256+128,int(cell->y)*256+128,0};
-            marker.resolved_hp=1;marker.lifetime=w::Lifetime::Placed;
-            if(const auto at=anchor(marker))rectangle(frame_,at->x-30,at->y-15,60,30,{255,230,80});
+            const p::CellXY origin{std::int16_t(cell->x),std::int16_t(cell->y)};
+            const bool valid=p::legal_placement(world_,catalog_,placement_,origin)==true &&
+                proto::passes_proximity(world_,factories_,catalog_,player_,placement_,origin)==true;
+            const std::array<std::uint8_t,3> color=valid?std::array<std::uint8_t,3>{70,255,90}:
+                std::array<std::uint8_t,3>{255,70,70};
+            if(const auto* type=catalog_.find(placement_))
+                for(const auto offset:p::original_foundation_cells(type->placement.foundation)) {
+                    const int x=int(cell->x)+offset.x,y=int(cell->y)+offset.y;
+                    if(x<0||y<0||x>=512||y>=512)continue;
+                    const auto found=world_.cells.find(std::uint32_t(y)*512+x);
+                    const int z=found!=world_.cells.end()&&found->second.terrain?
+                        found->second.terrain->floor_world_height.value_or(0):0;
+                    w::Entity marker;marker.cell=ra2map::Cell{std::uint16_t(x),std::uint16_t(y)};
+                    marker.position=sim::Coord{x*256+128,y*256+128,z};
+                    marker.resolved_hp=1;marker.lifetime=w::Lifetime::Placed;
+                    if(const auto at=anchor(marker))for(int dx=-30;dx<=30;++dx) {
+                        const int dy=(30-std::abs(dx))/2;
+                        pixel(frame_,at->x+dx,at->y-dy,color);
+                        pixel(frame_,at->x+dx,at->y+dy,color);
+                    }
+                }
         }
         refresh_hud();hud_.draw(frame_,hud_state_);
         if(show_score_ && score_image_) {

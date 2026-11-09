@@ -26,6 +26,7 @@ public:
     // App checks use the same SDL event queue as physical mouse and key input.
     void inject_for_test(const Input& input);
     void present(const std::uint8_t* rgba, int width, int height, std::size_t size);
+    void set_visible(bool visible);
     void title(const std::string& text);
     // Read the actual native render target for automated graphics checks.
     std::vector<std::uint8_t> capture(int& width, int& height) const;

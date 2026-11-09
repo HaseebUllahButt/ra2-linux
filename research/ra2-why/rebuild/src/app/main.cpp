@@ -54,8 +54,8 @@ Options options(int argc, char** argv) {
         throw std::runtime_error("Playable prototype supports base RA2 only");
     if (result.autoplay && !result.skirmish)
         throw std::runtime_error("Autoplay needs --skirmish");
-    if(result.human_input_check&&!result.skirmish)
-        throw std::runtime_error("Human input check needs --skirmish");
+    if(result.human_input_check&&result.variant!=ra2::fs::GameVariant::RedAlert2)
+        throw std::runtime_error("Human input check needs base RA2");
     if(result.human_input_check&&result.autoplay)
         throw std::runtime_error("Human input check cannot use autoplay");
     return result;
@@ -129,10 +129,17 @@ class MenuPump final : public ra2::loop::MessagePump {
     int pointer_x_ = -1, pointer_y_ = -1;
 public:
     bool start_match = false;
+    int test_stage=-1;
     MenuPump(ra2::app::Window& window, ra2::ui::Menu& menu, bool headless)
         : window_(window), menu_(menu), headless_(headless) {}
     void pump(ra2::loop::State& state) override {
         using ra2::app::InputKind;
+        if(test_stage>=0 && test_stage<3) {
+            const int ys[]={200,284,249};
+            window_.inject_for_test({InputKind::Button,650,ys[test_stage],SDL_BUTTON_LEFT,true});
+            window_.inject_for_test({InputKind::Button,650,ys[test_stage],SDL_BUTTON_LEFT,false});
+            ++test_stage;
+        }
         for (const auto& input : window_.poll()) {
             if (input.kind == InputKind::Quit) state.running = false;
             else if (input.kind == InputKind::Focus) {
@@ -205,10 +212,11 @@ int run_menu(const Options& args, ra2::fs::MixFileSystem& files) {
     ra2::app::Window window("Red Alert 2 native rebuild: menu", 800, 600, !args.headless);
     MenuPump pump(window, menu, args.headless);
     MenuPresenter presenter(window, menu);
+    if(args.human_input_check&&!args.skirmish)pump.test_stage=0;
     ra2::loop::SteadyClock clock;
     ra2::loop::GameLoop loop(pump, presenter, clock);
     for (;;) {
-        if (args.frames) loop.run(args.frames);
+        if (args.frames) loop.run(args.human_input_check&&pump.test_stage<0?3:args.frames);
         else while (loop.state().running) loop.step();
         if (args.headless) presenter.verify();
         if(args.human_input_check)if(const auto* capture=std::getenv("RA2_MATCH_CAPTURE")) {
@@ -222,7 +230,15 @@ int run_menu(const Options& args, ra2::fs::MixFileSystem& files) {
         battle.map = battle.setup.map_filename.value_or("MP02T2.MAP");
         battle.headless = args.headless;
         battle.frames = args.frames;
+        battle.human_input_check=args.human_input_check;
+        // Keep only the match visible while it owns input and focus.
+        window.set_visible(false);
         ra2::app::run_prototype_battle(battle);
+        if(!args.headless)window.set_visible(true);
+        if(args.human_input_check) {
+            loop.state().frame_counter=0;
+            pump.test_stage=-1;
+        }
         pump.start_match = false;
         loop.state().running = true;
         loop.state().window_active = true;
@@ -257,7 +273,7 @@ int main(int argc, char** argv) {
         files.mount_overlays();
         if (args.map.empty()||args.skirmish) {
             auto menu_args=args;
-            if(args.human_input_check)menu_args.frames=3;
+            if(args.human_input_check&&args.skirmish)menu_args.frames=3;
             return run_menu(menu_args, files);
         }
         files.mount_resources();
