@@ -218,6 +218,12 @@ int main(int argc, char** argv) {
         auto short_row=frame(); hud.draw(short_row,st);
         assert(ink_count(short_row,{808,649,212,11})>0);
         assert(ink_count(short_row,{808,661,212,11})==0);
+        st.status="CAN T BUILD HERE.";
+        auto without_apostrophe=frame();hud.draw(without_apostrophe,st);
+        st.status="CAN'T BUILD HERE.";
+        auto with_apostrophe=frame();hud.draw(with_apostrophe,st);
+        assert(ink_count(without_apostrophe,{832,650,6,10})==0);
+        assert(ink_count(with_apostrophe,{832,650,6,10})>0);
     }
     if (argc > 1) {
         fs::MixFileSystem files(argv[1]);
@@ -250,6 +256,15 @@ int main(int argc, char** argv) {
             }
         }
         assert(darker && hud.handle_click(fixed_slot.x+2,fixed_slot.y+2,unavailable).kind==HudActionKind::None);
+        hud.draw(screen,originals);
+
+        auto running=originals;running.choices[0].progress=250;
+        auto before_hold=frame();hud.draw(before_hold,running);
+        running.choices[0].held=true;
+        auto on_hold=frame();hud.draw(on_hold,running);
+        assert(!same(before_hold,on_hold,{fixed_slot.x+1,fixed_slot.y+20,fixed_slot.width-2,15}));
+        auto repeated_hold=frame();hud.draw(repeated_hold,running);
+        assert(on_hold.rgba==repeated_hold.rgba);
         hud.draw(screen,originals);
 
         int i=0;

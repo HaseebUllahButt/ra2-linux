@@ -330,6 +330,30 @@ IniFile parse(const std::string& text) {
     return result;
 }
 
+void check_team_leader() {
+    // Base 006BAA60 chooses the highest LeadershipRating before target search.
+    const auto rules = parse(
+        "[General]\nTeamDelays=100,100,100\n"
+        "[InfantryTypes]\n0=GI\n1=OFFICER\n"
+        "[GI]\nLeadershipRating=1\n[OFFICER]\nLeadershipRating=9\n");
+    const auto ai = parse(
+        "[TaskForces]\n0=TF\n[TF]\n0=1,GI\n1=1,OFFICER\n"
+        "[ScriptTypes]\n0=S\n[S]\n0=0,2\n[TeamTypes]\n0=T\n"
+        "[T]\nTaskForce=TF\nScript=S\nMax=1\n"
+        "[AITriggerTypes]\nTR=Attack,T,<all>,0,-1,<none>,0,50,1,100,1,0,0,0,<none>,1,1,1\n");
+    sw::Snapshot world;
+    world.houses = {house(computer, "Local", false), house(player, "Enemy", true)};
+    world.entities = {
+        actor(rules, 10, computer, "GI", sw::Kind::Infantry, {10,10}),
+        actor(rules, 11, computer, "OFFICER", sw::Kind::Infantry, {80,80}),
+        actor(rules, 20, player, "BASE", sw::Kind::Structure, {12,12}),
+        actor(rules, 21, player, "BASE", sw::Kind::Structure, {82,82})};
+    PrototypeAI policy(rules, &ai);
+    const auto orders = policy.tick(world, computer, player, 0);
+    require(orders.size() == 2 && orders[0].target == 21 && orders[1].target == 21,
+        "Team target search did not use the highest LeadershipRating");
+}
+
 void check_team_policy() {
     const auto rules = parse(
         "[General]\nTeamDelays=300,200,100\nTotalAITeamCap=4,4,4\nMaximumAIDefensiveTeams=1,1,1\n"
@@ -472,6 +496,7 @@ int main(int argc, char** argv) try {
         check_base_teams(rules, ai, allied, "Russians", soviet, level, "1");
         check_base_teams(rules, ai, soviet, "Americans", allied, level, "2");
     }
+    check_team_leader();
     check_team_policy();
     std::cout << "Prototype AI spot checks passed: both base factions, rule filters, deterministic clocks and targets, base AI.INI teams.\n";
     return 0;

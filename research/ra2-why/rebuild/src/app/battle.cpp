@@ -1,5 +1,6 @@
 #include "battle_formation.h"
 #include "battle.h"
+#include "cameo_click.h"
 #include "battle_status.h"
 #include "sidebar_choices.h"
 #include "camera_scroll.h"
@@ -143,9 +144,12 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     std::uint32_t human_target_=0,human_wait_frame_=0;
     std::map<std::uint32_t,sim::Coord> human_positions_;
     int human_camera_=0;
+    int human_cash_before_=0,human_hold_cash_=0,human_hold_progress_=0;
+    std::uint32_t human_product_=0;
     std::uint32_t ai_opening_=3500;
     ui::Opponent difficulty_=ui::Opponent::Easy;
     std::uint32_t autoplay_unit_=0;
+    std::uint64_t input_frame_=0;
     std::optional<sim::Coord> autoplay_start_;
 public:
     std::size_t presented=0,moved=0,fired=0,impacts=0,built=0,deployed=0,ai_orders=0,infantry=0;
@@ -361,27 +365,51 @@ public:
             if (input.pressed && (input.key==SDL_BUTTON_LEFT || input.key==SDL_BUTTON_RIGHT)) {
                 refresh_hud();
                 const auto action=hud_.handle_click(input.x,input.y,hud_state_);
-                if(input.key==SDL_BUTTON_RIGHT) {
-                    if(action.kind==HudActionKind::Build)if(const auto* type=catalog_.find(action.type))
-                        if(build_queue_.cancel(factory_slot(*type),action.type))status("Queued product removed.");
-                    return;
-                }
-                if (action.kind==HudActionKind::Deploy && !victory_.settled()) deploy_selected();
-                else if (action.kind==HudActionKind::Build) {
-                    if(victory_.settled())return;
-                    bool ready=false;
-                    for (const auto& f:factories_.factories) if (f.house_id==player_ && f.object &&
-                        f.object_type==action.type && f.progress==54) ready=true;
+                if(action.kind==HudActionKind::Build && !victory_.settled()) {
                     const auto* type=catalog_.find(action.type);
-                    if (ready && type && type->rtti==p::Rtti::BuildingType) {
+                    if(!type)return;
+                    const p::FactoryState* product=nullptr;
+                    for(const auto& factory:factories_.factories)
+                        if(factory.house_id==player_ && factory.object && factory.object_type==action.type)product=&factory;
+                    const bool queueable=type->rtti!=p::Rtti::BuildingType;
+                    const auto click=cameo_click(input.key==SDL_BUTTON_RIGHT,product!=nullptr,
+                        product&&product->progress==54,product&&product->suspended,
+                        build_queue_.count(action.type)>0,queueable);
+                    switch(click) {
+                    case CameoClick::RemoveQueued:
+                        if(build_queue_.cancel(factory_slot(*type),action.type))status("Queued product removed.");
+                        break;
+                    case CameoClick::Hold:
+                        note(proto::hold_production(world_,factories_,catalog_,player_,action.type,input_frame_),"On hold.");
+                        break;
+                    case CameoClick::Cancel: {
+                        const auto outcome=proto::cancel_production(world_,factories_,catalog_,player_,action.type,input_frame_);
+                        if(outcome.status==p::Status::Done && placement_==action.type) {
+                            placement_.clear();orders_.set_placement_active(false);
+                        }
+                        note(outcome,"Production cancelled.");
+                        break;
+                    }
+                    case CameoClick::Resume:
+                        note(proto::begin_production(world_,factories_,catalog_,player_,action.type,input_frame_),"Production resumed.");
+                        break;
+                    case CameoClick::Place:
                         placement_=action.type;orders_.set_placement_active(true);
                         status("Place "+name(placement_)+". Esc cancels.");
-                    } else if(type && (type->rtti==p::Rtti::UnitType || type->rtti==p::Rtti::InfantryType)) {
+                        break;
+                    case CameoClick::Queue:
                         if(build_queue_.add(factory_slot(*type),action.type,active_count(action.type)))
                             status("Queued "+name(action.type)+".");
                         else status("Queue full: five per type.");
-                    } else queue({OrderKind::Build,player_,0,0,action.type,{}});
-                } else if (action.kind==HudActionKind::Minimap) {
+                        break;
+                    case CameoClick::Begin:
+                        queue({OrderKind::Build,player_,0,0,action.type,{}});
+                        break;
+                    case CameoClick::None:break;
+                    }
+                } else if(input.key==SDL_BUTTON_RIGHT)return;
+                else if(action.kind==HudActionKind::Deploy && !victory_.settled())deploy_selected();
+                else if (action.kind==HudActionKind::Minimap) {
                     pan(action.position.x-camera_x_-BattleHud::sidebar_x/2,
                         action.position.y-camera_y_-BattleHud::view_height/2);
                 }
@@ -398,6 +426,7 @@ public:
         if(!victory_.settled())pending_.insert(pending_.end(),commands.begin(),commands.end());
     }
     void pump(loop::State& state) override {
+        input_frame_=state.frame_counter;
         if(args_.human_input_check)human_input(state);
         for (const auto& event:window_.poll()) {
             if (!args_.headless && event.kind==InputKind::Focus) state.window_active=event.pressed;
@@ -407,10 +436,10 @@ public:
         audio_.service(state.paused||!state.window_active);
         if (quit_) state.running=false;
     }
-    void test_click(int x,int y) {
+    void test_click(int x,int y,int button=SDL_BUTTON_LEFT) {
         window_.inject_for_test({InputKind::Motion,x,y});
-        window_.inject_for_test({InputKind::Button,x,y,SDL_BUTTON_LEFT,true});
-        window_.inject_for_test({InputKind::Button,x,y,SDL_BUTTON_LEFT,false});
+        window_.inject_for_test({InputKind::Button,x,y,button,true});
+        window_.inject_for_test({InputKind::Button,x,y,button,false});
     }
     void test_key(int key) {
         window_.inject_for_test({InputKind::Key,0,0,key,true});
@@ -439,12 +468,12 @@ public:
             for(const auto& e:world_.entities)if(live(e)&&e.house_id==player_&&e.type==type)return &e;
             return nullptr;
         };
-        const auto palette_click=[&](const std::string& type) {
+        const auto palette_click=[&](const std::string& type,int button=SDL_BUTTON_LEFT) {
             refresh_hud();
             const auto it=std::find_if(hud_state_.choices.begin(),hud_state_.choices.end(),[&](const auto& c){return c.type==type;});
             require(it!=hud_state_.choices.end(),"Human input: power plant cameo is missing");
             const auto r=BattleHud::build_button_bounds(int(it-hud_state_.choices.begin()));
-            test_click(r.x+8,r.y+8);
+            test_click(r.x+8,r.y+8,button);
         };
         const bool allied=house(world_,player_).side_index.value_or(0)==0;
         const std::string power=allied?"GAPOWR":"NAPOWR";
@@ -475,13 +504,43 @@ public:
             throw std::runtime_error("Human input: MCV is missing");
         case 2:
             require(own_type(allied?"GACNST":"NACNST"),"Human input: MCV input did not deploy");
+            human_cash_before_=house(world_,player_).cash.value_or(0);
             checkpoint(state,"01-deployed");palette_click(power);human_stage_=3;break;
         case 3: {
             const p::FactoryState* product=nullptr;
             for(const auto& f:factories_.factories)if(f.house_id==player_&&f.object&&f.object_type==power)product=&f;
             require(product,"Human input: sidebar click did not begin power production");
-            checkpoint(state,"02-production");human_stage_=4;break;
+            if(product->progress<2)break;
+            checkpoint(state,"02-production");
+            human_product_=product->object;human_hold_progress_=product->progress;
+            human_hold_cash_=house(world_,player_).cash.value_or(0);
+            human_wait_frame_=state.frame_counter;
+            palette_click(power,SDL_BUTTON_RIGHT);human_stage_=80;break;
         }
+        case 80: {
+            const auto product=std::find_if(factories_.factories.begin(),factories_.factories.end(),[&](const auto& f){return f.object==human_product_;});
+            require(product!=factories_.factories.end() && product->suspended && product->progress==human_hold_progress_,"Human input: right click did not hold production");
+            require(house(world_,player_).cash==human_hold_cash_,"Human input: held production spent credits");
+            if(state.frame_counter-human_wait_frame_<4)break;
+            palette_click(power);human_stage_=81;break;
+        }
+        case 81: {
+            const auto product=std::find_if(factories_.factories.begin(),factories_.factories.end(),[&](const auto& f){return f.object==human_product_;});
+            require(product!=factories_.factories.end() && !product->suspended && product->progress==human_hold_progress_ && product->timer_duration>0,"Human input: left click did not resume held production");
+            palette_click(power,SDL_BUTTON_RIGHT);human_stage_=82;break;
+        }
+        case 82: {
+            const auto product=std::find_if(factories_.factories.begin(),factories_.factories.end(),[&](const auto& f){return f.object==human_product_;});
+            require(product!=factories_.factories.end() && product->suspended,"Human input: resumed product did not hold again");
+            palette_click(power,SDL_BUTTON_RIGHT);human_stage_=83;break;
+        }
+        case 83:
+            require(active_count(power)==0 && house(world_,player_).cash==human_cash_before_,"Human input: second right click did not cancel and refund");
+            palette_click(power);human_stage_=84;break;
+        case 84:
+            require(active_count(power)==1,"Human input: fresh production failed after cancel");
+            std::cerr<<"Human production hold, resume and refund passed\n";
+            human_stage_=4;break;
         case 4:
             for(const auto& f:factories_.factories)if(f.house_id==player_&&f.object_type==power&&f.progress==54) {
                 checkpoint(state,"03-ready");palette_click(power);human_stage_=5;break;
@@ -901,7 +960,15 @@ public:
         hud_state_.status=status_.text(clock_.now_ms());hud_state_.result=result_name(victory_.result);
         hud_state_.choices.clear();
         const auto eligible=proto::options(world_,factories_,catalog_,player_);
-        const auto available=sim::tech::buildable_types(rules_,world_,player_);
+        auto available=sim::tech::buildable_types(rules_,world_,player_);
+        // Keep the active product accessible when a prerequisite disappears.
+        for(const auto& factory:factories_.factories)if(factory.house_id==player_&&factory.object) {
+            const auto* type=catalog_.find(factory.object_type);if(!type)continue;
+            auto& list=type->rtti==p::Rtti::BuildingType?available.buildings:
+                type->rtti==p::Rtti::InfantryType?available.infantry:
+                type->rtti==p::Rtti::AircraftType?available.aircraft:available.units;
+            if(std::find(list.begin(),list.end(),type->id)==list.end())list.push_back(type->id);
+        }
         // Keep the eligible types in their original rules order within each list.
         for(const auto* list:{&available.buildings,&available.units,&available.infantry,&available.aircraft})
         for(const auto& type:*list) {
@@ -914,7 +981,10 @@ public:
             choice.category=facts->rtti==p::Rtti::BuildingType?BuildCategory::Buildings:
                 facts->rtti==p::Rtti::InfantryType?BuildCategory::Infantry:
                 facts->rtti==p::Rtti::AircraftType?BuildCategory::Aircraft:BuildCategory::Vehicles;
-            if(factory)choice.progress=factory->progress*1000/54;
+            if(factory) {
+                choice.progress=factory->progress*1000/54;
+                choice.held=factory->suspended&&factory->progress<54;
+            }
             choice.queued=build_queue_.count(type)+active_count(type);
             hud_state_.choices.push_back(std::move(choice));
         }
