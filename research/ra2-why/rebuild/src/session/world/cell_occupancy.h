@@ -5,7 +5,7 @@
 namespace ra2::session::world {
 // Values at base Cell +124/+128 and +54/+58. Both layers must be resolved.
 struct SubcellOccupancy {
-    std::uint8_t ground=0, bridge=0;
+    std::uint32_t ground=0, bridge=0;
     std::int32_t ground_owner=-1, bridge_owner=-1;
 };
 enum class OccupancyLayer { Ground, Bridge };
@@ -21,6 +21,6 @@ bool remove_unit_occupancy(SubcellOccupancy&, OccupancyLayer);
 // The caller resolves the TerrainType mask and successful unlimbo.
 std::optional<std::uint32_t> terrain_occupancy_mask(std::optional<std::int32_t> session_field_838,
     std::optional<std::uint32_t> temperate_mask, std::optional<std::uint32_t> snow_mask);
-void add_terrain_occupancy(std::uint8_t& ground, std::uint32_t mask);
-void remove_terrain_occupancy(std::uint8_t& ground, std::uint32_t mask);
+void add_terrain_occupancy(std::uint32_t& ground, std::uint32_t mask);
+void remove_terrain_occupancy(std::uint32_t& ground, std::uint32_t mask);
 }

@@ -24,7 +24,7 @@ bool add_subcell(SubcellOccupancy& cell, OccupancyLayer layer, unsigned subcell,
     // Base 00508410 ORs the subcell bit and stores the object's owner value.
     auto& bits=layer==OccupancyLayer::Ground?cell.ground:cell.bridge;
     auto& field=layer==OccupancyLayer::Ground?cell.ground_owner:cell.bridge_owner;
-    bits=static_cast<std::uint8_t>(bits | (1u<<subcell));
+    bits=bits | (1u<<subcell);
     field=owner;
     return true;
 }
@@ -33,20 +33,20 @@ bool remove_subcell(SubcellOccupancy& cell, OccupancyLayer layer, unsigned subce
     // Base 005084A0 clears the bit; it resets the owner when bits 2..4 are clear.
     auto& bits=layer==OccupancyLayer::Ground?cell.ground:cell.bridge;
     auto& field=layer==OccupancyLayer::Ground?cell.ground_owner:cell.bridge_owner;
-    bits=static_cast<std::uint8_t>(bits & ~(1u<<subcell));
+    bits=bits & ~(1u<<subcell);
     if (!(bits&0x1c)) field=-1;
     return true;
 }
 bool add_unit_occupancy(SubcellOccupancy& cell, OccupancyLayer layer) {
     if (!valid(layer,0)) return false;
     auto& bits=layer==OccupancyLayer::Ground?cell.ground:cell.bridge;
-    bits=static_cast<std::uint8_t>(bits|0x20u);
+    bits=bits|0x20u;
     return true;
 }
 bool remove_unit_occupancy(SubcellOccupancy& cell, OccupancyLayer layer) {
     if (!valid(layer,0)) return false;
     auto& bits=layer==OccupancyLayer::Ground?cell.ground:cell.bridge;
-    bits=static_cast<std::uint8_t>(bits&~0x20u);
+    bits=bits&~0x20u;
     return true;
 }
 std::optional<std::uint32_t> terrain_occupancy_mask(std::optional<std::int32_t> session_field_838,
@@ -55,12 +55,12 @@ std::optional<std::uint32_t> terrain_occupancy_mask(std::optional<std::int32_t> 
     if (!session_field_838) return {};
     return *session_field_838==1?snow_mask:temperate_mask;
 }
-void add_terrain_occupancy(std::uint8_t& ground, std::uint32_t mask) {
+void add_terrain_occupancy(std::uint32_t& ground, std::uint32_t mask) {
     // Terrain 006E38F0 maps type mask bits 0..2 to Cell +124 bits 2..4.
-    ground=static_cast<std::uint8_t>(ground | ((mask&7u)<<2));
+    ground=ground | ((mask&7u)<<2);
 }
-void remove_terrain_occupancy(std::uint8_t& ground, std::uint32_t mask) {
+void remove_terrain_occupancy(std::uint32_t& ground, std::uint32_t mask) {
     // Terrain 006E3850 clears the same bits during removal.
-    ground=static_cast<std::uint8_t>(ground & ~((mask&7u)<<2));
+    ground=ground & ~((mask&7u)<<2);
 }
 }

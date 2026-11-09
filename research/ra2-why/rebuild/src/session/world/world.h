@@ -84,8 +84,8 @@ struct CellState {
     std::optional<std::uint8_t> cell_field_11d, coarse_cache_height, hierarchy_cache_height;
     std::optional<std::vector<std::uint8_t>> coarse_category_writes;
     std::optional<bool> cell_flag_20000;
-    // Base 004710B5 clears this byte. Unit entry 00703087 reads its bits.
-    std::optional<std::uint8_t> ground_occupancy_124;
+    // Base 004710B5 initializes this field. Unit entry 00703087 reads its bits.
+    std::optional<std::uint32_t> ground_occupancy_124;
     std::optional<bool> cell_flag_100;   // Base Cell +140 bit 100.
     std::optional<bool> cell_flag_40000; // Base Cell +140 bit 40000.
     std::optional<bool> cell_flag_200;   // Separate Cell +140 bit 200.
@@ -94,7 +94,7 @@ struct CellState {
     // state is not proved. Only +116 is known to index the TubeClass vector.
     std::optional<std::int32_t> cell_field_54, cell_field_58;
     std::optional<std::int16_t> tube_field_116;
-    std::optional<std::uint8_t> bridge_occupancy_128;
+    std::optional<std::uint32_t> bridge_occupancy_128;
     std::optional<std::int32_t> wall_owner;
 };
 // An owning snapshot. IDs use zero as null. Original creation order does not
@@ -152,6 +152,9 @@ public:
         std::optional<std::int32_t> tube_vector_count, std::optional<std::int32_t> session_field_838);
     PlacementResult place_base_unit(std::uint32_t unit_id, StartPoint cell,
         std::uint8_t facing, const BaseUnitProfile& profile);
+    // Checked direct Unit entry accepts Z zero or the resolved floor height.
+    PlacementResult place_base_unit_at(std::uint32_t unit_id, StartPoint cell,
+        std::int32_t world_z, std::uint8_t facing, const BaseUnitProfile& profile);
     // Wheel values are indexed by the final LandType. Absent cells and values
     // remain unknown. Only a complete result changes the staged snapshot.
     sim::CellSetupResult complete_pending_cell_setup(const sim::CellSetupStatic& guard,
