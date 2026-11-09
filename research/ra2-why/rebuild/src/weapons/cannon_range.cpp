@@ -14,9 +14,24 @@ std::optional<int> base_weapon_range_from_cells(double cells, int fallback) {
         return static_cast<int>(value);
     } catch (const std::exception&) { return {}; }
 }
+std::optional<int> base_arcing_elevation_bonus(bool source_object, bool target_object,
+    std::optional<int> source_floor, std::optional<int> target_floor,
+    std::optional<int> divisor, std::optional<double> factor, std::optional<double> cap) {
+    if (!source_object || !target_object) return 0;
+    if (!source_floor || !target_floor || !divisor || *divisor<=0 || !factor || !cap ||
+        !std::isfinite(*factor) || !std::isfinite(*cap) || *factor<0 || *cap<0 ||
+        *source_floor < -128 || *source_floor > 131 || *target_floor < -128 || *target_floor > 131)
+        return {};
+    try {
+        const int levels=std::max(0,*source_floor-*target_floor)/ *divisor;
+        const double value=std::min(sim::fp::multiply(levels,*factor),*cap);
+        if (value>std::numeric_limits<int>::max()/256) return {};
+        return static_cast<int>(value)*256;
+    } catch (const std::exception&) { return {}; }
+}
 CannonRangeStatus base_cannon_range(const CannonRangeInput& in,const sim::OriginalDistance& distance) {
     using S=CannonRangeStatus;
-    if (!in.plain_cannon_and_ground || !*in.plain_cannon_and_ground ||
+    if (!in.plain_cannon_and_ground || !*in.plain_cannon_and_ground || !in.subject_to_elevation ||
         in.weapon_range<0 || in.weapon_range>100000 || in.minimum_range<0 ||
         !std::isfinite(in.gravity) || in.gravity<=0 || in.gravity>1000)
         return S::NeedsInput;
@@ -30,9 +45,16 @@ CannonRangeStatus base_cannon_range(const CannonRangeInput& in,const sim::Origin
     try {
         if (in.minimum_range && distance.between(in.origin,in.target)<in.minimum_range)
             return S::OutOfRange;
+        int effective_range=in.weapon_range;
+        if (*in.subject_to_elevation) {
+            if (!in.first_elevation_query_resolved || !*in.first_elevation_query_resolved ||
+                !in.arcing_elevation_bonus || *in.arcing_elevation_bonus<0 ||
+                *in.arcing_elevation_bonus>100000-effective_range) return S::NeedsInput;
+            effective_range+=*in.arcing_elevation_bonus;
+        }
         const int horizontal=distance.between(in.origin,in.target,true);
-        if (horizontal>in.weapon_range) return S::OutOfRange;
-        const int speed=base_ballistic_launch_speed(in.weapon_range,in.gravity,distance);
+        if (horizontal>effective_range) return S::OutOfRange;
+        const int speed=base_ballistic_launch_speed(effective_range,in.gravity,distance);
         // Original 0047FBA0 discriminant and first solution. The second
         // solution cannot be positive when the first solution is negative.
         const auto speed2=sim::fp::multiply(speed,speed);

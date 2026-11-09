@@ -30,21 +30,23 @@ def hook(cpu,addr,size,user):
   ptr=read(cpu.reg_read(UC_X86_REG_ESP)+4);cpu.mem_write(ptr,struct.pack('<iii',*case[3:6]));ret(cpu,ptr,1)
  elif addr==0x548000:ret(cpu,cell,1)
  elif addr==0x4bbaa0:ret(cpu,case[9],2)
-for addr in (stop+0x100,stop+0x110,0x548000,0x4bbaa0):u.hook_add(UC_HOOK_CODE,hook,begin=addr,end=addr)
+ elif addr==0x6c48f0:ret(cpu,777,1)
+ elif addr==0x6c4a70:ret(cpu,case[11],1)
+for addr in (stop+0x100,stop+0x110,0x548000,0x4bbaa0,0x6c48f0,0x6c4a70):u.hook_add(UC_HOOK_CODE,hook,begin=addr,end=addr)
 w(actor,vtable);w(target_obj,vtable);w(vtable+0x54,stop+0x100);w(vtable+0x48,stop+0x110)
 w(actor+0x1b4,house);w(weapon+0xa0,projectile);u.mem_write(projectile+0x26b,b'\1');w(0x839848,rules);w(cell+0x140,0)
 rng=random.Random(0x6c4bb0);cases=[]
 for _ in range(5000):
  origin=(rng.randrange(-1000,1001),rng.randrange(-1000,1001),rng.randrange(-100,101))
  target=(origin[0]+rng.randrange(-4500,4501),origin[1]+rng.randrange(-4500,4501),origin[2]+rng.randrange(-500,501))
- cases.append((*origin,*target,rng.choice((128,512,1024,1536,2048,4096)),rng.choice((0,0,128,512)),rng.choice((1,3,6,9)),rng.randrange(2)))
+ cases.append((*origin,*target,rng.choice((128,512,1024,1536,2048,4096)),rng.choice((0,0,128,512)),rng.choice((1,3,6,9)),rng.randrange(2),rng.randrange(2),rng.choice((0,0,256,512,1024))))
 # Include exact range and vertical cases.
 for d in (0,1,255,256,511,512,513,1023,1024,1025,1536):
- for z in (-100,0,100):cases.append((0,0,0,d,0,z,1024,0,6,0))
+ for z in (-100,0,100):cases.append((0,0,0,d,0,z,1024,0,6,0,1,0))
 lines=subprocess.check_output([sys.argv[1]],input=''.join(' '.join(map(str,c))+'\n' for c in cases),text=True).splitlines();counts={}
 for case,line in zip(cases,lines):
- x,y,z,tx,ty,tz,range_,minimum,gravity,blocked=case
- u.mem_write(position,struct.pack('<iii',x,y,z));w(weapon+0xb4,range_);w(weapon+0xb8,minimum);w(rules+0x1320,gravity)
+ x,y,z,tx,ty,tz,range_,minimum,gravity,blocked,elevation,bonus=case
+ u.mem_write(position,struct.pack('<iii',x,y,z));w(weapon+0xb4,range_);w(weapon+0xb8,minimum);w(rules+0x1320,gravity);u.mem_write(projectile+0x267,bytes((elevation,)))
  w(stack,stop);w(stack+4,position);w(stack+8,target_obj);w(stack+12,weapon)
  u.reg_write(UC_X86_REG_ECX,actor);u.reg_write(UC_X86_REG_ESP,stack);u.reg_write(UC_X86_REG_FPCW,0xe7f)
  u.emu_start(0x6c4bb0,stop,count=100000)

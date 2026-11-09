@@ -169,9 +169,15 @@ void check_projectile(const std::string& path,const sim::OriginalDistance& dista
     check(base_weapon_range_from_cells(5.75,0)==1472 && base_weapon_range_from_cells(-1.0,19)==19,
           "original weapon range conversion");
     CannonRangeInput range_input{{0,0,0},{512,0,0},1024,0,6,true,false};
+    range_input.subject_to_elevation=true;range_input.first_elevation_query_resolved=true;
+    range_input.arcing_elevation_bonus=0;
+    check(base_arcing_elevation_bonus(true,true,3,3,2,1.0,4.0)==0 &&
+          base_arcing_elevation_bonus(true,true,-4,-10,4,1.0,10.0)==256,"Cannon elevation bonus");
     check(base_cannon_range(range_input,distance)==CannonRangeStatus::InRange,"original Cannon range");
     range_input.target.x=1030;
     check(base_cannon_range(range_input,distance)==CannonRangeStatus::OutOfRange,"Cannon maximum range");
+    range_input.target.x=1200;range_input.arcing_elevation_bonus=256;
+    check(base_cannon_range(range_input,distance)==CannonRangeStatus::InRange,"Cannon elevation range");
     range_input.target.x=512;range_input.line_blocked.reset();
     check(base_cannon_range(range_input,distance)==CannonRangeStatus::NeedsInput,"unknown Cannon line trace accepted");
     FlatUnitMuzzleInput muzzle{{12800,12800,0},0,16384,{{150,0,100}},0,0,true};

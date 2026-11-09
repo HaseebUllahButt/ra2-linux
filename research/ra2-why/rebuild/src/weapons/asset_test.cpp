@@ -28,7 +28,10 @@ int main(int argc, char** argv) {
         !ini.read_bool("Cannon", "SubjectToCliffs") ||
         !ini.read_bool("Cannon", "SubjectToElevation") ||
         !ini.read_bool("Cannon", "SubjectToWalls") ||
-        ini.read_integer("AudioVisual", "Gravity") != 6)
+        ini.read_integer("AudioVisual", "Gravity") != 6 ||
+        ini.read_integer("ElevationModel", "ElevationIncrement") != 4 ||
+        ini.read_double("ElevationModel", "ElevationIncrementBonus") != 2 ||
+        ini.read_double("ElevationModel", "ElevationBonusCap") != 2)
       throw std::runtime_error("unexpected shipped HTNK rules");
     auto art_bytes=files.read_file("art.ini");
     if (!art_bytes) throw std::runtime_error("missing base art.ini");

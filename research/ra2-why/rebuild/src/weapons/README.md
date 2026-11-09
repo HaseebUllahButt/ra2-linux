@@ -258,3 +258,10 @@ through its Techno parent's two Unit trigger events. It requires the preceding
 original type/house score query to be resolved. The combined Unit and parent
 trigger comparison covers 2,000 original paths with synchronous mutations.
 Ownership, score, veterancy and all later death effects still need callbacks.
+
+Cannon has SubjectToElevation=true in the shipped rules. The arcing range
+check now requires the initial elevation query and the original 006C4A70 bonus
+when that flag is set. `base_arcing_elevation_bonus()` uses resolved Cell floors
+and the three ElevationModel rules. It matches 3,000 original cases. The full
+range comparison covers 5,033 cases with elevation enabled and disabled. Base
+rules give increment 4, bonus 2 and cap 2; map rules may override them.
