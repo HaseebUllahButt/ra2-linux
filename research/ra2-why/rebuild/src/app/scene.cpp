@@ -3,6 +3,7 @@
 #include "../sim/floor.h"
 
 #include <algorithm>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -40,7 +41,47 @@ bool blit(render::Bitmap& target, const gfx::RgbaImage& sprite, actors::ScreenPo
 }
 }
 
+namespace {
+rules::IniFile compute_overlay_rules(const rules::IniFile& base, const rules::IniFile& map);
+// Startup asks for the same overlays several times. Keep recent results by
+// input content. A returned copy has a new revision, so remember which
+// stored result it holds; a later call with that copy as input still hits.
+// Content ids are input revisions or entry tokens; both never repeat.
+struct OverlayCache {
+    struct Entry { std::uint64_t base, map, token; rules::IniFile result; };
+    std::mutex lock;
+    std::map<std::uint64_t, std::uint64_t> content; // Copy revision -> entry token.
+    std::vector<Entry> entries;
+    std::uint64_t tokens = 0;
+    std::uint64_t id(std::uint64_t revision) const {
+        const auto found = content.find(revision);
+        return found == content.end() ? revision : found->second;
+    }
+};
+OverlayCache& overlay_cache() { static OverlayCache cache; return cache; }
+}
+
 rules::IniFile overlay_rules(const rules::IniFile& base, const rules::IniFile& map) {
+    auto& cache = overlay_cache();
+    std::lock_guard<std::mutex> guard(cache.lock);
+    const auto base_id = cache.id(base.revision()), map_id = cache.id(map.revision());
+    auto found = std::find_if(cache.entries.begin(), cache.entries.end(),
+        [&](const OverlayCache::Entry& entry) { return entry.base == base_id && entry.map == map_id; });
+    if (found == cache.entries.end()) {
+        if (cache.entries.size() >= 8) cache.entries.erase(cache.entries.begin());
+        auto result = compute_overlay_rules(base, map);
+        // Tokens use the top bit, so they never equal an IniFile revision.
+        const auto token = (std::uint64_t(1) << 63) | ++cache.tokens;
+        cache.entries.push_back({base_id, map_id, token, std::move(result)});
+        found = cache.entries.end() - 1;
+    }
+    rules::IniFile result = found->result;
+    cache.content[result.revision()] = found->token;
+    return result;
+}
+
+namespace {
+rules::IniFile compute_overlay_rules(const rules::IniFile& base, const rules::IniFile& map) {
     std::ostringstream text;
     std::set<std::string> sections;
     auto append = [&](const rules::IniFile::Section& section) {
@@ -59,6 +100,7 @@ rules::IniFile overlay_rules(const rules::IniFile& base, const rules::IniFile& m
     rules::IniFile result;
     result.parse(text.str());
     return result;
+}
 }
 
 Scene::Scene(const fs::MixFileSystem& files, rules::IniFile art, rules::IniFile rules,
