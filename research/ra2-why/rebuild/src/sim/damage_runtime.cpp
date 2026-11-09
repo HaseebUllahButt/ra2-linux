@@ -641,6 +641,9 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
         const session::world::Entity* nearest=nullptr;
         int best=weapon->range+1;
         for (const auto& target : world.entities) {
+            if(!prototype_alive(&target) || source.house_id==target.house_id)continue;
+            const int range=distance_.between(*source.position,*target.position);
+            if(range>weapon->range || range>best)continue;
             const auto* house=prototype_house(world,target.house_id);
             if (!house || house->country=="Neutral" || house->country=="Special" ||
                 (owner->alliance_mask_5674 && house->original_index && *house->original_index>=0 && *house->original_index<32 &&
@@ -648,7 +651,6 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
                 !can_attack(world,source.id,target.id) ||
                 !prototype_bool(base_,map_,target.type,"LegalTarget",true) ||
                 prototype_bool(base_,map_,target.type,"Immune")) continue;
-            const int range=distance_.between(*source.position,*target.position);
             if (range<=weapon->range && (range<best || (range==best && nearest && target.id<nearest->id))) {
                 best=range; nearest=&target;
             }
