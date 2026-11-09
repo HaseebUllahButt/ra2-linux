@@ -1,0 +1,57 @@
+#pragma once
+#include "distance.h"
+#include "../map/map_file.h"
+#include <functional>
+#include <optional>
+#include <string>
+#include <vector>
+namespace ra2::sim {
+struct FootPathState {
+    std::array<std::optional<std::int32_t>,24> words; // Base +4D0 / expansion +5E0.
+    std::optional<std::uint32_t> field_640; // Base +530.
+    std::optional<std::int32_t> field_644,field_648; // Base +534/+538. Keep unknown semantics explicit.
+    std::optional<ra2map::Cell> cell_558; // Base +450.
+};
+struct FootPathInputs {
+    ra2map::Cell goal;
+    std::optional<unsigned> append_offset,mark_mode;
+    std::optional<bool> is_train;
+    std::optional<bool> field_5d4_is_null; // Base +4C4; nonnull distance helper remains separate.
+    std::optional<bool> field_6c8_is_null,field_6d0; // Base +5B0/+5B8; linked-Unit propagation.
+    std::optional<std::uint32_t> frame;
+};
+struct FootPathQuery {
+    ra2map::Cell goal;
+    unsigned maximum=2000,append_offset=0,mark_mode=0;
+};
+struct ResolvedFootPath {
+    bool present=false; // Known null is distinct from an unknown callback result.
+    std::optional<std::int32_t> cost_key;
+    std::optional<std::vector<std::int32_t>> words; // Original count, including any terminator.
+};
+struct FootPathCallbacks {
+    std::function<std::optional<bool>(Coord)> can_queue;
+    std::function<std::optional<Coord>()> position;
+    std::function<std::optional<int>(ra2map::Cell)> enter_goal; // Direction -1, layer -1, source null, flag one.
+    std::function<std::optional<bool>(bool)> mark; // Result is ignored; empty means unresolved body.
+    std::function<std::optional<ResolvedFootPath>(const FootPathQuery&)> find;
+    std::function<std::optional<ra2map::Cell>()> current_cell;
+};
+enum class FootPathStep { CanQueue,Position,EnterGoal,MarkOut,Find,MarkIn,CurrentCell };
+enum class FootPathStatus { Complete, NeedsInput, Unsupported };
+struct FootPathResult {
+    FootPathStatus status=FootPathStatus::NeedsInput;
+    bool accepted=false; // Original return, only meaningful for Complete.
+    FootPathState state;
+    std::optional<int> initial_distance;
+    std::vector<FootPathStep> steps;
+    std::string detail;
+};
+// Base 004C3000 / expansion 004D3920, ordinary Unit class, no retarget or
+// linked-Unit propagation, known nonnull path result. The Unit metadata
+// virtual is a no-op: base 0041B540 / expansion 0041C140.
+// Called bodies remain explicit. Marks must operate on private staged state.
+// Only Complete supplies publishable queue state. No live Move command is enabled.
+FootPathResult original_unit_basic_path(const FootPathState&,const FootPathInputs&,
+    const OriginalDistance&,const FootPathCallbacks&);
+}

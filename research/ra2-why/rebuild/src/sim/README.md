@@ -1095,3 +1095,34 @@ Any original shared RNG call fails the check.
 Both editions match every native vector and aggregate hash 0A4940C2.
 Compare with `test_cell_setup.sh --vectors`.
 The native test also checks eleven effect guards, unknown values, receiver identity, and atomic results.
+
+## Ordinary Unit Foot path wrapper
+
+`original_unit_basic_path` ports the ordinary branch of base 004C3000 / expansion 004D3920.
+It accepts a resolved queue guard, actor position, goal entry, mark calls, path query, and current-cell getter.
+It preserves the original 24-word queue, append offset, raw counters, and last-cell update.
+The original queue guard sees the goal cell center with Z zero.
+A rejected guard clears the first queue word and does not read later state.
+An accepted call copies at most `24 - append_offset` words from a known nonnull result with a nonzero cost key.
+A zero cost key skips the copy. Existing unused queue words remain unchanged.
+Mark callback return values do not decide whether the wrapper continues.
+The Unit metadata virtual is a no-op at base 0041B540 / expansion 0041C140.
+The wrapper writes the frame, signed source-Y minus goal-center-Y, and zero to base +530/+534/+538.
+Their expansion fields are +640/+644/+648. The second field must not be replaced by the computed distance.
+The final current-cell getter supplies base +450 / expansion +558.
+
+Only Complete returns publishable queue state. Error results preserve the input state.
+Callbacks must use a private staged world because marking precedes later unresolved calls.
+Linked-object distance, train handling, goal-entry results 6 and 7, null-path fallback, and linked-Unit propagation remain unsupported.
+The called guard, mark, entry, and goal-search bodies remain separate dependencies.
+This module does not enable live goal commands or create missing staged-world state.
+
+`original_foot_path_check.py executable [--base] --vectors` runs 512 full original wrapper calls per edition.
+The real stack probe, coordinate getters, square root, conversion, metadata no-op, queue copy, and counters execute.
+Adapters supply queue guards, goal entry, marking, cell lookup, and path results.
+The fixture checks unchanged actor position and fails if the wrapper consumes shared RNG.
+Vectors include rejected guards, every append offset, truncated paths, terminators, zero cost keys, and retained tails.
+Every vector hashes queue words, raw fields, last cell, initial distance, and ordered callback arguments.
+Both editions match aggregate hash 7E173A4C.
+Compare both outputs with `test_foot_path.sh base_executable expansion_executable --vectors`.
+The native test also checks seventeen unresolved inputs, unsupported branches, and atomic queue results.
