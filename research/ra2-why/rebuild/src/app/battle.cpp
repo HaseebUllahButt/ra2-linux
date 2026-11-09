@@ -819,7 +819,9 @@ public:
             if(args_.autoplay)state.running=false;
         }
         if(world_.setup_progress!=w::SetupProgress::PrototypeComplete)throw std::runtime_error("Prototype world phase changed");
-        if((frame%120==0 || victory_.settled())&&!w::validate(world_))throw std::runtime_error("Shared match links are invalid");
+        // Setup and production commands already check their result. Run the
+        // periodic diagnostic after each full interval, between AI bursts.
+        if((frame%120==119 || victory_.settled())&&!w::validate(world_))throw std::runtime_error("Shared match links are invalid");
     }
     void refresh_hud() {
         loop::profile::Timer probe(loop::profile::Phase::HudRefresh);
