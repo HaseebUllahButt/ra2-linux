@@ -61,6 +61,14 @@ int main(int argc, char** argv) {
     assert(low_power.size() == 2 && !low_power[0].enabled && low_power[1].type == "MTNK");
     assert(low_power[1].progress == 300);
 
+    rules::IniFile order_rules;
+    order_rules.parse("[VehicleTypes]\n0=BOAT\n1=AIR\n2=TANK\n"
+        "[BOAT]\nNaval=yes\nTechLevel=1\n[AIR]\nConsideredAircraft=yes\nTechLevel=1\n"
+        "[TANK]\nTechLevel=9\n");
+    SidebarChoices domains;domains.use_rules(order_rules,0);
+    const auto domain_order=domains.update({{"BOAT","",1,true},{"AIR","",2,true},{"TANK","",1000,true}});
+    assert(domain_order[0].type=="TANK" && domain_order[1].type=="AIR" && domain_order[2].type=="BOAT");
+
     // Original 1024x768 layout: 168 pixel sidebar, 2x10 cameos of 60x48,
     // radar screen at the top, command bar under the battlefield.
     static_assert(BattleHud::sidebar_x == 856 && BattleHud::command_bar_y == 736);
@@ -193,6 +201,24 @@ int main(int argc, char** argv) {
                      {"GAPILE", "Barracks", 500, true, 0, BuildCategory::Buildings},
                      {"GAPILL", "Pillbox", 500, true, 0, BuildCategory::Buildings},
                      {"MTNK", "Grizzly Tank", 700, true, 0, BuildCategory::Vehicles}};
+        // Base 0067EA20 sorts by type fields, regardless of discovery order.
+        SidebarChoices ordered;ordered.use_rules(rules,0);
+        const auto choices_for=[&](std::initializer_list<const char*> ids) {
+            std::vector<BuildChoice> out;
+            for(const auto id:ids)out.push_back({id,id,rules.read_integer(id,"Cost",0),true});
+            return out;
+        };
+        const auto ids_of=[](const auto& choices) {
+            std::vector<std::string> out;for(const auto& c:choices)out.push_back(c.type);return out;
+        };
+        auto vehicles=ordered.update(choices_for({"SHAD","FV","MTNK","CMIN"}));
+        assert(ids_of(vehicles)==std::vector<std::string>({"CMIN","MTNK","FV","SHAD"}));
+        SidebarChoices buildings;buildings.use_rules(rules,0);
+        buildings.update(choices_for({"GAYARD","GAAIRC","GAWEAP"}));
+        auto sorted=buildings.update(choices_for({"GAPILE","GAREFN","GAPOWR","GAYARD","GAAIRC","GAWEAP"}));
+        assert(ids_of(sorted)==std::vector<std::string>({"GAPOWR","GAREFN","GAPILE","GAWEAP","GAAIRC","GAYARD"}));
+        const auto retained=buildings.update(choices_for({"GAPOWR"}));
+        assert(ids_of(retained)==ids_of(sorted) && !retained[3].enabled);
         BattleHud allied;
         allied.load_assets(files, rules, art, o.choices);
         assert(allied.original_art());
@@ -281,7 +307,13 @@ int main(int argc, char** argv) {
         radar.map_width = 1420; radar.map_height = 1100; radar.camera = {0, 0, 856, 736};
         auto opening = frame(); allied.draw(opening, radar);
         assert(exact(opening, side_frame(files, mix, "radar.shp", 1), 856, 48) > 1000);
-        for (int i = 0; i < 31; ++i) allied.draw(opening, radar);
+        auto repeated=frame();allied.draw(repeated,radar);
+        assert(same(opening,repeated,BattleHud::minimap_bounds()));
+        radar.clock_ms=63;allied.draw(repeated,radar);
+        assert(same(opening,repeated,BattleHud::minimap_bounds()));
+        radar.clock_ms=64;allied.draw(repeated,radar);
+        assert(exact(repeated,side_frame(files,mix,"radar.shp",2),856,48)>1000);
+        for (int i = 2; i < 32; ++i) {radar.clock_ms=i*64;allied.draw(opening, radar);}
         assert(count_rgb(opening, {880, 100, 40, 20}, 10, 20, 30) == 800);
         assert(count_rgb(opening, {960, 100, 40, 20}, 40, 50, 60) == 800);
         // End banner: original "You Are Victorious!" and "Game Over" art.
@@ -314,6 +346,8 @@ int main(int argc, char** argv) {
             auto active_frame=frame(); side->draw(active_frame,active);
             const auto r=side->repair_bounds();
             assert(exact(active_frame, side_frame(files, side==&allied?"sidec01.mix":"sidec02.mix", "repair.shp",1), r.x,r.y)>1000);
+            side->draw(active_frame,o);
+            assert(exact(active_frame, side_frame(files, side==&allied?"sidec01.mix":"sidec02.mix", "repair.shp",0), r.x,r.y)>1000);
         }
         assert(soviet.handle_click(910, 200, o).kind == HudActionKind::None && soviet.active_tab() == 1);
     }

@@ -221,6 +221,7 @@ public:
                 !args.headless,16*frame_delay_ticks(args)) {
         if(const auto labels=assets_.read_asset("RA2.CSF"))labels_.parse(labels->data(),labels->size());
         movement_.use_rules(rules_);
+        sidebar_choices_.use_rules(rules_,house(world_,player_).side_index.value_or(-1));
         score_assets_=ui::ScoreAssets::load(files,labels_);
         for(const auto& h:world_.houses)
             if(h.id!=player_ && !(h.role && (*h.role==w::HouseRole::Neutral||*h.role==w::HouseRole::Special)))enemies_.push_back(h.id);
@@ -1232,6 +1233,7 @@ public:
         const auto& h=house(world_,player_);
         hud_state_.cash=h.cash.value_or(0);hud_state_.power_output=h.power_output.value_or(0);
         hud_state_.power_drain=h.power_drain.value_or(0);hud_state_.selected_labels.clear();
+        hud_state_.clock_ms=clock_.now_ms();
         hud_state_.pointer_x=pointer_x_;hud_state_.pointer_y=pointer_y_;hud_state_.building_tool=building_tool_;
         hud_state_.can_deploy=false;
         for(const auto id:orders_.selected_ids())if(const auto* e=find(world_,id))

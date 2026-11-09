@@ -359,6 +359,7 @@ void BattleHud::draw(render::Bitmap& b, const HudState& s) const {
         draw_panel(panel_, s);
         panel_state_.cash = s.cash; panel_state_.power_output = s.power_output; panel_state_.power_drain = s.power_drain;
         panel_state_.choices = s.choices; panel_state_.can_deploy = s.can_deploy;
+        panel_state_.building_tool = s.building_tool;
         panel_tab_ = active_tab_; panel_row_ = top_row_; panel_valid_ = true;
     }
     copy_rect(panel_, b, {sidebar_x, 0, sidebar_width, view_height});
@@ -367,7 +368,13 @@ void BattleHud::draw(render::Bitmap& b, const HudState& s) const {
 
     // Radar: eagle logo while off; opens over 32 frames when it comes online.
     const bool radar_on = valid(s.minimap);
-    radar_frame_ = std::clamp(radar_frame_ + (radar_on ? 1 : -1), 0, 32);
+    // 0062F580 waits four ticks. 0069A430 is timeGetTime() >> 4.
+    const auto tick = s.clock_ms >> 4;
+    if (radar_online_ != radar_on) { radar_online_ = radar_on; radar_tick_.reset(); }
+    if (!radar_tick_ || tick < *radar_tick_ || tick - *radar_tick_ >= 4) {
+        radar_frame_ = std::clamp(radar_frame_ + (radar_on ? 1 : -1), 0, 32);
+        radar_tick_ = tick;
+    }
     const auto r = minimap_bounds();
     if (const auto* radar = art_.sprite("radar.shp", radar_frame_)) hud_blit(b, *radar, sidebar_x, 48);
     else fill(b, r, {8, 15, 12, 255});
