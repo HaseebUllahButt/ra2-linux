@@ -409,6 +409,13 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
             if (!same(*actor->cell,entered)) {
                 const auto step=pass_cell(candidate,entered,id,&movers);
                 if (step==Pass::Unresolved) return fail(PrototypeMoveStatus::NeedsInput,"prototype crossed Cell is unresolved");
+                if (step!=Pass::Open && !same(entered,target)) {
+                    // A Unit stopped off its Cell center cuts across a Cell
+                    // that is not on its route. Go back to its own center
+                    // first; that point stays inside its own Cell.
+                    movement.path.insert(movement.path.begin(),*actor->cell);
+                    continue;
+                }
                 if (step!=Pass::Open) {
                     if (!moved) blocked=!(step==Pass::Busy && wait_for(entered));
                     break;

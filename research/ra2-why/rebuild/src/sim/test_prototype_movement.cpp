@@ -217,6 +217,18 @@ int main() try {
         require(run.all_arrived && run.closest>=181,"crossing tanks overlapped at a Cell corner");
     }
     {
+        // A tank stopped off its Cell center (an order canceled mid-step).
+        // Its straight line to the next Cell crosses a Cell held by a
+        // stopped tank. It must first go back to its own center, not
+        // report "blocked" on every new order.
+        auto world=field(30,12);PrototypeMovement movement;
+        place(world,701,5,5);place(world,702,5,6);
+        world.entities[0].position->x=5*256+250;
+        const auto run=drive_group(world,movement,{{701,{4,6}}},17,300);
+        std::cout<<"off-center arrived="<<run.all_arrived<<" blocked="<<run.blocked<<'\n';
+        require(run.all_arrived && run.blocked==0 && same_cell(*world.entities[0].cell,{4,6}),"off-center tank was blocked by a corner Cell");
+    }
+    {
         // A stopped tank holds the goal. The mover stops on the near side
         // of the goal and does not drive around it.
         auto world=field(30,12);PrototypeMovement movement;
