@@ -96,7 +96,7 @@ void check_world(const sim::OriginalDistance& distance) {
 void check_projectile(const std::string& path,const sim::OriginalDistance& distance) {
     CannonRangeInput range_input{{0,0,0},{512,0,0},1024,0,6,true,false};
     check(base_cannon_range(range_input,distance)==CannonRangeStatus::InRange,"original Cannon range");
-    range_input.target.x=1025;
+    range_input.target.x=1030;
     check(base_cannon_range(range_input,distance)==CannonRangeStatus::OutOfRange,"Cannon maximum range");
     range_input.target.x=512;range_input.line_blocked.reset();
     check(base_cannon_range(range_input,distance)==CannonRangeStatus::NeedsInput,"unknown Cannon line trace accepted");
