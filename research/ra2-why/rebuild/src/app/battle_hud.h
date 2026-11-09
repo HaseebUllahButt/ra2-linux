@@ -35,6 +35,7 @@ struct BuildChoice {
     bool enabled = false; // False dims the entry and rejects clicks.
     int progress = 0;     // 0..1000 production clock, 1000 means ready.
     BuildCategory category = BuildCategory::All;
+    int queued = 0;       // Items waiting after the current one. A count of 2+ shows on the cameo.
 };
 
 // Everything the sidebar needs for one draw pass.
@@ -50,6 +51,9 @@ struct HudState {
     int map_height = 0;
     std::string status;                       // Sidebar status line, e.g. "BUILDING: GVGIANT".
     std::string result;                       // Empty, or VICTORY / DEFEAT / DRAW end banner.
+    int pointer_x = -1;                       // Mouse position, view pixels. -1 hides the tooltip.
+    int pointer_y = -1;
+    bool can_deploy = false;                   // Root sets this from selected live MCVs. DEPLOY shows only when true.
 };
 
 // Click results. The root executes them and moves the camera.
