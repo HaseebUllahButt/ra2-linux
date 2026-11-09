@@ -111,16 +111,13 @@ void CsfFile::parse(const uint8_t* data, size_t size) {
             label.values.push_back(std::move(value));
         }
         labels_.push_back(std::move(label));
+        if (!labels_.back().values.empty()) first_.emplace(labels_.back().name, labels_.size() - 1);
     }
 }
 
 const CsfValue* CsfFile::find(const std::string& label) const {
-    for (const CsfLabel& l : labels_) {
-        if (l.name == label && !l.values.empty()) {
-            return &l.values[0];
-        }
-    }
-    return nullptr;
+    const auto found = first_.find(label);
+    return found == first_.end() ? nullptr : &labels_[found->second].values[0];
 }
 
 } // namespace ra2text

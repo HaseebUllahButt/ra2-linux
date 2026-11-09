@@ -7,6 +7,7 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace ra2text {
@@ -34,6 +35,8 @@ public:
 
 private:
     std::vector<CsfLabel> labels_;
+    // Name -> first label index with a value, so find() needs no scan.
+    std::unordered_map<std::string, size_t> first_;
     size_t string_count_ = 0;
 };
 
