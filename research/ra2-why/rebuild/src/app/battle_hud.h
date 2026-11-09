@@ -37,6 +37,8 @@ struct BuildChoice {
 };
 
 // Everything the HUD needs for one draw pass.
+enum class BuildingTool { None, Repair, Sell };
+
 struct HudState {
     int cash = 0;
     int power_output = 0; // Power produced.
@@ -51,10 +53,11 @@ struct HudState {
     std::string result;                       // Empty, or VICTORY / DEFEAT / DRAW end banner.
     int pointer_x = -1;                       // Mouse position, view pixels. -1 hides hover and tooltip.
     int pointer_y = -1;
+    BuildingTool building_tool = BuildingTool::None;
     bool can_deploy = false;                  // Enables the Deploy button of the command bar.
 };
 
-enum class HudActionKind { None, Build, Deploy, Minimap };
+enum class HudActionKind { None, Build, Deploy, Minimap, Options, Repair, Sell };
 
 struct HudAction {
     HudActionKind kind = HudActionKind::None;
@@ -113,6 +116,9 @@ public:
     static render::Rectangle build_button_bounds(int index); // Visible slot 0..19.
     static render::Rectangle minimap_bounds();
     static render::Rectangle deploy_bounds();
+    render::Rectangle options_bounds() const;
+    render::Rectangle repair_bounds() const;
+    render::Rectangle sell_bounds() const;
     static render::Rectangle scroll_up_bounds();   // R-UP.SHP.
     static render::Rectangle scroll_down_bounds(); // R-DN.SHP.
     render::Rectangle tab_bounds(int tab) const;   // Tab 0..3: buildings, defenses, infantry, vehicles.

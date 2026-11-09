@@ -1,6 +1,7 @@
 #include "prototype_repair_sell.h"
 #include "fs/mix_bootstrap.h"
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>

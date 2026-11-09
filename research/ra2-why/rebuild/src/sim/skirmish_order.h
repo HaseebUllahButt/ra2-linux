@@ -6,7 +6,7 @@
 namespace ra2::sim::skirmish {
 // Orders from the native match interface and computer player.
 // The match controller owns execution and the single shared frame.
-enum class OrderKind { Move, Attack, Deploy, Build, Place, Stop };
+enum class OrderKind { Move, Attack, Deploy, Build, Place, Stop, Repair, Sell };
 struct Order {
     OrderKind kind=OrderKind::Stop;
     std::uint32_t house=0, entity=0, target=0;

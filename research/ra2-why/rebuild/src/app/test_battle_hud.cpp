@@ -82,6 +82,15 @@ int main(int argc, char** argv) {
     assert(hud.handle_click(r1.x + 5, r1.y + 5, s).kind == HudActionKind::None); // Disabled.
     assert(rect_eq(hud.choice_bounds(s, "GAREFN"), r1));
 
+    // Top Options and the building tools use their original side art bounds.
+    const std::pair<render::Rectangle, HudActionKind> buttons[] = {
+        {hud.options_bounds(), HudActionKind::Options}, {hud.repair_bounds(), HudActionKind::Repair},
+        {hud.sell_bounds(), HudActionKind::Sell}};
+    for(const auto& item : buttons) {
+        assert(hud.handle_click(item.first.x, item.first.y, s).kind==item.second);
+        assert(hud.handle_click(item.first.x+item.first.width-1, item.first.y+item.first.height-1, s).kind==item.second);
+    }
+
     // Deploy is the fourth command bar button and works only when allowed.
     const auto d = BattleHud::deploy_bounds();
     assert(hud.handle_click(d.x + 8, d.y + 8, s).kind == HudActionKind::None);
@@ -297,6 +306,15 @@ int main(int argc, char** argv) {
         assert(exact(sv, side_frame(files, "sidec02.mix", "radar.shp", 0), 856, 48) > 18000);
         assert(exact(sv, side_frame(files, "sidec02.mix", "repair.shp", 0), 889, 165) > 1600);
         assert(exact(sv, side_frame(files, "sidec02.mix", "tab00.shp", 1), 876, 197) > 800);
+        for(BattleHud* side : {&allied, &soviet}) {
+            assert(side->handle_click(side->options_bounds().x+2, side->options_bounds().y+2, o).kind==HudActionKind::Options);
+            assert(side->handle_click(side->repair_bounds().x+2, side->repair_bounds().y+2, o).kind==HudActionKind::Repair);
+            assert(side->handle_click(side->sell_bounds().x+2, side->sell_bounds().y+2, o).kind==HudActionKind::Sell);
+            auto active=o; active.building_tool=BuildingTool::Repair;
+            auto active_frame=frame(); side->draw(active_frame,active);
+            const auto r=side->repair_bounds();
+            assert(exact(active_frame, side_frame(files, side==&allied?"sidec01.mix":"sidec02.mix", "repair.shp",1), r.x,r.y)>1000);
+        }
         assert(soviet.handle_click(910, 200, o).kind == HudActionKind::None && soviet.active_tab() == 1);
     }
     std::cout << "battle HUD tests passed\n";
