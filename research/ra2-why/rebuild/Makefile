@@ -104,8 +104,8 @@ build/actors_test: build/native/src/actors/test_main.o build/native/src/actors/a
 ui: build/ui_test
 	build/ui_test $(TEST_GAME_DIR)
 
-build/ui_test: build/native/src/ui/ui.o build/native/src/ui/shell.o build/native/src/ui/skirmish.o build/native/src/ui/test_main.o build/native/src/text/csf.o build/native/src/rules/ini_file.o $(FS_OBJECTS) $(GFX_OBJECTS)
-	$(CXX) $(CXXFLAGS) $^ -o $@
+build/ui_test: build/native/src/pack/map_pack.o build/native/src/ui/ui.o build/native/src/ui/shell.o build/native/src/ui/skirmish.o build/native/src/ui/test_main.o build/native/src/text/csf.o build/native/src/rules/ini_file.o $(FS_OBJECTS) $(GFX_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 audio: build/audio_test build/audio_integration_test
 	build/audio_test

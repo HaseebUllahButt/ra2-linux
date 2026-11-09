@@ -181,6 +181,10 @@ private:
                       std::vector<DropChoice> choices; int current; };
     std::vector<Dropdown> dropdowns() const;
     Rect dropdown_list_bounds(const Dropdown& dropdown) const;
+    const gfx::RgbaImage& map_preview() const;
+    const fs::MixFileSystem* preview_files_=nullptr;
+    mutable std::string preview_key_;
+    mutable gfx::RgbaImage preview_;
     struct Button { std::uint32_t id; Rect bounds; std::string label; bool enabled; };
     std::vector<Button> buttons() const;
     std::optional<Rect> map_list_bounds(std::uint32_t id) const;

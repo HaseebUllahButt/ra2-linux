@@ -1,3 +1,4 @@
+#include "../pack/map_pack.h"
 #include "ui.h"
 #include "../fs/mix_bootstrap.h"
 #include "../rules/ini_file.h"
@@ -402,6 +403,22 @@ int main(int argc,char** argv) {
     ui::GameFont::parse(*base_font_bytes).draw_text(expected_name,base_maps[0].name,0,0,{255,255,0,255});
     check_blit(menu.render(),expected_name,(map_name_control->bounds.x*3+1)/2,
                (map_name_control->bounds.y*163+50)/100);
+
+    // The selected map thumbnail uses the original PreviewPack RGB bytes.
+    const auto preview_map=base.read_file("MP02T2.MAP");assert(preview_map);
+    rules::IniFile preview_ini;
+    preview_ini.parse(std::string_view(reinterpret_cast<const char*>(preview_map->data()),preview_map->size()));
+    const auto preview_rgb=pack::read_section(preview_ini,"PreviewPack",pack::Codec::Lzo);
+    const auto preview_size=preview_ini.read_list("Preview","Size");
+    const int preview_w=std::stoi(preview_size[2]),preview_h=std::stoi(preview_size[3]);
+    const int thumb_w=std::min(280,155*preview_w/preview_h),thumb_h=thumb_w*preview_h/preview_w;
+    const auto with_preview=menu.render();
+    for(int y=0;y<thumb_h;++y)for(int x=0;x<thumb_w;++x) {
+        const auto source=(std::size_t(y*preview_h/thumb_h)*preview_w+x*preview_w/thumb_w)*3;
+        const auto dest=(std::size_t(y+365)*with_preview.width+x+44)*4;
+        for(int c=0;c<3;++c)assert(with_preview.pixels[dest+c]==preview_rgb[source+c]);
+    }
+    assert(menu.render().pixels==with_preview.pixels);
 
     assert(menu.select_map(0)==ui::Action::None);
     assert(menu.select_map(base_maps.size())==ui::Action::None);

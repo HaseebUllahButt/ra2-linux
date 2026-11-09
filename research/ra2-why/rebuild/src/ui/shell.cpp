@@ -1,6 +1,7 @@
 #include "ui.h"
 #include "../fs/mix_bootstrap.h"
 #include "../rules/ini_file.h"
+#include "../pack/map_pack.h"
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
@@ -144,6 +145,7 @@ namespace ra2::ui {
 Menu Menu::load(const fs::MixFileSystem& files, const std::vector<std::uint8_t>& exe,
                 const ra2text::CsfFile& strings) {
     Menu result;
+    result.preview_files_=&files;
     result.background_ = draw_shell_background(files, 800, 600);
     result.main_ = load_dialog(exe, Page::Main, strings);
     result.single_ = load_dialog(exe, Page::SinglePlayer, strings);
@@ -660,6 +662,37 @@ Action Menu::select_color(std::size_t slot, int index) noexcept {
     return Action::SetupChanged;
 }
 
+// PreviewPack stores the original map thumbnail as RGB bytes.
+const gfx::RgbaImage& Menu::map_preview() const {
+    const auto key=setup_.map_archive.value_or("")+":"+setup_.map_filename.value_or("");
+    if(key==preview_key_)return preview_;
+    preview_key_=key;preview_={};
+    if(!preview_files_ || !setup_.map_filename)return preview_;
+    try {
+        auto bytes=preview_files_->read_file(*setup_.map_filename);
+        if(setup_.map_archive && !setup_.map_archive->empty()) {
+            auto archive=fs::MixArchive::open(preview_files_->directory()/ *setup_.map_archive);
+            if(const auto* entry=archive->find(*setup_.map_filename))bytes=archive->read(*entry);
+        }
+        if(!bytes)return preview_;
+        rules::IniFile ini;
+        ini.parse(std::string_view(reinterpret_cast<const char*>(bytes->data()),bytes->size()));
+        const auto size=ini.read_list("Preview","Size");
+        if(size.size()!=4)return preview_;
+        const auto width=rules::IniFile::integer_value(size[2]);
+        const auto height=rules::IniFile::integer_value(size[3]);
+        if(!width || !height || *width<=0 || *height<=0 || *width>2048 || *height>2048)return preview_;
+        const auto rgb=pack::read_section(ini,"PreviewPack",pack::Codec::Lzo);
+        if(rgb.size()!=std::size_t(*width)* *height*3)return preview_;
+        preview_.width=std::uint16_t(*width);preview_.height=std::uint16_t(*height);
+        preview_.pixels.reserve(std::size_t(*width)* *height*4);
+        for(std::size_t i=0;i<rgb.size();i+=3) {
+            preview_.pixels.insert(preview_.pixels.end(),{rgb[i],rgb[i+1],rgb[i+2],255});
+        }
+    } catch(const std::exception&) {preview_={};}
+    return preview_;
+}
+
 gfx::RgbaImage Menu::render() const {
     auto image = background_;
     // Draw the main page first, then the original confirmation panel.
@@ -719,6 +752,16 @@ gfx::RgbaImage Menu::render() const {
         font_.draw_text(image,c.label,c.bounds.x+26,y,color);
     }
     if (!confirming_exit_ && !choosing_map_ && page()==Page::Skirmish) {
+        const auto& preview=map_preview();
+        if(preview.width && preview.height) {
+            const int width=std::min(280,155*int(preview.width)/int(preview.height));
+            const int height=width*int(preview.height)/int(preview.width);
+            for(int y=0;y<height;++y)for(int x=0;x<width;++x) {
+                const auto from=(std::size_t(y*preview.height/height)*preview.width+x*preview.width/width)*4;
+                const auto to=(std::size_t(y+365)*image.width+x+44)*4;
+                std::copy_n(preview.pixels.begin()+from,4,image.pixels.begin()+to);
+            }
+        }
         for (const auto& control : skirmish_.controls) {
             // Base 0x005C34B0 writes the selected map name to control 0x5A8.
             if (control.id!=1448 || !setup_.map_filename) continue;

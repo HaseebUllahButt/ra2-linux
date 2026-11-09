@@ -208,6 +208,10 @@ int run_menu(const Options& args, ra2::fs::MixFileSystem& files) {
     files.mount_resources();
     menu.configure_maps(ra2::ui::load_skirmish_maps(files, strings),
                         ra2::ui::load_skirmish_modes(files, strings));
+    if(!expansion) {
+        menu.select_mode(1);
+        menu.select_map(0); // MP02T2 is also the direct skirmish default.
+    }
     ra2::app::Window window("Red Alert 2 native rebuild: menu", 800, 600, !args.headless);
     MenuPump pump(window, menu, args.headless);
     MenuPresenter presenter(window, menu);
