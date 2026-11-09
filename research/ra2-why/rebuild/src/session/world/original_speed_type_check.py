@@ -2,8 +2,8 @@
 """Check the base AMCV Crusher and missing SpeedType reader fragments.
 
 The real map has no AMCV section. The base rules provide Crusher=yes and
-omit SpeedType. INI service results are supplied to the original x86 code.
-The complete type-loading sequence and live Unit state are not reconstructed.
+omit SpeedType. The original Crusher boolean parser runs with supplied hash
+and INI record lookup services. Other type-loading phases remain omitted.
 """
 import struct
 import subprocess
@@ -16,19 +16,25 @@ from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_EBP, UC_X86_REG_EBX, UC
 if len(sys.argv) != 4:
     raise SystemExit('usage: original_speed_type_check.py game.exe real_map_case game_dir')
 executable, fixture, game = sys.argv[1:]
-assert subprocess.check_output([fixture, game, '--amcv-speed-info'], text=True).strip() == 'yes absent'
+rules_tokens=subprocess.check_output([fixture, game, '--amcv-speed-info'], text=True).split()
+assert rules_tokens==['yes','absent']
+real_crusher=rules_tokens[0].encode('ascii')
 # Run the real land loader first. The same original image and table remain in
 # the shared emulator for the following constructor and lookup fragments.
 sys.argv = [sys.argv[0], executable, fixture, game]
 runpy.run_path(os.path.join(os.path.dirname(__file__), 'original_land_table_check.py'))
 import original_move_trace as m
+from original_image import load_original
 
 def cstring(address):
     return bytes(m.cpu.mem_read(address, 64)).split(b'\0', 1)[0].decode('ascii')
 
-def crusher():
-    assert cstring(m.argument(0)) == 'AMCV' and cstring(m.argument(1)) == 'Crusher'
-    m.cpu.reg_write(UC_X86_REG_EAX, 1) # Supplied parse of Crusher=yes.
+hashes=[]
+def key_hash():
+    name=cstring(m.argument(0))
+    assert name in ('AMCV','Crusher')
+    hashes.append(name)
+    m.cpu.reg_write(UC_X86_REG_EAX, 0x1234 if name=='AMCV' else 0x5678)
 
 selected = [None]
 def speed_type():
@@ -43,10 +49,24 @@ def compare_names():
     left, right = cstring(m.argument(0)), cstring(m.argument(1))
     m.cpu.reg_write(UC_X86_REG_EAX, 0 if left.lower() == right.lower() else 1)
 
-m.bind(0x50f410, 12, crusher)
+# The land test supplied a boolean service. Restore the original parser body.
+original=load_original(executable)
+m.cpu.mem_write(0x50f410, bytes(original.mem_read(0x50f410, 3)))
+m.cpu.ctl_remove_cache(0x50f410,0x50f413)
+m.callbacks.pop(0x50f410)
+m.bind(0x493fc0, 8, key_hash)
+m.bind(0x510dd0, 4, m.ret(1))
 m.bind(0x50e9a0, 20, speed_type)
 m.bind(0x781f20, 0, compare_names)
 m.cpu.mem_write(0x100a000, b'AMCV\0')
+# Supply the original INI object's cached section and Crusher entry. The
+# original parser reads the actual value bytes and interprets the first byte.
+ini, section_cache, section, entry, node, value = 0x100b000,0x100d000,0x100d100,0x100d200,0x100d300,0x100d400
+m.word(ini+0x24,1); m.word(ini+0x30,section_cache)
+m.word(section_cache,0x1234); m.word(section_cache+4,section)
+m.word(section+0x30,1); m.word(section+0x3c,entry)
+m.word(entry,0x5678); m.word(entry+4,node); m.word(node+0x10,value)
+m.cpu.mem_write(value,b'yes\0')
 # Execute the UnitType constructor through the parent write of +5A4.
 # Parent object construction and collection helpers are supplied.
 m.bind(0x5d57f0, 4, m.ret(0))
@@ -58,8 +78,10 @@ def trace_read(cpu,access,address,size,value,user):
         reads.append((address,size))
 m.cpu.hook_add(UC_HOOK_MEM_READ, trace_read)
 
-for override, expected_index in ((None,1),('Wheel',2)):
+for override, expected_index, crusher_value in ((None,1,real_crusher),('Wheel',2,real_crusher),(None,2,b'no')):
     selected[0]=override
+    hashes.clear()
+    m.cpu.mem_write(value,crusher_value+b'\0')
     m.cpu.mem_write(m.TYPE, b'\xa5'*0xc00)
     m.cpu.reg_write(UC_X86_REG_ECX, m.TYPE)
     m.cpu.reg_write(UC_X86_REG_ESP, 0x103f000)
@@ -74,7 +96,8 @@ for override, expected_index in ((None,1),('Wheel',2)):
     # Base 006DD104 reads Crusher and writes Type +AF3.
     m.cpu.emu_start(0x6dd104, 0x6dd11e, count=1000)
     assert m.cpu.reg_read(UC_X86_REG_EIP)==0x6dd11e, 'Crusher reader did not reach its write boundary'
-    assert m.cpu.mem_read(m.TYPE+0xaf3,1)==b'\x01'
+    assert hashes==['AMCV','Crusher']
+    assert m.cpu.mem_read(m.TYPE+0xaf3,1)==(b'\x01' if crusher_value==b'yes' else b'\x00')
     m.cpu.reg_write(UC_X86_REG_EDI, m.TYPE)
     m.cpu.reg_write(UC_X86_REG_EBX, 0x100b000)
     m.cpu.reg_write(UC_X86_REG_EBP, 0x100a000)
@@ -94,4 +117,4 @@ for override, expected_index in ((None,1),('Wheel',2)):
         assert m.cpu.reg_read(UC_X86_REG_EIP)==0x471cef, 'land lookup did not reach its load boundary'
         address=0x850ea0+4*(land*9+index)
         assert reads==[(address,4)] and m.read(address)==expected
-print('base x86 AMCV default and Wheel override read separate real land values')
+print('base x86 AMCV Crusher parser, default and Wheel override match real land values')
