@@ -62,7 +62,9 @@ public:
     void set_shuffle(bool shuffle);            // advance picks a different random theme
     bool shuffle() const noexcept { return shuffle_; }
     std::vector<std::string> playlist() const; // available theme section names
-    std::size_t play_music(std::size_t position);  // start a playlist entry
+    // Starts a playlist entry (wraps past the end). Returns the playlist position
+    // started, or playlist().size() when nothing could play.
+    std::size_t play_music(std::size_t position);
     void next_music();                          // skip ahead (shuffle aware, wraps)
     void stop_music() noexcept;
     bool music_playing() const noexcept { return music_.has_value(); }
@@ -125,6 +127,7 @@ private:
     struct ResolvedEvent {
         std::vector<std::string> samples; // '$' prefixes stripped
         float volume = 1.0f;
+        bool random = false;              // Control=random picks one sample
     };
 
     std::uint32_t next_random() noexcept;
@@ -148,6 +151,7 @@ private:
     std::vector<std::size_t> playlist_positions_; // playable subset
     std::optional<Voice> music_;
     std::optional<Voice> speech_;
+    SpeechPriority speech_priority_ = SpeechPriority::Low;
     std::vector<PendingSpeech> speech_queue_;
     std::vector<Voice> sounds_;
     std::map<std::string, ResolvedEvent> event_cache_;
