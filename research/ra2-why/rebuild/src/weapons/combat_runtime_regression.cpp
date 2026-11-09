@@ -6,6 +6,7 @@
 #include "projectile_damage.h"
 #include "muzzle.h"
 #include "detonation.h"
+#include "unit_death.h"
 #include <sim/damage_runtime.h>
 #include <array>
 #include <cstdint>
@@ -52,6 +53,14 @@ void check_fire_and_damage() {
     check(base_projectile_damage(shot)==53,"original projectile damage rounding");
     shot.house_firepower=std::numeric_limits<double>::infinity();
     check(!base_projectile_damage(shot),"unknown projectile firepower accepted");
+    UnitDeathTriggerState death{true,true,-1};std::vector<int> events;
+    const auto trigger=[&](int event,UnitDeathTriggerState& state) {
+        events.push_back(event);if (event==7) state.active=false;
+    };
+    check(base_unit_death_trigger_prefix(death,true,{},trigger) && events==std::vector<int>({7,0x30,0x1d}),
+          "original Unit death trigger order");
+    death={true,true,0};events.clear();
+    check(!base_unit_death_trigger_prefix(death,true,{},trigger) && events.empty(),"unknown Unit trigger check accepted");
     TechnoDamageInput d{};d.raw_damage=100;d.house_armor_multiplier=2;d.object_armor_multiplier=1;
     d.veteran_armor_multiplier=1;d.attacker_present=true;d.warhead_present=true;
     auto result=base_techno_damage_prefix(d);

@@ -246,3 +246,9 @@ projectile, the final cluster still draws 256..512 and one direction word.
 Inactive projectiles draw neither. All 250 words and both indexes match the
 original in 1,200 checks. The caller must prove the single-cluster, non-airburst
 path and complete every original impact callback before this step.
+
+`base_unit_death_trigger_prefix()` follows the Unit 00707ED0 trigger callback
+order before its Techno parent. The callback executes each real trigger and
+updates the live state before the next event. A special trigger check remains
+an explicit input. The original comparison covers 2,000 cases with trigger and
+active-state mutations. Parent death, rewards, effects and removal remain open.
