@@ -18,11 +18,15 @@ ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} c
 ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} bridge_footprint.cpp bridge_footprint_case.cpp -o "$build/bridge_footprint_case"
 ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} speed_type.cpp speed_type_case.cpp -o "$build/speed_type_case"
 ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} -I "$shared" movement_zone.cpp movement_zone_case.cpp -o "$build/movement_zone_case"
+${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" \
+    overlay_cell_setup.cpp overlay_cell_case.cpp "$shared"/sim/{cell_setup,coarse_category,replacement,world,floor}.cpp \
+    "$shared/rules/ini_file.cpp" -o "$build/overlay_cell_case"
 ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/render" \
     overlay_rules.cpp overlay_rules_case.cpp "$shared/sim/test_inputs.cpp" "$shared"/render/{minimap,tmp_decode}.cpp \
     "$shared/gfx/palette.cpp" "$shared"/fs/{mix_archive,mix_bootstrap,filename_hash}.cpp \
     "$shared/rules/ini_file.cpp" "$shared/map/map_file.cpp" "$shared/pack/map_pack.cpp" -ldl -o "$build/overlay_rules_case"
 ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} unit_flags.cpp unit_flags_case.cpp -o "$build/unit_flags_case"
+"$build/overlay_cell_case" > /dev/null
 "$build/overlay_rules_case" "$game" > /dev/null
 ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -I "$shared/render" \
     world.cpp speed_type.cpp movement_zone.cpp unit_flags.cpp ../session.cpp ../map_geometry.cpp ../placement_terrain.cpp target_tile_case.cpp \
@@ -66,6 +70,7 @@ ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -
 "$build/speed_type_case"
 "$build/movement_zone_case"
 "$build/unit_flags_case"
+"$build/overlay_cell_case" > /dev/null
 "$build/overlay_rules_case" "$game" > /dev/null
 "$build/real_map_case" "$game"
 "$build/target_tile_case" "$game"
@@ -100,6 +105,9 @@ ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -
     ${PYTHON:-python3} original_overlay_fields_check.py "$game/game.exe" "$build/overlay_rules_case" "$game"
     ${PYTHON:-python3} original_overlay_types_check.py "$game/game.exe" "$build/overlay_rules_case" "$game"
     ${PYTHON:-python3} original_overlay_art_check.py "$game/game.exe" "$build/overlay_shape_case" "$game"
+    ${PYTHON:-python3} original_overlay_cell_check.py "$game/game.exe" --base --vectors > "$build/overlay-original-vectors"
+    "$build/overlay_cell_case" > "$build/overlay-native-vectors"
+    cmp "$build/overlay-original-vectors" "$build/overlay-native-vectors"
     ${PYTHON:-python3} original_overlay_shape_check.py "$game/game.exe" "$build/overlay_shape_case" "$game"
     ${PYTHON:-python3} original_battle_start_check.py "$game/game.exe" "$build/setup_case"
     ${PYTHON:-python3} original_constructor_check.py "$game/game.exe" "$build/constructor_case"
@@ -119,8 +127,10 @@ ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -
     ${PYTHON:-python3} original_speed_type_check.py "$game/game.exe" "$build/real_map_case" "$game" "$build/speed_type_case"
     ${PYTHON:-python3} original_movement_zone_check.py "$game/game.exe" "$build/real_map_case" "$game" "$build/movement_zone_case"
     ${PYTHON:-python3} original_unit_flags_check.py "$game/game.exe" "$build/real_map_case" "$game" "$build/unit_flags_case"
+"$build/overlay_cell_case" > /dev/null
 "$build/overlay_rules_case" "$game" > /dev/null
     ${PYTHON:-python3} original_type_ctor_fields_check.py "$game/game.exe" "$build/unit_flags_case"
+"$build/overlay_cell_case" > /dev/null
 "$build/overlay_rules_case" "$game" > /dev/null
     ${PYTHON:-python3} original_object_reader_205_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game"
     ${PYTHON:-python3} original_unit_reader_205_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game"
@@ -162,6 +172,7 @@ ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -
     ${PYTHON:-python3} original_vehicle_registration_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game"
     ${PYTHON:-python3} original_vehicle_readers_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game"
     ${PYTHON:-python3} original_placement_type_check.py "$game/game.exe" "$build/real_map_case" "$game" "$build/unit_flags_case"
+"$build/overlay_cell_case" > /dev/null
 "$build/overlay_rules_case" "$game" > /dev/null
     ${PYTHON:-python3} original_sight_rule_check.py "$game/game.exe" "$build/real_map_case" "$game"
     ${PYTHON:-python3} "$shared/sim/original_cell_setup_check.py" "$game/game.exe" --base --vectors > "$build/original-setup-vectors"

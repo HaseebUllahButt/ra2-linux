@@ -22,6 +22,11 @@ std::optional<OverlayRuleFields> read_base_overlay_rule_slice(
     const rules::IniFile& ini,const std::string& type,OverlayRuleFields before) {
     if (type.empty()) return {};
     if (!ini.find_section(type)) return before;
+    if (const auto* value=ini.find(type,"Crushable")) {
+        const auto parsed=boolean(value->value);
+        if (!parsed) return {};
+        before.crushable=*parsed;
+    }
     if (const auto* value=ini.find(type,"Land")) {
         constexpr std::array<const char*,12> names={"clear","road","water","rock","wall","tiberium",
                                                     "beach","rough","ice","railroad","tunnel","weeds"};
@@ -30,7 +35,9 @@ std::optional<OverlayRuleFields> read_base_overlay_rule_slice(
             if (equal_ascii(value->value,names[i])) { before.land=static_cast<std::int32_t>(i); break; }
     }
     for (const auto& item:{std::pair<const char*,bool*>{"Wall",&before.wall},
-                           {"Tiberium",&before.tiberium},{"Crate",&before.crate}}) {
+                           {"Tiberium",&before.tiberium},{"Crate",&before.crate},
+                           {"NoUseTileLandType",&before.no_use_tile_land},
+                           {"IsARock",&before.is_rock},{"IsRubble",&before.is_rubble}}) {
         if (const auto* value=ini.find(type,item.first)) {
             const auto parsed=boolean(value->value);
             if (!parsed) return {};

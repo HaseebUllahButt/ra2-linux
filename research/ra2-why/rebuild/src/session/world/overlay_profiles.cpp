@@ -24,7 +24,8 @@ std::optional<std::map<std::uint8_t,OverlayTypeInputs>> prepare_base_overlay_inp
         const auto& name=registry->entries[i].value;
         // These restrictions avoid choosing an unproved order for a changed
         // field, and avoid inventing animation registry lookup results.
-        for (const char* key:{"Land","Wall","Tiberium","Crate","Image","CellAnim"})
+        for (const char* key:{"Land","Wall","Tiberium","Crate","Image","CellAnim","Crushable",
+                              "NoUseTileLandType","IsARock","IsRubble"})
             if (assets.battle_rules().find(name,key) || assets.map_ini().find(name,key)) return {};
         if (assets.rules().find(name,"CellAnim") || !assets.rules().find_section(name)) return {};
         auto rule=read_base_overlay_rule_slice(assets.rules(),name,base_overlay_type_constructor());

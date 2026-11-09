@@ -24,13 +24,15 @@ int main(int argc,char** argv) {
             const auto* item=ini.find(type,key);
             return item?item->value:std::string("-");
         };
-        if (used[i]) for (const char* key:{"Land","Wall","Tiberium","Crate","CellAnim"})
+        if (used[i]) for (const char* key:{"Land","Wall","Tiberium","Crate","CellAnim","Crushable","NoUseTileLandType","IsARock","IsRubble"})
             assert(!map.find(type,key) && !mode.find(type,key));
         // CellAnim lookup uses an animation registry and is not covered here.
         assert(!ini.find(type,"CellAnim"));
         std::cout<<i<<' '<<type<<' '<<int(ini.find_section(type)!=nullptr)<<' '
                  <<text("Land")<<' '<<text("Wall")<<' '<<text("Tiberium")<<' '<<text("Crate")<<' '
-                 <<fields->land<<' '<<fields->wall<<' '<<fields->tiberium<<' '<<fields->crate<<'\n';
+                 <<text("NoUseTileLandType")<<' '<<text("IsARock")<<' '<<text("IsRubble")<<' '<<text("Crushable")<<' '
+                 <<fields->land<<' '<<fields->wall<<' '<<fields->tiberium<<' '<<fields->crate<<' '
+                 <<fields->no_use_tile_land<<' '<<fields->is_rock<<' '<<fields->is_rubble<<' '<<fields->crushable<<'\n';
     }
     rules::IniFile overlay; overlay.parse("[X]\nLand=Clear\nTiberium=yes\nWall=no\nCrate=1\n");
     const auto changed=read_base_overlay_rule_slice(overlay,"X",base_overlay_type_constructor());

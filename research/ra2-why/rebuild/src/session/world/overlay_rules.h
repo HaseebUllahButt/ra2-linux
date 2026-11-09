@@ -10,6 +10,8 @@ namespace ra2::session::world {
 struct OverlayRuleFields {
     std::int32_t land=0; // OverlayType +268.
     bool wall=false, tiberium=false, crate=false; // +278, +279, +27A.
+    bool no_use_tile_land=false, is_rock=false, is_rubble=false; // +27C, +285, +284.
+    bool crushable=false; // ObjectType +1FD.
 };
 // Constructor defaults at 005DC5A0, before any INI reader.
 OverlayRuleFields base_overlay_type_constructor() noexcept;

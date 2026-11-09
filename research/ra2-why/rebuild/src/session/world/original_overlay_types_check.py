@@ -14,7 +14,7 @@ if len(sys.argv)!=4:
     raise SystemExit('usage: original_overlay_types_check.py game.exe overlay_rules_case game_dir')
 exe,native,game=sys.argv[1:]
 rows=[line.split() for line in subprocess.check_output([native,game],text=True).splitlines()]
-assert len(rows)==243 and all(len(row)==11 for row in rows)
+assert len(rows)==243 and all(len(row)==19 for row in rows)
 sys.argv=[sys.argv[0],exe,'--base']
 import original_move_trace as m
 objects=0x1400000;vector=0x1500000;nameptr=0x100a000

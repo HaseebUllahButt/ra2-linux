@@ -225,3 +225,10 @@ it does not prove complete live type loading or place Overlay objects. Base x86
 registration matches 243 installed names when the initial registry is supplied
 empty. Constructor and art reader slices match the 17 used types with supplied
 INI services.
+
+`world/overlay_cell_setup.h` covers the base Cell setup path for a resolved
+resource Overlay on a valid flat tile. It joins the checked tile and effect
+path with the original Overlay category inputs. It leaves the incoming state
+unchanged when any needed field is unknown. The original x86 body matches 320
+fixture traces, with resource lookup, tile metadata, and effect guards supplied.
+Rock, rubble, invalid tile, slope, and other Overlay paths remain separate.
