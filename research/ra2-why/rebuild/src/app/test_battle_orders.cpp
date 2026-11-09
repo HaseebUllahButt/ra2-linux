@@ -1,4 +1,5 @@
 #include "battle_orders.h"
+#include "camera_scroll.h"
 #include <algorithm>
 #include <iostream>
 #include <limits>
@@ -374,6 +375,19 @@ void event_edges() {
 } // namespace
 
 int main() try {
+    // Holding arrows for one second moves the same distance at each frame rate.
+    for(const unsigned interval:{1u,4u,16u,40u,100u}) {
+        CameraScroll scroll;int x=0,y=0;
+        for(unsigned now=interval;now<=1000;now+=interval) {
+            const auto delta=scroll.step(now,1,1);x+=delta.first;y+=delta.second;
+        }
+        const unsigned duration=1000/interval*interval;
+        require(x==int(duration*400/1000) && y==int(duration*260/1000),"Camera speed depends on frame rate");
+    }
+    CameraScroll scroll;
+    require(scroll.step(1000,2,-2)==std::make_pair(40,-26),"Camera pause cap or combined input is wrong");
+    scroll.reset(1000);
+    require(scroll.step(1000,1,1)==std::make_pair(0,0),"Camera moves without elapsed time");
     selection();
     battlefield_bounds();
     move_attack_stop();
