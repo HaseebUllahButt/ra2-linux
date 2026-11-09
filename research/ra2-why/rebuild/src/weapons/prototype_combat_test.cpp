@@ -28,7 +28,9 @@ world::Snapshot make_world(const std::string& source_type,const std::string& tar
         w.cells.emplace(y*512+x,c);
     }
     world::House a;a.id=101;a.reload_multiplier=1;a.firepower_multiplier=1;
-    world::House b=a;b.id=102;w.houses={a,b};
+    // The target house is human and its object is on mission 13, so the
+    // 006CDC40 retaliation stays off (PlayerReturnFire=no) in one-sided tests.
+    world::House b=a;b.id=102;b.human_controlled=true;w.houses={a,b};
     world::Entity source;source.id=1;source.house_id=101;source.type=source_type;source.kind=source_kind;
     source.lifetime=world::Lifetime::Placed;source.position=sim::Coord{50*256+128,50*256+128,0};
     source.cell=ra2map::Cell{50,50};source.next=0;source.resolved_hp=source.maximum_hp=source_hp;
@@ -39,6 +41,7 @@ world::Snapshot make_world(const std::string& source_type,const std::string& tar
     auto target=source;target.id=2;target.house_id=102;target.type=target_type;target.kind=target_kind;
     target.position=sim::Coord{54*256+128,50*256+128,0};target.cell=ra2map::Cell{54,50};
     target.resolved_hp=target.maximum_hp=target_hp;target.collision_virtual_position=target.position;target.next=3;
+    target.mission=13;
     world::Entity tree;tree.id=3;tree.type="TREE";tree.kind=world::Kind::Terrain;tree.lifetime=world::Lifetime::Placed;
     tree.position=*target.position;tree.next=0;tree.collision_eligible=false;
     w.cells.at(50*512+50).heads->ground_head=1;
@@ -233,6 +236,130 @@ void idle_defense_test(const rules::IniFile& rules,const rules::IniFile& art,con
     for (unsigned frame=1;frame<40 && !defended;++frame) if (guard.tick(tank,frame).fired) defended=frame;
     check(defended==12,"idle tank did not defend after its turret turned");
 }
+// A small base: house 101 owns the yard and Rhinos, house 102 owns the
+// soldiers. Each object has its own Cell link.
+struct Piece { std::uint32_t id,house; const char* type; world::Kind kind; int x,y; };
+world::Snapshot make_base(const rules::IniFile& rules,const std::vector<Piece>& pieces,bool human) {
+    world::Snapshot w;w.random=sim::Random(0).state();
+    for (int y=36;y<=64;++y) for (int x=36;x<=64;++x) {
+        world::CellState c;c.allocated=true;c.heads.emplace();c.cell_flag_100=false;
+        c.ground_occupancy_124=0;c.terrain.emplace();c.terrain->cell={static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)};
+        c.terrain->floor_world_height=0;c.terrain->ramp_index=0;c.terrain->overlay_type_index=-1;
+        w.cells.emplace(y*512+x,c);
+    }
+    world::House a;a.id=101;a.reload_multiplier=1;a.firepower_multiplier=1;a.human_controlled=human;
+    world::House b=a;b.id=102;b.human_controlled=false;w.houses={a,b};
+    for (const auto& p:pieces) {
+        world::Entity e;e.id=p.id;e.house_id=p.house;e.type=p.type;e.kind=p.kind;
+        e.lifetime=world::Lifetime::Placed;e.position=sim::Coord{p.x*256+128,p.y*256+128,0};
+        e.cell=ra2map::Cell{std::uint16_t(p.x),std::uint16_t(p.y)};e.next=0;
+        e.resolved_hp=e.maximum_hp=rules.read_integer(p.type,"Strength");
+        e.active=true;e.in_limbo=false;e.hull_facing_raw=0;e.turret_facing_raw=0;
+        e.weapon_timer_start_frame=-1;e.weapon_timer_duration=0;e.burst_index=0;
+        e.armor_multiplier=1;e.house_armor_multiplier=1;e.firepower_multiplier=1;
+        e.collision_eligible=true;e.collision_virtual_position=e.position;
+        e.locomotor_moving=false;e.mission=5;
+        w.cells.at(p.y*512+p.x).heads->ground_head=p.id;
+        w.entities.push_back(e);
+    }
+    return w;
+}
+world::Entity& piece(world::Snapshot& w,std::uint32_t id) {
+    for (auto& e:w.entities) if (e.id==id) return e;
+    throw std::runtime_error("missing piece");
+}
+// Base 006C6530/006D31E0 idle threat scan and 006CDC40/006D3B60 retaliation.
+void yard_defense_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+    rules::IniFile map;
+    // Three idle Guard Rhinos 3-4 cells from their yard. Three GIs walk up
+    // to the other side of the yard and shoot it from 3 cells.
+    const std::vector<Piece> base{{1,101,"NACNST",world::Kind::Structure,50,50},
+        {2,101,"HTNK",world::Kind::Unit,53,49},{3,101,"HTNK",world::Kind::Unit,53,51},
+        {4,101,"HTNK",world::Kind::Unit,48,52},{5,102,"E1",world::Kind::Infantry,50,47},
+        {6,102,"E1",world::Kind::Infantry,51,47},{7,102,"E1",world::Kind::Infantry,49,47}};
+    auto w=make_base(rules,base,true);
+    piece(w,1).mission=0;
+    sim::PrototypeCombatRuntime combat(rules,map,art,exe);
+    for (unsigned id:{5u,6u,7u}) check(combat.attack(w,id,1),"GI yard order rejected");
+    const int yard_hp=*piece(w,1).resolved_hp;
+    unsigned cleared=0,first_defense=0;std::size_t rhino_shots=0;
+    for (unsigned frame=0;frame<2000 && !cleared;++frame) {
+        const auto r=combat.tick(w,frame);
+        check(r.unresolved.empty(),"yard defense unresolved");
+        for (const auto& e:r.events) if (e.kind==sim::PrototypeCombatEventKind::Shot && e.source_type=="HTNK") {
+            ++rhino_shots;if (!first_defense) first_defense=frame;
+            check(e.target_type=="E1","Rhino shot a wrong target");
+        }
+        if (piece(w,5).lifetime==world::Lifetime::Destroyed && piece(w,6).lifetime==world::Lifetime::Destroyed &&
+            piece(w,7).lifetime==world::Lifetime::Destroyed) cleared=frame;
+    }
+    check(cleared && first_defense>0 && first_defense<20,"idle Rhinos did not defend their yard");
+    check(piece(w,1).lifetime==world::Lifetime::Placed && *piece(w,1).resolved_hp>0 &&
+          *piece(w,1).resolved_hp<yard_hp,"yard defense test lost or never hit the yard");
+    for (unsigned id:{2u,3u,4u}) check(piece(w,id).target_id.value_or(0)==0,"Rhino kept a dead guard target");
+    std::cout<<"Three Guard HTNK defend NACNST from three E1: first defense="<<first_defense
+             <<" all dead="<<cleared<<" Rhino shots="<<rhino_shots<<" yard hp="<<*piece(w,1).resolved_hp<<'/'<<yard_hp<<'\n';
+
+    // Guard scans the weapon range (5.75 cells). Area Guard scans twice that
+    // and approaches the enemy. The GI is 8 cells from the Rhino.
+    const std::vector<Piece> far{{1,101,"HTNK",world::Kind::Unit,50,50},{2,102,"E1",world::Kind::Infantry,58,50}};
+    auto guard=make_base(rules,far,true);
+    sim::PrototypeCombatRuntime g(rules,map,art,exe);
+    const auto gr=g.tick(guard,0);
+    check(gr.out_of_range.empty() && piece(guard,1).target_id.value_or(0)==0,"Guard scanned beyond weapon range");
+    auto area=make_base(rules,far,false);
+    piece(area,1).mission=11;
+    sim::PrototypeCombatRuntime ag(rules,map,art,exe);
+    const auto ar=ag.tick(area,0);
+    check(ar.out_of_range.size()==1 && ar.out_of_range[0]==std::make_pair(1u,2u) &&
+          piece(area,1).target_id==2u,"Area Guard did not take an enemy in twice weapon range");
+    // The Area Guard target stays while the Rhino drives toward it.
+    piece(area,1).locomotor_moving=true;
+    check(ag.tick(area,1).out_of_range.size()==1 && piece(area,1).target_id==2u,"Area Guard dropped its approach");
+    // Base 004C5C1D: a stopped Rhino more than 0.75 * 2944 leptons from its
+    // guard place drops the target and asks to drive back.
+    piece(area,1).locomotor_moving=false;piece(area,1).position->x+=8*256;
+    check(ag.tick(area,2).guard_return.empty() && piece(area,1).target_id==2u,"Area Guard gave up too early");
+    piece(area,1).position->x+=256;
+    const auto back=ag.tick(area,3);
+    check(back.guard_return.size()==1 && back.guard_return[0].first==1 &&
+          back.guard_return[0].second.x==50*256+128 && piece(area,1).target_id.value_or(0)!=2u,
+          "Area Guard chased beyond its guard range");
+
+    // Retaliation: a Rhino on another mission (13) is shot by a GI.
+    // A computer Rhino returns fire. A human Rhino does not, because
+    // [CombatDamage] PlayerReturnFire=no and the mission is not Guard.
+    const std::vector<Piece> duel{{1,101,"HTNK",world::Kind::Unit,50,50},{2,102,"E1",world::Kind::Infantry,53,50}};
+    for (bool human:{false,true}) {
+        auto d=make_base(rules,duel,human);
+        piece(d,1).mission=13;
+        sim::PrototypeCombatRuntime c(rules,map,art,exe);
+        check(c.attack(d,2,1),"GI Rhino order rejected");
+        bool hit=false;
+        for (unsigned frame=0;frame<200 && !hit;++frame) {
+            const auto r=c.tick(d,frame);
+            for (const auto& e:r.events) hit|=e.kind==sim::PrototypeCombatEventKind::Damage && e.target_id==1;
+        }
+        check(hit,"GI did not hit the Rhino");
+        check(piece(d,1).target_id.value_or(0)==(human?0u:2u),
+              human?"human Rhino returned fire outside Guard":"computer Rhino did not return fire");
+    }
+
+    // An explicit target dies; the Guard Rhino then takes the next enemy.
+    const std::vector<Piece> next{{1,101,"HTNK",world::Kind::Unit,50,50},{2,102,"E1",world::Kind::Infantry,53,50},
+        {3,102,"E1",world::Kind::Infantry,50,54}};
+    auto n=make_base(rules,next,true);
+    piece(n,2).resolved_hp=1;piece(n,1).turret_facing_raw=16384;
+    sim::PrototypeCombatRuntime nc(rules,map,art,exe);
+    check(nc.attack(n,1,2),"explicit Rhino order rejected");
+    unsigned dead=0,retarget=0;
+    for (unsigned frame=0;frame<200 && !retarget;++frame) {
+        nc.tick(n,frame);
+        if (!dead && piece(n,2).lifetime==world::Lifetime::Destroyed) dead=frame;
+        if (dead && piece(n,1).target_id==3u) retarget=frame;
+    }
+    check(dead && retarget && retarget<=dead+1,"Rhino lost Guard after its explicit target died");
+}
 // Base 004B8A30/004B8BE0 turret turning and 00704C00 fire facing check.
 void turret_turn_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
     rules::IniFile map;
@@ -353,6 +480,7 @@ int main(int argc,char** argv) {
         yard_volley_test(rules,art,std::string(argv[1])+"/game.exe","NACNST");
         yard_volley_test(rules,art,std::string(argv[1])+"/game.exe","GACNST");
         idle_defense_test(rules,art,std::string(argv[1])+"/game.exe");
+        yard_defense_test(rules,art,std::string(argv[1])+"/game.exe");
         for (const auto* type : {"HTNK","DRON","NALASR"}) {
             const auto weapon=rules.read_string(type,"Primary");
             std::cout<<type<<" weapon="<<weapon<<" range="<<rules.read_string(weapon,"Range")

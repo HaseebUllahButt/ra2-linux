@@ -547,11 +547,11 @@ std::optional<PrototypeCombatRuntime::TurretAim> PrototypeCombatRuntime::turret_
 bool PrototypeCombatRuntime::attack(session::world::Snapshot& world,std::uint32_t source_id,std::uint32_t target_id) {
     if (!can_attack(world,source_id,target_id)) return false;
     auto* source=prototype_find(world,source_id);
-    guard_orders_.erase(source_id);
+    guard_orders_.erase(source_id);guard_place_.erase(source_id);
     orders_[source_id]=target_id;source->target_id=target_id;return true;
 }
 void PrototypeCombatRuntime::stop(session::world::Snapshot& world,std::uint32_t source_id) {
-    guard_orders_.erase(source_id);
+    guard_orders_.erase(source_id);guard_place_.erase(source_id);
     orders_.erase(source_id);
     if (auto* source=prototype_find(world,source_id)) source->target_id=0;
 }
@@ -591,6 +591,8 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
     };
     // TODO-ORIGINAL: The prototype advances saved bullets before attack orders.
     // Recover global object update order before treating this as replay exact.
+    // Survivors hit this frame, with the attacker, for the 006CDC40 retaliation.
+    std::vector<std::pair<std::uint32_t,std::uint32_t>> struck;
     auto impact=[&](const PrototypeCombatProjectile& shot,Coord position,bool scatter) {
         ++report.impacts;
         const auto* source=prototype_find(world,shot.source_id);
@@ -637,6 +639,7 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             auto hit=prototype_damage(world,candidate.id,shot.source_id,raw_for(*target),
                                       candidate.distance,*weapon,base_,map_);
             panic(*target,hit);
+            if (hit.applied && !hit.destroyed && shot.source_id) struck.emplace_back(target->id,shot.source_id);
             if (!hit.missing.empty()) report.unresolved.push_back(hit.missing);
             if (hit.applied) record(PrototypeCombatEventKind::Damage,shot,*target,before,*target->resolved_hp);
             if (hit.destroyed) record(PrototypeCombatEventKind::Death,shot,*target,before,*target->resolved_hp);
@@ -649,6 +652,7 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             const int before=*aimed->resolved_hp;
             auto hit=prototype_damage(world,aimed->id,shot.source_id,raw_for(*aimed),0,*weapon,base_,map_);
             panic(*aimed,hit);
+            if (hit.applied && !hit.destroyed && shot.source_id) struck.emplace_back(aimed->id,shot.source_id);
             if (!hit.missing.empty()) report.unresolved.push_back(hit.missing);
             if (hit.applied) record(PrototypeCombatEventKind::Damage,shot,*aimed,before,*aimed->resolved_hp);
             if (hit.destroyed) record(PrototypeCombatEventKind::Death,shot,*aimed,before,*aimed->resolved_hp);
@@ -736,49 +740,93 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             owner->power_output.value_or(0)<owner->power_drain.value_or(0)) return false;
         return can_attack(world,source.id,target.id);
     };
+    // Original mission numbers: 0 Sleep, 5 Guard, 11 Area Guard, 25 Patrol.
+    // TODO-ORIGINAL: Setup and production still write 0 for new idle
+    // objects, so this prototype scans and retaliates with 0 like Guard.
+    const auto guard_mission=[](const session::world::Entity& e) {
+        return e.mission && (*e.mission==0 || *e.mission==5 || *e.mission==11);
+    };
+    // Base 006D31E0 Threat_Range and 006C6530 Greatest_Threat. Guard (control
+    // 0) uses TechnoType +504 GuardRange; zero makes 006C5570 use the weapon
+    // range through virtual +350. Area Guard (control 1) doubles GuardRange,
+    // or the longer of both weapon ranges, and clamps it to 0..1000h.
+    // TODO-ORIGINAL: virtual +304 can disable control 0 GuardRange.
+    const auto scan_range=[&](const session::world::Entity& source,const PrototypeWeapon& weapon) {
+        const auto cells=prototype_double(base_,map_,source.type,"GuardRange");
+        const auto guard=cells?weapons::base_weapon_range_from_cells(*cells,0).value_or(0):0;
+        if (!source.mission || *source.mission!=11) return guard>0?guard:weapon.range;
+        int range=guard;
+        if (!range) {
+            range=weapon.range;
+            const auto secondary=prototype_string(base_,map_,source.type,"Secondary");
+            if (!secondary.empty())
+                if (const auto other=prototype_weapon(base_,map_,art_,source,secondary)) range=std::max(range,other->range);
+        }
+        return std::clamp(range*2,0,0x1000);
+    };
+    std::set<std::uint32_t> returning;
     // Guard targets stay local. Explicit attack orders retain their chase target.
     for (auto it=guard_orders_.begin();it!=guard_orders_.end();) {
         const auto order=orders_.find(it->first);
-        if (order==orders_.end() || order->second!=it->second) {
+        if (order==orders_.end() || order->second!=it->second.target) {
             it=guard_orders_.erase(it); continue;
         }
         auto* source=prototype_find(world,it->first);
-        const auto* target=prototype_find(world,it->second);
+        const auto* target=prototype_find(world,it->second.target);
         const auto weapon=prototype_alive(source)?prototype_weapon(base_,map_,art_,*source):
             std::optional<PrototypeWeapon>{};
-        if (!weapon || !prototype_alive(target) || source->locomotor_moving.value_or(false) ||
-            distance_.between(*source->position,*target->position)>weapon->range ||
-            !legal_guard_target(*source,*target)) {
+        // A Guard target ends when the actor moves or the target leaves the
+        // scan range. An Area Guard actor may drive toward its target.
+        // Base 004C5C1D..004C5CA3 (Area Guard): a stopped actor farther than
+        // Threat_Range(1) * 0.75 from its guard place drops the target and
+        // heads back there. TODO-ORIGINAL: the +57D flag, the +494 check
+        // and GuardModeStray for a guarded object are not resolved.
+        bool stray=false;
+        if (it->second.area && source && !source->locomotor_moving.value_or(false))
+            stray=distance_.between(*source->position,it->second.anchor)>
+                static_cast<int>(it->second.range*0.75);
+        const bool lost=stray || !weapon || !prototype_alive(target) || !legal_guard_target(*source,*target) ||
+            (!it->second.area && (source->locomotor_moving.value_or(false) ||
+                 distance_.between(*source->position,*target->position)>it->second.range));
+        if (stray) {report.guard_return.emplace_back(source->id,it->second.anchor);returning.insert(source->id);}
+        if (lost) {
             if (source) source->target_id=0;
             orders_.erase(order);
             it=guard_orders_.erase(it);
         } else ++it;
     }
     // Acquire only for idle actors. Explicit attack and move orders keep priority.
-    // TODO-ORIGINAL: Recover the full guard scan and threat scoring.
+    // TODO-ORIGINAL: Recover the 006C5570 threat score, the cell scan order
+    // and the NormalTargetingDelay/GuardAreaTargetingDelay scan timer (006D46D0).
     for (auto& source : world.entities) {
         if (!prototype_alive(&source) || orders_.count(source.id) ||
-            source.target_id.value_or(0) || source.locomotor_moving.value_or(false) ||
-            !source.mission || (*source.mission!=0 && *source.mission!=5 && *source.mission!=11)) continue;
+            source.target_id.value_or(0) || !guard_mission(source)) continue;
+        // The prototype keeps the idle mission number during Move orders, so
+        // a driving actor without a guard target is not idle and its old
+        // guard place no longer applies.
+        const bool area=*source.mission==11;
+        if (!area || source.locomotor_moving.value_or(false)) guard_place_.erase(source.id);
+        if (returning.count(source.id) || source.locomotor_moving.value_or(false)) continue;
         const auto weapon=prototype_weapon(base_,map_,art_,source);
         if (!weapon) continue;
         const auto* owner=prototype_house(world,source.house_id);
         if (!owner || owner->country=="Neutral" || owner->country=="Special") continue;
         if (prototype_bool(base_,map_,source.type,"Powered") &&
             owner->power_output.value_or(0)<owner->power_drain.value_or(0)) continue;
+        const int range=scan_range(source,*weapon);
         const session::world::Entity* nearest=nullptr;
-        int best=weapon->range+1;
+        int best=range+1;
         for (const auto& target : world.entities) {
             if(!prototype_alive(&target) || source.house_id==target.house_id)continue;
-            const int range=distance_.between(*source.position,*target.position);
-            if(range>weapon->range || range>best)continue;
+            const int d=distance_.between(*source.position,*target.position);
+            if(d>range || d>best)continue;
             if (!legal_guard_target(source,target)) continue;
-            if (range<=weapon->range && (range<best || (range==best && nearest && target.id<nearest->id))) {
-                best=range; nearest=&target;
-            }
+            if (d<best || (nearest && target.id<nearest->id)) {best=d; nearest=&target;}
         }
         if (nearest) {
-            orders_[source.id]=nearest->id; guard_orders_[source.id]=nearest->id;
+            orders_[source.id]=nearest->id;
+            const auto anchor=area?guard_place_.emplace(source.id,*source.position).first->second:*source.position;
+            guard_orders_[source.id]=GuardOrder{nearest->id,range,anchor,area};
             source.target_id=nearest->id;
         }
     }
@@ -879,6 +927,42 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             }
         } catch (const std::exception& e) {report.unresolved.push_back(e.what());}
         ++it;
+    }
+    // Base 006CDC40 Take_Damage calls 006D3B60 Can_Retaliate with the
+    // attacker. When it passes, the victim assigns the attacker as its target
+    // (virtual +2B8) and overrides its mission to attack it (virtual +1DC).
+    // A human-controlled victim out of range skips that override when the
+    // attacker is farther than (Sight + 0.5) * 256 leptons.
+    // TODO-ORIGINAL: a computer victim with a current Techno target compares
+    // 006D7550 threat values; this prototype keeps its current target. The
+    // 005950D0 +8 game flag, transport (+230, +238) and PlayerScatter paths
+    // are not resolved.
+    for (const auto& [victim_id,attacker_id] : struck) {
+        auto* victim=prototype_find(world,victim_id);
+        const auto* attacker=prototype_find(world,attacker_id);
+        if (!prototype_alive(victim) || !prototype_alive(attacker) || orders_.count(victim_id) ||
+            victim->target_id.value_or(0) || victim->house_id==attacker->house_id ||
+            !prototype_bool(base_,map_,victim->type,"CanRetaliate",true)) continue;
+        const auto weapon=prototype_weapon(base_,map_,art_,*victim);
+        if (!weapon || !legal_guard_target(*victim,*attacker)) continue;
+        const auto* owner=prototype_house(world,victim->house_id);
+        const bool human=owner && owner->human_controlled.value_or(false);
+        const bool building=victim->kind==session::world::Kind::Structure;
+        // 006D3B60: a human object that is not a Building returns fire only in
+        // Guard, Area Guard or Patrol unless [CombatDamage] PlayerReturnFire.
+        // The prototype keeps the idle mission number during a Move order,
+        // so a driving human object counts as being on Move here.
+        if (human && !building && !prototype_bool(base_,map_,"CombatDamage","PlayerReturnFire") &&
+            (victim->locomotor_moving.value_or(false) ||
+             !(guard_mission(*victim) || victim->mission.value_or(-1)==25))) continue;
+        const int d=distance_.between(*victim->position,*attacker->position);
+        if (building || (human && d>weapon->range &&
+            d>(prototype_int(base_,map_,victim->type,"Sight").value_or(0)*2+1)*128)) {
+            // Without the attack override the target lasts while it is in range.
+            if (d>weapon->range) continue;
+            guard_orders_[victim_id]=GuardOrder{attacker_id,weapon->range,*victim->position,false};
+        }
+        orders_[victim_id]=attacker_id;victim->target_id=attacker_id;
     }
     return report;
 }
