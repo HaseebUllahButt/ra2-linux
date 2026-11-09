@@ -38,8 +38,12 @@ PrototypeEconomy::PrototypeEconomy(const rules::IniFile& r):rules_(r) {
             if(resource.first_overlay<0) resource.first_overlay=int(i);
             overlay_resources_.emplace(int(i),resource_index);
         }
+        resource.growth=std::max(1,r.read_integer(resource.section,"Growth",2200));
+        resource.interval=std::max(1,r.read_integer(resource.section,"Spread",2200));
         resources_.push_back(std::move(resource));
     }
+    grows_=r.read_bool("General","TiberiumGrows",true);
+    spreads_=r.read_bool("General","TiberiumSpreads",true);
 }
 int PrototypeEconomy::load(std::uint32_t id) const { auto i=cargo_.find(id);return i==cargo_.end()?0:i->second.bails; }
 int PrototypeEconomy::resource(const sw::CellState& c) const {
@@ -55,13 +59,16 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
     movement_.tick(w,frame);
     // TODO-ORIGINAL TiberiumClass::RegisterForSpread: deterministic clocks replace the growth queues and percentages.
     std::vector<std::pair<std::uint32_t,int>> spread;
-    for(auto& [k,c]:w.cells) {
+    // The Cell pass changes nothing unless some resource grows or spreads on
+    // this frame. Rules are fixed for the match, so skip the pass otherwise.
+    bool active=false;
+    if(frame) for(const auto& item:resources_)
+        if((grows_ && frame%item.growth==0) || (spreads_ && frame%item.interval==0)) active=true;
+    if(active) for(auto& [k,c]:w.cells) {
         int r=resource(c);if(r<0) continue;
-        const auto& section=resources_[r].section;
-        int growth=std::max(1,rules_.read_integer(section,"Growth",2200));
-        int interval=std::max(1,rules_.read_integer(section,"Spread",2200));
-        if(frame && frame%growth==0 && rules_.read_bool("General","TiberiumGrows",true) && *c.overlay_data_11e<11) ++*c.overlay_data_11e;
-        if(!frame || frame%interval || !rules_.read_bool("General","TiberiumSpreads",true) || *c.overlay_data_11e<11) continue;
+        const int growth=resources_[r].growth,interval=resources_[r].interval;
+        if(frame && frame%growth==0 && grows_ && *c.overlay_data_11e<11) ++*c.overlay_data_11e;
+        if(!frame || frame%interval || !spreads_ || *c.overlay_data_11e<11) continue;
         auto p=coord(k);
         for(auto [dx,dy]:{std::pair<int,int>{0,-1},{1,0},{0,1},{-1,0}}) {
             int x=p.x+dx,y=p.y+dy;if(x<0 || y<0 || x>=512 || y>=512) continue;
