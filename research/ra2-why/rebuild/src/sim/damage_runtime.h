@@ -107,3 +107,43 @@ struct AreaDamageNext {
 AreaDamageNext base_next_area_damage(AreaDamageCursor&, const AreaRecipientLookup&);
 bool base_complete_area_damage_request(AreaDamageCursor&,std::uint32_t target_id);
 }
+
+namespace ra2::sim {
+// Playable prototype only. The exact, guarded APIs above do not use these
+// fallbacks. TODO-ORIGINAL: recover attack missions, turret turning, the full
+// projectile/infantry handlers, triggers, death effects and deferred deletion.
+struct PrototypeCombatProjectile {
+    std::uint32_t source_id=0, target_id=0;
+    std::string weapon, warhead;
+    int damage=0;
+    FlatProjectile flight{};
+};
+struct PrototypeCombatTick {
+    std::size_t fired=0, impacts=0, destroyed=0;
+    std::vector<std::string> unresolved;
+    // Source and target IDs that need an approach route this frame.
+    std::vector<std::pair<std::uint32_t,std::uint32_t>> out_of_range;
+};
+class PrototypeCombatRuntime {
+public:
+    // The map rules override base rules. All four inputs are copied.
+    PrototypeCombatRuntime(const rules::IniFile& base_rules,
+        const rules::IniFile& map_rules, const rules::IniFile& art,
+        const std::string& game_exe);
+    // The Battle mode overrides base rules; the map overrides both.
+    PrototypeCombatRuntime(const rules::IniFile& base_rules,const rules::IniFile& mode_rules,
+        const rules::IniFile& map_rules,const rules::IniFile& art,const std::string& game_exe);
+    // Source and target must be alive, placed Units, Infantry, or Structures.
+    // An accepted order remains active until stopped or either object dies.
+    bool attack(session::world::Snapshot&,std::uint32_t source_id,std::uint32_t target_id);
+    void stop(session::world::Snapshot&,std::uint32_t source_id);
+    PrototypeCombatTick tick(session::world::Snapshot&,std::uint64_t frame);
+    const std::vector<PrototypeCombatProjectile>& projectiles() const { return projectiles_; }
+private:
+    rules::IniFile base_,map_,art_;
+    OriginalDistance distance_;
+    weapons::BaseBallisticAngles angles_;
+    std::map<std::uint32_t,std::uint32_t> orders_;
+    std::vector<PrototypeCombatProjectile> projectiles_;
+};
+}
