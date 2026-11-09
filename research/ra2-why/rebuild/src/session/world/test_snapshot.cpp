@@ -120,6 +120,10 @@ int main() {
     unknown_occupancy.cells.at(69*512+54).ground_occupancy_124.reset();
     Stage guarded_occupancy(unknown_occupancy);
     assert(guarded_occupancy.place_base_unit(*battle_unit,{54,69},32,profile)==PlacementResult::Unresolved);
+    auto unknown_tracking=battle.snapshot();
+    unknown_tracking.entities[0].occupancy_tracking.reset();
+    Stage guarded_tracking(unknown_tracking);
+    assert(guarded_tracking.place_base_unit(*battle_unit,{54,69},32,profile)==PlacementResult::Unresolved);
     auto unknown_bridge_flag=battle.snapshot();
     unknown_bridge_flag.cells.at(69*512+54).cell_flag_100.reset();
     Stage guarded_bridge(unknown_bridge_flag);
@@ -129,10 +133,12 @@ int main() {
     assert(battle.snapshot().entities[0].on_map==false);
     assert(battle.place_base_unit(*battle_unit,{56,69},32,profile)==PlacementResult::Blocked);
     assert(battle.snapshot().entities[0].on_map==true && battle.snapshot().entities[0].lifetime==Lifetime::Created);
+    assert(battle.snapshot().cells.at(69*512+56).ground_occupancy_124==0);
     assert(battle.place_base_unit(*battle_unit,{54,69},32,profile)==PlacementResult::Placed);
     const auto& placed=battle.snapshot().entities[0];
     assert(placed.lifetime==Lifetime::Placed && placed.hull_facing==32 && placed.turret_facing==32);
     assert(battle.snapshot().cells.at(69*512+54).heads->ground_head==*battle_unit);
+    assert(battle.snapshot().cells.at(69*512+54).ground_occupancy_124==0x20);
     assert(battle.snapshot().houses[0].placed_unit_counts->at(0)==1);
     for (const auto& direction:std::vector<std::pair<int,int>>{{0,-1},{1,-1},{1,0},{1,1},{0,1},{-1,1},{-1,0},{-1,-1}})
         assert(battle.snapshot().cells.at((69+direction.second)*512+54+direction.first).neighbor_count==1);

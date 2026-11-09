@@ -49,6 +49,7 @@ struct Entity {
     std::optional<bool> excluded_from_house_tracking;
     std::optional<std::uint16_t> constructor_random; // Base Techno +320.
     std::optional<bool> on_map;
+    std::optional<bool> occupancy_tracking; // Base Foot +5A0.
     std::optional<std::int32_t> timer_length;
     std::optional<bool> timer_active;
     std::optional<std::uint8_t> height_byte;

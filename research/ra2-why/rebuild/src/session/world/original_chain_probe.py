@@ -69,6 +69,11 @@ m.word(m.VT+0x11c,0x4c2e60)
 m.word(m.VT+0x16c,0x594770)
 m.word(m.VT+0x80,0x6c12c0);m.word(m.VT+0x84,0x705020);m.word(m.VT+0x100,0x5d4470)
 m.word(m.VT+0x74,0x4ca130);m.virtual(0x2a0,0,m.ret(0));m.virtual(0x38,0,m.ret(0))
+# Fresh Foot +5A0 is set by 004C2B6E. Use the original occupancy getter
+# and Unit +E8 so linked placement updates the Cell +124 byte.
+if not full_battle: cpu.mem_write(m.FOOT+0x5a0,b'\x01')
+assert cpu.mem_read(m.FOOT+0x5a0,1)==b'\x01'
+m.word(m.VT+0xbc,0x41b470);m.word(m.VT+0xe8,0x707980)
 m.virtual(0x180,4,m.ret(0))
 m.virtual(0x418,16,m.ret(0))
 m.virtual(0x414,8,m.ret(0));m.virtual(0x1e8,0,m.ret(0))
@@ -128,5 +133,6 @@ for speed in (0.0,1.0):
     table=struct.unpack_from('<250I',state,12)
     z=m.signed(m.FOOT+0x90) if result else -1
     height=cpu.mem_read(m.FOOT+0x378,1)[0] if result else -1
-    print('PLACE_RESULT',result,on_map,4 if head==m.FOOT else 0,house_count,m.read(m.FOOT+0x30),
+    occupancy=cpu.mem_read(destination+0x124,1)[0]
+    print('PLACE_RESULT',result,on_map,4 if head==m.FOOT else 0,occupancy,house_count,m.read(m.FOOT+0x30),
           hull,turret,z,height,*neighbor,*indexes,*table)

@@ -106,6 +106,7 @@ std::optional<std::uint32_t> Stage::create_unit(std::uint32_t house_id, std::str
     unit.kind=Kind::Unit; unit.lifetime=Lifetime::Created; unit.resolved_hp=resolved_hp;
     unit.constructor_random=constructor_random;
     unit.next=0; unit.on_map=false; unit.hull_facing=0; unit.turret_facing=0;
+    unit.occupancy_tracking=true; // Foot constructor 004C2B6E.
     unit.original_type_index=original_type_index;
     unit.excluded_from_house_tracking=excluded_from_house_tracking;
     auto updated_house=*found;
@@ -158,7 +159,8 @@ PlacementResult Stage::place_base_unit(std::uint32_t unit_id, StartPoint point,
     for (auto it=candidate.entities.begin();it!=candidate.entities.end();++it)
         if (it->id==unit_id) { unit=it; break; }
     if (unit==candidate.entities.end() || unit->kind!=Kind::Unit || unit->lifetime!=Lifetime::Created ||
-        !unit->resolved_hp || !unit->original_type_index || !unit->next || *unit->next!=0)
+        !unit->resolved_hp || !unit->original_type_index || !unit->next || *unit->next!=0 ||
+        !unit->occupancy_tracking || !*unit->occupancy_tracking)
         return PlacementResult::Unresolved;
     auto house=candidate.houses.end();
     for (auto it=candidate.houses.begin();it!=candidate.houses.end();++it)
@@ -220,6 +222,9 @@ PlacementResult Stage::place_base_unit(std::uint32_t unit_id, StartPoint point,
         return PlacementResult::Unresolved;
     cell->second.heads=links.cells.at(key);
     unit->next=links.objects.at(unit->id).next;
+    // Unit virtual +E8 at 00707980 sets the ground occupancy bit. The
+    // restricted path has a clear bridge flag and an initially empty byte.
+    *cell->second.ground_occupancy_124|=0x20;
     ++(*house->placed_unit_counts)[*unit->original_type_index]; // 004ED70C.
     for (int i=0;i<8;++i) {
         const auto neighbor=std::uint32_t(int(point.y)+dy[i])*512+std::uint32_t(int(point.x)+dx[i]);

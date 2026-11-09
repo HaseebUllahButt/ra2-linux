@@ -59,6 +59,7 @@ int main(int argc,char** argv) {
         const auto count=h.placed_unit_counts->find(0);
         std::cout<<(result==PlacementResult::Placed?1:0)<<' '<<int(*u.on_map)<<' '
                  <<s.cells.at(point.y*512+point.x).heads->ground_head<<' '
+                 <<int(*s.cells.at(point.y*512+point.x).ground_occupancy_124)<<' '
                  <<(count==h.placed_unit_counts->end()?0:count->second)<<' '<<*u.next<<' '
                  <<*u.hull_facing<<' '<<*u.turret_facing<<' '
                  <<(u.position?u.position->z:-1)<<' '<<(u.height_byte?int(*u.height_byte):-1);

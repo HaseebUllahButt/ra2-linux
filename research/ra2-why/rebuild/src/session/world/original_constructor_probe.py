@@ -83,5 +83,5 @@ next_id=m.read(m.FOOT+0x30)
 on_map=cpu.mem_read(m.FOOT+0x32d,1)[0]
 hull=struct.unpack('<H',cpu.mem_read(m.FOOT+0x2e0,2))[0]>>8
 turret=struct.unpack('<H',cpu.mem_read(m.FOOT+0x2f8,2))[0]>>8
-print('RESULT',low,next_id,on_map,m.read(m.FOOT+0x6c),hull,turret,
+print('RESULT',low,next_id,on_map,m.read(m.FOOT+0x6c),hull,turret,cpu.mem_read(m.FOOT+0x5a0,1)[0],
       m.read(house+0x228),m.read(0x1421000+4*type_index),m.read(house+0x1278+4*type_index),*indexes,*table)

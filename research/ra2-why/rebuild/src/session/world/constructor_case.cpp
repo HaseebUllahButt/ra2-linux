@@ -24,6 +24,7 @@ int main(int argc,char** argv) {
     };
     std::cout<<*unit.constructor_random<<' '<<*unit.next<<' '<<int(*unit.on_map)<<' '<<*unit.resolved_hp<<' '
              <<*unit.hull_facing<<' '<<*unit.turret_facing<<' '
+             <<int(*unit.occupancy_tracking)<<' '
              <<*owner.unit_count<<' '<<count(owner.unit_type_counts)<<' '<<count(owner.unit_fixed_counts)<<' '
              <<snapshot.random.first<<' '<<snapshot.random.second;
     for (auto word:snapshot.random.table) std::cout<<' '<<word;
