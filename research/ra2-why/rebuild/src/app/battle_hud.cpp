@@ -90,7 +90,7 @@ render::Rectangle BattleHud::build_button_bounds(int i) {
 render::Rectangle BattleHud::deploy_bounds() { return {palette_x,deploy_y,deploy_width,deploy_height}; }
 render::Rectangle BattleHud::minimap_bounds() { return {minimap_x,minimap_y,minimap_region_width,minimap_region_height}; }
 HudAction BattleHud::handle_click(int x,int y,const HudState& s) const {
-    if (y >= 34 && y < 58 && x >= 808 && x < 1018) {
+    if (y >= 36 && y < 58 && x >= 808 && x < 1018) {
         active_category_ = static_cast<BuildCategory>((x-808)/42);
         return {};
     }
@@ -120,12 +120,13 @@ void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
     fill(b,{808,29,static_cast<int>(212LL*std::max(0,s.power_output)/capacity),6},
          s.power_output<s.power_drain?red:green);
     // Enlarged tabs. The click test in handle_click uses these same rects.
+    // Below the power bar (ends at y 35), above the buttons (start y 60).
     const char* tabs[] = {"ALL", "BLD", "INF", "VEH", "AIR"};
     for (int i=0;i<5;++i) {
-        Rectangle tab{808+i*42,34,42,24};
+        Rectangle tab{808+i*42,36,42,22};
         border(b,tab,static_cast<int>(active_category_)==i?gold:edge);
         std::string label=tabs[i];
-        text(b,tab.x+(42-4*static_cast<int>(label.size()))/2,tab.y+9,label,ink,40,1);
+        text(b,tab.x+(42-(4*static_cast<int>(label.size())-2))/2,tab.y+6,label,ink,40,2);
     }
     if (s.choices.empty() && s.result.empty()) {
         text(b,816,90,"DEPLOY YOUR",gold,200);
@@ -156,9 +157,10 @@ void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
                 const double sweep=std::clamp(c.progress,0,1000)/1000.0*2*M_PI;
                 const int cx=r.x+r.width/2, cy=r.y+r.height/2;
                 const int rad=std::min(r.width,r.height)/2-2;
-                for (int y=std::max(1,cy-rad);y<std::min(r.height-1,cy+rad+1);++y)
-                    for (int x=std::max(1,cx-rad);x<std::min(r.width-1,cx+rad+1);++x) {
-                        const double dx=x+0.5-cx, dy=y+0.5-cy;
+                // Local button coords; dx/dy measure from the button center.
+                for (int y=1;y<r.height-1;++y)
+                    for (int x=1;x<r.width-1;++x) {
+                        const double dx=r.x+x+0.5-cx, dy=r.y+y+0.5-cy;
                         if (dx*dx+dy*dy>rad*rad) continue;
                         double ang=std::atan2(dx,-dy);
                         if (ang<0) ang+=2*M_PI;
