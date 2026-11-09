@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run ordinary Unit branches of the original Foot path wrapper.
 
-Usage: original_foot_path_check.py executable [--base] [--ordinary] [--trace] [--vectors]
+Usage: original_foot_path_check.py executable [--base] [--ordinary|--asymmetric] [--trace] [--vectors]
 Queue guard, goal entry, marking, map lookup and path results are resolved adapters.
 The wrapper, stack probe, coordinate getters, square root, conversion, metadata
 no-op, queue copy, raw field writes and successful return execute unchanged.
@@ -21,7 +21,7 @@ queue=0x4d0 if base else 0x5e0
 raw=0x530 if base else 0x640
 last_cell=0x450 if base else 0x558
 clock=0xa40d2c if base else 0xa8ed84
-state={}; events=[]; callbacks={}; distances=[]; recent=[]
+state={}; events=[]; callbacks={}; distances=[]; recent=[]; axes=[0,0,0]
 def word(address,value): cpu.mem_write(address,struct.pack('<I',value&0xffffffff))
 def read(address): return struct.unpack('<I',cpu.mem_read(address,4))[0]
 def argument(n=0): return read(cpu.reg_read(UC_X86_REG_ESP)+4+4*n)
@@ -81,7 +81,8 @@ def inputs(seed):
     source=((48+next_value()%16)*256+128+next_value()%97,
             (64+next_value()%16)*256+128-next_value()%97,(seed%5)*104)
     ordinary='--ordinary' in sys.argv
-    present=ordinary or seed%9!=0
+    asymmetric='--asymmetric' in sys.argv
+    present=not asymmetric and (ordinary or seed%9!=0)
     if not present:
         source=((goal[0]+seed%3-1)*256+128,(goal[1]+(seed//3)%3-1)*256+128,source[2])
     append=next_value()%25; mode=next_value()%3; guard=next_value()%5!=0
@@ -124,6 +125,11 @@ def run(seed):
     assert cpu.reg_read(UC_X86_REG_EIP)==STOP,'ordinary Foot wrapper bound exceeded'
     assert tuple(struct.unpack('<iii',cpu.mem_read(ACTOR+position,12)))==state['source']
     fields=tuple(signed(read(ACTOR+raw+i*4)) for i in range(3))
+    if '--asymmetric' in sys.argv and state['guard']:
+        dx=state['source'][0]-(state['goal'][0]*256+128)
+        dy=state['source'][1]-(state['goal'][1]*256+128)
+        assert fields[1]==dy, 'original null Foot path did not retain Y delta'
+        axes[0]+=dx==0 and dy!=0; axes[1]+=dy==0 and dx!=0; axes[2]+=dx*dy<0
     if '--trace' in sys.argv:
         print(seed,state['source'],state['goal'],'sqrt',distances,'fields',fields,'deltaY',state['source'][1]-(state['goal'][1]*256+128),events)
     h=2166136261
@@ -146,3 +152,6 @@ for seed in seeds:
     if '--vectors' in sys.argv: print(seed,f'{digest:08x}')
     total=((total^digest)*16777619)&0xffffffff
 print(len(seeds),'original ordinary Foot path cases',f'{total:08x}',file=sys.stderr)
+if '--asymmetric' in sys.argv and '--trace' not in sys.argv:
+    assert all(axes), 'original vectors missed zero axes or opposite signs'
+    print('zero-X, zero-Y, opposite-sign cases:',*axes,file=sys.stderr)

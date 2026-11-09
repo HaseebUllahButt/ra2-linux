@@ -86,7 +86,7 @@ FootPathResult original_unit_basic_path(const FootPathState& in,const FootPathIn
             const auto ticks=fp::multiply(require(input.path_delay,"Foot PathDelay is unresolved"),900.0);
             if (ticks<std::numeric_limits<std::int32_t>::min() || ticks>std::numeric_limits<std::int32_t>::max())
                 throw Unsupported{"Foot PathDelay conversion exceeds the recovered integer domain"};
-            state.field_644=signed_word(static_cast<std::uint32_t>(position.x)-static_cast<std::uint32_t>(goal.x));
+            // The original retains the initial Y delta. Popping EDI shifts the stack offsets by four.
             state.field_648=static_cast<std::int32_t>(ticks);
             out.steps.push_back(FootPathStep::StopLocomotor);
             if (!cb.stop_locomotor) throw Missing{"Foot locomotor stop body is missing"};

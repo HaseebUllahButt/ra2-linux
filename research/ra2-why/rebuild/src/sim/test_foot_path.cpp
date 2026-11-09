@@ -15,14 +15,14 @@ struct Fixture {
     int entry=0;
     std::optional<bool> above_bridge;
     std::vector<std::array<std::uint32_t,4>> events;
-    explicit Fixture(unsigned seed,bool ordinary=false) {
+    explicit Fixture(unsigned seed,bool ordinary=false,bool asymmetric=false) {
         std::uint32_t value=seed^0x5197ac63u;
         const auto next=[&]() { value=value*1664525u+1013904223u; return value>>16; };
         input.goal.x=50+next()%9; input.goal.y=65+next()%9;
         position.x=(48+next()%16)*256+128; position.x+=next()%97;
         position.y=(64+next()%16)*256+128; position.y-=next()%97;
         position.z=(seed%5)*104;
-        path.present=ordinary || seed%9!=0;
+        path.present=!asymmetric && (ordinary || seed%9!=0);
         if (!path.present) {
             position.x=(int(input.goal.x)+int(seed%3)-1)*256+128;
             position.y=(int(input.goal.y)+int((seed/3)%3)-1)*256+128;
@@ -66,18 +66,25 @@ bool same(const FootPathState& a,const FootPathState& b) {
         a.cell_558.has_value()==b.cell_558.has_value() && (!a.cell_558 || packed(*a.cell_558)==packed(*b.cell_558));
 }
 int main(int argc,char** argv) try {
-    if (argc<3 || argc>4) throw std::runtime_error("usage: test_foot_path BASE_EXECUTABLE EXPANSION_EXECUTABLE [--vectors|--ordinary-vectors]");
+    if (argc<3 || argc>4) throw std::runtime_error("usage: test_foot_path BASE_EXECUTABLE EXPANSION_EXECUTABLE [--vectors|--ordinary-vectors|--asymmetric-vectors]");
     for (int edition=1;edition<3;++edition) {
         const auto distance=OriginalDistance::from_executable(argv[edition]);
-        for (unsigned profile=0;profile<(argc==3?2u:1u);++profile) {
+        for (unsigned profile=0;profile<(argc==3?3u:1u);++profile) {
             const bool ordinary=argc==3?profile==0:std::string(argv[3])=="--ordinary-vectors";
+            const bool asymmetric=argc==3?profile==2:std::string(argv[3])=="--asymmetric-vectors";
             std::uint32_t total=2166136261u;
+            std::array<unsigned,3> axes{};
             for (unsigned seed=0;seed<512;++seed) {
-                Fixture f(seed,ordinary);
+                Fixture f(seed,ordinary,asymmetric);
                 f.input.close_enough=distance.between(f.position,{int(f.input.goal.x)*256+128,int(f.input.goal.y)*256+128,0})+seed%3;
                 const auto result=original_unit_basic_path(f.state,f.input,distance,f.callbacks());
                 check(result.status==FootPathStatus::Complete,"resolved ordinary Foot wrapper rejected input");
                 check(result.accepted==(f.guard && f.path.present),"Foot queue guard or null path return differs");
+                if (asymmetric && f.guard) {
+                    const int dx=f.position.x-(int(f.input.goal.x)*256+128),dy=f.position.y-(int(f.input.goal.y)*256+128);
+                    check(result.state.field_644==dy,"null Foot path replaced the original Y delta");
+                    axes[0]+=dx==0 && dy!=0; axes[1]+=dy==0 && dx!=0; axes[2]+=dx*dy<0;
+                }
                 std::uint32_t h=2166136261u;
                 const auto mix=[&](std::uint32_t value) { h=(h^value)*16777619u; };
                 mix(result.accepted);
@@ -88,8 +95,9 @@ int main(int argc,char** argv) try {
                 if (argc==4) std::cout<<edition<<" "<<seed<<" "<<std::hex<<std::setw(8)<<std::setfill('0')<<h<<std::dec<<"\n";
                 total=(total^h)*16777619u;
             }
-            check(total==(ordinary?0x7e173a4cu:0xdd3d1138u),"original Foot queue, failure timer, distance, or callback order differs");
-            if (argc==3) std::cout<<"edition "<<edition<<(ordinary?" ordinary":" resolved failure")<<" Foot path digest "<<std::hex<<total<<std::dec<<"\n";
+            check(total==(ordinary?0x7e173a4cu:asymmetric?0x131f4268u:0xdd3d1138u),"original Foot queue, failure timer, distance, or callback order differs");
+            if (asymmetric) check(axes[0] && axes[1] && axes[2],"asymmetric Foot vectors missed zero axes or opposite signs");
+            if (argc==3) std::cout<<"edition "<<edition<<(ordinary?" ordinary":asymmetric?" asymmetric":" resolved failure")<<" Foot path digest "<<std::hex<<total<<std::dec<<"\n";
         }
     }
     const auto distance=OriginalDistance::from_executable(argv[1]);
@@ -140,5 +148,5 @@ int main(int argc,char** argv) try {
     unsigned reads=0; failed_cb=failure.callbacks();
     failed_cb.position=[&]()->std::optional<Coord> { return ++reads==1?std::optional<Coord>{failure.position}:std::nullopt; };
     reject(failure,failed_cb,FootPathStatus::NeedsInput);
-    if (argc==3) std::cout<<"2048 original Foot vectors and "<<checks<<" input checks pass\n";
+    if (argc==3) std::cout<<"3072 original Foot vectors and "<<checks<<" input checks pass\n";
 } catch(const std::exception& error) { std::cerr<<error.what()<<"\n"; return 1; }

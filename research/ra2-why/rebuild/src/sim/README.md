@@ -1125,8 +1125,8 @@ The final current-cell getter supplies base +450 / expansion +558 for a nonnull 
 Entry status 6 continues without retargeting when the initial distance is no greater than resolved Rules CloseEnough.
 The equality boundary follows base 004C317B..004C317F.
 
-A known null path writes a different failure timer before stopping the locomotor.
-It writes the frame, signed source-X minus goal-center-X, and truncated `PathDelay * 900`.
+A known null path updates the failure timer before stopping the locomotor.
+It writes the frame, retains signed source-Y minus goal-center-Y, and writes truncated `PathDelay * 900`.
 Base 004C36EC / expansion 004D4016 proves those writes and the factor 900.
 The rule readers identify PathDelay at base 0064C2B0 and expansion 00672AE0.
 Floating arithmetic follows the checked original 53-bit, round-toward-zero behavior.
@@ -1155,4 +1155,9 @@ Both editions match aggregate hash DD3D1138.
 Compare both outputs with `test_foot_path.sh base_executable expansion_executable --vectors`.
 The original `--ordinary` mode retains all 512 earlier nonnull vectors per edition and aggregate hash 7E173A4C.
 Compare that mode with native `--ordinary-vectors`.
-The default native test runs both sets and twenty-eight unresolved input, unsupported branch, and atomic-result checks.
+The original `--asymmetric` mode adds 512 nearby null paths per edition with independent X and Y offsets.
+It includes zero X with nonzero Y, zero Y with nonzero X, and opposite-sign offsets.
+Every accepted null path must preserve the initial Y delta at base +534 / expansion +644.
+Both editions match hash 131F4268. Compare with native `--asymmetric-vectors`.
+This corrects the earlier X-delta claim, which equal-axis null-path fixtures could not distinguish.
+The default native test runs all three sets and twenty-eight unresolved input, unsupported branch, and atomic-result checks.
