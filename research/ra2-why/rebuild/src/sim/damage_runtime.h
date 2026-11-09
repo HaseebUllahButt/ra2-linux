@@ -133,6 +133,11 @@ public:
     // The Battle mode overrides base rules; the map overrides both.
     PrototypeCombatRuntime(const rules::IniFile& base_rules,const rules::IniFile& mode_rules,
         const rules::IniFile& map_rules,const rules::IniFile& art,const std::string& game_exe);
+    // Uses the same prototype weapon and armor-verse checks as attack().
+    // Range, reload timing, and original attack eligibility are not checked.
+    // Does not change the world, RNG, attack orders, or projectiles.
+    bool can_attack(const session::world::Snapshot&,std::uint32_t source_id,
+                    std::uint32_t target_id) const;
     // Source and target must be alive, placed Units, Infantry, or Structures.
     // An accepted order remains active until stopped or either object dies.
     bool attack(session::world::Snapshot&,std::uint32_t source_id,std::uint32_t target_id);

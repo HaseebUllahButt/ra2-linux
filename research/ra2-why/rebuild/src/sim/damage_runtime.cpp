@@ -278,6 +278,11 @@ Entity* prototype_find(Snapshot& world,std::uint32_t id) {
         [id](const Entity& e){return e.id==id;});
     return it==world.entities.end()?nullptr:&*it;
 }
+const Entity* prototype_find(const Snapshot& world,std::uint32_t id) {
+    const auto it=std::find_if(world.entities.begin(),world.entities.end(),
+        [id](const Entity& e){return e.id==id;});
+    return it==world.entities.end()?nullptr:&*it;
+}
 bool prototype_alive(const Entity* e) {
     // TODO-ORIGINAL: Resolve missing active and limbo values from the actor.
     return e && (e->kind==Kind::Unit || e->kind==Kind::Infantry || e->kind==Kind::Structure) &&
@@ -480,11 +485,25 @@ PrototypeCombatRuntime::PrototypeCombatRuntime(const IniFile& base,const IniFile
     const IniFile& map,const IniFile& art,const std::string& exe)
     :PrototypeCombatRuntime(prototype_merge_rules(base,mode),map,art,exe) {}
 
-bool PrototypeCombatRuntime::attack(session::world::Snapshot& world,std::uint32_t source_id,std::uint32_t target_id) {
-    auto* source=prototype_find(world,source_id);const auto* target=prototype_find(world,target_id);
+bool PrototypeCombatRuntime::can_attack(const session::world::Snapshot& world,
+    std::uint32_t source_id,std::uint32_t target_id) const {
+    if (world.edition!=session::world::Edition::Base || world.pending_cell_setup ||
+        world.random.first>=250 || world.random.second>=250 ||
+        (world.random.first+103)%250!=world.random.second ||
+        !source_id || !target_id || source_id==target_id) return false;
+    const auto* source=prototype_find(world,source_id);
+    const auto* target=prototype_find(world,target_id);
     // TODO-ORIGINAL: Resolve alliances beyond matching House IDs.
-    if (!source_id || !target_id || source_id==target_id || !prototype_alive(source) ||
-        !prototype_alive(target) || source->house_id==target->house_id) return false;
+    if (!prototype_alive(source) || !prototype_alive(target) || source->house_id==target->house_id)
+        return false;
+    const auto weapon=prototype_weapon(base_,map_,art_,*source);
+    if (!weapon) return false;
+    const auto verse=prototype_verse(base_,map_,*weapon,*target);
+    return verse && std::isfinite(*verse) && *verse>0;
+}
+bool PrototypeCombatRuntime::attack(session::world::Snapshot& world,std::uint32_t source_id,std::uint32_t target_id) {
+    if (!can_attack(world,source_id,target_id)) return false;
+    auto* source=prototype_find(world,source_id);
     orders_[source_id]=target_id;source->target_id=target_id;return true;
 }
 void PrototypeCombatRuntime::stop(session::world::Snapshot& world,std::uint32_t source_id) {
@@ -612,8 +631,11 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
         try {
             const auto weapon=prototype_weapon(base_,map_,art_,*source);
             const auto verse=weapon?prototype_verse(base_,map_,*weapon,*target):std::optional<double>{};
-            if (!weapon || !verse) {report.unresolved.push_back("weapon or target armor is unresolved");++it;continue;}
-            if (*verse<=0) {++it;continue;}
+            if (!weapon || !verse || !std::isfinite(*verse) || *verse<=0) {
+                if (!weapon || !verse || !std::isfinite(*verse))
+                    report.unresolved.push_back("weapon or target armor is unresolved");
+                source->target_id=0;it=orders_.erase(it);continue;
+            }
             const int d=distance_.between(*source->position,*target->position);
             if (d>weapon->range) {report.out_of_range.emplace_back(source->id,target->id);++it;continue;}
             // TODO-ORIGINAL: Replace these direct range and targeting checks
