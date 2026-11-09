@@ -581,6 +581,101 @@ int main(int argc, char **argv) {
     }
     if (!vehicle_diff)
       throw std::runtime_error("turret facing did not change vehicle");
+    // Cached part layers must give the same pose as a full draw. Draw each
+    // group from a pose with a different other facing to prove that the
+    // group ignores it.
+    {
+      auto composed_pose = vehicle;
+      const std::pair<int, int> pairs[] = {
+          {32, 63},  {32, 58},  {32, 0},   {0, 0},    {64, 32},  {1, 255},
+          {128, 200}, {200, 128}, {255, 7}, {96, 160}, {160, 96}, {224, 31}};
+      std::size_t opaque = 0, overlap = 0;
+      for (const auto &[hull_map, turret_map] : pairs)
+        for (int offset : {0, 16, -16}) {
+          composed_pose.turret_offset = offset;
+          composed_pose.hull_facing = std::uint16_t(hull_map) << 8;
+          composed_pose.turret_facing = std::uint16_t(turret_map) << 8;
+          const auto expected = draw_vehicle(composed_pose, p);
+          auto hull_source = composed_pose, upper_source = composed_pose;
+          hull_source.turret_facing = std::uint16_t((turret_map + 77) & 255) << 8;
+          upper_source.hull_facing = std::uint16_t((hull_map + 141) & 255) << 8;
+          std::vector<VehicleLayer> cropped;
+          for (const auto &layer : draw_vehicle_hull_layers(hull_source, p))
+            cropped.push_back(crop_vehicle_layer(layer));
+          const auto hull_count = cropped.size();
+          for (const auto &layer : draw_vehicle_upper_layers(upper_source, p))
+            cropped.push_back(crop_vehicle_layer(layer));
+          if (hull_count != 1 || cropped.size() != 3)
+            throw std::runtime_error("vehicle layer groups changed");
+          std::vector<const VehicleLayer *> order;
+          for (const auto &layer : cropped)
+            order.push_back(&layer);
+          // Count screen pixels that two layers both cover. Draw order alone
+          // decides these ties, so they must stay in the check.
+          for (std::size_t a = 0; a < cropped.size(); ++a)
+            for (std::size_t b = a + 1; b < cropped.size(); ++b)
+              for (unsigned y = 0; y < cropped[b].height; ++y)
+                for (unsigned x = 0; x < cropped[b].width; ++x) {
+                  const int sx = cropped[b].left + int(x) - cropped[a].left;
+                  const int sy = cropped[b].top + int(y) - cropped[a].top;
+                  if (sx < 0 || sy < 0 || sx >= int(cropped[a].width) ||
+                      sy >= int(cropped[a].height))
+                    continue;
+                  overlap +=
+                      cropped[b].pixels[std::size_t(y) * cropped[b].width + x].a &&
+                      cropped[a].pixels[std::size_t(sy) * cropped[a].width + sx].a;
+                }
+          const auto actual = compose_vehicle_layers(order);
+          if (actual.left != expected.left || actual.top != expected.top ||
+              actual.image.width != expected.image.width ||
+              actual.image.height != expected.image.height)
+            throw std::runtime_error("composed vehicle bounds changed");
+          for (std::size_t i = 0; i < expected.image.pixels.size(); ++i) {
+            const auto a = actual.image.pixels[i], b = expected.image.pixels[i];
+            if (a.r != b.r || a.g != b.g || a.b != b.b || a.a != b.a)
+              throw std::runtime_error("composed vehicle pixels changed");
+            opaque += b.a != 0;
+          }
+        }
+      if (opaque < 36 * 500 || overlap < 36 * 50)
+        throw std::runtime_error("composed vehicle check was too small");
+      // Empty images and fully transparent layers add nothing.
+      for (const auto &empty :
+           {SceneImage{{0, 0, {}}, 5, 5}, SceneImage{{0, 7, {}}, 5, 5},
+            SceneImage{{7, 0, {}}, 5, 5},
+            SceneImage{{256, 256, std::vector<ra2::gfx::Rgba>(65536, {0, 0, 0, 0})}, 5, 5}}) {
+        const auto cropped_empty = crop_vehicle_layer(empty);
+        if (cropped_empty.width || cropped_empty.height ||
+            !cropped_empty.pixels.empty())
+          throw std::runtime_error("empty vehicle layer was not empty");
+      }
+      const VehicleLayer no_pixels{-900, -900, 0, 0, {}};
+      const VehicleLayer zero_width{900, 900, 0, 9, {}};
+      const auto none = compose_vehicle_layers({});
+      const auto only_empty = compose_vehicle_layers({&no_pixels, &zero_width});
+      for (const auto *blank : {&none, &only_empty})
+        if (blank->left || blank->top || blank->image.width != 256 ||
+            std::any_of(blank->image.pixels.begin(), blank->image.pixels.end(),
+                        [](ra2::gfx::Rgba pixel) { return pixel.a != 0; }))
+          throw std::runtime_error("empty vehicle layers changed");
+      // Empty layers at far offsets must not move bounds or pixels.
+      composed_pose.hull_facing = 32 << 8;
+      composed_pose.turret_facing = 63 << 8;
+      composed_pose.turret_offset = 16;
+      const auto full = draw_vehicle(composed_pose, p);
+      std::vector<VehicleLayer> parts;
+      for (const auto &layer : draw_vehicle_parts(composed_pose, p))
+        parts.push_back(crop_vehicle_layer(layer));
+      const auto mixed = compose_vehicle_layers(
+          {&no_pixels, &parts[0], &zero_width, &parts[1], &parts[2], &no_pixels});
+      if (mixed.left != full.left || mixed.top != full.top)
+        throw std::runtime_error("empty vehicle layers moved bounds");
+      for (std::size_t i = 0; i < full.image.pixels.size(); ++i) {
+        const auto a = mixed.image.pixels[i], b = full.image.pixels[i];
+        if (a.r != b.r || a.g != b.g || a.b != b.b || a.a != b.a)
+          throw std::runtime_error("empty vehicle layers changed pixels");
+      }
+    }
     auto light = single_light(2, {0.671214f, 0.198492f, -0.714194f});
     if (light[0] != 16 || light[253] != 16 || light[254] != 16 ||
         light[255] != 16)

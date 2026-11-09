@@ -214,6 +214,23 @@ SceneImage draw_vehicle(const VehiclePose &, const Lighting &);
 // Parts remain in original draw order. Each rectangle is relative to its own
 // 256x256 surface. Use the separate rectangle for terrain depth clipping.
 std::vector<SceneImage> draw_vehicle_parts(const VehiclePose &, const Lighting &);
+// The two layer groups of draw_vehicle_parts, in original draw order. The
+// hull group uses only hull_facing. The upper group (barrel and turret) uses
+// turret_facing, turret_offset and barrel_tilt, not hull_facing.
+std::vector<SceneImage> draw_vehicle_hull_layers(const VehiclePose &,
+                                                 const Lighting &);
+std::vector<SceneImage> draw_vehicle_upper_layers(const VehiclePose &,
+                                                  const Lighting &);
+// Screen-space rectangle around the opaque pixels of one part layer.
+struct VehicleLayer {
+  int left = 0, top = 0;
+  unsigned width = 0, height = 0; // Zero size means no opaque pixels.
+  std::vector<ra2::gfx::Rgba> pixels;
+};
+VehicleLayer crop_vehicle_layer(const SceneImage &);
+// Gives the same image, bounds and errors as draw_vehicle when the cropped
+// layers are in draw_vehicle_parts order.
+SceneImage compose_vehicle_layers(const std::vector<const VehicleLayer *> &);
 struct FlatPartDepth {
   BaseDepthRow row{0, 0};
   int source_y = 0;

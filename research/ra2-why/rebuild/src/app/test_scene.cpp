@@ -208,6 +208,47 @@ int main(int argc, char** argv) {
                 state.entities[0].turret_facing = 64;
                 require(fixture.render(empty,state,view).image.rgba == tank_output.image.rgba,
                         "Turret pose cache changed the earlier pose");
+                {
+                    // Reused hull and turret layers must match a full draw.
+                    auto load_part = [&](const std::string& name) {
+                        const auto vxl = files.read_file(name + ".VXL");
+                        const auto hva = files.read_file(name + ".HVA");
+                        require(vxl && hva, "Missing original HTNK part");
+                        return std::make_pair(voxel::read_vxl(*vxl), voxel::read_hva(*hva));
+                    };
+                    const auto hull = load_part("HTNK"), turret = load_part("HTNKTUR"),
+                        barrel = load_part("HTNKBARL");
+                    const auto vpl = files.read_file("VOXELS.VPL");
+                    require(bool(vpl), "Missing original vehicle lighting table");
+                    const auto lighting = voxel::read_vpl(*vpl);
+                    auto fresh_art = app::VehicleArt::load(files, art, rules, "HTNK");
+                    const std::pair<int,int> poses[] = {{32,0},{32,63},{32,58},{64,58},{64,63},
+                        {0,63},{255,58},{128,128},{128,1},{200,63},{7,250},{32,63}};
+                    for (const auto& [hull_facing, turret_facing] : poses) {
+                        auto pose = voxel::vehicle_pose_from_map(std::uint8_t(hull_facing));
+                        pose.turret_facing = std::uint16_t(turret_facing) << 8;
+                        pose.hull = {&hull.first, &hull.second};
+                        pose.turret = {&turret.first, &turret.second};
+                        pose.barrel = {&barrel.first, &barrel.second};
+                        pose.turret_offset = rules.read_integer("HTNK", "TurretOffset", 0);
+                        const auto expected = voxel::draw_vehicle(pose, lighting);
+                        const auto& sprite = fresh_art.draw(std::uint8_t(hull_facing),
+                                                            std::uint8_t(turret_facing));
+                        require(sprite.left == expected.left && sprite.top == expected.top &&
+                                sprite.image.width == expected.image.width &&
+                                sprite.image.height == expected.image.height &&
+                                sprite.image.pixels.size() == expected.image.pixels.size()*4,
+                                "Reused vehicle layers changed the pose bounds");
+                        for (std::size_t i = 0; i < expected.image.pixels.size(); ++i) {
+                            const auto pixel = expected.image.pixels[i];
+                            require(sprite.image.pixels[i*4] == pixel.r &&
+                                    sprite.image.pixels[i*4+1] == pixel.g &&
+                                    sprite.image.pixels[i*4+2] == pixel.b &&
+                                    sprite.image.pixels[i*4+3] == pixel.a,
+                                    "Reused vehicle layers changed pose pixels");
+                        }
+                    }
+                }
                 for (int invalid : {-1,256}) {
                     state.entities[0].turret_facing = invalid;
                     const auto rejected = fixture.render(empty,state,view);
