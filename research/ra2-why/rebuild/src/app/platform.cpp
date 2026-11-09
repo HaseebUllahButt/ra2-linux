@@ -39,6 +39,18 @@ struct Window::Impl {
     SDL_Texture* texture = nullptr;
     int texture_width = 0, texture_height = 0;
     bool initialized = false;
+    void prepare_texture(int width, int height) {
+        if (texture && width == texture_width && height == texture_height) return;
+        if (SDL_RenderSetLogicalSize(renderer, width, height) != 0)
+            error("Set native logical frame size");
+        if (texture) SDL_DestroyTexture(texture);
+        texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
+                                    SDL_TEXTUREACCESS_STREAMING, width, height);
+        if (!texture) error("Create native frame texture");
+        texture_width = width; texture_height = height;
+        if (SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE) != 0)
+            error("Set native frame blend mode");
+    }
     ~Impl() {
         if (texture) SDL_DestroyTexture(texture);
         if (renderer) SDL_DestroyRenderer(renderer);
@@ -64,6 +76,8 @@ Window::Window(const std::string& title, int width, int height, bool visible)
     if (!impl_->renderer) error("Create native renderer");
     if (SDL_SetRenderDrawColor(impl_->renderer, 0, 0, 0, 255) != 0)
         error("Set native border color");
+    // Allocate the first frame's resources before play and input start.
+    impl_->prepare_texture(width, height);
 }
 Window::~Window() = default;
 void Window::set_visible(bool visible) {
@@ -150,20 +164,8 @@ void Window::present(const std::uint8_t* rgba, int width, int height, std::size_
         SDL_GetTicks(),SDL_GetWindowID(impl_->window));
     if (!rgba || size != image_size(width, height))
         throw std::runtime_error("Native frame dimensions differ from pixel buffer");
-    if (!impl_->texture || width != impl_->texture_width || height != impl_->texture_height) {
-        // Keep original pixels at their aspect ratio. SDL also maps pointer
-        // events into these logical coordinates, including after resizing.
-        if (SDL_RenderSetLogicalSize(impl_->renderer, width, height) != 0)
-            error("Set native logical frame size");
-        if (impl_->texture) SDL_DestroyTexture(impl_->texture);
-        impl_->texture = SDL_CreateTexture(impl_->renderer, SDL_PIXELFORMAT_RGBA32,
-                                           SDL_TEXTUREACCESS_STREAMING, width, height);
-        if (!impl_->texture) error("Create native frame texture");
-        impl_->texture_width = width;
-        impl_->texture_height = height;
-        if (SDL_SetTextureBlendMode(impl_->texture, SDL_BLENDMODE_NONE) != 0)
-            error("Set native frame blend mode");
-    }
+    // Keep original pixels at their aspect ratio, including after resizing.
+    impl_->prepare_texture(width, height);
     if (SDL_UpdateTexture(impl_->texture, nullptr, rgba, width * 4) != 0)
         error("Update native frame");
     if (SDL_RenderClear(impl_->renderer) != 0 ||

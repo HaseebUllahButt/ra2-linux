@@ -109,6 +109,8 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     std::optional<gfx::RgbaImage> score_image_;
     HudState hud_state_;
     render::Bitmap frame_,navigation_base_;
+    std::optional<SceneFrame> initial_scene_;
+    int initial_camera_x_=0,initial_camera_y_=0;
     render::RadarStyle radar_style_;
     std::map<std::uint32_t,std::uint32_t> attacks_;
     std::map<std::uint32_t,ra2map::Cell> manual_moves_;
@@ -170,6 +172,10 @@ public:
         for(const auto& list:{&catalog_.buildings,&catalog_.units,&catalog_.infantry})
             for(const auto& type:*list)icons.push_back({type.id,type.id,type.cost,true,0});
         hud_.load_assets(files,rules_,assets.art_ini(),icons);
+        // Compose the initial view while loading. The first event pump can
+        // change the camera, selection or help; overlays stay live below.
+        initial_camera_x_=camera_x_;initial_camera_y_=camera_y_;
+        initial_scene_=scene_.render(terrain_,battle_scene_state(world_,0),{camera_x_,camera_y_,1024,768});
     }
     const w::Snapshot& world() const {return world_;}
     sim::Victory result() const {return victory_.result;}
@@ -562,8 +568,7 @@ public:
                     for (int dx=-radius;dx<=radius && !placed;++dx) {
                         if (std::max(std::abs(dx),std::abs(dy))!=radius) continue;
                         const p::CellXY cell{std::int16_t(int(base.x)+dx),std::int16_t(int(base.y)+dy)};
-                        const auto near=proto::passes_proximity(world_,factories_,catalog_,owner,type,cell);
-                        if (!near || !*near) continue;
+                        // place() checks proximity before its first write.
                         placed=proto::place(world_,factories_,catalog_,owner,type,cell,frame).status==p::Status::Done;
                     }
                 if(placed)break;
@@ -822,11 +827,16 @@ public:
     void present(const loop::State& state) override {
         // Headless checks compose at fixed intervals and at the final frame.
         if(args_.headless && presented && state.frame_counter%60 && !victory_.settled()&&!help_visible_&&!force_draw_)return;
-        const auto drawing=[&] {
-            loop::profile::Timer probe(loop::profile::Phase::SceneState);
-            return battle_scene_state(world_,state.frame_counter);
+        auto scene=[&] {
+            if(initial_scene_ && state.frame_counter==0 && camera_x_==initial_camera_x_ && camera_y_==initial_camera_y_)
+                return std::move(*initial_scene_);
+            const auto drawing=[&] {
+                loop::profile::Timer probe(loop::profile::Phase::SceneState);
+                return battle_scene_state(world_,state.frame_counter);
+            }();
+            return scene_.render(terrain_,drawing,{camera_x_,camera_y_,1024,768});
         }();
-        auto scene=scene_.render(terrain_,drawing,{camera_x_,camera_y_,1024,768});
+        initial_scene_.reset();
         for(const auto& detail:scene.gaps)gaps_.insert(detail);
         frame_=std::move(scene.image);
         for(const auto& e:world_.entities)if(live(e)&&(e.house_id==player_||e.house_id==enemy_)) {
