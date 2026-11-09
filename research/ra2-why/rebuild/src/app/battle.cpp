@@ -1,5 +1,6 @@
 #include "battle.h"
 #include "camera_scroll.h"
+#include "house_color.h"
 #include "battle_hud.h"
 #include "battle_queue.h"
 #include "battle_help.h"
@@ -182,7 +183,10 @@ public:
         const auto start=std::find_if(world_.entities.begin(),world_.entities.end(),[&](const auto& e){return live(e)&&e.house_id==player_;});
         if (start!=world_.entities.end()) center(*start);
         radar_style_=render::battle_radar_style(rules_);
-        radar_style_.houses[player_]={70,255,90};radar_style_.houses[enemy_]={255,65,50};
+        for(const auto& h:world_.houses) if(h.selected_color && *h.selected_color>=0 && *h.selected_color<8) {
+            const auto c=house_color(rules_,*h.selected_color);
+            radar_style_.houses[h.id]={c.r,c.g,c.b};
+        }
         effects_.observe(world_,combat_.projectiles(),0,effect_project());
         audio_.observe(world_,0);
         if(!args_.headless&&!audio_.enabled())std::cerr<<"Combat audio unavailable: "<<audio_.failure()<<'\n';
@@ -979,7 +983,7 @@ public:
             }
         for(const auto& e:world_.entities)if(live(e)&&(e.house_id==player_||e.house_id==enemy_)) {
             const auto point=anchor(e);if(!point||point->x<0||point->x>=BattleHud::sidebar_x)continue;
-            const auto color=e.house_id==player_?std::array<std::uint8_t,3>{70,255,90}:std::array<std::uint8_t,3>{255,65,50};
+            const auto color=radar_style_.houses.at(e.house_id);
             // TODO-ORIGINAL: House markers and health bars use simple native art.
             rectangle(frame_,point->x-5,point->y+9,10,3,color);
             const bool selected=std::find(orders_.selected_ids().begin(),orders_.selected_ids().end(),e.id)!=orders_.selected_ids().end();
@@ -1131,6 +1135,9 @@ int run_prototype_battle(const BattleOptions& args) {
     const auto catalog=p::Catalog::from(rules,{},{});
     for(const auto* list:{&catalog.buildings,&catalog.units,&catalog.infantry,&catalog.aircraft})
         for(const auto& type:*list)products.push_back(type.id);
+    for(const auto& h:battle->snapshot.houses)
+        if(h.selected_color && *h.selected_color>=0 && *h.selected_color<8)
+            scene.set_house_color(h.name,*h.selected_color);
     scene.prepare(battle_scene_state(battle->snapshot,0),products);
     Window window("Red Alert 2 native prototype: skirmish",1024,768,!args.headless);
     loop::SteadyClock real_clock;loop::SimulatedClock fast_clock;

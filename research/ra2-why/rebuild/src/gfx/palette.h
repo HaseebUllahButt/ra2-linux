@@ -28,6 +28,11 @@ public:
     }
     static Palette load_file(const std::filesystem::path& path);
     const Rgba& operator[](std::uint8_t index) const noexcept { return colors_[index]; }
+    Palette with_house_ramp(const std::array<Rgba,16>& ramp) const {
+        auto result=*this;
+        for(unsigned i=0;i<16;++i) result.colors_[16+i]=ramp[i];
+        return result;
+    }
 private:
     std::array<Rgba, 256> colors_{};
 };

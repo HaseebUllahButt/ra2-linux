@@ -1,4 +1,5 @@
 #include "scene.h"
+#include "house_color.h"
 #include "../loop/profile.h"
 #include "../sim/floor.h"
 
@@ -219,11 +220,19 @@ std::optional<ra2map::Cell> Scene::pick_cell(std::int64_t map_x, std::int64_t ma
     return result;
 }
 
+void Scene::set_house_color(const std::string& house,int selected) {
+    if(!prototype_) throw std::runtime_error("House colours require the playable scene");
+    house_palettes_.insert_or_assign(selected,palette_.with_house_ramp(house_ramp(rules_,selected)));
+    house_colors_[house]=selected;
+}
+
 VehicleArt& Scene::vehicle(const std::string& type) {
-    auto found=vehicles_.find(type);
+    const auto key=std::make_pair(type,active_color_);
+    auto found=vehicles_.find(key);
     if(found==vehicles_.end()) {
         loop::profile::asset_event("vehicle",type.c_str());
-        found=vehicles_.emplace(type,VehicleArt::load(files_,art_,rules_,type,prototype_)).first;
+        found=vehicles_.emplace(key,VehicleArt::load(files_,art_,rules_,type,prototype_)).first;
+        if(active_color_>=0) found->second.set_house_ramp(house_ramp(rules_,active_color_));
     }
     return found->second;
 }
@@ -266,16 +275,27 @@ Scene::Asset& Scene::actor(actors::Kind kind,const std::string& type) {
     return found->second;
 }
 const gfx::RgbaImage& Scene::image(Asset& asset,std::size_t frame,bool terrain) {
-    auto found=asset.frames.find(frame);
+    const auto key=std::make_pair(frame,terrain?-1:active_color_);
+    auto found=asset.frames.find(key);
     if(found==asset.frames.end()) {
         loop::profile::asset_event("shp",asset.art.filename().c_str(),int(frame));
-        found=asset.frames.emplace(frame,asset.art.draw_frame(frame,terrain?terrain_palette_:palette_)).first;
+        found=asset.frames.emplace(key,asset.art.draw_frame(frame,terrain?terrain_palette_:
+            active_color_>=0?house_palettes_.at(active_color_):palette_)).first;
     }
     return found->second;
 }
 void Scene::prepare(const sim::Snapshot& state,const std::vector<std::string>& products) {
+    active_color_=-1;
     if(!pick_ready_)prepare_pick();
     if(!terrain_ready_)prepare_terrain(terrain_gaps_);
+    prepare_color(state,products);
+    for(const auto& entry:house_palettes_) {
+        active_color_=entry.first;
+        prepare_color(state,products);
+    }
+    active_color_=-1;
+}
+void Scene::prepare_color(const sim::Snapshot& state,const std::vector<std::string>& products) {
     for(const auto& entity:state.entities)if(!entity.dead)try {
         if(entity.kind==sim::Kind::Unit) {
             if(entity.facing<0||entity.facing>255)continue;
@@ -383,6 +403,8 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
             anchor.x -= viewport.x;
             anchor.y -= viewport.y;
             const auto& entity = *draw.entity;
+            const auto color=house_colors_.find(entity.house);
+            active_color_=prototype_ && color!=house_colors_.end()?color->second:-1;
             if (entity.kind == sim::Kind::Unit) {
                 if (entity.map_health != 256 && !prototype_)
                     throw std::runtime_error("Damaged vehicle drawing states are unresolved");
@@ -419,6 +441,7 @@ SceneFrame Scene::render(const render::Bitmap& terrain, const sim::Snapshot& sta
             result.gaps.push_back("Entity " + std::to_string(draw.entity->id) + ": " + error.what());
         }
     }
+    active_color_=-1;
     for (; next_terrain != terrain_draws_.end(); ++next_terrain) draw_terrain(*next_terrain);
     // Local pointer and size: byte stores cannot then alias the vector itself.
     auto* const rgba = result.image.rgba.data();

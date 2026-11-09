@@ -16,6 +16,7 @@ public:
                             const rules::IniFile& rules, std::string_view type, bool prototype = false);
     const VehicleSprite& draw(std::uint8_t map_facing);
     const VehicleSprite& draw(std::uint8_t hull_facing, std::uint8_t turret_facing);
+    void set_house_ramp(const std::array<gfx::Rgba,16>& ramp);
 private:
     voxel::VehiclePose pose(std::uint8_t hull_facing, std::uint8_t turret_facing) const;
     const std::vector<voxel::VehicleLayer>& hull_layers(std::uint8_t facing);
