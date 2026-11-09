@@ -3,6 +3,7 @@
 #include "session/world/world.h"
 #include <algorithm>
 #include <limits>
+#include <map>
 #include <set>
 #include <utility>
 
@@ -366,6 +367,13 @@ Outcome initialize(w::Snapshot& world,FactorySet& factories,const Catalog& catal
         next.buildings.try_emplace(item.id,BuildingState{});
     }
     if (!w::validate(candidate)) return fail(Status::NeedsInput,"prototype links are invalid");
+    {
+        // Rebuild the Cell map in key order. The content is the same; the
+        // nodes now sit in memory in the order that full Cell walks read them.
+        std::map<std::uint32_t,w::CellState> cells;
+        for (auto& item:candidate.cells) cells.emplace_hint(cells.end(),item.first,std::move(item.second));
+        candidate.cells=std::move(cells);
+    }
     world=std::move(candidate);
     factories=std::move(next);
     return {Status::Done,{},{},{}};
