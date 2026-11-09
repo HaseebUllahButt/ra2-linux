@@ -1,6 +1,7 @@
 #include "../placement_terrain.h"
 #include "sim/test_inputs.h"
 #include "sim/world_init.h"
+#include "render/minimap.h"
 #include <cassert>
 #include <cstdint>
 #include <iostream>
@@ -10,12 +11,27 @@
 // as admitted. This does not execute Overlay effects, Cell +11D, Tube or
 // animation creation, shadow writes, object loading, or bridge setup.
 int main(int argc,char** argv) {
-    if (argc!=2) return 2;
+    if (argc!=2 && !(argc==3 && std::string(argv[2])=="--bounds")) return 2;
     using namespace ra2;
     const std::string game=argv[1];
+    fs::MixFileSystem files(game);
+    files.mount_language(fs::GameVariant::RedAlert2);
+    files.bootstrap(fs::GameVariant::RedAlert2);
+    files.mount_overlays();
+    files.mount_resources();
     rules::IniFile map,rules;
     map.parse(original_test_ini(game,"MP02T2.MAP",true));
     rules.parse(original_test_ini(game,"RULES.INI",true));
+    auto art=render::TheaterArt::load(files,map.read_string("Map","Theater"));
+    const auto& record=art.resolved_metadata(131,0);
+    assert(record.present && art.resolved_subtile_present(131,0));
+    if (argc==3) {
+        std::cout<<art.tile_width()<<' '<<art.tile_height()<<' '<<record.flags<<' '
+                 <<record.y<<' '<<record.extra_y<<'\n';
+        return 0;
+    }
+    // 0052B690 reads the extra-image bit before using the two Y fields.
+    assert(art.tile_height()==30 && (record.flags&1u)==0);
     const auto rectangle=[&](const char* name) {
         const auto fields=map.read_list("Map",name);
         assert(fields.size()==4);

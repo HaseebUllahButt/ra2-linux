@@ -47,4 +47,5 @@ if [ "${2:-}" = "--original" ]; then
     ${PYTHON:-python3} original_overlay_registry_check.py "$game/game.exe"
     ${PYTHON:-python3} original_overlay_map_check.py "$game/game.exe" "$build/real_map_case" "$game"
     ${PYTHON:-python3} original_tile_type_check.py "$game/game.exe"
+    ${PYTHON:-python3} original_target_bounds_check.py "$game/game.exe" "$build/target_tile_case" "$game"
 fi
