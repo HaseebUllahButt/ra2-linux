@@ -130,6 +130,15 @@ const sw::Entity& unit(const sw::Snapshot& w,std::uint32_t id) {
     for (const auto& e:w.entities) if (e.id==id) return e;
     throw std::runtime_error("missing Unit");
 }
+// A soldier on spot 2..4 of a shared Cell, linked as the new chain head.
+void soldier(sw::Snapshot& world,std::uint32_t id,std::uint32_t house,int x,int y,int spot) {
+    static constexpr int sx[5]={128,64,192,64,192},sy[5]={128,64,64,192,192};
+    sw::Entity e;e.id=id;e.house_id=house;e.type="E1";e.kind=sw::Kind::Infantry;e.lifetime=sw::Lifetime::Placed;
+    e.cell=ra2map::Cell{static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)};
+    e.position=sim::Coord{x*256+sx[spot],y*256+sy[spot],0};e.layer=sw::Layer::Ground;e.resolved_hp=100;e.hull_facing=64;
+    auto& c=world.cells.at(key(x,y));e.next=c.heads->ground_head;c.heads->ground_head=id;*c.ground_occupancy_124|=1u<<spot;
+    world.entities.push_back(e);world.creation_order.push_back({sw::CreatedKind::Entity,id});
+}
 void original_rules_tests() {
     const auto rules=test_rules();
     {
@@ -209,6 +218,40 @@ void original_rules_tests() {
         run_to(spared,other,908,{10,6},300,&none);
         require(none.crushed.empty() && unit(spared,909).lifetime==sw::Lifetime::Placed &&
                 unit(spared,910).lifetime==sw::Lifetime::Placed,"tank crushed a friend or a Crushable=no soldier");
+    }
+    {
+        // The original start puts up to three soldiers of one House in a
+        // Cell (spot bits 4, 8, 16). Each one can take an order; the old
+        // code refused every soldier that was not alone with bit 0x20.
+        auto world=field(30,12);PrototypeMovement movement;movement.use_rules(rules);
+        soldier(world,920,1,5,6,2);soldier(world,921,1,5,6,3);soldier(world,922,1,5,6,4);
+        const ra2map::Cell goals[]={{9,4},{9,6},{9,8}};
+        for (unsigned i=0;i<3;++i)
+            require(movement.issue(world,920+i,goals[i],10).status==PrototypeMoveStatus::Complete,"a soldier in a shared Cell was refused");
+        for (std::uint32_t frame=1;frame<300 && movement.active_count();++frame)
+            require(movement.tick(world,frame).status==PrototypeMoveStatus::Complete,"shared soldier frame failed");
+        require(!movement.active_count() && *world.cells.at(key(5,6)).ground_occupancy_124==0 &&
+                world.cells.at(key(5,6)).heads->ground_head==0,"shared soldiers did not leave their Cell");
+        for (unsigned i=0;i<3;++i) require(same_cell(*unit(world,920+i).cell,goals[i]) && unit(world,920+i).next==0u,"a soldier missed its goal");
+        // Soldiers of one House share a goal Cell on free spots.
+        PrototypeMovement again;again.use_rules(rules);
+        require(again.issue(world,921,{9,4},10).status==PrototypeMoveStatus::Complete,"soldier refused a shared goal");
+        for (std::uint32_t frame=400;frame<700 && again.active_count();++frame) again.tick(world,frame);
+        require(same_cell(*unit(world,921).cell,{9,4}) && *world.cells.at(key(9,4)).ground_occupancy_124==(4u|8u),
+                "two soldiers did not share a goal Cell");
+    }
+    {
+        // A tank in a corridor meets friendly soldiers. They step aside and
+        // the tank passes; the old code saw their Cell as a wall.
+        auto world=field(30,12);PrototypeMovement movement;movement.use_rules(rules);
+        for (int x=4;x<=12;++x) world.cells.at(key(x,5)).ground_occupancy_124=1,world.cells.at(key(x,7)).ground_occupancy_124=1;
+        world.cells.at(key(8,5)).ground_occupancy_124=0; // A side pocket the tank cannot use.
+        put(world,923,"MTNK",sw::Kind::Unit,1,5,6);
+        soldier(world,924,1,8,6,2);
+        const auto frames=run_to(world,movement,923,{11,6},400);
+        std::cout<<"tank past friendly soldier frames="<<frames<<'\n';
+        require(frames && unit(world,924).lifetime==sw::Lifetime::Placed && same_cell(*unit(world,924).cell,{8,5}),
+                "tank did not pass a friendly soldier that stepped aside");
     }
     {
         // Ground cost zero (Beach for Track) cannot be entered.
@@ -305,8 +348,10 @@ int main() try {
     require(saw_concurrent && frames<300 && !replay.active_count(),"prototype Units did not move together");
     for (unsigned i=0;i<3;++i) {
         const auto& unit=a.entities[i];const auto& cell=a.cells.at(key(goals[i].x,goals[i].y));
+        // Infantry rests on spot 2 (bit 4, offset 192,64; table 00850E50).
+        const std::uint32_t mark=i==2?4u:32u;
         require(unit.cell->x==goals[i].x && unit.cell->y==goals[i].y && cell.heads->ground_head==unit.id &&
-                *cell.ground_occupancy_124==32 && unit.next==0 && unit.locomotor_moving==false &&
+                *cell.ground_occupancy_124==mark && (i!=2 || (unit.position->x%256==192 && unit.position->y%256==64)) && unit.next==0 && unit.locomotor_moving==false &&
                 unit.collision_virtual_position && unit.collision_virtual_position->x==unit.position->x &&
                 unit.collision_virtual_position->y==unit.position->y,"prototype Unit or Cell did not reach its goal");
     }

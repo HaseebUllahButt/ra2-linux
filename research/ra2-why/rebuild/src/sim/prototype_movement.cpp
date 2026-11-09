@@ -1,6 +1,7 @@
 #include "prototype_movement.h"
 #include "../loop/profile.h"
 #include "../weapons/occupant_order.h"
+#include "drive.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -48,14 +49,24 @@ std::optional<std::string> unit_error(const Entity* e) {
 // corner Cell is Busy, so two Units never cross one Cell corner together.
 enum class Pass : std::uint8_t { Unknown=0,Open=1,Closed=2,Unresolved=3,Busy=4,Held=5 };
 using Movers=std::set<std::uint32_t>;
-// Crushable Infantry: id -> (House, next object).
-using Victims=std::map<std::uint32_t,std::pair<std::uint32_t,std::uint32_t>>;
+// Live placed Infantry: id -> House, next object and Crushable.
+struct Soldier { std::uint32_t house=0,next=0;bool crushable=false; };
+using Soldiers=std::map<std::uint32_t,Soldier>;
+// Infantry spots in a Cell (initializer 00483390, table 00850E50). Live
+// Infantry uses spots 2..4 and Cell +124 bits 1<<spot; 0x20 is a vehicle.
+constexpr int spot_x[5]={128,64,192,64,192},spot_y[5]={128,64,64,192,192};
+constexpr std::uint32_t spot_bits=0x1cu;
+int spot_of(const Coord& p) {
+    for (int s=2;s<=4;++s) if (p.x%256==spot_x[s] && p.y%256==spot_y[s]) return s;
+    return 0;
+}
 // What one mover may enter. All pointers are optional.
 struct Context {
     const Movers* movers=nullptr;
     // Cells that a stepping vehicle has claimed: Cell key -> vehicle.
     const std::map<std::uint32_t,std::uint32_t>* claims=nullptr;
-    const Victims* victims=nullptr; // Set only for a crushing mover.
+    const Soldiers* soldiers=nullptr;
+    bool crusher=false,walker=false; // walker: the mover is Infantry.
     std::uint32_t house=0;
     const std::array<float,12>* ground=nullptr;
 };
@@ -76,14 +87,32 @@ Pass open_state(const session::world::CellState& cell,std::uint32_t at,std::uint
         if (claim!=ctx->claims->end() && claim->second!=self) return Pass::Busy;
     }
     if (head==0 && *cell.ground_occupancy_124==0) return Pass::Open;
-    // Base 004A2670 treats a crushable result as open for a Crusher
-    // (Type +AF3); 00705160 then kills enemy crushable Infantry there.
-    if (head && ctx && ctx->victims) {
-        const auto victim=ctx->victims->find(head);
-        if (victim!=ctx->victims->end() && victim->second.first!=ctx->house && victim->second.second==0)
-            return Pass::Open;
+    const auto bits=*cell.ground_occupancy_124;
+    if (head && ctx && ctx->soldiers && ctx->soldiers->count(head)) {
+        // A Cell with Infantry only. Walk its object chain.
+        bool all_friends=true,all_prey=true,moving=false;
+        for (auto id=head;id;) {
+            if (id==self) return Pass::Open;
+            const auto soldier=ctx->soldiers->find(id);
+            if (soldier==ctx->soldiers->end()) return Pass::Closed;
+            all_friends&=soldier->second.house==ctx->house;
+            all_prey&=soldier->second.house!=ctx->house && soldier->second.crushable;
+            moving|=ctx->movers && ctx->movers->count(id);
+            id=soldier->second.next;
+        }
+        if (ctx->walker) {
+            // Infantry of one House share a Cell while a spot is free.
+            if (all_friends && !(bits&0x20u) && (bits&spot_bits)!=spot_bits) return Pass::Open;
+            return moving?Pass::Busy:Pass::Held;
+        }
+        // Base 004A2670 treats a crushable result as open for a Crusher
+        // (Type +AF3); 00705160 then kills enemy crushable Infantry there.
+        if (ctx->crusher && all_prey) return Pass::Open;
+        // Friendly Infantry steps aside (scatter), so it only slows a route.
+        if (all_friends && ctx->movers) return Pass::Busy;
+        return moving?Pass::Busy:Pass::Held;
     }
-    if (head && *cell.ground_occupancy_124==0x20u)
+    if (head && bits==0x20u)
         return ctx && ctx->movers && ctx->movers->count(head)?Pass::Busy:Pass::Held;
     return Pass::Closed;
 }
@@ -269,15 +298,44 @@ RouteResult route_or_nearby(const World& world,std::uint32_t id,ra2map::Cell sta
     }
     return result;
 }
-std::optional<std::string> transfer(World& world,std::uint32_t id,ra2map::Cell from,ra2map::Cell to) {
+bool in_chain(const World& w,std::uint32_t head,std::uint32_t id) {
+    for (int guard=0;head && guard<64;++guard) {
+        if (head==id) return true;
+        const auto* e=find_unit(w,head);
+        if (!e || !e->next) return false;
+        head=*e->next;
+    }
+    return false;
+}
+// The mover is linked in its Cell: a vehicle alone with bit 0x20, Infantry
+// anywhere in the chain with its spot bit (or 0x20 for a whole-Cell spot).
+bool on_source(const World& w,const Entity& e,int spot) {
+    const auto found=w.cells.find(key(*e.cell));
+    if (found==w.cells.end() || !found->second.heads || !found->second.ground_occupancy_124 || !found->second.cell_flag_100 ||
+        *found->second.cell_flag_100 || !e.next) return false;
+    const auto bits=*found->second.ground_occupancy_124;
+    if (e.kind==session::world::Kind::Infantry)
+        return in_chain(w,found->second.heads->ground_head,e.id) && (bits&(spot?1u<<spot:0x20u));
+    return found->second.heads->ground_head==e.id && *e.next==0 && (bits&0x20u);
+}
+int free_spot(std::uint32_t bits) {
+    for (int s=2;s<=4;++s) if (!(bits&(1u<<s))) return s;
+    return 0;
+}
+// Move one object between Cell chains. A vehicle needs an empty target;
+// Infantry takes a free spot there and returns it in spot.
+std::optional<std::string> transfer(World& world,std::uint32_t id,ra2map::Cell from,ra2map::Cell to,int* spot=nullptr) {
     auto source=world.cells.find(key(from)),target=world.cells.find(key(to));
     if (source==world.cells.end() || target==world.cells.end() || !source->second.heads || !target->second.heads ||
         !source->second.ground_occupancy_124 || !target->second.ground_occupancy_124)
         return "prototype transfer Cell is unresolved";
     const auto* actor=find_unit(world,id);
-    if (!actor || !actor->next || *actor->next!=0 || source->second.heads->ground_head!=id ||
-        target->second.heads->ground_head || *target->second.ground_occupancy_124)
-        return "prototype transfer needs an isolated source and an empty target";
+    const bool walker=spot!=nullptr;
+    const auto target_bits=*target->second.ground_occupancy_124;
+    if (!actor || !actor->next || !in_chain(world,source->second.heads->ground_head,id) || (!walker && *actor->next!=0) ||
+        (!walker && (target->second.heads->ground_head || target_bits)) ||
+        (walker && ((target_bits&0x20u) || (target->second.heads->ground_head && !free_spot(target_bits)))))
+        return "prototype transfer needs a linked source and a free target";
     weapons::ContentLinks links;links.cells.emplace(key(from),*source->second.heads);links.cells.emplace(key(to),*target->second.heads);
     for (const auto& e:world.entities) {
         if (e.lifetime!=session::world::Lifetime::Placed) continue;
@@ -291,9 +349,18 @@ std::optional<std::string> transfer(World& world,std::uint32_t id,ra2map::Cell f
     for (auto& e:world.entities) {
         const auto link=links.objects.find(e.id);if (link!=links.objects.end()) e.next=link->second.next;
     }
-    // TODO-ORIGINAL: Infantry needs its original subcell mask and reservation.
-    *source->second.ground_occupancy_124&=~0x20u;*target->second.ground_occupancy_124|=0x20u;
+    if (!walker) { *source->second.ground_occupancy_124&=~0x20u;*target->second.ground_occupancy_124|=0x20u;return {}; }
+    // Base 00508410 marks an Infantry spot bit.
+    *source->second.ground_occupancy_124&=~(*spot?1u<<*spot:0x20u);
+    *spot=free_spot(target_bits);*target->second.ground_occupancy_124|=1u<<*spot;
     return {};
+}
+Soldiers soldiers_of(const World& w,const PrototypeMovement& movement) {
+    Soldiers out;
+    for (const auto& e:w.entities)
+        if (e.kind==session::world::Kind::Infantry && e.lifetime==session::world::Lifetime::Placed && e.next &&
+            e.resolved_hp.value_or(0)>0) out[e.id]={e.house_id,*e.next,movement.profile(e).crushable};
+    return out;
 }
 constexpr const char* drive_locomotor="{4A582741-9839-11d1-B709-00A024DDAFD1}";
 // Original LandType order of the Ground table at 00850EA0 (9 floats a row).
@@ -353,6 +420,7 @@ PrototypeMoveProfile PrototypeMovement::profile(const session::world::Entity& e)
         out.acceleration=r.read_double(t,"AccelerationFactor",0.03);
         out.rot=r.read_integer(t,"ROT",0);
         out.strength=r.read_integer(t,"Strength",0);
+        out.speed=std::max(1,original_rule_speed(r.read_integer(t,"Speed",4)));
         // UnitType 0070ABEA: no SpeedType gives Track for a Crusher, else Wheel.
         if (e.kind==Kind::Unit) out.speed_type=out.crusher?1:2;
         const auto authored=r.read_string(t,"SpeedType");
@@ -373,19 +441,16 @@ PrototypeMoveResult PrototypeMovement::issue(const World& world,std::uint32_t id
     const auto source=world.cells.find(key(*actor->cell));
     if (source==world.cells.end() || !source->second.heads || !source->second.ground_occupancy_124 ||
         !source->second.cell_flag_100) return fail(PrototypeMoveStatus::NeedsInput,"prototype source Cell is unresolved");
-    if (*source->second.cell_flag_100 || source->second.heads->ground_head!=id || *actor->next!=0 ||
-        !(*source->second.ground_occupancy_124&0x20u))
-        return fail(PrototypeMoveStatus::Blocked,"prototype source Unit is not isolated on ground");
+    if (!spots_.count(id)) spots_[id]=actor->kind==session::world::Kind::Infantry?spot_of(*actor->position):0;
+    if (!on_source(world,*actor,spots_.at(id)))
+        return fail(PrototypeMoveStatus::Blocked,"prototype source Unit is not linked on ground");
     const auto self=profile(*actor);
     Movers movers;
     for (const auto& item:moves_) if (item.first!=id) movers.insert(item.first);
     std::map<std::uint32_t,std::uint32_t> claims;
     for (const auto& [owner,m]:motion_) if (m.stepping && owner!=id) { claims[key(m.from)]=owner;claims[key(m.to)]=owner; }
-    Victims victims;
-    if (self.crusher) for (const auto& e:world.entities)
-        if (e.kind==session::world::Kind::Infantry && e.lifetime==session::world::Lifetime::Placed && e.next &&
-            e.resolved_hp.value_or(0)>0 && profile(e).crushable) victims[e.id]={e.house_id,*e.next};
-    const Context ctx{&movers,&claims,self.crusher?&victims:nullptr,actor->house_id,rules_?&self.ground:nullptr};
+    const auto soldiers=soldiers_of(world,*this);
+    const Context ctx{&movers,&claims,&soldiers,self.crusher,actor->kind==session::world::Kind::Infantry,actor->house_id,rules_?&self.ground:nullptr};
     const auto path=route_or_nearby(world,id,*actor->cell,goal,&ctx);
     if (path.status!=PrototypeMoveStatus::Complete) return fail(path.status,path.detail);
     moves_[id]={goal,speed,path.path};
@@ -436,10 +501,15 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
     const auto release=[&](std::uint32_t id) {
         for (auto it=claims.begin();it!=claims.end();) it=it->second==id?claims.erase(it):std::next(it);
     };
-    Victims victims;
-    for (const auto& e:candidate.entities)
-        if (e.kind==session::world::Kind::Infantry && e.lifetime==session::world::Lifetime::Placed && e.next &&
-            e.resolved_hp.value_or(0)>0 && profile(e).crushable) victims[e.id]={e.house_id,*e.next};
+    auto soldiers=soldiers_of(candidate,*this);
+    auto spots=spots_;
+    // Chains change after each transfer; refresh the Infantry links.
+    const auto relink=[&] {
+        for (const auto& e:candidate.entities) {
+            const auto it=soldiers.find(e.id);
+            if (it!=soldiers.end() && e.next) it->second.next=*e.next;
+        }
+    };
     std::vector<std::uint32_t> order;
     for (const auto& item:moves) order.push_back(item.first);
     for (const auto& item:motions) if (item.second.stepping && !moves.count(item.first)) order.push_back(item.first);
@@ -452,18 +522,23 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
     // TODO-ORIGINAL: sound, score and the 004A2670 scatter warning.
     const auto crush=[&](const session::world::Entity& crusher,ra2map::Cell at)->std::optional<std::string> {
         auto found=candidate.cells.find(key(at));
-        if (found==candidate.cells.end() || !found->second.heads) return {};
-        const auto head=found->second.heads->ground_head;
-        const auto victim=victims.find(head);
-        if (!head || victim==victims.end() || victim->second.first==crusher.house_id || victim->second.second!=0) return {};
+        if (found==candidate.cells.end() || !found->second.heads || !found->second.heads->ground_head) return {};
+        std::vector<std::uint32_t> prey;
+        for (auto head=found->second.heads->ground_head;head;) {
+            const auto it=soldiers.find(head);
+            if (it==soldiers.end() || it->second.house==crusher.house_id || !it->second.crushable) return {};
+            prey.push_back(head);head=it->second.next;
+        }
         journal.cell(key(at));
-        auto* dead=find_unit(candidate,head);
-        if (!dead || !dead->next || *dead->next!=0) return "prototype crushed Object link is unresolved";
-        found->second.heads->ground_head=0;*found->second.ground_occupancy_124&=~0x20u;
-        dead->next=0;dead->resolved_hp=0;dead->active=false;dead->in_limbo=true;dead->target_id=0;
-        dead->locomotor_moving=false;dead->lifetime=session::world::Lifetime::Destroyed;
-        victims.erase(victim);moves.erase(head);motions.erase(head);movers.erase(head);release(head);
-        result.crushed.push_back(head);
+        for (const auto victim:prey) {
+            auto* dead=find_unit(candidate,victim);
+            if (!dead) return "prototype crushed Object is missing";
+            dead->next=0;dead->resolved_hp=0;dead->active=false;dead->in_limbo=true;dead->target_id=0;
+            dead->locomotor_moving=false;dead->lifetime=session::world::Lifetime::Destroyed;
+            soldiers.erase(victim);moves.erase(victim);motions.erase(victim);movers.erase(victim);release(victim);spots.erase(victim);
+            result.crushed.push_back(victim);
+        }
+        found->second.heads->ground_head=0;*found->second.ground_occupancy_124&=~(spot_bits|0x20u);
         return {};
     };
     for (const auto id:order) {
@@ -479,14 +554,22 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
         const auto source=candidate.cells.find(key(*actor->cell));
         if (source==candidate.cells.end() || !source->second.heads || !source->second.ground_occupancy_124 ||
             !source->second.cell_flag_100) return fail(PrototypeMoveStatus::NeedsInput,"prototype source Cell is unresolved");
-        if (*source->second.cell_flag_100 || source->second.heads->ground_head!=id || *actor->next!=0 ||
-            !(*source->second.ground_occupancy_124&0x20u)) return fail(PrototypeMoveStatus::Blocked,"prototype source Unit is not isolated on ground");
+        const bool walker=actor->kind==session::world::Kind::Infantry;
+        if (!spots.count(id)) spots[id]=walker?spot_of(*actor->position):0;
+        int& spot=spots[id];
+        if (!on_source(candidate,*actor,spot)) return fail(PrototypeMoveStatus::Blocked,"prototype source Unit is not linked on ground");
         const auto self=profile(*actor);
-        const Context ctx{&movers,&claims,self.crusher?&victims:nullptr,actor->house_id,rules_?&self.ground:nullptr};
+        const Context ctx{&movers,&claims,&soldiers,self.crusher,walker,actor->house_id,rules_?&self.ground:nullptr};
         Context strict=ctx;strict.movers=nullptr;
         const int wait_limit=globals_.blockage_path_delay;
+        // The resting point in the current Cell: its center, or the spot.
+        const auto rest=[&](ra2map::Cell c) {
+            const int s=same(c,*actor->cell)?spot:0;
+            return Coord{int(c.x)*256+spot_x[s],int(c.y)*256+spot_y[s],*candidate.cells.at(key(c)).terrain->floor_world_height};
+        };
         const auto at_center=[&] {
-            return actor->position->x==int(actor->cell->x)*256+128 && actor->position->y==int(actor->cell->y)*256+128;
+            const auto r=rest(*actor->cell);
+            return actor->position->x==r.x && actor->position->y==r.y;
         };
         // Wait behind a Unit that still moves. Do not plan a detour around
         // it, as that sends a group sideways and back. Plan again when the
@@ -498,8 +581,13 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
             if (claim!=claims.end() && claim->second!=id) return true;
             const auto found=candidate.cells.find(key(cell));
             if (found==candidate.cells.end() || !found->second.heads) return false;
-            const auto blocker=moves.find(found->second.heads->ground_head);
-            return blocker!=moves.end() && blocker->first!=id && !blocker->second.stalled;
+            for (auto head=found->second.heads->ground_head;head;) {
+                const auto blocker=moves.find(head);
+                if (blocker!=moves.end() && blocker->first!=id && !blocker->second.stalled) return true;
+                const auto it=soldiers.find(head);
+                head=it==soldiers.end()?0:it->second.next;
+            }
+            return false;
         };
         // A moving Unit in a corner Cell of a diagonal step, if any.
         const auto busy_corner=[&](ra2map::Cell from,ra2map::Cell to)->std::optional<ra2map::Cell> {
@@ -507,6 +595,37 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
             for (const ra2map::Cell corner:{ra2map::Cell{to.x,from.y},ra2map::Cell{from.x,to.y}})
                 if (pass_cell(candidate,corner,id,&ctx)==Pass::Busy) return corner;
             return {};
+        };
+        // Friendly Infantry in the next Cell steps to a free neighbour Cell,
+        // and the vehicle waits for it (004A2670 asks blockers to scatter).
+        // TODO-ORIGINAL: the scatter choice of 00476920 and its timers.
+        const auto scatter=[&](ra2map::Cell cell) {
+            const auto found=candidate.cells.find(key(cell));
+            if (found==candidate.cells.end() || !found->second.heads) return false;
+            std::vector<std::uint32_t> crowd;
+            for (auto head=found->second.heads->ground_head;head;) {
+                const auto it=soldiers.find(head);
+                if (it==soldiers.end() || it->second.house!=actor->house_id) return false;
+                crowd.push_back(head);head=it->second.next;
+            }
+            bool any=false;
+            for (const auto sid:crowd) {
+                if (moves.count(sid)) { any=true;continue; }
+                const auto* soldier=find_unit(candidate,sid);
+                if (!soldier) continue;
+                const auto kind=profile(*soldier);
+                const Context side{&movers,&claims,&soldiers,false,true,soldier->house_id,rules_?&kind.ground:nullptr};
+                for (const auto& d:directions) {
+                    const int x=int(cell.x)+d[0],y=int(cell.y)+d[1];
+                    if (x<0 || y<0 || x>=512 || y>=512) continue;
+                    const ra2map::Cell n{static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)};
+                    bool on_route=same(n,*actor->cell);
+                    if (movement) for (std::size_t i=0;i<movement->path.size() && i<3;++i) on_route|=same(n,movement->path[i]);
+                    if (on_route || pass_cell(candidate,n,sid,&side)!=Pass::Open) continue;
+                    moves[sid]=Move{n,kind.speed,{n},0,false};movers.insert(sid);any=true;break;
+                }
+            }
+            return any;
         };
         // Distance to the move goal, as 004A2670 measures it for CloseEnough.
         const auto goal_distance=[&] {
@@ -539,6 +658,7 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
             if (face(target)) return Next::Turn;
             auto available=pass_cell(candidate,target,id,&ctx);
             if (available==Pass::Unresolved) { failure=fail(PrototypeMoveStatus::NeedsInput,"prototype next Cell is unresolved");return Next::Fail; }
+            if (available!=Pass::Open && !walker && scatter(target)) return Next::Hold;
             if (available==Pass::Busy && wait_for(target)) return Next::Hold;
             if (available!=Pass::Open) {
                 // 004A2670: a blocked vehicle less than CloseEnough from its
@@ -682,6 +802,7 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
                         if (pass_cell(candidate,entered,id,&ctx)!=Pass::Open || !same(entered,m.to)) return false;
                         journal.cell(key(*actor->cell));journal.cell(key(entered));
                         if (const auto error=transfer(candidate,id,*actor->cell,entered)) { failure=fail(PrototypeMoveStatus::NeedsInput,*error);return std::nullopt; }
+                        relink();
                         actor=find_unit(candidate,id);actor->cell=entered;
                     }
                     actor->position=next;actor->collision_virtual_position=next;moved=true;
@@ -771,7 +892,10 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
             auto found=candidate.cells.find(key(target));
             if (found==candidate.cells.end() || !found->second.terrain || !found->second.terrain->floor_world_height)
                 return fail(PrototypeMoveStatus::NeedsInput,"prototype target floor is unresolved");
-            const auto old=*actor->position;const Coord desired{int(target.x)*256+128,int(target.y)*256+128,*found->second.terrain->floor_world_height};
+            const auto old=*actor->position;
+            // Infantry walks Cell centers and rests on its spot in the goal.
+            const Coord desired=walker && same(target,*actor->cell) && movement->path.size()==1?rest(target):
+                Coord{int(target.x)*256+128,int(target.y)*256+128,*found->second.terrain->floor_world_height};
             const auto dx=std::int64_t(desired.x)-old.x,dy=std::int64_t(desired.y)-old.y,dz=std::int64_t(desired.z)-old.z;
             const auto distance=std::max(std::abs(dx),std::abs(dy));
             Coord next=desired;auto used=distance;
@@ -799,7 +923,8 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
                     break;
                 }
                 journal.cell(key(*actor->cell));journal.cell(key(entered));
-                if (const auto error=transfer(candidate,id,*actor->cell,entered)) return fail(PrototypeMoveStatus::NeedsInput,*error);
+                if (const auto error=transfer(candidate,id,*actor->cell,entered,walker?&spot:nullptr)) return fail(PrototypeMoveStatus::NeedsInput,*error);
+                relink();
                 actor=find_unit(candidate,id);actor->cell=entered;
             }
             const int sx=(dx>0)-(dx<0),sy=(dy>0)-(dy<0);
@@ -815,6 +940,6 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
         movement->waited=0;movement->stalled=false;actor->locomotor_moving=true;result.moved.push_back(id);
         if (movement->path.empty() && same(*actor->cell,movement->goal)) finish(id,actor);
     }
-    journal.keep=true;moves_=std::move(moves);motion_=std::move(motions);last_frame_=frame;return result;
+    journal.keep=true;moves_=std::move(moves);motion_=std::move(motions);spots_=std::move(spots);last_frame_=frame;return result;
 }
 }

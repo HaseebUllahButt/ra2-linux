@@ -32,6 +32,7 @@ struct PrototypeMoveProfile {
     double deceleration=0.002,acceleration=0.03; // +2D0, +2D8.
     bool crusher=false,crushable=false; // +AF3, Object +1FD.
     int strength=0;
+    int speed=10;              // original_rule_speed(Speed); 10 for E1 Speed=4.
     // Ground[land].Cost[speed_type], land types 0..11 (Clear .. Weeds).
     std::array<float,12> ground{{1,1,1,1,1,1,1,1,1,1,1,1}};
 };
@@ -79,6 +80,8 @@ private:
     struct Move { ra2map::Cell goal;int speed=0;std::vector<ra2map::Cell> path;int waited=0;bool stalled=false; };
     std::map<std::uint32_t,Move> moves_;
     std::map<std::uint32_t,Motion> motion_;
+    // Infantry spot (2..4) in its Cell; 0 is a whole-Cell 0x20 occupant.
+    std::map<std::uint32_t,int> spots_;
     std::optional<std::uint32_t> last_frame_;
     const rules::IniFile* rules_=nullptr;
     PrototypeMoveGlobals globals_;
