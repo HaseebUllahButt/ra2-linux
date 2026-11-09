@@ -85,6 +85,8 @@ struct Snapshot {
     // A placed Unit reached Cell setup 00472540, whose full effects are not
     // yet staged. Do not use this snapshot for further placement or live AI.
     bool pending_cell_setup=false;
+    // Packed Cell index when known; a pending setup with no index is unresolved.
+    std::optional<std::uint32_t> pending_setup_cell;
     std::vector<CreatedObject> creation_order;
     std::vector<House> houses;
     std::vector<Entity> entities;

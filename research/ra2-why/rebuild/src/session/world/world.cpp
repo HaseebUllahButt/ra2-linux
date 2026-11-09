@@ -245,12 +245,15 @@ PlacementResult Stage::place_base_unit(std::uint32_t unit_id, StartPoint point,
     // unknown. Require a resolved snapshot before another placement.
     cell->second.coarse_category.reset();
     candidate.pending_cell_setup=true;
+    candidate.pending_setup_cell=key;
     if (!validate(candidate)) return PlacementResult::Unresolved;
     snapshot_=std::move(candidate);
     return PlacementResult::Placed;
 }
 bool validate(const Snapshot& snapshot) {
     if (snapshot.edition!=Edition::Base && snapshot.edition!=Edition::Yuri) return false;
+    if (snapshot.pending_setup_cell && (!snapshot.pending_cell_setup ||
+        *snapshot.pending_setup_cell>=512u*512u || !snapshot.cells.count(*snapshot.pending_setup_cell))) return false;
     try { (void)sim::Random(snapshot.random); } catch (...) { return false; }
     std::set<std::uint32_t> ids;
     std::map<std::uint32_t,const House*> houses;

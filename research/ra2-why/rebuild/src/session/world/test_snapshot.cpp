@@ -64,6 +64,8 @@ int main() {
     invalid=s; invalid.random.second=0; assert(!validate(invalid));
     invalid=s; invalid.entities[0].position.reset(); assert(!validate(invalid));
     invalid=s; invalid.entities[0].lifetime=Lifetime::Destroyed; assert(!validate(invalid));
+    invalid=s; invalid.pending_setup_cell=69*512+55; assert(!validate(invalid));
+    invalid=s; invalid.pending_cell_setup=true; invalid.pending_setup_cell=512*512; assert(!validate(invalid));
     sim::Random expected_random(42);
     Stage staged(expected_random.state());
     const auto house=staged.create_player_house("Player","Americans",5000,0,512); assert(house && *house==1);
@@ -152,6 +154,7 @@ int main() {
     assert(battle.snapshot().cells.at(69*512+54).heads->ground_head==*battle_unit);
     assert(battle.snapshot().cells.at(69*512+54).ground_occupancy_124==0x20);
     assert(battle.snapshot().pending_cell_setup);
+    assert(battle.snapshot().pending_setup_cell==69*512+54);
     assert(!battle.snapshot().cells.at(69*512+54).coarse_category);
     assert(!coarse_inputs(battle.snapshot(),69*512+54));
     assert(battle.place_base_unit(*battle_unit,{56,69},32,profile)==PlacementResult::Unresolved);
