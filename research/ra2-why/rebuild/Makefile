@@ -10,7 +10,7 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/render/tmp_decode.cpp src/render/minimap.cpp src/loop/game_loop.cpp \
     src/fs/mix_archive.cpp src/fs/mix_bootstrap.cpp src/fs/filename_hash.cpp \
     src/gfx/palette.cpp src/gfx/shp_decode.cpp src/actors/actors.cpp \
-    src/session/session.cpp src/session/map_geometry.cpp src/session/placement_terrain.cpp src/session/world/world.cpp src/session/world/cell_occupancy.cpp src/weapons/weapons.cpp src/weapons/occupant_order.cpp src/weapons/object_damage.cpp \
+    src/session/session.cpp src/session/map_geometry.cpp src/session/placement_terrain.cpp src/session/world/world.cpp src/session/world/cell_occupancy.cpp src/session/world/bridge_footprint.cpp src/weapons/weapons.cpp src/weapons/occupant_order.cpp src/weapons/object_damage.cpp \
     src/ui/ui.cpp src/ui/shell.cpp src/ui/skirmish.cpp src/text/csf.cpp \
     src/pack/map_pack.cpp src/rules/ini_file.cpp src/map/map_file.cpp \
     src/sim/sim.cpp src/sim/random.cpp src/sim/factory.cpp src/sim/ground.cpp \
@@ -225,10 +225,11 @@ build/session_test: $(SESSION_OBJECTS) build/native/src/session/test_main.o buil
 SESSION_WORLD_OBJECTS = build/native/src/session/world/world.o $(SESSION_OBJECTS) build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/sim/coarse_category.o build/native/src/weapons/occupant_order.o
 
 .PHONY: session-world
-session-world: build/session_world_snapshot_test build/session_world_map_test build/session_world_cell_occupancy_cases
+session-world: build/session_world_snapshot_test build/session_world_map_test build/session_world_cell_occupancy_cases build/session_world_bridge_cases
 	build/session_world_snapshot_test
 	build/session_world_map_test ../game
 	build/session_world_cell_occupancy_cases > /dev/null
+	build/session_world_bridge_cases > /dev/null
 
 build/session_world_snapshot_test: build/native/src/session/world/test_snapshot.o $(SESSION_WORLD_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@
@@ -243,6 +244,9 @@ build/session_world_placement_cases: build/native/src/session/world/placement_ca
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/session_world_cell_occupancy_cases: build/native/src/session/world/cell_occupancy_case.o build/native/src/session/world/cell_occupancy.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/session_world_bridge_cases: build/native/src/session/world/bridge_footprint_case.o build/native/src/session/world/bridge_footprint.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/session_world_map_test: build/native/src/session/world/real_map_case.o build/native/src/sim/test_inputs.o $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
