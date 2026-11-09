@@ -1,6 +1,10 @@
 #include "setup.h"
+#include "sim/floor.h"
 #include "sim/world_init.h"
+#include <algorithm>
+#include <limits>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -264,5 +268,252 @@ std::optional<Snapshot> construct_house_fragments(const sim::RandomState& before
             !stage.create_auxiliary_house(HouseRole::Special,registry_size,light_grey,special_index)) return {};
         return stage.snapshot();
     } catch (const std::invalid_argument&) { return {}; }
+}
+
+std::optional<PrototypeBattle> prototype_battle(BaseBattleAssets& assets,
+    const PrototypeBattleSetup& options,const sim::RandomState& before) {
+    if (options.players.size()<2 || options.players.size()>8) return {};
+    const auto& rules=assets.rules();
+    const auto& mode=assets.battle_rules();
+    const auto& map=assets.map_ini();
+    const auto value=[&](const std::string& section,const char* key) -> const rules::IniFile::Entry* {
+        if (const auto* entry=map.find(section,key)) return entry;
+        if (const auto* entry=mode.find(section,key)) return entry;
+        return rules.find(section,key);
+    };
+    const auto integer=[&](const std::string& section,const char* key) -> std::optional<std::int32_t> {
+        const auto* entry=value(section,key);
+        return entry ? rules::IniFile::integer_value(entry->value) : std::nullopt;
+    };
+    const auto list=[&](const std::string& section,const char* key) {
+        const auto* entry=value(section,key);
+        return entry ? rules::IniFile::split_list(entry->value) : std::vector<std::string>{};
+    };
+    const auto* countries=rules.find_section("Countries");
+    const auto* vehicles=rules.find_section("VehicleTypes");
+    if (!countries || !vehicles || vehicles->entries.empty() || vehicles->entries.size()>512) return {};
+    const auto vehicle_index=[&](const std::string& type) -> std::optional<std::int32_t> {
+        const auto it=std::find_if(vehicles->entries.begin(),vehicles->entries.end(),
+            [&](const auto& entry){ return entry.value==type; });
+        if (it==vehicles->entries.end()) return {};
+        return static_cast<std::int32_t>(it-vehicles->entries.begin());
+    };
+    const auto country_index=[&](const std::string& country) -> std::optional<std::int32_t> {
+        const auto it=std::find_if(countries->entries.begin(),countries->entries.end(),
+            [&](const auto& entry){ return entry.value==country; });
+        if (it==countries->entries.end()) return {};
+        return static_cast<std::int32_t>(it-countries->entries.begin());
+    };
+    auto starts=assets.map().waypoints();
+    std::sort(starts.begin(),starts.end(),[](const auto& a,const auto& b){return a.index<b.index;});
+    std::set<int> used_waypoints;
+    std::set<std::string> used_names;
+    std::vector<ra2map::Cell> chosen_starts;
+    std::vector<std::string> mcvs;
+    std::vector<PlayerHouseSetup> players;
+    for (const auto& player:options.players) {
+        if (player.name.empty() || player.name=="Neutral" || player.name=="Special" ||
+            !used_names.insert(player.name).second || !country_index(player.country) || player.credits<0 ||
+            player.color<0 || player.color>7 || player.vehicle_count<0 || player.vehicle_count>24) return {};
+        const auto waypoint=std::find_if(starts.begin(),starts.end(),[&](const auto& start){
+            return player.waypoint_index<0 ? !used_waypoints.count(start.index) : start.index==player.waypoint_index;
+        });
+        if (waypoint==starts.end() || !used_waypoints.insert(waypoint->index).second) return {};
+        chosen_starts.push_back(waypoint->cell);
+        std::string mcv;
+        for (const auto& name:list("General","BaseUnit")) {
+            const auto owners=list(name,"Owner");
+            if (std::find(owners.begin(),owners.end(),player.country)!=owners.end()) { mcv=name; break; }
+        }
+        if (mcv.empty() || !vehicle_index(mcv)) return {};
+        mcvs.push_back(mcv);
+        players.push_back({player.name,player.country,player.credits,player.color,
+                           static_cast<std::int32_t>(players.size())});
+    }
+    const auto houses=construct_house_fragments(before,players,static_cast<std::int32_t>(vehicles->entries.size()),
+                                                 std::nullopt,static_cast<std::int32_t>(players.size()),
+                                                 static_cast<std::int32_t>(players.size()+1));
+    if (!houses) return {};
+    Stage stage(*houses);
+    struct PlannedUnit { std::uint32_t id; ra2map::Cell start; };
+    std::vector<PlannedUnit> planned;
+    for (std::size_t i=0;i<options.players.size();++i) {
+        // TODO-ORIGINAL: use the original starting-unit budget and selection.
+        // This prototype uses the installed faction MCV and two tank types.
+        const std::string tank=mcvs[i]=="AMCV" ? "MTNK" : mcvs[i]=="SMCV" ? "HTNK" : "";
+        if (tank.empty() || !vehicle_index(tank)) return {};
+        for (int n=0;n<=options.players[i].vehicle_count;++n) {
+            const auto& type=n==0 ? mcvs[i] : tank;
+            const auto strength=integer(type,"Strength");
+            const auto index=vehicle_index(type);
+            if (!strength || *strength<=0 || !index) return {};
+            const auto id=stage.create_unit(houses->houses[i].id,type,*strength,*index,false);
+            if (!id) return {};
+            planned.push_back({*id,chosen_starts[i]});
+        }
+    }
+    PrototypeBattle result;
+    auto& world=result.snapshot;
+    world=stage.snapshot();
+    const auto packed=read_base_packed_map(assets,0xffff);
+    if (!packed) return {};
+    world.geometry=packed->geometry;
+    world.cell_order=packed->cell_order;
+    world.cells=packed->cells;
+    world.setup_progress=SetupProgress::PrototypeComplete;
+    // TODO-ORIGINAL: replace these session fields with the real load results.
+    world.tube_vector_count=0;
+    world.session_field_838=0;
+    // TODO-ORIGINAL: run overlay, bridge, object, visibility and Cell setup.
+    // Until then, use raw map overlays, TMP floor planes, and empty flags.
+    std::size_t fallback_tiles=0;
+    for (const auto& input:assets.cells_in_original_order()) {
+        const auto key=std::uint32_t(input.cell.y)*512+input.cell.x;
+        auto& state=world.cells.at(key);
+        auto& terrain=*state.terrain;
+        terrain.overlay_type_index=input.packed_overlay && *input.packed_overlay!=255 ? int(*input.packed_overlay) : -1;
+        terrain.bridge=false;
+        terrain.ramp_index=0;
+        if (terrain.resolved_tile_index && *terrain.resolved_tile_index!=0xffff) {
+            try {
+                const auto count=assets.theater().resolved_subtile_count(*terrain.resolved_tile_index);
+                if (count) {
+                    const auto sub=static_cast<std::uint8_t>(terrain.subtile%count);
+                    if (assets.theater().resolved_subtile_present(*terrain.resolved_tile_index,sub)) {
+                        const auto& metadata=assets.theater().resolved_metadata(*terrain.resolved_tile_index,sub);
+                        terrain.tmp_terrain=metadata.terrain;
+                        if (metadata.ramp<=20) terrain.ramp_index=metadata.ramp;
+                    }
+                }
+            } catch (const render::RenderError&) {}
+        }
+        if (terrain.tmp_terrain && *terrain.tmp_terrain<16) terrain.land_type=sim::original_tmp_land_type(*terrain.tmp_terrain);
+        else { terrain.land_type=0; ++fallback_tiles; }
+        terrain.floor_world_height=sim::original_floor_height(static_cast<std::int8_t>(*terrain.height_level),
+            static_cast<std::uint8_t>(*terrain.ramp_index),int(input.cell.x)*256+128,int(input.cell.y)*256+128);
+        state.overlay_data_11e=input.packed_overlay_data;
+        state.cell_flags_140=0; state.cell_flag_80=false; state.cell_flag_100=false;
+        state.cell_flag_200=false; state.cell_flag_20000=false; state.cell_flag_40000=false;
+        state.ground_occupancy_124=0; state.bridge_occupancy_128=0;
+        state.cell_field_12c=0; state.usable=true;
+        const bool passable=*terrain.land_type!=2 && *terrain.land_type!=3;
+        state.land_wheel=passable ? 1.0f : 0.0f;
+        state.unit_land_speed=state.land_wheel;
+        state.coarse_category=passable ? 0 : 4;
+    }
+    for (std::size_t i=0;i<world.houses.size();++i) {
+        auto& house=world.houses[i];
+        // TODO-ORIGINAL: replace these multiplayer House defaults with its load phase.
+        house.constructor_complete=true; house.human_controlled=i<options.players.size() && options.players[i].human;
+        house.house_flag_135=false; house.observer_flag_13d=false; house.tech_level=10;
+        house.power_output=0; house.power_drain=0; house.reload_multiplier=1.0; house.firepower_multiplier=1.0;
+        house.stolen_tech_204=false; house.stolen_tech_205=false;
+        house.stolen_mask_208=0; house.stolen_mask_20c=0; house.stolen_mask_210=0; house.stolen_mask_214=0;
+        house.buildings_active_5460.emplace(); house.buildings_owned_5420.emplace(); house.buildings_ever_54a0.emplace();
+        house.units_owned_5430.emplace(); house.units_ever_54b0.emplace(); house.infantry_owned_5440.emplace();
+        house.infantry_ever_54c0.emplace(); house.aircraft_owned_5450.emplace(); house.aircraft_ever_54d0.emplace();
+        house.attacker_damage_records.emplace(); house.attacker_damage_count=0; house.selected_enemy_index=-1;
+        house.alliance_mask_5674=i<32 ? std::uint32_t{1}<<i : 0;
+        if (i<options.players.size()) {
+            house.country_index=country_index(options.players[i].country);
+            house.side_index=mcvs[i]=="AMCV" ? 0 : 1;
+        }
+    }
+    world.veteran_reload_multiplier=1.0; world.veteran_firepower_multiplier=1.0;
+    sim::Random random(world.random);
+    std::uint32_t next_id=0;
+    for (const auto& object:world.creation_order) next_id=std::max(next_id,object.id);
+    const auto next=[&]() { return ++next_id; };
+    const auto house_id=[&](const std::string& name) -> std::uint32_t {
+        for (const auto& house:world.houses) if (house.name==name) return house.id;
+        // TODO-ORIGINAL: map House construction and alliances need their real phases.
+        House house; house.id=next(); house.name=name;
+        house.country=map.read_string(name,"Country",name); house.role=HouseRole::Neutral;
+        house.constructor_complete=true; house.human_controlled=false; house.cash=0;
+        world.creation_order.push_back({CreatedKind::House,house.id});
+        world.houses.push_back(house);
+        return house.id;
+    };
+    const auto place=[&](Entity& entity,ra2map::Cell cell,int facing) -> bool {
+        const auto key=std::uint32_t(cell.y)*512+cell.x;
+        auto it=world.cells.find(key);
+        if (it==world.cells.end() || !it->second.terrain || !it->second.terrain->floor_world_height) return false;
+        auto& state=it->second;
+        entity.cell=cell; entity.layer=Layer::Ground; entity.lifetime=Lifetime::Placed;
+        entity.position=sim::Coord{int(cell.x)*256+128,int(cell.y)*256+128,*state.terrain->floor_world_height};
+        entity.next=state.heads->ground_head; state.heads->ground_head=entity.id;
+        // TODO-ORIGINAL: object footprints, Cell marking, and occupancy updates.
+        *state.ground_occupancy_124|=0x20;
+        entity.hull_facing=facing&255; entity.hull_facing_raw=static_cast<std::uint16_t>((facing&255)<<8);
+        entity.turret_facing=facing&255; entity.turret_facing_raw=entity.hull_facing_raw;
+        entity.on_map=true; entity.active=true; entity.in_limbo=false; entity.collision_eligible=true;
+        entity.collision_virtual_position=entity.position; entity.has_trigger=false; entity.target_id=0;
+        entity.constructor_complete=true; entity.locomotor_moving=false; entity.mission=0;
+        entity.burst_index=0; entity.weapon_timer_start_frame=-1; entity.weapon_timer_duration=0;
+        entity.armor_multiplier=1.0; entity.house_armor_multiplier=1.0; entity.firepower_multiplier=1.0;
+        entity.veterancy=0.0; entity.techno_field_1b8=0; entity.techno_field_329=0;
+        return true;
+    };
+    std::size_t skipped=0;
+    const auto actor=[&](Kind kind,const std::string& name,const std::string& type,ra2map::Cell cell,
+                         int facing,int map_health) {
+        if (type.empty() || (kind!=Kind::Terrain && name.empty())) { ++skipped; return; }
+        Entity entity; entity.id=next(); entity.kind=kind; entity.type=type;
+        entity.house_id=kind==Kind::Terrain ? 0 : house_id(name);
+        // TODO-ORIGINAL: construction draws for map actors have not been recovered as a whole.
+        if (kind!=Kind::Terrain) entity.constructor_random=static_cast<std::uint16_t>(random.next());
+        if (const auto strength=integer(type,"Strength"); strength && *strength>0) {
+            entity.maximum_hp=*strength;
+            const auto scaled=std::int64_t(std::clamp(map_health,0,256))* *strength/256;
+            entity.resolved_hp=static_cast<std::int32_t>(std::max<std::int64_t>(1,scaled));
+        }
+        entity.category.emplace();
+        entity.category->runtime_type=kind==Kind::Terrain ? 36 : kind==Kind::Structure ? 6 : 1;
+        if (!place(entity,cell,facing)) { ++skipped; return; }
+        world.creation_order.push_back({CreatedKind::Entity,entity.id});
+        world.entities.push_back(std::move(entity));
+    };
+    for (const auto& object:assets.map().units()) actor(Kind::Unit,object.house,object.type,object.cell,object.facing,object.health);
+    for (const auto& object:assets.map().aircraft()) actor(Kind::Aircraft,object.house,object.type,object.cell,object.facing,object.health);
+    for (const auto& object:assets.map().infantry()) actor(Kind::Infantry,object.house,object.type,object.cell,object.facing,object.health);
+    for (const auto& object:assets.map().structures()) actor(Kind::Structure,object.house,object.type,object.cell,object.facing,object.health);
+    for (const auto& object:assets.map().terrain()) actor(Kind::Terrain,"",object.type,object.cell,0,256);
+    for (const auto& unit:planned) {
+        auto entity=std::find_if(world.entities.begin(),world.entities.end(),[&](const auto& item){return item.id==unit.id;});
+        if (entity==world.entities.end()) return {};
+        bool placed=false;
+        // TODO-ORIGINAL: replace the nearby square search with the original placement search.
+        for (int radius=0;radius<=16 && !placed;++radius) for (int dy=-radius;dy<=radius && !placed;++dy)
+            for (int dx=-radius;dx<=radius && !placed;++dx) {
+                if (std::max(std::abs(dx),std::abs(dy))!=radius) continue;
+                const int x=int(unit.start.x)+dx,y=int(unit.start.y)+dy;
+                if (x<0 || y<0 || x>=512 || y>=512) continue;
+                const auto cell=world.cells.find(std::uint32_t(y)*512+x);
+                if (cell==world.cells.end() || !cell->second.terrain || !cell->second.unit_land_speed ||
+                    *cell->second.unit_land_speed<=0 || !cell->second.ground_occupancy_124 ||
+                    *cell->second.ground_occupancy_124 || cell->second.terrain->overlay_type_index!= -1) continue;
+                placed=place(*entity,{static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)},0);
+            }
+        if (!placed) return {};
+        entity->maximum_hp=entity->resolved_hp;
+        if (entity->original_type_index) {
+            const auto house=std::find_if(world.houses.begin(),world.houses.end(),[&](const auto& item){
+                return item.id==entity->house_id;
+            });
+            if (house==world.houses.end() || !house->placed_unit_counts || !house->units_owned_5430 ||
+                !house->units_ever_54b0) return {};
+            ++(*house->placed_unit_counts)[*entity->original_type_index];
+            ++(*house->units_owned_5430)[*entity->original_type_index];
+            ++(*house->units_ever_54b0)[*entity->original_type_index];
+        }
+    }
+    world.random=random.state();
+    if (!validate(world)) return {};
+    result.gaps={"Prototype setup uses approximate starting units and placement.",
+        "Map object footprints, overlay effects, bridge state, and House updates are incomplete.",
+        "The shared random state is preserved, but original setup draw order is incomplete."};
+    if (fallback_tiles) result.gaps.push_back("Some terrain tiles use prototype land defaults: "+std::to_string(fallback_tiles));
+    if (skipped) result.gaps.push_back("Some map objects could not be placed: "+std::to_string(skipped));
+    return result;
 }
 }

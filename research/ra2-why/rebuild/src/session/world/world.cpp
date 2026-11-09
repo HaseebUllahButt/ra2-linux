@@ -390,7 +390,8 @@ bool validate(const Snapshot& snapshot) {
     if (snapshot.setup_progress!=SetupProgress::Unknown && snapshot.setup_progress!=SetupProgress::PackedMapRead &&
         snapshot.setup_progress!=SetupProgress::Complete && snapshot.setup_progress!=SetupProgress::OverlayObjectsRead &&
         snapshot.setup_progress!=SetupProgress::OverlayDataRead &&
-        snapshot.setup_progress!=SetupProgress::ReadyForInitialUnits) return false;
+        snapshot.setup_progress!=SetupProgress::ReadyForInitialUnits &&
+        snapshot.setup_progress!=SetupProgress::PrototypeComplete) return false;
     if (snapshot.cell_order) {
         std::set<std::uint32_t> seen;
         for (const auto key:*snapshot.cell_order) {

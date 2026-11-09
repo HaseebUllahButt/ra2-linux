@@ -18,8 +18,9 @@ enum class Lifetime { Created, Placed, Destroyed };
 enum class Layer { Ground, Bridge };
 enum class CreatedKind { House, Entity };
 enum class HouseRole { Player, Neutral, Special };
-// Only a completed original scenario may enter the live runtime.
-enum class SetupProgress { Unknown, PackedMapRead, Complete, OverlayObjectsRead, OverlayDataRead, ReadyForInitialUnits };
+// Complete is reserved for a finished original scenario. PrototypeComplete
+// identifies a separate playable world that still contains stated guesses.
+enum class SetupProgress { Unknown, PackedMapRead, Complete, OverlayObjectsRead, OverlayDataRead, ReadyForInitialUnits, PrototypeComplete };
 struct CreatedObject { CreatedKind kind; std::uint32_t id; };
 struct House {
     std::uint32_t id=0;

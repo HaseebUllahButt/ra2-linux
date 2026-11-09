@@ -120,4 +120,26 @@ std::optional<Snapshot> construct_house_fragments(const sim::RandomState& before
     const std::vector<PlayerHouseSetup>& players, std::int32_t unit_registry_size,
     std::optional<std::int32_t> light_grey_palette,
     std::optional<std::int32_t> neutral_index={}, std::optional<std::int32_t> special_index={});
+
+// A separate playable approximation. The caller supplies the random state and
+// owns the returned world. PrototypeComplete must never enter the exact path.
+struct PrototypePlayerSetup {
+    std::string name, country;
+    std::int32_t credits=10000, color=0;
+    // -1 selects the next map starting waypoint in index order.
+    std::int32_t waypoint_index=-1;
+    // Number of tanks in addition to the starting MCV.
+    std::int32_t vehicle_count=2;
+    bool human=true;
+};
+struct PrototypeBattleSetup { std::vector<PrototypePlayerSetup> players; };
+struct PrototypeBattle {
+    Snapshot snapshot;
+    std::vector<std::string> gaps;
+};
+// Loads authored map actors and player vehicles into one linked world. Rules,
+// art, the map, and the mode come from assets. Gaps name remaining prototype
+// behavior. The input random state is never changed by a failed call.
+std::optional<PrototypeBattle> prototype_battle(BaseBattleAssets&,
+    const PrototypeBattleSetup&,const sim::RandomState&);
 }
