@@ -115,7 +115,7 @@ HudAction BattleHud::handle_click(int x,int y,const HudState& s) const {
             return {HudActionKind::Build,c.type,{}};
         ++slot;
     }
-    if(inside(x,y,deploy_bounds())) return {HudActionKind::Deploy,{}, {}};
+    if(!s.has_yard && inside(x,y,deploy_bounds())) return {HudActionKind::Deploy,{}, {}};
     auto r=minimap_bounds();
     if(inside(x,y,r) && s.map_width>0 && s.map_height>0)
         return {HudActionKind::Minimap,{},
@@ -128,16 +128,17 @@ bool BattleHud::same_panel(const HudState& s) const {
     return panel_valid_&&panel_category_==active_category_&&old.cash==s.cash&&
         old.power_output==s.power_output&&old.power_drain==s.power_drain&&
         old.status==s.status&&old.result==s.result&&old.selected_labels==s.selected_labels&&
+        old.has_yard==s.has_yard&&
         old.choices.size()==s.choices.size()&&std::equal(old.choices.begin(),old.choices.end(),s.choices.begin(),
             [](const auto& a,const auto& b) {
                 return a.type==b.type&&a.name==b.name&&a.cost==b.cost&&a.enabled==b.enabled&&
-                    a.progress==b.progress&&a.category==b.category;
+                    a.progress==b.progress&&a.category==b.category&&a.queued==b.queued;
             });
 }
 void BattleHud::draw_panel(render::Bitmap& b,const HudState& s) const {
     fill(b,{sidebar_x,0,sidebar_width,minimap_y},dark);
     text(b,808,3,"CREDITS $"+std::to_string(s.cash),ink,212);
-    text(b,808,17,"POWER "+std::to_string(s.power_output)+"/"+std::to_string(s.power_drain),ink,212);
+    text(b,808,17,"POWER OUT "+std::to_string(s.power_output)+" USE "+std::to_string(s.power_drain),ink,212);
     fill(b,{808,29,212,6},edge);
     const auto capacity=std::max({1,s.power_output,s.power_drain});
     fill(b,{808,29,static_cast<int>(212LL*std::max(0,s.power_output)/capacity),6},
@@ -147,7 +148,14 @@ void BattleHud::draw_panel(render::Bitmap& b,const HudState& s) const {
     const char* tabs[] = {"ALL", "BLD", "INF", "VEH", "AIR"};
     for (int i=0;i<5;++i) {
         Rectangle tab{808+i*42,36,42,22};
-        border(b,tab,static_cast<int>(active_category_)==i?gold:edge);
+        if(static_cast<int>(active_category_)==i) {
+            // Clear active-tab mark: dim gold fill plus a gold frame.
+            fill(b,{tab.x+1,tab.y+1,tab.width-2,tab.height-2},{58,50,18,255});
+            border(b,tab,gold);
+            border(b,{tab.x+1,tab.y+1,tab.width-2,tab.height-2},gold);
+        } else {
+            border(b,tab,edge);
+        }
         std::string label=tabs[i];
         text(b,tab.x+(42-(4*static_cast<int>(label.size())-2))/2,tab.y+6,label,ink,40,2);
     }
@@ -204,8 +212,17 @@ void BattleHud::draw_panel(render::Bitmap& b,const HudState& s) const {
             text(b,r.x+4,r.y+31,c.progress>=1000?"READY":c.progress>0?std::to_string(c.progress/10)+"%":"BUILD",color,r.width-8);
             fill(b,{r.x+4,r.y+46,(r.width-8)*std::clamp(c.progress,0,1000)/1000,5},c.enabled?green:edge);
         }
+        if(c.queued>1) {  // Queue count badge, bottom-right on both art paths.
+            const std::string n=std::to_string(c.queued);
+            const int w=4*static_cast<int>(n.size())+3;
+            fill(b,{r.x+r.width-w-2,r.y+r.height-9,w,7},dark);
+            text(b,r.x+r.width-w-1,r.y+r.height-8,n,gold,214,1);
+        }
     }
-    border(b,deploy_bounds(),ink); text(b,816,577,"DEPLOY",ink,190);
+    if(!s.has_yard) {
+        border(b,deploy_bounds(),ink); text(b,816,577,"DEPLOY",ink,190);
+    }
+    text(b,808,596,"SELECTED UNITS",edge,212);
     int y=606;
     for(const auto& label:s.selected_labels) {
         if(y>642) break;
@@ -222,13 +239,30 @@ void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
         draw_panel(panel_,s);
         panel_state_.cash=s.cash;panel_state_.power_output=s.power_output;panel_state_.power_drain=s.power_drain;
         panel_state_.selected_labels=s.selected_labels;panel_state_.choices=s.choices;
-        panel_state_.status=s.status;panel_state_.result=s.result;
+        panel_state_.status=s.status;panel_state_.result=s.result;panel_state_.has_yard=s.has_yard;
         panel_category_=active_category_;panel_valid_=true;
     }
     const int right=std::min(b.width,view_width),bottom=std::min(b.height,minimap_y);
     if(right>sidebar_x)for(int y=0;y<bottom;++y)
         std::copy_n(panel_.rgba.begin()+(std::size_t(y)*view_width+sidebar_x)*4,
             std::size_t(right-sidebar_x)*4,b.rgba.begin()+(std::size_t(y)*b.width+sidebar_x)*4);
+    // Hover tooltip: the hovered cameo cost, drawn over the cached panel.
+    if(s.pointer_x>=palette_x&&s.pointer_x<view_width&&s.pointer_y>=palette_y&&s.pointer_y<deploy_y) {
+        int slot=0;
+        for(const auto& c:s.choices) {
+            if(active_category_!=BuildCategory::All&&c.category!=active_category_) continue;
+            if(slot>=build_columns*build_rows) break;
+            auto r=build_button_bounds(slot++);
+            if(c.enabled&&inside(s.pointer_x,s.pointer_y,r)) {
+                const std::string tip="$"+std::to_string(c.cost);
+                const int w=4*static_cast<int>(tip.size())+6;
+                const Rectangle box{r.x+r.width-w,r.y+r.height+1,w,11};
+                fill(b,box,dark); border(b,box,edge);
+                text(b,box.x+3,box.y+3,tip,gold,w-4);
+                break;
+            }
+        }
+    }
     auto r=minimap_bounds(); fill(b,r,{8,15,12,255});
     if(valid(s.minimap)) for(int y=0;y<r.height;++y) for(int x=0;x<r.width;++x) {
         const auto i=(static_cast<std::size_t>(y)*s.minimap.height/r.height*s.minimap.width+
