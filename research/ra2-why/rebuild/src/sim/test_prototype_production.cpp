@@ -149,6 +149,10 @@ int main(int argc,char** argv) try {
             "deploy did not update live actors");
     require(world.random.first!=old_random.first || world.random.second!=old_random.second,
             "deploy did not preserve construction draws");
+    sim::Random expected(old_random);
+    expected.next(); expected.next();
+    require(world.random.table==expected.state().table && world.random.first==expected.first() &&
+            world.random.second==expected.second(),"deployed Houses did not share the same random stream");
     require_prototype(world);
     const auto base=*actor(world,*allied.entity).cell;
     const auto enemy_base=*actor(world,*soviet.entity).cell;
