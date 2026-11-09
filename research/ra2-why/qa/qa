@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Virtual player kit for RA2 QA. Each QA session uses its own display number.
+# qa start N [game args...]  start hidden screen :N (1024x768) and the game on it
+# qa shot N FILE.png         screenshot of screen :N
+# qa in N <qa-input args>    fake input on screen :N (see qa-input.c)
+# qa wait MS                 wait real time
+# qa stop N                  stop the game and the hidden screen
+# qa log N                   show the game's output so far
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+GAME=${RA2_QA_BINARY:-/path/to/user/Projects/ra2/ra2-test-host/qa/bin/ra2-native-1bf1e7f3}
+DATA=${RA2_QA_GAME:-/path/to/user/Projects/ra2/ra2-test-host/game-full}
+cmd=$1; shift
+case $cmd in
+start)
+  n=$1; shift; dir=/tmp/ra2-qa-$n; mkdir -p $dir
+  "$here/xvfb-pkg/usr/bin/Xvfb" :$n -screen 0 1024x768x24 -nolisten tcp >$dir/xvfb.log 2>&1 & echo $! >$dir/xvfb.pid
+  for i in $(seq 50); do [ -e /tmp/.X11-unix/X$n ] && break; sleep 0.1; done
+  DISPLAY=:$n SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy WAYLAND_DISPLAY= RA2_DEBUG_LOOP=1 nohup chrt -o 0 "$GAME" --game-dir "$DATA" "$@" >$dir/game.log 2>&1 & echo $! >$dir/game.pid
+  renice -n 0 -p $(cat $dir/game.pid) >/dev/null 2>&1 || true
+  sleep 2; echo "started display :$n game pid $(cat $dir/game.pid)";;
+shot) DISPLAY=:$1 import -window root "$2" && echo "$2";;
+in) n=$1; shift; DISPLAY=:$n "$here/qa-input" "$@";;
+wait) sleep "$(awk "BEGIN{print $1/1000}")";;
+log) tail -n 40 /tmp/ra2-qa-$1/game.log;;
+stop) dir=/tmp/ra2-qa-$1; kill $(cat $dir/game.pid) 2>/dev/null || true; sleep 0.5; kill $(cat $dir/xvfb.pid) 2>/dev/null || true; echo stopped;;
+alive) kill -0 $(cat /tmp/ra2-qa-$1/game.pid) 2>/dev/null && echo running || echo "NOT RUNNING";;
+*) echo "unknown command"; exit 2;;
+esac
