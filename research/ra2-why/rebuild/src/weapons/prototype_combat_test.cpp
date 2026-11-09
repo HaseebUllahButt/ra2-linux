@@ -180,6 +180,21 @@ void idle_defense_test(const rules::IniFile& rules,const rules::IniFile& art,con
     w.entities[1].position->x-=8*256;
     check(combat.tick(w,1).fired==1 && w.entities[0].target_id==2,"idle Sentry did not fire in range");
     check(combat.tick(w,2).fired==0,"idle Sentry bypassed reload");
+    // A stale guard target must not block a closer enemy or cause a chase.
+    w.entities[1].position->x+=8*256;
+    auto close=w.entities[1]; close.id=4; close.position->x-=9*256;
+    w.entities.push_back(close);
+    const auto replaced=combat.tick(w,3);
+    check(replaced.out_of_range.empty() && w.entities[0].target_id==4,
+          "distant guard target blocked a nearby enemy");
+    w.entities.back().house_id=w.entities[0].house_id;
+    check(combat.tick(w,4).out_of_range.empty() && w.entities[0].target_id==0,
+          "guard retained an illegal target");
+    check(combat.attack(w,1,2),"explicit distant order rejected");
+    w.entities.back().house_id=w.entities[1].house_id;
+    const auto explicit_order=combat.tick(w,5);
+    check(explicit_order.out_of_range.size()==1 && w.entities[0].target_id==2,
+          "guard scan replaced an explicit chase target");
     auto tank=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400);
     tank.entities[0].mission=0;
     tank.entities[0].locomotor_moving=true;

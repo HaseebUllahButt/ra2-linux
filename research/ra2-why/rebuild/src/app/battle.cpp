@@ -811,27 +811,7 @@ public:
             ++it;
         }
         if(motion.status!=sim::PrototypeMoveStatus::Complete)gaps_.insert(motion.detail);
-        // TODO-ORIGINAL: Stationary troops acquire a nearby enemy. This is
-        // native guard behavior, not original Mission_Guard or threat selection.
-        if(frame%15==0) {
-            std::vector<std::pair<std::uint32_t,std::uint32_t>> acquire;
-            for(const auto& e:world_.entities) if((fighter(e)||(live(e)&&e.kind==w::Kind::Structure&&
-                !rules_.read_string(e.type,"Primary").empty()&&
-                sim::tech::building_online(rules_,sim::tech::house_power(rules_,world_,e.house_id),e.type)))&&
-                !movement_.moving(e.id)&&!attacks_.count(e.id)) {
-                const auto opponent=e.house_id==player_?enemy_:e.house_id==enemy_?player_:0;
-                if(!opponent)continue;
-                std::int64_t best=std::int64_t(6*256)*(6*256);std::uint32_t target=0;
-                for(const auto& other:world_.entities) if(live(other)&&other.house_id==opponent&&
-                    combat_.can_attack(world_,e.id,other.id)) {
-                    const auto dx=std::int64_t(e.position->x)-other.position->x;
-                    const auto dy=std::int64_t(e.position->y)-other.position->y;
-                    if(dx*dx+dy*dy<best){best=dx*dx+dy*dy;target=other.id;}
-                }
-                if(target)acquire.push_back({e.id,target});
-            }
-            for(const auto& [source,target]:acquire)if(combat_.attack(world_,source,target))attacks_[source]=target;
-        }
+        // Combat owns idle guard acquisition and uses each weapon's range.
         const auto fighting=combat_.tick(world_,frame);
         effects_.observe(world_,combat_.projectiles(),frame,effect_project());
         audio_.observe(world_,frame);

@@ -507,9 +507,11 @@ bool PrototypeCombatRuntime::can_attack(const session::world::Snapshot& world,
 bool PrototypeCombatRuntime::attack(session::world::Snapshot& world,std::uint32_t source_id,std::uint32_t target_id) {
     if (!can_attack(world,source_id,target_id)) return false;
     auto* source=prototype_find(world,source_id);
+    guard_orders_.erase(source_id);
     orders_[source_id]=target_id;source->target_id=target_id;return true;
 }
 void PrototypeCombatRuntime::stop(session::world::Snapshot& world,std::uint32_t source_id) {
+    guard_orders_.erase(source_id);
     orders_.erase(source_id);
     if (auto* source=prototype_find(world,source_id)) source->target_id=0;
 }
@@ -626,6 +628,41 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
         } catch (const std::exception& e) {report.unresolved.push_back(e.what());}
     }
     projectiles_=std::move(flying);
+    const auto legal_guard_target=[&](const session::world::Entity& source,
+                                      const session::world::Entity& target) {
+        const auto* owner=prototype_house(world,source.house_id);
+        const auto* house=prototype_house(world,target.house_id);
+        if (!owner || !house || owner->country=="Neutral" || owner->country=="Special" ||
+            house->country=="Neutral" || house->country=="Special" ||
+            !prototype_bool(base_,map_,target.type,"LegalTarget",true) ||
+            prototype_bool(base_,map_,target.type,"Immune")) return false;
+        const auto allied=[](const session::world::House& a,const session::world::House& b) {
+            return a.alliance_mask_5674 && b.original_index && *b.original_index>=0 &&
+                *b.original_index<32 && (*a.alliance_mask_5674 & (1u<<*b.original_index));
+        };
+        if (allied(*owner,*house) || allied(*house,*owner)) return false;
+        if (prototype_bool(base_,map_,source.type,"Powered") &&
+            owner->power_output.value_or(0)<owner->power_drain.value_or(0)) return false;
+        return can_attack(world,source.id,target.id);
+    };
+    // Guard targets stay local. Explicit attack orders retain their chase target.
+    for (auto it=guard_orders_.begin();it!=guard_orders_.end();) {
+        const auto order=orders_.find(it->first);
+        if (order==orders_.end() || order->second!=it->second) {
+            it=guard_orders_.erase(it); continue;
+        }
+        auto* source=prototype_find(world,it->first);
+        const auto* target=prototype_find(world,it->second);
+        const auto weapon=prototype_alive(source)?prototype_weapon(base_,map_,art_,*source):
+            std::optional<PrototypeWeapon>{};
+        if (!weapon || !prototype_alive(target) || source->locomotor_moving.value_or(false) ||
+            distance_.between(*source->position,*target->position)>weapon->range ||
+            !legal_guard_target(*source,*target)) {
+            if (source) source->target_id=0;
+            orders_.erase(order);
+            it=guard_orders_.erase(it);
+        } else ++it;
+    }
     // Acquire only for idle actors. Explicit attack and move orders keep priority.
     // TODO-ORIGINAL: Recover the full guard scan and threat scoring.
     for (auto& source : world.entities) {
@@ -644,18 +681,15 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             if(!prototype_alive(&target) || source.house_id==target.house_id)continue;
             const int range=distance_.between(*source.position,*target.position);
             if(range>weapon->range || range>best)continue;
-            const auto* house=prototype_house(world,target.house_id);
-            if (!house || house->country=="Neutral" || house->country=="Special" ||
-                (owner->alliance_mask_5674 && house->original_index && *house->original_index>=0 && *house->original_index<32 &&
-                 (*owner->alliance_mask_5674 & (1u<<*house->original_index))) ||
-                !can_attack(world,source.id,target.id) ||
-                !prototype_bool(base_,map_,target.type,"LegalTarget",true) ||
-                prototype_bool(base_,map_,target.type,"Immune")) continue;
+            if (!legal_guard_target(source,target)) continue;
             if (range<=weapon->range && (range<best || (range==best && nearest && target.id<nearest->id))) {
                 best=range; nearest=&target;
             }
         }
-        if (nearest) { orders_[source.id]=nearest->id; source.target_id=nearest->id; }
+        if (nearest) {
+            orders_[source.id]=nearest->id; guard_orders_[source.id]=nearest->id;
+            source.target_id=nearest->id;
+        }
     }
     for (auto it=orders_.begin();it!=orders_.end();) {
         auto* source=prototype_find(world,it->first);auto* target=prototype_find(world,it->second);

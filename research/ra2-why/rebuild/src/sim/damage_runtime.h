@@ -149,6 +149,7 @@ private:
     OriginalDistance distance_;
     weapons::BaseBallisticAngles angles_;
     std::map<std::uint32_t,std::uint32_t> orders_;
+    std::map<std::uint32_t,std::uint32_t> guard_orders_;
     std::vector<PrototypeCombatProjectile> projectiles_;
 };
 }
