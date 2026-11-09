@@ -18,6 +18,20 @@ bool open(const sw::CellState& c) {
         c.ground_occupancy_124==0 && c.cell_flag_100==false && c.terrain &&
         c.terrain->floor_world_height && c.unit_land_speed.value_or(1)>0;
 }
+// Ground that only live Infantry of one House stands on. A miner of that
+// House may take it as its goal: its drive asks the soldiers to step aside
+// (004A2670 calls Cell Scatter_Content 00476920 on the blocked Cell).
+bool held_by_friends(const sw::Snapshot& w,const sw::CellState& c,std::uint32_t house) {
+    if(!c.allocated.value_or(false) || !c.heads || !c.heads->ground_head || c.cell_flag_100!=false ||
+       !c.terrain || !c.terrain->floor_world_height || c.unit_land_speed.value_or(1)<=0) return false;
+    int guard=0;
+    for(auto id=c.heads->ground_head;id;) {
+        const auto e=std::find_if(w.entities.begin(),w.entities.end(),[&](const auto& item){return item.id==id;});
+        if(e==w.entities.end() || !alive(*e) || e->kind!=sw::Kind::Infantry || e->house_id!=house || !e->next || ++guard>8) return false;
+        id=*e->next;
+    }
+    return true;
+}
 }
 PrototypeEconomy::PrototypeEconomy(const rules::IniFile& r):rules_(r) {
     movement_.use_rules(rules_);
@@ -173,11 +187,17 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
                 continue;
             }
             bag.docked=false;
-            for(int dy=-1;dy<=1;++dy) for(int dx=-1;dx<=1;++dx) {
+            // An empty Cell beside the refinery first. If guards stand on
+            // every one, a driving miner heads for a Cell that only friendly
+            // soldiers hold; they step aside for it. The old code waited for
+            // an empty Cell and the full miner never moved (MP02T2, HARV at
+            // 87,123 from frame 10039).
+            for(int pass=0;pass<2;++pass) for(int dy=-1;dy<=1;++dy) for(int dx=-1;dx<=1;++dx) {
                 int x=int(refinery->cell->x)+dx,y=int(refinery->cell->y)+dy;
                 if((!dx&&!dy)||x<0||y<0||x>=512||y>=512||movement_.moving(e.id)) continue;
                 ra2map::Cell target{std::uint16_t(x),std::uint16_t(y)};auto i=w.cells.find(key(target));
-                if(i==w.cells.end() || !open(i->second)) continue;
+                if(i==w.cells.end()) continue;
+                if(pass?e.type=="CMIN" || !held_by_friends(w,i->second,e.house_id):!open(i->second)) continue;
                 if(e.type=="CMIN") {
                     auto old=w.cells.find(key(*e.cell));
                     if(old==w.cells.end() || !old->second.heads || old->second.heads->ground_head!=e.id || e.next.value_or(1)!=0) continue;
