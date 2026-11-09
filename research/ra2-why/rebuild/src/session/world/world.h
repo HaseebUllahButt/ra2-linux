@@ -81,6 +81,7 @@ struct Entity {
     std::optional<std::uint16_t> hull_facing_raw;
     std::optional<bool> locomotor_moving;
     std::optional<std::int32_t> mission;
+    std::optional<std::uint8_t> unit_field_7d;
 };
 struct CellState {
     std::optional<bool> allocated; // The original allocated Cell, not the fallback receiver.
