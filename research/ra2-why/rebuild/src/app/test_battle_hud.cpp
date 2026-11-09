@@ -125,11 +125,15 @@ s.can_deploy=true;
             }
             return hits;
         };
-        // Queue count: a badge with the number shows only when queued > 1.
+        // Queue count: a badge with the total shows only when queued > 1.
+        // queued includes the active item, so 1 means no badge.
         HudState q;
         q.choices={{"E1","GI",200,true,0,BuildCategory::Infantry,2}};
         auto one=frame(); hud.draw(one,q);
         assert(gold_hits(one,{r.x+88,r.y+44,16,12})>0);
+        q.choices[0].queued=1;
+        auto single=frame(); hud.draw(single,q);
+        assert(gold_hits(single,{r.x+88,r.y+44,16,12})==0);
         q.choices[0].queued=0;
         auto none=frame(); hud.draw(none,q);
         assert(gold_hits(none,{r.x+88,r.y+44,16,12})==0);

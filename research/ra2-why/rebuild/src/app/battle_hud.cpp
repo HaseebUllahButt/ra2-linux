@@ -212,7 +212,7 @@ void BattleHud::draw_panel(render::Bitmap& b,const HudState& s) const {
             text(b,r.x+4,r.y+31,c.progress>=1000?"READY":c.progress>0?std::to_string(c.progress/10)+"%":"BUILD",color,r.width-8);
             fill(b,{r.x+4,r.y+46,(r.width-8)*std::clamp(c.progress,0,1000)/1000,5},c.enabled?green:edge);
         }
-        if(c.queued>1) {  // Queue count badge, bottom-right on both art paths.
+        if(c.queued>1) {  // Queue count badge: total items, active one included.
             const std::string n=std::to_string(c.queued);
             const int w=4*static_cast<int>(n.size())+3;
             fill(b,{r.x+r.width-w-2,r.y+r.height-9,w,7},dark);
