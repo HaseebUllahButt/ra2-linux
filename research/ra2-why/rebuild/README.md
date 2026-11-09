@@ -8,6 +8,11 @@ The rebuild remains incomplete. Matches use `PrototypeComplete` world state.
 Campaigns, saves, and multiplayer are not complete game modes.
 Keep later modules separate from base skirmish play.
 
+The computer reads teams, task forces, and trigger choices from base `AI.INI`.
+Difficulty controls team choices and delays. Supported team plans include movement,
+attack, guard, and repeat. Several other script actions remain incomplete.
+TODO-ORIGINAL: Team random choices and some timing still use prototype behavior.
+
 Build with a C++17 compiler, make, pkg-config, SDL2 development files,
 and the LZO2 runtime library. On test-host, owned assets are in `game-full/`.
 Tests select that folder when it contains `game.exe`.
