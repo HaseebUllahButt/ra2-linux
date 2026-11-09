@@ -33,6 +33,13 @@ struct House {
     std::optional<std::map<std::int32_t,std::int32_t>> placed_unit_counts;
     bool constructor_complete=false;
     std::optional<double> reload_multiplier; // Base House +F0.
+    std::optional<std::int32_t> country_index, side_index, tech_level;
+    std::optional<bool> human_controlled, house_flag_135, stolen_tech_204, stolen_tech_205;
+    std::optional<std::uint32_t> stolen_mask_208, stolen_mask_20c, stolen_mask_210, stolen_mask_214;
+    std::optional<std::int32_t> power_output, power_drain;
+    std::optional<std::map<std::int32_t,std::int32_t>> buildings_active_5460, buildings_owned_5420,
+        buildings_ever_54a0, units_owned_5430, units_ever_54b0, infantry_owned_5440,
+        infantry_ever_54c0, aircraft_owned_5450, aircraft_ever_54d0;
 };
 struct BaseUnitProfile {
     std::optional<std::int32_t> restricted_land, movement_mode, placement_mode, speed_type, level_height;
@@ -71,6 +78,9 @@ struct Entity {
     // Base Techno +244 and +24C. The intervening +248 is unresolved.
     std::optional<std::int32_t> weapon_timer_start_frame, weapon_timer_duration;
     std::optional<std::uint8_t> object_field_74, object_field_76, techno_field_370;
+    std::optional<std::uint16_t> hull_facing_raw;
+    std::optional<bool> locomotor_moving;
+    std::optional<std::int32_t> mission;
 };
 struct CellState {
     std::optional<bool> allocated; // The original allocated Cell, not the fallback receiver.
@@ -96,6 +106,8 @@ struct CellState {
     std::optional<std::int16_t> tube_field_116;
     std::optional<std::uint32_t> bridge_occupancy_128;
     std::optional<std::int32_t> wall_owner;
+    std::optional<std::uint8_t> overlay_data_11e;
+    std::optional<std::uint32_t> cell_flags_140;
 };
 // An owning snapshot. IDs use zero as null. Original creation order does not
 // depend on the storage order of houses and entities. The shared next field is
