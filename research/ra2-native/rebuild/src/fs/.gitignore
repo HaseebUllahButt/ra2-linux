@@ -1,0 +1,6 @@
+/mix_test
+/crypto_test
+/openra-reference/bin/
+/openra-reference/obj/
+/openra-reference/.dotnet/
+/openra-reference/.nuget/
