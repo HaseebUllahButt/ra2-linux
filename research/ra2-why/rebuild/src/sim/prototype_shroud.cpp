@@ -216,6 +216,20 @@ void PrototypeShroud::revealed_layer(std::uint32_t house,
         out[index] = map->revealed[index] != 0 && map->gaps[index] == 0;
 }
 
+void PrototypeShroud::revealed_layer(std::uint32_t house, std::int32_t x0, std::int32_t y0,
+    std::int32_t x1, std::int32_t y1, std::vector<std::uint8_t>& out) const {
+    const auto width = std::max(0, x1 - x0), height = std::max(0, y1 - y0);
+    out.assign(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), 0);
+    const auto* map = find_map(house);
+    if (!map) return;
+    for (std::int32_t y = std::max(0, y0); y < std::min(y1, height_); ++y) {
+        const auto row = static_cast<std::size_t>(y) * static_cast<std::size_t>(width_);
+        auto* target = &out[static_cast<std::size_t>(y - y0) * static_cast<std::size_t>(width)];
+        for (std::int32_t x = std::max(0, x0); x < std::min(x1, width_); ++x)
+            target[x - x0] = map->revealed[row + x] != 0 && map->gaps[row + x] == 0;
+    }
+}
+
 PrototypeShroud::Vision PrototypeShroud::vision(std::uint32_t house, ra2map::Cell cell) const {
     const auto* map = find_map(house);
     if (!map || !in_grid(cell)) return Vision::Hidden;

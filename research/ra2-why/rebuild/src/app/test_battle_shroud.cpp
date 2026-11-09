@@ -148,7 +148,7 @@ void scene_mask() {
     shroud.update(world, rules_for_test());
     render::Bitmap frame{1024, 768, render::Bytes(1024u * 768u * 4u, 200)};
     const auto clip = render::Rectangle{0, 0, 800, 768};
-    shroud.mask_scene(frame, world, 1, project, clip);
+    shroud.mask_scene(frame, world, 1, project, 0, 0, clip);
     const auto centre = *project(cell(50, 50));
     require(at(frame, centre.x, centre.y)[0] == 200, "deep explored cell stays clear");
     const auto black = *project(cell(62, 56));
@@ -165,6 +165,57 @@ void scene_mask() {
     for (int y = 0; y < 768; ++y)
         for (int x = 800; x < 1024; ++x)
             if (at(frame, x, y)[0] != 200) throw std::runtime_error("mask crossed the clip");
+}
+
+// The cached mask matches a cold mask, rebuilds only on change, and follows
+// the camera and newly explored cells.
+render::Bitmap masked(const BattleShroud& shroud, const Snapshot& world,
+                      std::int64_t camera_x, std::int64_t camera_y) {
+    render::Bitmap frame{1024, 768, render::Bytes(1024u * 768u * 4u, 0)};
+    for (std::size_t i = 0; i < frame.rgba.size(); ++i)
+        frame.rgba[i] = static_cast<std::uint8_t>(40 + i * 7 % 200);
+    shroud.mask_scene(frame, world, 1, project, camera_x, camera_y, {0, 0, 800, 768});
+    return frame;
+}
+void mask_cache() {
+    auto world = battle();
+    const auto rules = rules_for_test();
+    BattleShroud warm;
+    warm.update(world, rules);
+    const auto first = masked(warm, world, 0, 0);
+    require(warm.mask_rebuilds() == 1, "first mask builds once");
+    require(masked(warm, world, 0, 0).rgba == first.rgba, "warm mask equals cold mask");
+    require(warm.mask_rebuilds() == 1, "unchanged view reuses the mask");
+    // Camera move: same pixels as a fresh object at that camera.
+    const auto moved = masked(warm, world, 90, -45);
+    require(warm.mask_rebuilds() == 2, "camera move rebuilds");
+    BattleShroud cold;
+    cold.update(world, rules);
+    require(masked(cold, world, 90, -45).rgba == moved.rgba, "moved mask equals cold mask");
+    const auto centre = *project(cell(50, 50));
+    const auto index = (std::size_t(centre.y + 45) * 1024 + std::size_t(centre.x - 90)) * 4;
+    require(at(moved, centre.x - 90, centre.y + 45)[0] == std::uint8_t(40 + index * 7 % 200),
+        "explored cell stays clear after the camera move");
+    const auto black = *project(cell(62, 56));
+    require(at(moved, black.x - 90, black.y + 45)[0] == 0, "black cell follows the camera");
+    // New explored ground: rebuild and clear the new cells.
+    world.entities[0].cell = cell(58, 50);
+    warm.update(world, rules);
+    const auto scouted = masked(warm, world, 0, 0);
+    require(warm.mask_rebuilds() == 3, "new explored ground rebuilds");
+    BattleShroud fresh;
+    fresh.update(battle(), rules);
+    world.entities[0].cell = cell(50, 50);
+    fresh.update(world, rules);
+    world.entities[0].cell = cell(58, 50);
+    fresh.update(world, rules);
+    require(masked(fresh, world, 0, 0).rgba == scouted.rgba, "scouted mask equals cold mask");
+    const auto ground = *project(cell(60, 50));
+    require(at(scouted, ground.x, ground.y)[0] != 0, "scouted cell is no longer black");
+    // Same explored cells, other frame content: no rebuild.
+    warm.update(world, rules);
+    masked(warm, world, 0, 0);
+    require(warm.mask_rebuilds() == 3, "same explored cells reuse the mask");
 }
 
 void radar_mask() {
@@ -237,6 +288,7 @@ int main(int argc, char** argv) try {
     visibility();
     footprints();
     scene_mask();
+    mask_cache();
     radar_mask();
     if (argc == 2) real_rules(argv[1]);
     std::cout << "Battle shroud checks passed: visibility, fog switch, footprints, "

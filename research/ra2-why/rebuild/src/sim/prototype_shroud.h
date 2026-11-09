@@ -72,6 +72,10 @@ public:
     // One byte per grid cell (index y*width+x): 1 when cell_revealed_to is
     // true. For fast drawing passes; unknown houses give all zeros.
     void revealed_layer(std::uint32_t house, std::vector<std::uint8_t>& out) const;
+    // The same for the box [x0,x1) x [y0,y1) only (index (y-y0)*(x1-x0)+x-x0).
+    // Cells outside the grid read as zero.
+    void revealed_layer(std::uint32_t house, std::int32_t x0, std::int32_t y0,
+                        std::int32_t x1, std::int32_t y1, std::vector<std::uint8_t>& out) const;
 
     // Sight= in cells for one type. A missing key reads as zero (006D9B40).
     std::int32_t sight_range(const rules::IniFile& rules, const std::string& type) const;

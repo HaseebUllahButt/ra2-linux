@@ -66,11 +66,20 @@ public:
                        std::uint32_t house) const;
 
     // Black out unexplored cells in the battle frame, with a soft edge.
-    // anchor gives each cell's floor centre in frame pixels. Only pixels
-    // inside clip change. Cells come from the world's allocated cells.
+    // map_anchor gives each cell's floor centre in map pixels (camera
+    // independent). The frame shows map pixel (camera_x + x, camera_y + y).
+    // Only pixels inside clip change. Cells come from the world's allocated
+    // cells. Floor anchors are read once and cached: call reset_mask_cache()
+    // when the map or the anchor function changes. The dark map is rebuilt
+    // only when the camera, clip, house or explored cells change; otherwise
+    // the cached dark runs are applied again.
     void mask_scene(render::Bitmap& frame, const session::world::Snapshot& world,
-                    std::uint32_t house, const CellAnchor& anchor,
+                    std::uint32_t house, const CellAnchor& map_anchor,
+                    std::int64_t camera_x, std::int64_t camera_y,
                     render::Rectangle clip) const;
+    void reset_mask_cache() const;
+    // How many times mask_scene rebuilt its dark map (for tests and timing).
+    std::uint64_t mask_rebuilds() const noexcept { return mask_.rebuilds; }
 
     // Black out unexplored cells on a radar image from draw_battle_radar.
     // Uses the same flat projection as the radar, so enemy dots on black
@@ -89,7 +98,27 @@ private:
     bool revealed_xy(std::uint32_t house, std::int32_t x, std::int32_t y) const;
 
     sim::PrototypeShroud shroud_;
+    struct MaskCell { std::int32_t x, y; std::int64_t ax, ay; };
+    struct MaskRun { int y, x0, x1; bool black; }; // x1 excluded.
+    struct MaskCache {
+        bool anchors_ready = false;
+        std::size_t cell_count = 0;
+        std::vector<MaskCell> cells; // Sorted by anchor y.
+        std::int32_t x0 = 0, y0 = 0, x1 = 0, y1 = 0; // Cell box plus one cell.
+        bool ready = false;
+        std::int64_t camera_x = 0, camera_y = 0;
+        int width = 0, height = 0;
+        render::Rectangle clip;
+        std::uint32_t house = 0;
+        std::vector<std::uint8_t> layer;  // Explored layer of the last rebuild.
+        std::vector<std::uint8_t> dark;   // Clip pixels, 0 clear .. 255 black.
+        std::vector<MaskRun> runs;
+        std::uint64_t rebuilds = 0;
+    };
+    void rebuild_mask(std::uint32_t house, std::int64_t camera_x, std::int64_t camera_y,
+                      render::Rectangle clip) const;
     mutable std::vector<std::uint8_t> layer_; // Scratch for mask_scene.
+    mutable MaskCache mask_;
     Footprint footprint_;
     bool fog_of_war_ = false;
 };
