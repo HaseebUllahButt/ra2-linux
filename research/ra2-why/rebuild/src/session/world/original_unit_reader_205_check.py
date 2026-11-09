@@ -15,6 +15,7 @@ The connected-speed-wheel mode supplies one synthetic SpeedType override.
 The connected-zone-subterranean mode supplies one synthetic MovementZone override.
 The connected-real-placement mode runs the original MovementRestrictedTo reader.
 The connected-restricted-water mode supplies a synthetic Water override.
+The connected-real-armor mode also runs the original Armor reader.
 Other INI, formatting, enumeration, allocation, and asset services are supplied.
 Mode rules and later loading remain omitted.
 """
@@ -27,11 +28,12 @@ from itertools import product
 from unicorn import UC_HOOK_CODE,UC_HOOK_MEM_READ,UC_HOOK_MEM_WRITE
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EIP,UC_X86_REG_ESP
 
-if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--connected','--connected-real-bool','--connected-real-art','--connected-real-integer','--connected-real-float','--connected-real-speed','--connected-speed-wheel','--connected-zone-subterranean','--connected-real-placement','--connected-restricted-water')):
+if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--connected','--connected-real-bool','--connected-real-art','--connected-real-integer','--connected-real-float','--connected-real-speed','--connected-speed-wheel','--connected-zone-subterranean','--connected-real-placement','--connected-restricted-water','--connected-real-armor')):
     raise SystemExit('usage: original_unit_reader_205_check.py game.exe unit_flags_case real_map_case game_dir [mode]')
 executable,native,fixture,game=sys.argv[1:5]
 connected=len(sys.argv)==6
-real_restricted=connected and sys.argv[5] in ('--connected-real-placement','--connected-restricted-water')
+real_armor=connected and sys.argv[5]=='--connected-real-armor'
+real_restricted=connected and (real_armor or sys.argv[5] in ('--connected-real-placement','--connected-restricted-water'))
 real_bool=connected and (real_restricted or sys.argv[5] in ('--connected-real-bool','--connected-real-art','--connected-real-integer','--connected-real-float','--connected-real-speed','--connected-speed-wheel','--connected-zone-subterranean'))
 real_art=connected and (real_restricted or sys.argv[5] in ('--connected-real-art','--connected-real-integer','--connected-real-float','--connected-real-speed','--connected-speed-wheel','--connected-zone-subterranean'))
 real_integer=connected and (real_restricted or sys.argv[5] in ('--connected-real-integer','--connected-real-float','--connected-real-speed','--connected-speed-wheel','--connected-zone-subterranean'))
@@ -87,6 +89,10 @@ zone_copies=[]
 restricted_entries=[]
 restricted_value_range=[]
 restricted_copies=[]
+armor_entries=[]
+armor_value_range=[]
+armor_copies=[]
+armor_returns=[]
 
 def trace_write(cpu,access,address,size,value,user):
     if active[0] and address<=m.TYPE+0x205<address+size:
@@ -108,6 +114,8 @@ def checked_copy_string():
             zone_copies.append(source)
         if restricted_override and restricted_value_range and restricted_value_range[0]<=source<restricted_value_range[1]:
             restricted_copies.append(source)
+        if real_armor and armor_value_range and armor_value_range[0]<=source<armor_value_range[1]:
+            armor_copies.append(source)
     base['copy_string']()
 
 def supplied_scan_float():
@@ -153,6 +161,13 @@ def trace_code(cpu,address,size,user):
             key=bytes(cpu.mem_read(m.argument(1),64)).split(b'\0',1)[0].decode('ascii')
             assert cpu.reg_read(UC_X86_REG_ECX)==0x100b000 and section=='AMCV' and key=='MovementRestrictedTo'
             restricted_entries.append((section,key,m.argument(2)))
+        if real_armor and mode==3 and address==0x46a8b0:
+            section=bytes(cpu.mem_read(m.argument(0),64)).split(b'\0',1)[0].decode('ascii')
+            key=bytes(cpu.mem_read(m.argument(1),64)).split(b'\0',1)[0].decode('ascii')
+            assert cpu.reg_read(UC_X86_REG_ECX)==0x100b000 and section=='AMCV' and key=='Armor'
+            armor_entries.append((section,key,m.argument(2)))
+        if real_armor and mode==3 and address==0x5d7a01:
+            armor_returns.append(cpu.reg_read(UC_X86_REG_EAX))
         if real_bool and address==0x50f410:
             section=bytes(cpu.mem_read(m.argument(0),64)).split(b'\0',1)[0].decode('ascii')
             incoming=cpu.reg_read(UC_X86_REG_ECX)
@@ -262,6 +277,9 @@ if real_bool:
         if restricted_override and digest==original_hash('MovementRestrictedTo'):
             assert value=='Water'
             restricted_value_range[:]=[strings,strings+len(encoded)]
+        if real_armor and digest==original_hash('Armor'):
+            assert value=='heavy'
+            armor_value_range[:]=[strings,strings+len(encoded)]
         m.cpu.mem_write(strings,encoded); m.word(node+0x10,strings); strings+=len(encoded)
         m.word(array+8*index,digest); m.word(array+8*index+4,node)
     m.word(section_cache,original_hash('AMCV')); m.word(section_cache+4,section)
@@ -288,6 +306,7 @@ if real_bool:
         float_prologue=bytes(hash_cpu.mem_read(0x50e3a0,7))
         speed_prologue=bytes(hash_cpu.mem_read(0x46c400,3))
         restricted_prologue=bytes(hash_cpu.mem_read(0x46a970,3))
+        armor_prologue=bytes(hash_cpu.mem_read(0x46a8b0,3))
 for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
     m.cpu.mem_write(m.TYPE,constructor)
     m.cpu.mem_write(m.TYPE+0x205,bytes([initial]))
@@ -315,6 +334,9 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
             if real_restricted:
                 m.cpu.mem_write(0x46a970,restricted_prologue); m.callbacks.pop(0x46a970,None)
                 m.cpu.ctl_remove_cache(0x46a970,0x46a973)
+            if real_armor:
+                m.cpu.mem_write(0x46a8b0,armor_prologue); m.callbacks.pop(0x46a8b0,None)
+                m.cpu.ctl_remove_cache(0x46a8b0,0x46a8b3)
         else:
             m.word(0x100b000+0x24,0)
             m.bind(0x50f410,12,base['boolean'])
@@ -330,6 +352,8 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
                 m.bind(0x46c400,12,base['integer']); m.cpu.ctl_remove_cache(0x46c400,0x46c403)
             if real_restricted:
                 m.bind(0x46a970,12,base['integer']); m.cpu.ctl_remove_cache(0x46a970,0x46a973)
+            if real_armor:
+                m.bind(0x46a8b0,12,base['integer']); m.cpu.ctl_remove_cache(0x46a8b0,0x46a8b3)
         m.cpu.ctl_remove_cache(0x50f410,0x50f413)
     calls.update(parent=0,pair=0,format=0,compare=0)
     chain_calls.clear()
@@ -347,6 +371,9 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
     zone_copies.clear()
     restricted_entries.clear()
     restricted_copies.clear()
+    armor_entries.clear()
+    armor_copies.clear()
+    armor_returns.clear()
     m.cpu.reg_write(UC_X86_REG_ECX,m.TYPE); m.cpu.reg_write(UC_X86_REG_ESP,0x103f000)
     m.cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,0x100b000))
     writes.clear(); active[0]=True
@@ -386,6 +413,9 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
             assert restricted_entries==[('AMCV','MovementRestrictedTo',0xffffffff)]
             assert m.signed(m.TYPE+0xb94)==(2 if restricted_override else -1)
             assert len(restricted_copies)==int(restricted_override)
+        if real_armor:
+            assert raw_rules['Armor']=='heavy' and armor_entries==[('AMCV','Armor',0)]
+            assert len(armor_copies)==1 and armor_returns==[5] and m.signed(m.TYPE+0x9c)==5
     assert calls['parent']==1 and calls['pair']>=1 and calls['format']>=6 and calls['compare']>=1
     if connected: assert chain_calls==[0x70ab40,0x6daf60,0x5d7810,0x4107e0]
 parent_ok[0]=False
@@ -404,4 +434,4 @@ assert not writes and m.cpu.mem_read(m.TYPE+0x205,1)==b'\x01'
 assert calls=={'parent':1,'pair':0,'format':0,'compare':0}
 if connected: assert chain_calls==[0x70ab40,0x6daf60,0x5d7810,0x4107e0]
 print('base x86 %sreader chain preserves supplied Type +205 in %d checked cases'%
-      ('connected synthetic-Water ' if restricted_override else 'connected real-placement ' if real_restricted else 'connected synthetic-zone ' if zone_override else 'connected synthetic-Wheel ' if speed_override else 'connected real-speed ' if real_speed else 'connected real-float ' if real_float else 'connected real-integer ' if real_integer else 'connected real-art ' if real_art else 'connected real-boolean ' if real_bool else 'connected ' if connected else 'UnitType ',9 if connected else 7))
+      ('connected real-armor ' if real_armor else 'connected synthetic-Water ' if restricted_override else 'connected real-placement ' if real_restricted else 'connected synthetic-zone ' if zone_override else 'connected synthetic-Wheel ' if speed_override else 'connected real-speed ' if real_speed else 'connected real-float ' if real_float else 'connected real-integer ' if real_integer else 'connected real-art ' if real_art else 'connected real-boolean ' if real_bool else 'connected ' if connected else 'UnitType ',9 if connected else 7))
