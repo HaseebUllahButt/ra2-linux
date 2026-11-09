@@ -166,6 +166,10 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
         const auto elapsed=std::uint32_t(frame-*last_frame_);
         if (!elapsed || elapsed>0x7fffffffu) return fail(PrototypeMoveStatus::Invalid,"prototype frame is repeated or in the past");
     }
+    if (moves_.empty()) {
+        last_frame_=frame;
+        return {PrototypeMoveStatus::Complete,{},{},{},{}};
+    }
     auto candidate=world;auto moves=moves_;PrototypeMoveResult result;result.status=PrototypeMoveStatus::Complete;
     for (auto it=moves.begin();it!=moves.end();) {
         const auto id=it->first;auto& movement=it->second;auto* actor=find_unit(candidate,id);

@@ -1,4 +1,5 @@
 #include "prototype_movement.h"
+#include <cstdint>
 #include <iostream>
 #include <stdexcept>
 using namespace ra2;
@@ -31,6 +32,26 @@ sw::Snapshot fixture() {
 }
 }
 int main() try {
+    auto idle_world=fixture();PrototypeMovement idle;
+    auto idle_incomplete=idle_world;idle_incomplete.setup_progress=sw::SetupProgress::PackedMapRead;
+    require(idle.tick(idle_incomplete,10).status==PrototypeMoveStatus::NeedsInput,"idle frame accepted unfinished setup");
+    const auto cell_address=reinterpret_cast<std::uintptr_t>(&idle_world.cells.at(key(2,2)));
+    const auto entity_address=reinterpret_cast<std::uintptr_t>(idle_world.entities.data());
+    const auto random=idle_world.random;
+    const auto idle_result=idle.tick(idle_world,10);
+    require(idle_result.status==PrototypeMoveStatus::Complete && idle_result.moved.empty() &&
+            idle_result.arrived.empty() && idle_result.blocked.empty() &&
+            reinterpret_cast<std::uintptr_t>(&idle_world.cells.at(key(2,2)))==cell_address &&
+            reinterpret_cast<std::uintptr_t>(idle_world.entities.data())==entity_address &&
+            idle_world.random.table==random.table && idle_world.random.first==random.first && idle_world.random.second==random.second,
+            "idle frame changed or copied the shared world");
+    require(idle.tick(idle_world,10).status==PrototypeMoveStatus::Invalid &&
+            idle.tick(idle_world,9).status==PrototypeMoveStatus::Invalid &&
+            idle.tick(idle_world,11).status==PrototypeMoveStatus::Complete,"idle frame did not retain the shared clock");
+    require(idle.issue(idle_world,101,{4,2},64).status==PrototypeMoveStatus::Complete &&
+            idle.tick(idle_world,11).status==PrototypeMoveStatus::Invalid &&
+            idle.tick(idle_world,12).status==PrototypeMoveStatus::Complete && idle_world.entities[0].locomotor_moving==true,
+            "movement did not resume on the next shared frame");
     auto original=fixture();auto a=original,b=original;PrototypeMovement first,replay;
     auto incomplete=original;incomplete.setup_progress=sw::SetupProgress::PackedMapRead;
     require(first.issue(incomplete,101,{4,2},64).status==PrototypeMoveStatus::NeedsInput,
