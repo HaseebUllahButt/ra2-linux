@@ -45,6 +45,8 @@ def boolean():
     default=m.argument(2)&255
     key=bytes(m.cpu.mem_read(m.argument(1),64)).split(b'\0',1)[0].decode('ascii')
     if bool_mode[0]==3:
+        section=bytes(m.cpu.mem_read(m.argument(0),64)).split(b'\0',1)[0].decode('ascii')
+        assert section.casefold()=='amcv'
         value=installed.get(key.casefold(),'<absent>')
         first=value[:1].lower()
         result=default if value=='<absent>' or first not in ('0','1','f','n','t','y') else int(first in ('1','t','y'))

@@ -14,7 +14,7 @@ from unicorn import UC_HOOK_MEM_WRITE
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EIP,UC_X86_REG_ESP
 
 if len(sys.argv)!=5:
-    raise SystemExit('usage: original_techno_prefix_205_check.py game.exe unit_flags_case real_map_case game_dir')
+    raise SystemExit('usage: original_techno_reader_205_check.py game.exe unit_flags_case real_map_case game_dir')
 executable,native,fixture,game=sys.argv[1:]
 sys.argv=[sys.argv[0],executable,native,fixture,game]
 base=runpy.run_path(os.path.join(os.path.dirname(__file__),'original_object_reader_205_check.py'))
