@@ -192,18 +192,9 @@ public:
         if (point.x<0 || point.y<0 || point.x>=BattleHud::sidebar_x || point.y>=BattleHud::view_height) return {};
         // TODO-ORIGINAL: Pick the nearest projected floor diamond. Original
         // depth-buffer picking and bridge levels must replace this adapter.
-        int best=46;std::optional<ra2map::Cell> result;
-        for (const auto& [key,state]:world_.cells) {
-            (void)key;
-            if (!state.terrain || !state.terrain->floor_world_height) continue;
-            const auto& t=*state.terrain;
-            sim::Entity e;e.cell=t.cell;e.kind=sim::Kind::Unit;
-            e.position=sim::Coord{int(t.cell.x)*256+128,int(t.cell.y)*256+128,*t.floor_world_height};
-            const auto a=scene_.map_anchor(e);
-            const int distance=std::abs(int(a.x)-camera_x_-point.x)+2*std::abs(int(a.y)-camera_y_-point.y);
-            if (distance<best) {best=distance;result=t.cell;}
-        }
-        return result;
+        // Same nearest-anchor rule as a scan of every floor Cell; floor
+        // heights are fixed after setup, so Scene keeps a bucket index.
+        return scene_.pick_cell(std::int64_t(camera_x_)+point.x,std::int64_t(camera_y_)+point.y);
     }
     BattleView view() const {
         return {{0,0,BattleHud::sidebar_x,BattleHud::view_height},
