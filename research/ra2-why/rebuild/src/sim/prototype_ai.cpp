@@ -537,7 +537,14 @@ void PrototypeAI::run_teams(Context& context, std::vector<skirmish::Order>& resu
         const auto script_at = std::find(script_ids_.begin(), script_ids_.end(), team_types_[team.type].script);
         if (script_at == script_ids_.end()) { finish(team, false); continue; }
         const auto& steps = scripts_[static_cast<std::size_t>(script_at - script_ids_.begin())];
-        const auto centre = *context.own.at(team.members.front())->cell;
+        // Base game.exe 006BAA60 (TeamClass::FetchALeader): use the
+        // greatest LeadershipRating, keeping the first member on a tie.
+        auto leader = team.members.front();
+        for (const auto id : team.members)
+            if (rules_.read_integer(context.own.at(id)->type, "LeadershipRating", 5) >
+                rules_.read_integer(context.own.at(leader)->type, "LeadershipRating", 5))
+                leader = id;
+        const auto centre = *context.own.at(leader)->cell;
         const auto send = [&](skirmish::OrderKind kind, std::uint32_t target, ra2map::Cell cell) {
             for (const auto id : team.members) {
                 auto item = order(kind, context.computer.id, *context.own.at(id));
