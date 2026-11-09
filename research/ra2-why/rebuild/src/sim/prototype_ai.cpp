@@ -741,10 +741,10 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
     // no enemy to 0041C990 until that selection succeeds. A deployed base
     // supplies the centre in this adapter. Damage records also select an enemy
     // through 004EEBA0, even if its construction yard is gone.
-    // TODO-ORIGINAL: any enemy structure counts here, so a lone yard still
-    // enables offense. The reference shows no attack in 38 minutes against
-    // a player who only deploys the yard. 004E8990 anger and base-centre
-    // state is not modelled yet.
+    // TODO-ORIGINAL: the reference shows no attack in 38 minutes against a
+    // player who only deploys the yard. The cause is unknown. 004E8990 and
+    // 004EEBA0 can select that player as enemy: they check no structures.
+    // Look in 0041C990, team filling or the team scripts.
     context.enemy_available = std::any_of(enemies.begin(), enemies.end(),
         [](const WorldEntity* e) { return e->kind == WorldKind::Structure; });
     if (computer->attacker_damage_records)
