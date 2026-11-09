@@ -21,6 +21,7 @@ The connected-real-compare modes also run the original string comparison.
 The connected-real-token modes run the original tokenizer with supplied
 thread storage. Token calls outside VHPScan remain supplied.
 The connected-real-section mode also runs the original AMCV section lookup.
+The connected-real-copy mode also runs the original string-copy routine.
 Other INI, formatting, enumeration, allocation, and asset services are supplied.
 Mode rules and later loading remain omitted.
 """
@@ -33,11 +34,12 @@ from itertools import product
 from unicorn import UC_HOOK_CODE,UC_HOOK_MEM_READ,UC_HOOK_MEM_WRITE
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EIP,UC_X86_REG_ESP
 
-if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--connected','--connected-real-bool','--connected-real-art','--connected-real-integer','--connected-real-float','--connected-real-speed','--connected-speed-wheel','--connected-zone-subterranean','--connected-real-placement','--connected-restricted-water','--connected-real-armor','--connected-real-vhpscan','--connected-vhpscan-strong','--connected-real-compare','--connected-compare-strong','--connected-real-token','--connected-token-strong','--connected-real-section')):
+if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5] not in ('--connected','--connected-real-bool','--connected-real-art','--connected-real-integer','--connected-real-float','--connected-real-speed','--connected-speed-wheel','--connected-zone-subterranean','--connected-real-placement','--connected-restricted-water','--connected-real-armor','--connected-real-vhpscan','--connected-vhpscan-strong','--connected-real-compare','--connected-compare-strong','--connected-real-token','--connected-token-strong','--connected-real-section','--connected-real-copy')):
     raise SystemExit('usage: original_unit_reader_205_check.py game.exe unit_flags_case real_map_case game_dir [mode]')
 executable,native,fixture,game=sys.argv[1:5]
 connected=len(sys.argv)==6
-real_section=connected and sys.argv[5]=='--connected-real-section'
+real_copy=connected and sys.argv[5]=='--connected-real-copy'
+real_section=connected and (real_copy or sys.argv[5]=='--connected-real-section')
 real_token=connected and (real_section or sys.argv[5] in ('--connected-real-token','--connected-token-strong'))
 real_compare=connected and (real_token or sys.argv[5] in ('--connected-real-compare','--connected-compare-strong'))
 real_vhpscan=connected and (real_compare or sys.argv[5] in ('--connected-real-vhpscan','--connected-vhpscan-strong'))
@@ -121,6 +123,8 @@ token_returns=[]
 section_entries=[]
 section_pending={}
 section_returns=[]
+copy_pending={}
+copy_results=[]
 
 def trace_write(cpu,access,address,size,value,user):
     if active[0] and address<=m.TYPE+0x205<address+size:
@@ -131,8 +135,7 @@ def trace_art_value(cpu,access,address,size,value,user):
         for key,(start,end) in art_value_ranges.items():
             if address<end and address+size>start: art_value_reads.add(key)
 
-def checked_copy_string():
-    source=m.argument(1)
+def note_copy_source(source):
     if active[0] and real_art and mode==3:
         for key,(start,end) in art_value_ranges.items():
             if start<=source<end: art_value_reads.add(key)
@@ -146,6 +149,9 @@ def checked_copy_string():
             armor_copies.append(source)
         if vhpscan_override and vhpscan_value_range and vhpscan_value_range[0]<=source<vhpscan_value_range[1]:
             vhpscan_copies.append(source)
+
+def checked_copy_string():
+    note_copy_source(m.argument(1))
     base['copy_string']()
 
 def supplied_single_token():
@@ -185,6 +191,11 @@ def parent_reader():
 
 def trace_code(cpu,address,size,user):
     if active[0] and connected:
+        if real_copy and mode==3 and address in copy_pending:
+            target,expected=copy_pending.pop(address)
+            assert cpu.reg_read(UC_X86_REG_EAX)==target
+            assert bytes(cpu.mem_read(target,len(expected)))==expected
+            copy_results.append(1)
         if real_section and mode==3 and address in section_pending:
             section_pending.pop(address)
             section_returns.append(cpu.reg_read(UC_X86_REG_EAX))
@@ -199,6 +210,15 @@ def trace_code(cpu,address,size,user):
             integer_checked.add(key)
         if address in (0x70ab40,0x6daf60,0x5d7810,0x4107e0): chain_calls.append(address)
         if address==0x6daf60: calls['parent']+=1
+        if real_copy and mode==3 and address==0x7823d0:
+            target,source,count=m.argument(0),m.argument(1),m.argument(2)
+            assert count<=1024
+            raw=bytes(cpu.mem_read(source,count)).split(b'\0',1)[0][:count]
+            expected=raw+bytes(count-len(raw))
+            ret=struct.unpack('<I',bytes(cpu.mem_read(cpu.reg_read(UC_X86_REG_ESP),4)))[0]
+            assert ret not in copy_pending
+            copy_pending[ret]=(target,expected)
+            note_copy_source(source)
         if real_section and mode==3 and address==0x50c9b0:
             section_name=bytes(cpu.mem_read(m.argument(0),64)).split(b'\0',1)[0].decode('ascii')
             assert cpu.reg_read(UC_X86_REG_ECX)==0x100b000 and section_name=='AMCV'
@@ -408,6 +428,7 @@ if real_bool:
         compare_prologue=bytes(hash_cpu.mem_read(0x781f20,3))
         token_prologue=bytes(hash_cpu.mem_read(0x782ec2,3))
         section_prologue=bytes(hash_cpu.mem_read(0x50c9b0,3))
+        copy_prologue=bytes(hash_cpu.mem_read(0x7823d0,3))
 for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
     m.cpu.mem_write(m.TYPE,constructor)
     m.cpu.mem_write(m.TYPE+0x205,bytes([initial]))
@@ -451,6 +472,9 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
             if real_section:
                 m.cpu.mem_write(0x50c9b0,section_prologue); m.callbacks.pop(0x50c9b0,None)
                 m.cpu.ctl_remove_cache(0x50c9b0,0x50c9b3)
+            if real_copy:
+                m.cpu.mem_write(0x7823d0,copy_prologue); m.callbacks.pop(0x7823d0,None)
+                m.cpu.ctl_remove_cache(0x7823d0,0x7823d3)
         else:
             m.word(0x100b000+0x24,0)
             m.bind(0x50f410,12,base['boolean'])
@@ -476,6 +500,8 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
                 m.bind(0x782ec2,0,supplied_single_token); m.cpu.ctl_remove_cache(0x782ec2,0x782ec5)
             if real_section:
                 m.bind(0x50c9b0,4,base['section_lookup']); m.cpu.ctl_remove_cache(0x50c9b0,0x50c9b3)
+            if real_copy:
+                m.bind(0x7823d0,0,checked_copy_string); m.cpu.ctl_remove_cache(0x7823d0,0x7823d3)
         m.cpu.ctl_remove_cache(0x50f410,0x50f413)
     calls.update(parent=0,pair=0,format=0,compare=0)
     chain_calls.clear()
@@ -510,6 +536,8 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
     section_entries.clear()
     section_pending.clear()
     section_returns.clear()
+    copy_pending.clear()
+    copy_results.clear()
     m.cpu.reg_write(UC_X86_REG_ECX,m.TYPE); m.cpu.reg_write(UC_X86_REG_ESP,0x103f000)
     m.cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,0x100b000))
     writes.clear(); active[0]=True
@@ -523,8 +551,7 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
         if real_bool: assert len(bool_entries)>100
         if real_art:
             assert {(0x50f410,'Voxel'),(0x50f410,'Remapable'),(0x50e9a0,'Cameo')} <= set(art_entries)
-            # Cameo uses the supplied string-copy service. Boolean bytes
-            # execute in x86.
+            # Track the Cameo copy and original boolean reads separately.
             assert {'Voxel','Remapable','Cameo'} <= art_value_reads, art_value_reads
         if real_integer:
             assert {('MCV','Facings'),('AMCV','Strength')} <= set(integer_entries)
@@ -568,6 +595,7 @@ for initial,mode in product((0,1),(0,1,2,3) if connected else (0,1,2)):
             assert token_returns==[source] and m.read(0x14c1000+0x18)==source+length
         if real_section:
             assert section_entries==['AMCV'] and section_returns==[section] and not section_pending
+        if real_copy: assert len(copy_results)==87 and not copy_pending
     assert calls['parent']==1 and calls['pair']>=1 and calls['format']>=6 and calls['compare']>=1
     if connected: assert chain_calls==[0x70ab40,0x6daf60,0x5d7810,0x4107e0]
 parent_ok[0]=False
@@ -609,4 +637,4 @@ if real_section:
     assert calls=={'parent':1,'pair':0,'format':0,'compare':0}
     assert chain_calls==[0x70ab40,0x6daf60,0x5d7810,0x4107e0]
 print('base x86 %sreader chain preserves supplied Type +205 in %d checked cases'%
-      ('connected real-section ' if real_section else 'connected token-Strong ' if real_token and vhpscan_override else 'connected real-token ' if real_token else 'connected compare-Strong ' if real_compare and vhpscan_override else 'connected real-compare ' if real_compare else 'connected synthetic-VHPScan ' if vhpscan_override else 'connected real-VHPScan ' if real_vhpscan else 'connected real-armor ' if real_armor else 'connected synthetic-Water ' if restricted_override else 'connected real-placement ' if real_restricted else 'connected synthetic-zone ' if zone_override else 'connected synthetic-Wheel ' if speed_override else 'connected real-speed ' if real_speed else 'connected real-float ' if real_float else 'connected real-integer ' if real_integer else 'connected real-art ' if real_art else 'connected real-boolean ' if real_bool else 'connected ' if connected else 'UnitType ',10 if real_section else 9 if connected else 7))
+      ('connected real-copy ' if real_copy else 'connected real-section ' if real_section else 'connected token-Strong ' if real_token and vhpscan_override else 'connected real-token ' if real_token else 'connected compare-Strong ' if real_compare and vhpscan_override else 'connected real-compare ' if real_compare else 'connected synthetic-VHPScan ' if vhpscan_override else 'connected real-VHPScan ' if real_vhpscan else 'connected real-armor ' if real_armor else 'connected synthetic-Water ' if restricted_override else 'connected real-placement ' if real_restricted else 'connected synthetic-zone ' if zone_override else 'connected synthetic-Wheel ' if speed_override else 'connected real-speed ' if real_speed else 'connected real-float ' if real_float else 'connected real-integer ' if real_integer else 'connected real-art ' if real_art else 'connected real-boolean ' if real_bool else 'connected ' if connected else 'UnitType ',10 if real_section else 9 if connected else 7))
