@@ -21,6 +21,14 @@ struct FootPathInputs {
     std::optional<std::uint32_t> frame;
     std::optional<std::int32_t> close_enough; // Rules base +1380 / expansion +1718; original internal distance units.
     std::optional<double> path_delay; // Rules PathDelay, base +13C8 / expansion +1760, in minutes.
+    std::optional<ra2map::Cell> invalid_cell; // Resolved global Cell sentinel, base 00865F00 / expansion 008B3D88.
+};
+struct FootGoalContents {
+    std::optional<bool> enabled; // Base 00A40958 / expansion 00A8E9A0 enables Cell Building traversal.
+    std::optional<std::vector<std::optional<int>>> ordered_kinds; // Full original ground list, virtual +2C results.
+};
+struct FootFailureHouse {
+    std::optional<std::uint8_t> field_1ec,field_1ed; // Base +134/+135. Keep raw byte meaning explicit.
 };
 struct FootPathQuery {
     ra2map::Cell goal;
@@ -41,8 +49,18 @@ struct FootPathCallbacks {
     std::function<std::optional<bool>()> stop_locomotor; // Null path: Foot +48C/+500 calls locomotor virtual +48.
     std::function<std::optional<bool>()> above_bridge; // Actor base +79 / expansion +8C after the stop callback.
     std::function<std::optional<bool>(ra2map::Cell)> goal_bridge; // Explicit Cell +140 bit 100 after the stop callback.
+    std::function<std::optional<FootGoalContents>(ra2map::Cell)> goal_contents; // Read-only, original ground-link order.
+    std::function<std::optional<bool>(std::optional<ra2map::Cell>,bool)> set_destination; // Base +410 / expansion +480.
+    std::function<std::optional<bool>()> failure_slot_3c8; // Base +370 / expansion +3C8, argument zero.
+    std::function<std::optional<FootFailureHouse>()> failure_house; // Read the current owner after both preceding virtual calls.
+    std::function<std::optional<bool>()> failure_mode; // Base 00A3D298 / expansion 00A8B238 is nonzero; read again after mission.
+    std::function<std::optional<bool>(unsigned,bool)> queue_mission; // Base +1D0 / expansion +1E8; raw original mission numbers.
+    std::function<std::optional<ra2map::Cell>()> failure_goal; // Resolved base 004EB270 / expansion 00500200.
 };
-enum class FootPathStep { CanQueue,Position,EnterGoal,MarkOut,Find,MarkIn,CurrentCell,StopLocomotor,FailurePosition,FailureBridgeLayer,GoalBridge };
+enum class FootPathStep {
+    CanQueue,Position,EnterGoal,MarkOut,Find,MarkIn,CurrentCell,StopLocomotor,FailurePosition,FailureBridgeLayer,GoalBridge,
+    GoalContents,FailureDestination,FailureSlot3c8,FailureHouse,FailureMode,FailureMission,FailureGoal
+};
 enum class FootPathStatus { Complete, NeedsInput, Unsupported };
 struct FootPathResult {
     FootPathStatus status=FootPathStatus::NeedsInput;
@@ -53,7 +71,7 @@ struct FootPathResult {
     std::string detail;
 };
 // Base 004C3000 / expansion 004D3920, ordinary Unit class, no retarget or
-// linked-Unit propagation. Null paths require a resolved nearby failure slice. The Unit metadata
+// linked-Unit propagation. Failure virtual bodies remain explicit callbacks. The Unit metadata
 // virtual is a no-op: base 0041B540 / expansion 0041C140.
 // Called bodies remain explicit. Marks must operate on private staged state.
 // Only Complete supplies publishable queue state. No live Move command is enabled.

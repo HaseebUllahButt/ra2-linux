@@ -1124,6 +1124,11 @@ Their expansion fields are +640/+644/+648. The second field must not be replaced
 The final current-cell getter supplies base +450 / expansion +558 for a nonnull path.
 Entry status 6 continues without retargeting when the initial distance is no greater than resolved Rules CloseEnough.
 The equality boundary follows base 004C317B..004C317F.
+Entry status 7 continues when the original goal-cell Building lookup proves empty.
+`FootGoalContents` preserves the lookup-enable flag and original ordered ground occupants' runtime types.
+Base 004717B0 / expansion 0047C520 skips traversal when the flag is clear.
+When enabled, the native code checks each known type in order and stops at the first Building type 6.
+Unknown flags, links, or types remain NeedsInput. A Building reaches the still unsupported retarget branch.
 
 A known null path updates the failure timer before stopping the locomotor.
 It writes the frame, retains signed source-Y minus goal-center-Y, and writes truncated `PathDelay * 900`.
@@ -1136,18 +1141,32 @@ A nearby failure returns false when the source and goal cells differ by at most 
 The actor must be on the bridge layer, or the goal Cell bit 100 must be explicitly clear.
 This branch preserves the prior last-cell field. It does not turn a failed search into movement.
 
+Distant failure or a nearby bridge mismatch runs the original failure dispatch in order.
+It calls destination virtual +410/+480 with null and true, then virtual +370/+3C8 with zero.
+It then reads current owner bytes +134/+135 or expansion +1EC/+1ED.
+The real owner predicate is base 004F52F0 / expansion 0050B730.
+A nonzero first byte selects original mission 5.
+With a zero first byte, a zero global mode also permits the second byte to select mission 5.
+Otherwise the wrapper selects original mission 11, then reads the global mode again after that callback.
+A nonzero mode calls the resolved House goal helper and compares the result with the explicit invalid-Cell sentinel.
+A nonsentinel goal calls the destination virtual again with that Cell and true.
+The callback interface preserves these raw mission numbers without assigning unproved names or behavior.
+It returns the original false result and preserves the prior last-cell field.
+Destination, secondary virtual, mission, and House-goal bodies remain resolved caller work.
+Read-only owner and mode getters must observe private staged state after earlier callbacks.
+
 Only Complete returns publishable queue state. Error results preserve the input state.
 Callbacks must use a private staged world because marking precedes later unresolved calls.
-Linked-object distance, train handling, retargeting, distant failure missions, and linked-Unit propagation remain unsupported.
+Linked-object distance, train handling, retargeting, and linked-Unit propagation remain unsupported.
 Unknown bridge state remains unknown. Terrain and overlay absence do not supply bridge flags.
 The called guard, mark, entry, and goal-search bodies remain separate dependencies.
 This module does not enable live goal commands or create missing staged-world state.
 
 `original_foot_path_check.py executable [--base] --vectors` runs 512 full original wrapper calls per edition.
 The real stack probe, coordinate getters, square root, conversion, metadata no-op, queue copy, and counters execute.
-Adapters supply queue guards, goal entry, marking, cell lookup, path results, and locomotor stop.
+Adapters supply queue guards, goal entry, marking, cell lookup, path results, locomotor stop, and failure mutation bodies.
 The original Foot stop virtual executes before the supplied locomotor stop body.
-The fixture checks unchanged actor position and fails if the wrapper consumes shared RNG.
+The fixture checks actor position against explicit callback effects and fails if the checked branch consumes shared RNG.
 Vectors include rejected guards, every append offset, truncated paths, terminators, zero cost keys, and retained tails.
 Every vector hashes queue words, raw fields, last cell, initial distance, and ordered callback arguments.
 The cases include entry status 6 at the CloseEnough boundary, nearby null paths, explicit bridge layers, and seven PathDelay values.
@@ -1160,4 +1179,12 @@ It includes zero X with nonzero Y, zero Y with nonzero X, and opposite-sign offs
 Every accepted null path must preserve the initial Y delta at base +534 / expansion +644.
 Both editions match hash 131F4268. Compare with native `--asymmetric-vectors`.
 This corrects the earlier X-delta claim, which equal-axis null-path fixtures could not distinguish.
-The default native test runs all three sets and twenty-eight unresolved input, unsupported branch, and atomic-result checks.
+The original `--distant` mode adds 512 distant or explicit bridge-failure cases per edition, with independent X/Y offsets.
+The actual owner predicate and actual Cell Building traversal execute unchanged.
+The fixture includes disabled traversal with unknown links, known empty lists, and lists containing a Unit.
+Destination and secondary callbacks change owner fields. Mission callbacks change the global mode before the second read.
+Some stop callbacks move the actor from a distant position to a nearby position.
+The initial raw Y delta must stay unchanged, while the later branch must read the new position.
+Vectors compare call order, destination, mission, owner bytes, global mode, actor position, queue, and raw fields.
+Both editions match hash FFDCED71. Compare with native `--distant-vectors`.
+The default native test runs all four sets and forty-six unresolved input, unsupported branch, and atomic-result checks.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run ordinary Unit branches of the original Foot path wrapper.
 
-Usage: original_foot_path_check.py executable [--base] [--ordinary|--asymmetric] [--trace] [--vectors]
+Usage: original_foot_path_check.py executable [--base] [--ordinary|--asymmetric|--distant] [--trace] [--vectors]
 Queue guard, goal entry, marking, map lookup and path results are resolved adapters.
 The wrapper, stack probe, coordinate getters, square root, conversion, metadata
 no-op, queue copy, raw field writes and successful return execute unchanged.
@@ -15,6 +15,10 @@ cpu=load_original(sys.argv[1]); base='--base' in sys.argv
 cpu.mem_map(0x1000000,0x100000)
 ACTOR,TYPE,VT,CELL,RULES,PATH=0x1000000,0x1003000,0x1005000,0x1008000,0x100a000,0x100c000
 STACK,STOP=0x10ff000,0x10fe000
+HOUSE=0x100e000
+failure_mode=0xa3d298 if base else 0xa8b238
+house_a,house_b=(0x134,0x135) if base else (0x1ec,0x1ed)
+invalid_cell=0x865f00 if base else 0x8b3d88
 original_vt=0x7addf8 if base else 0x7f5c70
 position=0x88 if base else 0x9c
 queue=0x4d0 if base else 0x5e0
@@ -65,8 +69,35 @@ def computed_distance():
 callbacks[0x4c3110 if base else 0x4d3a30]=computed_distance
 def stop():
     events.append((4,0,0,0))
+    if state['distant'] and state['seed']%11==0:
+        point=(state['goal'][0]*256+128+301,state['goal'][1]*256+128-87,state['source'][2])
+        cpu.mem_write(ACTOR+position,struct.pack('<iii',*point)); state['after_position']=point
     cpu.reg_write(UC_X86_REG_EAX,0)
 bind(0x1007030,4,stop)
+def destination():
+    point=read(argument()+0x24) if argument() else None
+    events.append((5,int(point is not None),point or 0,argument(1)))
+    state['destination']=point
+    if point is None and state['seed']%7==0: cpu.mem_write(HOUSE+house_a,b'\x01')
+    cpu.reg_write(UC_X86_REG_EAX,0)
+def secondary():
+    assert argument()==0
+    events.append((6,0,0,0)); state['secondary']=True
+    if state['seed']%4==0: cpu.mem_write(HOUSE+house_b,b'\x00')
+    cpu.reg_write(UC_X86_REG_EAX,0)
+def mission():
+    assert argument(1)==0
+    number=argument(); events.append((7,number,0,0)); state['mission']=number
+    if number==11: word(failure_mode,(state['seed']//2)%2)
+    cpu.reg_write(UC_X86_REG_EAX,0)
+def failure_goal():
+    assert argument(1)==ACTOR
+    events.append((8,0,0,0)); word(argument(),state['fallback_goal'])
+    cpu.reg_write(UC_X86_REG_EAX,argument())
+bind(0x1007040,8,destination); bind(0x1007050,4,secondary); bind(0x1007060,8,mission)
+bind(0x4eb270 if base else 0x500200,8,failure_goal)
+# Observe the actual Cell Building traversal without changing its instructions.
+callbacks[0x4717b0 if base else 0x47c520]=lambda:events.append((9,read(CELL+0x24),0,0))
 def rng(): raise AssertionError('resolved ordinary Foot wrapper consumed RNG')
 callbacks[0x638840 if base else 0x65c780]=rng
 callbacks[0x6388a0 if base else 0x65c7e0]=rng
@@ -82,18 +113,30 @@ def inputs(seed):
             (64+next_value()%16)*256+128-next_value()%97,(seed%5)*104)
     ordinary='--ordinary' in sys.argv
     asymmetric='--asymmetric' in sys.argv
-    present=not asymmetric and (ordinary or seed%9!=0)
+    distant='--distant' in sys.argv
+    present=not asymmetric and not distant and (ordinary or seed%9!=0)
     if not present:
         source=((goal[0]+seed%3-1)*256+128,(goal[1]+(seed//3)%3-1)*256+128,source[2])
+    if distant:
+        source=((goal[0]+2+seed%3)*256+128+seed%13-6,
+                (goal[1]+(seed//3)%5-2)*256+128+seed%17-8,source[2])
+        if seed%5==0:
+            source=((goal[0]+seed%3-1)*256+128+seed%13-6,
+                    (goal[1]+(seed//3)%3-1)*256+128+seed%17-8,source[2])
     append=next_value()%25; mode=next_value()%3; guard=next_value()%5!=0
     cost=next_value()%99+1; count=next_value()%48
     if seed%11==0: cost=0
     path=[next_value()%8 for _ in range(count)]+[-1]
     old=[(seed+i)%8 for i in range(24)]
     if seed%7==0: old[0]=-1
+    sentinel=0xffffffff if seed%2 else 0x7fff7fff
     return dict(goal=goal,source=source,append=append,mode=mode,guard=guard,cost=cost,path=path,old=old,
-                present=present,entry=0 if ordinary else 6 if seed%4==0 else seed%6,close_delta=seed%3,
-                delay=(.01,0.,.333,1./900,1.23456789,-.01,2.)[seed%7],above_bridge=seed%2==0)
+                present=present,entry=7 if distant and seed%4==0 else 0 if ordinary else 6 if seed%4==0 else seed%6,close_delta=seed%3,
+                delay=(.01,0.,.333,1./900,1.23456789,-.01,2.)[seed%7],above_bridge=False if distant and seed%5==0 else seed%2==0,
+                bridge_goal=distant and seed%5==0,
+                seed=seed,distant=distant,invalid=sentinel,
+                fallback_goal=sentinel if seed%3==0 else (50+seed%7)|((64+seed%7)<<16),
+                destination=None,secondary=False,mission=None)
 
 def run(seed):
     global state,events,distances
@@ -105,10 +148,20 @@ def run(seed):
     word(ACTOR+(0x564 if base else 0x674),TYPE+0x1100)
     word(TYPE+0x1100,VT+0x700); word(VT+0x748,0x1007030)
     cpu.mem_write(ACTOR+(0x79 if base else 0x8c),bytes([state['above_bridge']]))
-    word(CELL+0x140,0) # Explicit resolved fixture bridge flag; no terrain inference.
+    word(CELL+0x140,0x100 if state['bridge_goal'] else 0) # Explicit fixture flag; no terrain inference.
     word(VT+(0x2ac if base else 0x2cc),0x1007000)
     word(VT+(0x194 if base else 0x1ac),0x1007010)
     word(VT+(0x11c if base else 0x124),0x1007020)
+    word(VT+(0x410 if base else 0x480),0x1007040)
+    word(VT+(0x370 if base else 0x3c8),0x1007050)
+    word(VT+(0x1d0 if base else 0x1e8),0x1007060)
+    word(ACTOR+(0x1b4 if base else 0x21c),HOUSE)
+    cpu.mem_write(HOUSE,bytes(0x300))
+    cpu.mem_write(HOUSE+house_a,bytes([2 if seed%5==0 else 0]))
+    cpu.mem_write(HOUSE+house_b,bytes([255 if seed%3==0 else 0]))
+    word(failure_mode,int(seed%2==0)); word(invalid_cell,state['invalid'])
+    cpu.mem_write(0xa40958 if base else 0xa8e9a0,bytes([seed%3!=0]))
+    word(CELL+0xe4,0xdead0000 if seed%3==0 else 0 if seed%3==1 else ACTOR)
     cpu.mem_write(ACTOR+position,struct.pack('<iii',*state['source']))
     cpu.mem_write(ACTOR+queue,struct.pack('<24i',*state['old']))
     for i,value in enumerate((0x12345678,0x3456789a,0x56789abc)): word(ACTOR+raw+i*4,value)
@@ -123,7 +176,8 @@ def run(seed):
         print('unresolved Foot dependency',hex(cpu.reg_read(UC_X86_REG_EIP)),[hex(address) for address in recent],events,file=sys.stderr)
         raise
     assert cpu.reg_read(UC_X86_REG_EIP)==STOP,'ordinary Foot wrapper bound exceeded'
-    assert tuple(struct.unpack('<iii',cpu.mem_read(ACTOR+position,12)))==state['source']
+    after_position=tuple(struct.unpack('<iii',cpu.mem_read(ACTOR+position,12)))
+    assert after_position==state.get('after_position',state['source'])
     fields=tuple(signed(read(ACTOR+raw+i*4)) for i in range(3))
     if '--asymmetric' in sys.argv and state['guard']:
         dx=state['source'][0]-(state['goal'][0]*256+128)
@@ -143,6 +197,11 @@ def run(seed):
     mix(distances[0] if distances else -1)
     for event in events:
         for value in event: mix(value)
+    if state['distant']:
+        mix(0xffffffff if state['destination'] is None else state['destination'])
+        mix(state['secondary']); mix(0xffffffff if state['mission'] is None else state['mission'])
+        mix(read(failure_mode)); mix(cpu.mem_read(HOUSE+house_a,1)[0]); mix(cpu.mem_read(HOUSE+house_b,1)[0])
+        for value in after_position: mix(value)
     return h
 
 total=2166136261

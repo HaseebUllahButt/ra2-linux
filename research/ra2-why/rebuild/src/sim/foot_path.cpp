@@ -42,14 +42,26 @@ FootPathResult original_unit_basic_path(const FootPathState& in,const FootPathIn
         out.initial_distance=distance.between(position,goal);
         if (!require(input.field_5d4_is_null,"Foot field +5D4/+4C4 is unresolved"))
             throw Unsupported{"Foot linked-object distance helper is not recovered"};
-        // The unlinked CloseEnough read cannot affect this ordinary entry branch.
+        // Resolve the unlinked CloseEnough threshold only when entry status 6 needs it.
         if (require(input.is_train,"Foot UnitType IsTrain is unresolved"))
             throw Unsupported{"Foot train path handling is not recovered"};
         out.steps.push_back(FootPathStep::EnterGoal);
         if (!cb.enter_goal) throw Missing{"Foot goal-entry body is missing"};
         const auto entry=require(cb.enter_goal(input.goal),"Foot goal-entry result is unresolved");
-        if (entry==7 || (entry==6 && *out.initial_distance>require(input.close_enough,"Foot CloseEnough is unresolved")))
+        if (entry==6 && *out.initial_distance>require(input.close_enough,"Foot CloseEnough is unresolved"))
             throw Unsupported{"Foot goal retarget decisions are not recovered"};
+        if (entry==7) {
+            out.steps.push_back(FootPathStep::GoalContents);
+            if (!cb.goal_contents) throw Missing{"Foot goal Building lookup inputs are missing"};
+            const auto contents=require(cb.goal_contents(input.goal),"Foot goal Building lookup inputs are unresolved");
+            // Base 004717B0 / expansion 0047C520 scans the original ground list only when enabled.
+            if (require(contents.enabled,"Foot goal Building lookup flag is unresolved")) {
+                const auto kinds=require(contents.ordered_kinds,"Foot goal ground occupant order is unresolved");
+                for (const auto& kind:kinds)
+                    if (require(kind,"Foot goal occupant runtime type is unresolved")==6)
+                        throw Unsupported{"Foot Building-goal retarget decisions are not recovered"};
+            }
+        }
         const auto mark=[&](bool inserted) {
             out.steps.push_back(inserted?FootPathStep::MarkIn:FootPathStep::MarkOut);
             if (!cb.mark) throw Missing{"Foot mark body is missing"};
@@ -94,15 +106,48 @@ FootPathResult original_unit_basic_path(const FootPathState& in,const FootPathIn
             // The original reads actor coordinates after this virtual, not the earlier getter result.
             out.steps.push_back(FootPathStep::FailurePosition);
             const auto after_stop=require(cb.position(),"Foot position after locomotor stop is unresolved");
-            if (std::max(std::abs(signed_cell(after_stop.x)-input.goal.x),std::abs(signed_cell(after_stop.y)-input.goal.y))>1)
-                throw Unsupported{"Foot distant null-path mission fallback is not recovered"};
-            out.steps.push_back(FootPathStep::FailureBridgeLayer);
-            if (!cb.above_bridge) throw Missing{"Foot actor bridge layer getter is missing"};
-            if (!require(cb.above_bridge(),"Foot actor bridge layer is unresolved")) {
-                out.steps.push_back(FootPathStep::GoalBridge);
-                if (!cb.goal_bridge) throw Missing{"Foot goal bridge flag getter is missing"};
-                if (require(cb.goal_bridge(input.goal),"Foot goal bridge flag is unresolved"))
-                    throw Unsupported{"Foot bridge null-path mission fallback is not recovered"};
+            bool dispatch=std::max(std::abs(signed_cell(after_stop.x)-input.goal.x),std::abs(signed_cell(after_stop.y)-input.goal.y))>1;
+            if (!dispatch) {
+                out.steps.push_back(FootPathStep::FailureBridgeLayer);
+                if (!cb.above_bridge) throw Missing{"Foot actor bridge layer getter is missing"};
+                if (!require(cb.above_bridge(),"Foot actor bridge layer is unresolved")) {
+                    out.steps.push_back(FootPathStep::GoalBridge);
+                    if (!cb.goal_bridge) throw Missing{"Foot goal bridge flag getter is missing"};
+                    dispatch=require(cb.goal_bridge(input.goal),"Foot goal bridge flag is unresolved");
+                }
+            }
+            if (dispatch) {
+                // Base 004C380D / expansion 004D413A, after the linked-object branch is excluded.
+                const auto destination=[&](std::optional<ra2map::Cell> cell) {
+                    out.steps.push_back(FootPathStep::FailureDestination);
+                    if (!cb.set_destination) throw Missing{"Foot failure destination body is missing"};
+                    (void)require(cb.set_destination(cell,true),"Foot failure destination body is unresolved");
+                };
+                destination({});
+                out.steps.push_back(FootPathStep::FailureSlot3c8);
+                if (!cb.failure_slot_3c8) throw Missing{"Foot failure virtual +3C8/+370 body is missing"};
+                (void)require(cb.failure_slot_3c8(),"Foot failure virtual +3C8/+370 is unresolved");
+                out.steps.push_back(FootPathStep::FailureHouse);
+                if (!cb.failure_house) throw Missing{"Foot failure House getter is missing"};
+                const auto house=require(cb.failure_house(),"Foot failure House state is unresolved");
+                const auto mode=[&]() {
+                    out.steps.push_back(FootPathStep::FailureMode);
+                    if (!cb.failure_mode) throw Missing{"Foot failure global mode getter is missing"};
+                    return require(cb.failure_mode(),"Foot failure global mode is unresolved");
+                };
+                // Real owner predicate: base 004F52F0 / expansion 0050B730.
+                bool owner_flag=require(house.field_1ec,"Foot owner byte +1EC/+134 is unresolved")!=0;
+                if (!owner_flag && !mode()) owner_flag=require(house.field_1ed,"Foot owner byte +1ED/+135 is unresolved")!=0;
+                out.steps.push_back(FootPathStep::FailureMission);
+                if (!cb.queue_mission) throw Missing{"Foot failure mission body is missing"};
+                (void)require(cb.queue_mission(owner_flag?5:11,false),"Foot failure mission body is unresolved");
+                if (!owner_flag && mode()) {
+                    out.steps.push_back(FootPathStep::FailureGoal);
+                    if (!cb.failure_goal) throw Missing{"Foot failure goal helper is missing"};
+                    const auto cell=require(cb.failure_goal(),"Foot failure goal is unresolved");
+                    const auto invalid=require(input.invalid_cell,"Foot invalid Cell sentinel is unresolved");
+                    if (cell.x!=invalid.x || cell.y!=invalid.y) destination(cell);
+                }
             }
         }
         out.state=std::move(state); out.status=FootPathStatus::Complete;
