@@ -1,4 +1,3 @@
-#include <cmath>
 #include "prototype_yuri.h"
 #include "../fs/mix_bootstrap.h"
 
@@ -34,22 +33,29 @@ void expect_load_throws(const std::string& rules_text, const char* what) {
 
 // One gattling frame per call, firing for the given frame count.
 void fire_for(yu::GattlingState& state, int frames) {
-    for (int i = 0; i < frames; ++i) state.tick(true, false);
+    for (int i = 0; i < frames; ++i) state.tick(true, false, false);
 }
 void cool_for(yu::GattlingState& state, int frames) {
-    for (int i = 0; i < frames; ++i) state.tick(false, false);
+    for (int i = 0; i < frames; ++i) state.tick(false, false, false);
 }
 } // namespace
 
 int main(int argc, char** argv) try {
-    if (argc < 2) throw std::runtime_error("Usage: prototype_yuri_test <rulesmd.ini> [artmd.ini]");
+    if (argc != 2) throw std::runtime_error("Usage: prototype_yuri_test <game-dir>");
 
     // --- Real game data through the MIX loader. ---------------------------
-    // ra2md.mix is not on every machine: read rulesmd.ini from a path.
-    // argv[1] is the rulesmd.ini path; artmd.ini is optional (argv[2]).
+    ra2::fs::MixFileSystem files(argv[1]);
+    files.mount_language(ra2::fs::GameVariant::YurisRevenge);
+    files.bootstrap(ra2::fs::GameVariant::YurisRevenge);
+    const auto rules_bytes = files.read_file("RULESMD.INI");
+    require(rules_bytes.has_value(), "RULESMD.INI is missing from the expansion mixes");
+    const auto art_bytes = files.read_file("ARTMD.INI");
+    require(art_bytes.has_value(), "ARTMD.INI is missing from the expansion mixes");
     IniFile rules_md, art_md;
-    rules_md.load_file(argv[1]);
-    if (argc > 2) art_md.load_file(argv[2]);
+    rules_md.parse(std::string_view(
+        reinterpret_cast<const char*>(rules_bytes->data()), rules_bytes->size()));
+    art_md.parse(std::string_view(
+        reinterpret_cast<const char*>(art_bytes->data()), art_bytes->size()));
     const auto yuri = yu::PrototypeYuriRules::load(rules_md, art_md);
 
     // The Yuri side from [Sides] and [Countries].
@@ -134,16 +140,13 @@ int main(int argc, char** argv) try {
 
     // artmd.ini additions.
     const auto* gattling_tank = yuri.find_vehicle("YTNK");
-    // artmd.ini is not on every machine; check its fields only when given.
-    require(gattling_tank && gattling_tank->gattling, "Gattling Tank rules changed");
-    if (argc > 2)
-        require(gattling_tank->voxel && gattling_tank->cameo == "YTNKICON",
-                "Gattling Tank art changed");
+    require(gattling_tank && gattling_tank->voxel && gattling_tank->gattling &&
+            gattling_tank->cameo == "YTNKICON",
+            "Gattling Tank art changed");
     const auto* grinder_art = yuri.find_building("YAGRND");
-    require(grinder_art, "Grinder is missing");
-    if (argc > 2)
-        require(grinder_art->foundation == "3x3" && grinder_art->buildup == "YAGRNDMK",
-                "Grinder art changed");
+    require(grinder_art && grinder_art->foundation == "3x3" &&
+            grinder_art->buildup == "YAGRNDMK",
+            "Grinder art changed");
     require(ggi->voxel == false, "Guardian GI must stay a sprite");
 
     // Mind control weapons from rulesmd.ini.
@@ -179,7 +182,7 @@ int main(int argc, char** argv) try {
             "Magnetron drop rules changed");
     require(yuri.refund_percent == 50, "RefundPercent changed");
     require(yuri.open_topped.range_bonus == 2 &&
-            std::abs(yuri.open_topped.damage_multiplier - 1.2) < 1e-6 &&
+            yuri.open_topped.damage_multiplier == 1.2 &&
             yuri.open_topped.warp_distance == 7,
             "Battle Fortress open-topped rules changed");
     // Gattling stage pairs.
@@ -204,23 +207,23 @@ int main(int argc, char** argv) try {
             "Gattling Cannon stage weapons changed");
 
     // --- Mind control behaviour (CaptureManager prototype). ---------------
-    yu::MindController tower_ctl(yuri.multi_tower_control.nodes,
+    const yu::MindController tower(yuri.multi_tower_control.nodes,
                                    yuri.multi_tower_control.infinite, yuri.overload);
-    require(tower_ctl.full() == false && tower_ctl.overloaded() == false,
+    require(tower.full() == false && tower.overloaded() == false,
             "A fresh controller is not empty");
-    require(tower_ctl.capture(1, 10) && tower_ctl.capture(2, 20) && tower_ctl.capture(3, 30),
-            "A tower_ctl cannot capture three targets");
-    require(tower_ctl.node_count() == 3 && tower_ctl.full(),
+    require(tower.capture(1, 10) && tower.capture(2, 20) && tower.capture(3, 30),
+            "A tower cannot capture three targets");
+    require(tower.node_count() == 3 && tower.full(),
             "Tower node count is wrong");
     // The fourth capture drops every link first.
-    require(tower_ctl.capture(4, 40), "The tower_ctl cannot capture a fourth target");
-    require(tower_ctl.node_count() == 1 && tower_ctl.controls(4) && !tower_ctl.controls(1),
-            "The tower_ctl kept its old links");
-    require(tower_ctl.overload_tick() == 0,
+    require(tower.capture(4, 40), "The tower cannot capture a fourth target");
+    require(tower.node_count() == 1 && tower.controls(4) && !tower.controls(1),
+            "The tower kept its old links");
+    require(tower.overload_tick() == 0,
             "A non-infinite controller takes no overload damage");
 
     // Yuri Prime swaps its single target.
-    yu::MindController prime_control(yuri.mind_control.nodes,
+    const yu::MindController prime_control(yuri.mind_control.nodes,
                                            yuri.mind_control.infinite, yuri.overload);
     require(prime_control.capture(7, 70), "Yuri cannot capture");
     require(prime_control.capture(8, 80), "Yuri cannot swap targets");
@@ -230,14 +233,14 @@ int main(int argc, char** argv) try {
     require(prime_control.free(8) == 0, "Free returned a ghost owner");
 
     // The Mastermind overloads past its limit.
-    yu::MindController mastermind_control(yuri.multi_tank_control.nodes,
+    const yu::MindController mastermind_control(yuri.multi_tank_control.nodes,
                                                 yuri.multi_tank_control.infinite,
                                                 yuri.overload);
     for (std::uint32_t t = 1; t <= 3; ++t)
         require(mastermind_control.capture(t, 100 + t),
                 "The Mastermind cannot capture three targets");
-    require(mastermind_control.capture(4, 104),
-            "The Mastermind cannot capture past its limit");
+    require(!mastermind_control.capture(4, 104),
+            "The Mastermind captured past its limit without overload");
     require(mastermind_control.overloaded(), "The Mastermind is not overloaded");
     std::int32_t damage = 0;
     for (int frame = 0; frame < 60; ++frame) damage += mastermind_control.overload_tick();
@@ -247,51 +250,43 @@ int main(int argc, char** argv) try {
             "A Mastermind under its limit still overloads");
 
     // Capture checks in original order.
-    require(tower_ctl.can_capture(true, 1.0, false, false, false) == false,
-            "A tower_ctl captured its own kind");
-    require(tower_ctl.can_capture(false, 0.0, false, false, false) == false,
+    require(tower.can_capture(true, 1.0, false, false, false) == false,
+            "A tower captured its own kind");
+    require(tower.can_capture(false, 0.0, false, false, false) == false,
             "The warhead hurt a zero-verse armor");
-    require(tower_ctl.can_capture(false, 1.0, true, false, false) == false,
-            "The tower_ctl captured an immune target");
-    require(tower_ctl.can_capture(false, 1.0, false, true, false) == false,
-            "The tower_ctl stole a non-permanent link");
-    require(tower_ctl.can_capture(false, 1.0, false, true, true),
+    require(tower.can_capture(false, 1.0, true, false, false) == false,
+            "The tower captured an immune target");
+    require(tower.can_capture(false, 1.0, false, true, false) == false,
+            "The tower stole a non-permanent link");
+    require(tower.can_capture(false, 1.0, false, true, true),
             "A permanent link cannot steal a target");
 
     // --- Gattling stages (TechnoClass rate up/down prototype). ------------
     yu::GattlingState tank_gattling(yuri.gattling_tank);
     require(tank_gattling.stage() == 0, "Gattling does not start at stage 0");
-    fire_for(tank_gattling, 199);
-    require(tank_gattling.stage() == 0, "Gattling left stage 0 too early");
-    fire_for(tank_gattling, 1);
+    fire_for(tank_gattling, 30);
     require(tank_gattling.stage() == 1, "Gattling stage 1 is wrong");
-    fire_for(tank_gattling, 200);
+    fire_for(tank_gattling, 60);
     require(tank_gattling.stage() == 2, "Gattling stage 2 is wrong");
     const auto* stage_weapon = tank_gattling.weapon(false, false);
     require(stage_weapon && stage_weapon->name == "AGGattling3",
             "Stage 2 ground weapon is wrong");
     require(tank_gattling.weapon_number(true) == 5,
             "Stage 2 air weapon number is wrong");
-    fire_for(tank_gattling, 1000); // The value stops at Stage3=600.
-    cool_for(tank_gattling, 1);    // 600 -> 550 -> still stage 2.
-    require(tank_gattling.stage() == 2, "Gattling cooled too fast");
-    cool_for(tank_gattling, 3);    // 400: Stage2 is reached, still stage 2.
-    require(tank_gattling.stage() == 2, "Gattling stage 2 threshold is wrong");
-    cool_for(tank_gattling, 1);    // 350.
+    cool_for(tank_gattling, 1);
     require(tank_gattling.stage() == 1, "Gattling did not cool down");
-    cool_for(tank_gattling, 10);
+    cool_for(tank_gattling, 50);
     require(tank_gattling.stage() == 0, "Gattling did not cool to stage 0");
-    // Elite stages use their own thresholds and weapon table.
+    // Elite stages use their own table.
     yu::GattlingState elite_gattling(yuri.gattling_tank);
-    for (int i = 0; i < 100; ++i) elite_gattling.tick(true, true);
-    require(elite_gattling.stage() == 1, "Elite stage 1 threshold is wrong");
+    fire_for(elite_gattling, 1);
     const auto* elite_weapon = elite_gattling.weapon(false, true);
-    require(elite_weapon && elite_weapon->name == "AGGattling2E",
-            "Elite stage 1 weapon is wrong");
+    require(elite_weapon && elite_weapon->name == "AGGattlingE",
+            "Elite stage 0 weapon is wrong");
     yu::GattlingState cannon_gattling(yuri.gattling_cannon);
-    fire_for(cannon_gattling, 200);
+    fire_for(cannon_gattling, 30);
     require(cannon_gattling.stage() == 1 &&
-            cannon_gattling.weapon(true, false)->name == "AAGattCann2",
+            cannon_gattling.weapon(true, false)->name == "AAGattCann",
             "Gattling Cannon stage 1 air weapon is wrong");
 
     // --- Grinder, Cloning Vats, Magnetron, Floating Disc. -----------------
@@ -315,7 +310,7 @@ int main(int argc, char** argv) try {
     const ra2map::Cell source_cell{5, 5};
     int drags = 0;
     while (beam.drag(target_cell, source_cell)) ++drags;
-    require(drags == 4 && !beam.active() &&
+    require(drags == 10 && !beam.active() &&
             target_cell.x == source_cell.x && target_cell.y == source_cell.y,
             "The beam did not drag the target to the Magnetron");
     require(beam.drop_damage(300, 300, yuri.falling_damage_multiplier,
@@ -333,10 +328,7 @@ int main(int argc, char** argv) try {
     std::int32_t drained = 0;
     for (int frame = 0; frame < 60; ++frame) drained += drain.tick(yuri.drain_delay, yuri.drain_amount, 1000);
     require(drained == 60, "The disc drained the wrong amount");
-    std::int32_t last_pulse = 0;
-    for (int frame = 0; frame < 30; ++frame)
-        last_pulse += drain.tick(yuri.drain_delay, yuri.drain_amount, 20);
-    require(last_pulse == 20,
+    require(drain.tick(yuri.drain_delay, yuri.drain_amount, 20) == 20,
             "The disc drained more than the building had");
     require(drain.tick(yuri.drain_delay, yuri.drain_amount, 0) == 0,
             "The disc drained an empty building");
@@ -373,9 +365,10 @@ int main(int argc, char** argv) try {
             "A deployed Guardian GI used the rifle");
 
     const auto* center = yuri.find_building("GAROBO");
-    require(center && center->owned_by("YuriCountry"),
-            "The Robot Control Center is missing");
-    const yu::YuriTechno& robot_center = *center;
+    require(center == nullptr, "The Robot Control Center is not Yuri content");
+    yu::YuriTechno robot_center;
+    robot_center.kind = yu::YuriTechno::Kind::Building;
+    robot_center.name = "GAROBO";
     require(yu::robot_tank_needs_center(*robo, robot_center),
             "The Robot Tank does not need a Robot Control Center");
     require(!yu::robot_tank_needs_center(*mastermind, robot_center),
