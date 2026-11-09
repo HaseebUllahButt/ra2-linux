@@ -68,6 +68,7 @@ std::size_t GameLoop::run(std::size_t budget) {
 
 FrameResult GameLoop::step() {
     if (!state_.running) return FrameResult::Stopped;
+    if(profile::enabled())profile::instance().begin_frame(state_.frame_counter);
     ++iterations_;
 
     if (!state_.window_active) {

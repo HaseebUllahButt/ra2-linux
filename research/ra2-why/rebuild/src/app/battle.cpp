@@ -16,6 +16,7 @@
 #include "../render/battle_radar.h"
 #include "../sim/damage_runtime.h"
 #include "../loop/game_loop.h"
+#include "../loop/profile.h"
 #include "../ui/score_screen.h"
 #include <SDL.h>
 #include <algorithm>
@@ -475,6 +476,7 @@ public:
             gaps_.insert(outcome.detail);
     }
     void execute(const Order& order,std::uint32_t frame) {
+        loop::profile::Timer probe(loop::profile::Phase::Orders);
         if (order.house!=player_ && order.house!=enemy_) return;
         const auto* e=find(world_,order.entity);
         if (order.kind!=OrderKind::Build && order.kind!=OrderKind::Place &&
@@ -540,6 +542,7 @@ public:
         }
     }
     void auto_place(std::uint32_t owner,std::uint32_t frame) {
+        loop::profile::Timer probe(loop::profile::Phase::AutoPlace);
         std::vector<std::string> ready;
         for (const auto& f:factories_.factories) if (f.house_id==owner && f.object && f.progress==54) {
             const auto* type=catalog_.find(f.object_type);
@@ -563,6 +566,7 @@ public:
         }
     }
     void autoplay(std::uint32_t frame) {
+        loop::profile::Timer probe(loop::profile::Phase::Autoplay);
         if (frame==0) {
             for (const auto& e:world_.entities) if (live(e)&&e.house_id==player_&&
                 !rules_.read_string(e.type,"DeploysInto").empty()) {
@@ -749,6 +753,7 @@ public:
         if((frame%120==0 || victory_.settled())&&!w::validate(world_))throw std::runtime_error("Shared match links are invalid");
     }
     void refresh_hud() {
+        loop::profile::Timer probe(loop::profile::Phase::HudRefresh);
         const auto& h=house(world_,player_);
         hud_state_.cash=h.cash.value_or(0);hud_state_.power_output=h.power_output.value_or(0);
         hud_state_.power_drain=h.power_drain.value_or(0);hud_state_.selected_labels.clear();
@@ -813,7 +818,10 @@ public:
     void present(const loop::State& state) override {
         // Headless checks compose at fixed intervals and at the final frame.
         if(args_.headless && presented && state.frame_counter%60 && !victory_.settled()&&!help_visible_&&!force_draw_)return;
-        const auto drawing=battle_scene_state(world_,state.frame_counter);
+        const auto drawing=[&] {
+            loop::profile::Timer probe(loop::profile::Phase::SceneState);
+            return battle_scene_state(world_,state.frame_counter);
+        }();
         auto scene=scene_.render(terrain_,drawing,{camera_x_,camera_y_,1024,768});
         for(const auto& detail:scene.gaps)gaps_.insert(detail);
         frame_=std::move(scene.image);

@@ -3,6 +3,7 @@
 // CnC_Red_Alert/CODE/RADAR.CPP (radar coordinate scaling).
 // TODO-ORIGINAL: plain rectangles replace original sidebar/cameo artwork.
 #include "battle_hud.h"
+#include "../loop/profile.h"
 #include "../fs/mix_bootstrap.h"
 #include "../rules/ini_file.h"
 #include "../gfx/shp_decode.h"
@@ -121,6 +122,7 @@ HudAction BattleHud::handle_click(int x,int y,const HudState& s) const {
     return {};
 }
 void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
+    loop::profile::Timer probe(loop::profile::Phase::HudDraw);
     if(!valid(b)) return;
     fill(b,{sidebar_x,0,sidebar_width,view_height},dark);
     text(b,808,3,"CREDITS $"+std::to_string(s.cash),ink,212);

@@ -1,4 +1,5 @@
 #include "platform.h"
+#include "../loop/profile.h"
 #include <SDL.h>
 
 #include <limits>
@@ -144,6 +145,7 @@ std::vector<Input> Window::poll() {
 }
 
 void Window::present(const std::uint8_t* rgba, int width, int height, std::size_t size) {
+    loop::profile::Timer probe(loop::profile::Phase::Upload);
     if(auto* log=debug_log())std::fprintf(log,"SDL %u window=%u present begin\n",
         SDL_GetTicks(),SDL_GetWindowID(impl_->window));
     if (!rgba || size != image_size(width, height))
