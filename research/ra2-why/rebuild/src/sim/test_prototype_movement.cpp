@@ -254,6 +254,54 @@ void original_rules_tests() {
                 "tank did not pass a friendly soldier that stepped aside");
     }
     {
+        // A match has two movement owners: one for the miners and one for
+        // all other Units. A miner (here a tank) in a lane meets a friendly
+        // soldier that walks west for the other owner. The old code also
+        // pushed the soldier north-east. The two pushes held the soldier
+        // in place and the miner waited without end (MP02T2, HARV at 73,114).
+        auto world=field(30,12);PrototypeMovement miners,others;miners.use_rules(rules);others.use_rules(rules);
+        for (int y=3;y<=9;++y) {
+            if (y!=6) world.cells.at(key(7,y)).ground_occupancy_124=1;
+            if (y!=5) world.cells.at(key(9,y)).ground_occupancy_124=1;
+        }
+        put(world,925,"MTNK",sw::Kind::Unit,1,8,7,0);
+        soldier(world,926,1,8,6,2);
+        require(others.issue(world,926,{7,6},10).status==PrototypeMoveStatus::Complete &&
+                miners.issue(world,925,{8,2},17).status==PrototypeMoveStatus::Complete,"two owner orders failed");
+        unsigned frames=0;
+        for (std::uint32_t frame=1;frame<=400 && !frames;++frame) {
+            const auto first=miners.tick(world,frame);
+            require(first.status==PrototypeMoveStatus::Complete && others.tick(world,frame).status==PrototypeMoveStatus::Complete,"two owner frame failed");
+            for (const auto a:first.arrived) if (a==925) frames=frame;
+        }
+        std::cout<<"tank past a soldier of the other owner frames="<<frames<<'\n';
+        require(frames && same_cell(*unit(world,925).cell,{8,2}),"a tank waited without end for a soldier that the other owner moves");
+        require(same_cell(*unit(world,926).cell,{7,6}) && !miners.moving(926) && !others.moving(926),
+                "the soldier did not reach the goal of its own owner");
+    }
+    {
+        // The wait for soldiers to step aside ends after BlockagePathDelay
+        // (60 frames). Here another owner keeps the soldier busy in the
+        // near gap of a wall. The tank waits, then takes the far gap; it
+        // does not push the soldier.
+        auto world=field(30,12);PrototypeMovement movement;movement.use_rules(rules);
+        for (int y=2;y<=12;++y) if (y!=6) world.cells.at(key(8,y)).ground_occupancy_124=1;
+        put(world,927,"MTNK",sw::Kind::Unit,1,5,6);
+        soldier(world,928,1,8,6,2);
+        require(movement.issue(world,927,{14,6},17).status==PrototypeMoveStatus::Complete,"busy soldier order failed");
+        unsigned frames=0,waited=0;
+        for (std::uint32_t frame=1;frame<=600 && !frames;++frame) {
+            for (auto& e:world.entities) if (e.id==928) e.locomotor_moving=true;
+            const auto r=movement.tick(world,frame);
+            require(r.status==PrototypeMoveStatus::Complete,"busy soldier frame failed");
+            if (same_cell(*unit(world,927).cell,{7,6}) && r.moved.empty()) ++waited;
+            for (const auto a:r.arrived) if (a==927) frames=frame;
+        }
+        std::cout<<"tank around a busy soldier frames="<<frames<<" waited="<<waited<<'\n';
+        require(frames && waited>=60 && same_cell(*unit(world,928).cell,{8,6}) && !movement.moving(928),
+                "a tank did not plan around a busy soldier after BlockagePathDelay");
+    }
+    {
         // Ground cost zero (Beach for Track) cannot be entered.
         auto world=field(30,12);PrototypeMovement movement;movement.use_rules(rules);
         for (int y=1;y<=12;++y) if (y!=2) world.cells.at(key(10,y)).terrain->land_type=6;
