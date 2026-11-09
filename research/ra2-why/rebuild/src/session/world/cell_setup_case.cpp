@@ -91,6 +91,23 @@ int main(int argc,char** argv) {
             checked_order=true;
         }
         if (seed==3) {
+            assert(actual.terrain->land_type);
+            auto same_land=snapshot;
+            same_land.cells.at(key).terrain->land_type=actual.terrain->land_type;
+            same_land.cells.at(key).unit_land_speed=0.75f;
+            Stage same_speed(same_land);
+            assert(same_speed.complete_pending_cell_setup(fixture.guard,fixture.theater,fixture.cliff,tracks).status==sim::CellSetupStatus::Complete);
+            assert(same_speed.snapshot().cells.at(key).unit_land_speed==0.75f);
+            auto changed_land=same_land;
+            changed_land.cells.at(key).terrain->land_type=*actual.terrain->land_type+1;
+            Stage stale_speed(changed_land);
+            assert(stale_speed.complete_pending_cell_setup(fixture.guard,fixture.theater,fixture.cliff,tracks).status==sim::CellSetupStatus::Complete);
+            assert(!stale_speed.snapshot().cells.at(key).unit_land_speed);
+            auto unknown_land=same_land;
+            unknown_land.cells.at(key).terrain->land_type.reset();
+            Stage unknown_speed(unknown_land);
+            assert(unknown_speed.complete_pending_cell_setup(fixture.guard,fixture.theater,fixture.cliff,tracks).status==sim::CellSetupStatus::Complete);
+            assert(!unknown_speed.snapshot().cells.at(key).unit_land_speed);
             auto missing=fixture.guard; missing.bounds_height.reset();
             Stage rejected(snapshot);
             const auto failed=rejected.complete_pending_cell_setup(missing,fixture.theater,fixture.cliff,tracks);

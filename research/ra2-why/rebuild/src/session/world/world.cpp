@@ -300,6 +300,11 @@ sim::CellSetupResult Stage::complete_pending_cell_setup(const sim::CellSetupStat
         return unresolved;
     }
     auto& cell=candidate.cells.at(key);
+    // Unit locomotor speed and coarse-category Track are separate lookups.
+    // A changed or unknown LandType invalidates the former, not the latter.
+    if (!cell.terrain->land_type || !result.state.terrain.land_type ||
+        *cell.terrain->land_type!=*result.state.terrain.land_type)
+        cell.unit_land_speed.reset();
     cell.terrain=result.state.terrain;
     cell.cell_field_11d=result.state.field_11d;
     cell.cell_flag_20000=result.state.animated_20000;
