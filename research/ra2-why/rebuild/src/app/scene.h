@@ -64,6 +64,11 @@ private:
     void prepare_terrain(std::vector<std::string>& position_gaps);
     actors::WorldPosition position(const sim::Entity& entity) const;
     VehicleArt& vehicle(const std::string& type);
+    bool shp_vehicle(const std::string& type) const;
+    // Guarded base SHP vehicle layout, cached once it passes the checks.
+    const actors::ShpVehicleFrames& shp_layout(const std::string& type);
+    struct ShpSprite { Asset& asset; const gfx::RgbaImage& image; };
+    ShpSprite shp_vehicle_image(const std::string& type, std::uint8_t facing, bool moving);
     Asset& actor(actors::Kind kind,const std::string& type);
     const gfx::RgbaImage& image(Asset& asset,std::size_t frame,bool terrain=false);
     const fs::MixFileSystem& files_;
@@ -74,6 +79,7 @@ private:
     std::map<std::uint32_t, sim::TerrainCell> cells_;
     std::map<std::pair<actors::Kind, std::string>, Asset> assets_;
     std::map<std::string, VehicleArt> vehicles_;
+    std::map<std::string, actors::ShpVehicleFrames> shp_layouts_;
     std::vector<ra2map::TerrainObject> terrain_objects_;
     bool terrain_ready_ = false;
     std::vector<TerrainDraw> terrain_draws_;   // Stable-sorted by key.
