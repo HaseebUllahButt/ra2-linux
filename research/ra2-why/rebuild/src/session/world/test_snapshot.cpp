@@ -173,6 +173,12 @@ int main() {
                before_divisor.cells.at(69*512+54).ground_occupancy_124);
     auto train=profile; train.type_flag_aa0=true;
     assert(battle.place_base_unit(*battle_unit,{54,69},32,train)==PlacementResult::Unresolved);
+    auto small=profile; small.type_flag_bb0=true;
+    assert(battle.place_base_unit(*battle_unit,{54,69},32,small)==PlacementResult::Unresolved);
+    auto large=profile; large.type_flag_bb1=true;
+    assert(battle.place_base_unit(*battle_unit,{54,69},32,large)==PlacementResult::Unresolved);
+    auto restricted=profile; restricted.restricted_land=2;
+    assert(battle.place_base_unit(*battle_unit,{54,69},32,restricted)==PlacementResult::Unresolved);
     assert(battle.snapshot().entities[0].on_map==false);
     assert(battle.place_base_unit(*battle_unit,{56,69},32,profile)==PlacementResult::Blocked);
     assert(battle.snapshot().entities[0].on_map==true && battle.snapshot().entities[0].lifetime==Lifetime::Created);

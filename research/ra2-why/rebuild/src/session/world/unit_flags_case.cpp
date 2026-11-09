@@ -9,16 +9,39 @@ using namespace ra2::session::world;
 int main(int argc,char** argv) {
     const bool vectors=argc==2 && std::string(argv[1])=="--vectors";
     const bool constructor_vectors=argc==2 && std::string(argv[1])=="--constructor-vectors";
-    if (argc!=1 && !vectors && !constructor_vectors) return 2;
+    const bool placement_vectors=argc==2 && std::string(argv[1])=="--placement-vectors";
+    if (argc!=1 && !vectors && !constructor_vectors && !placement_vectors) return 2;
     const auto defaults=base_unit_type_constructor_fields();
     assert(defaults.raw_205 && !defaults.is_train && !defaults.crusher && !defaults.raw_bb0 &&
-           !defaults.raw_bb1 && defaults.speed_type==-1 && defaults.movement_zone==0);
+           !defaults.raw_bb1 && defaults.speed_type==-1 && defaults.movement_zone==0 && defaults.restricted_land==-1);
     if (constructor_vectors) {
         std::cout<<int(defaults.raw_205)<<' '<<int(defaults.is_train)<<' '<<int(defaults.crusher)<<' '
                  <<int(defaults.raw_bb0)<<' '<<int(defaults.raw_bb1)<<' '
-                 <<defaults.speed_type<<' '<<defaults.movement_zone<<'\n';
+                 <<defaults.speed_type<<' '<<defaults.movement_zone<<' '<<defaults.restricted_land<<'\n';
         return 0;
     }
+    if (placement_vectors) {
+        for (int test=0;test<6;++test) {
+            UnitFlagKey restricted;
+            restricted.state=(test==1 || test==4)?UnitFlagKeyState::Present:UnitFlagKeyState::Absent;
+            restricted.value=test==1?"Water":test==4?"<none>":"";
+            BaseUnitFlagInput input;
+            input.initial_small_visceroid=false; input.initial_large_visceroid=false;
+            input.small_visceroid.state=(test==2 || test==5)?UnitFlagKeyState::Present:UnitFlagKeyState::Absent;
+            input.large_visceroid.state=(test==3 || test==5)?UnitFlagKeyState::Present:UnitFlagKeyState::Absent;
+            input.small_visceroid.value="yes"; input.large_visceroid.value="yes";
+            const auto flags=resolve_base_unit_flags(input);
+            const auto land=resolve_base_restricted_land(defaults.restricted_land,restricted);
+            assert(land.status==UnitFlagStatus::Complete && flags.small_visceroid.status==UnitFlagStatus::Complete &&
+                   flags.large_visceroid.status==UnitFlagStatus::Complete);
+            std::cout<<*land.value<<' '<<int(*flags.small_visceroid.value)<<' '<<int(*flags.large_visceroid.value)<<'\n';
+        }
+        return 0;
+    }
+    BaseUnitFlagInput legacy{false,true,{UnitFlagKeyState::Absent,{}},{UnitFlagKeyState::Absent,{}}};
+    const auto legacy_result=resolve_base_unit_flags(legacy);
+    assert(legacy_result.is_train.value==false && legacy_result.crusher.value==true &&
+           legacy_result.small_visceroid.status==UnitFlagStatus::NeedsInput);
     const std::vector<std::pair<std::string,std::string>> cases={
         {"","yes"},{"yes","no"},{"true","false"},{"1","0"},
         {"no","yes"},{"false","true"},{"0","1"},{"YeS","nO"},{"TrUe","FaLsE"},{"",""}};
@@ -51,5 +74,17 @@ int main(int argc,char** argv) {
     assert(resolve_base_unit_flags(input).is_train.status==UnitFlagStatus::Unsupported);
     input.initial_is_train.reset(); input.is_train.value="yes";
     assert(resolve_base_unit_flags(input).is_train.status==UnitFlagStatus::NeedsInput);
+    input.initial_small_visceroid=false; input.initial_large_visceroid=false;
+    input.small_visceroid={UnitFlagKeyState::Present,"yes"};
+    assert(resolve_base_unit_flags(input).small_visceroid.value==true &&
+           resolve_base_unit_flags(input).large_visceroid.status==UnitFlagStatus::NeedsInput);
+    UnitFlagKey restricted;
+    assert(resolve_base_restricted_land(-1,restricted).status==UnitFlagStatus::NeedsInput);
+    restricted={UnitFlagKeyState::Present,"<none>"};
+    assert(resolve_base_restricted_land(-1,restricted).value==-1);
+    restricted.value="Water";
+    assert(resolve_base_restricted_land(-1,restricted).value==2);
+    restricted.value="Road";
+    assert(resolve_base_restricted_land(-1,restricted).status==UnitFlagStatus::Unsupported);
     std::cout<<"checked base IsTrain and Crusher values pass\n";
 }

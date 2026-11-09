@@ -103,15 +103,30 @@ int main(int argc,char** argv) {
         BaseUnitFlagInput flag_input;
         const auto constructor=base_unit_type_constructor_fields();
         flag_input.initial_is_train=constructor.is_train; flag_input.initial_crusher=constructor.crusher;
+        flag_input.initial_small_visceroid=constructor.raw_bb0; flag_input.initial_large_visceroid=constructor.raw_bb1;
         const auto* train_key=rules.find("AMCV","IsTrain");
         const auto* crusher_key=rules.find("AMCV","Crusher");
+        const auto* small_key=rules.find("AMCV","SmallVisceroid");
+        const auto* large_key=rules.find("AMCV","LargeVisceroid");
         flag_input.is_train.state=train_key?UnitFlagKeyState::Present:UnitFlagKeyState::Absent;
         flag_input.crusher.state=crusher_key?UnitFlagKeyState::Present:UnitFlagKeyState::Absent;
+        flag_input.small_visceroid.state=small_key?UnitFlagKeyState::Present:UnitFlagKeyState::Absent;
+        flag_input.large_visceroid.state=large_key?UnitFlagKeyState::Present:UnitFlagKeyState::Absent;
         if (train_key) flag_input.is_train.value=train_key->value;
         if (crusher_key) flag_input.crusher.value=crusher_key->value;
+        if (small_key) flag_input.small_visceroid.value=small_key->value;
+        if (large_key) flag_input.large_visceroid.value=large_key->value;
         const auto flags=resolve_base_unit_flags(flag_input);
         assert(flags.is_train.status==UnitFlagStatus::Complete && flags.is_train.value==false &&
-               flags.crusher.status==UnitFlagStatus::Complete && flags.crusher.value==true);
+               flags.crusher.status==UnitFlagStatus::Complete && flags.crusher.value==true &&
+               flags.small_visceroid.status==UnitFlagStatus::Complete && flags.small_visceroid.value==false &&
+               flags.large_visceroid.status==UnitFlagStatus::Complete && flags.large_visceroid.value==false);
+        UnitFlagKey restricted_key;
+        const auto* restricted=rules.find("AMCV","MovementRestrictedTo");
+        restricted_key.state=restricted?UnitFlagKeyState::Present:UnitFlagKeyState::Absent;
+        if (restricted) restricted_key.value=restricted->value;
+        const auto restricted_land=resolve_base_restricted_land(constructor.restricted_land,restricted_key);
+        assert(restricted_land.status==UnitFlagStatus::Complete && restricted_land.value==-1);
         BaseSpeedTypeInput type_input;
         type_input.initial_type=constructor.speed_type;
         type_input.crusher=flags.crusher.value;
@@ -163,11 +178,12 @@ int main(int argc,char** argv) {
         assert(staged_cells.size()==10 && staged_cells.count(target));
         assert(stage.install_base_cells(*geometry,std::move(staged_cells),{},{}));
         BaseUnitProfile profile;
-        profile.restricted_land=-1; profile.movement_mode=-1; profile.placement_mode=2;
+        profile.restricted_land=restricted_land.value; profile.movement_mode=-1; profile.placement_mode=2;
         profile.speed_type=type.index; profile.level_height=sim::original_level_height;
         profile.leptons_per_sight_increase=*sight; profile.type_flag_aa0=flags.is_train.value;
         profile.unit_flag_32c=false; profile.linked_team=false; profile.type_flag_205=true;
-        profile.unit_flag_32a=false; profile.type_flag_bb0=false; profile.type_flag_bb1=false;
+        profile.unit_flag_32a=false; profile.type_flag_bb0=flags.small_visceroid.value;
+        profile.type_flag_bb1=flags.large_visceroid.value;
         assert(stage.place_base_unit(*unit,{135,80},32,profile)==PlacementResult::Unresolved);
         auto supplied=stage.snapshot();
         supplied.tube_vector_count=0;

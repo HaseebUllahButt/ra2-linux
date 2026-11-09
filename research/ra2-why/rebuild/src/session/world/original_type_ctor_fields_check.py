@@ -59,6 +59,6 @@ for fill,registry_capacity in ((0,0),(0,1),(0xa5,0),(0xa5,1),(0xff,0),(0xff,1)):
     assert m.read(0xa35d58)==registry_capacity
     if registry_capacity: assert m.read(0x1009000)==m.TYPE
     actual=[m.cpu.mem_read(m.TYPE+offset,1)[0] for offset in (0x205,0xaa0,0xaf3,0xbb0,0xbb1)]
-    actual.extend((m.signed(m.TYPE+0x5a4),m.signed(m.TYPE+0x500)))
+    actual.extend((m.signed(m.TYPE+0x5a4),m.signed(m.TYPE+0x500),m.signed(m.TYPE+0xb94)))
     assert actual==expected
-print('base x86 UnitType constructor matches seven fields across fills and registry cases')
+print('base x86 UnitType constructor matches eight fields across fills and registry cases')

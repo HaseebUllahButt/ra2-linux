@@ -17,6 +17,16 @@ int main(int argc, char** argv) {
     map.parse(original_test_ini(argv[1],"MP02T2.MAP",true));
     if (argc==3) {
         const std::string request=argv[2];
+        if (request=="--amcv-placement-info") {
+            rules.parse(original_test_ini(argv[1],"RULES.INI",true));
+            assert(map.key_count("AMCV")==0);
+            for (const char* key:{"MovementRestrictedTo","SmallVisceroid","LargeVisceroid"}) {
+                const auto* value=rules.find("AMCV",key);
+                std::cout<<(value?value->value:"<absent>")<<' ';
+            }
+            std::cout<<'\n';
+            return std::cout?0:1;
+        }
         if (request=="--sight-info") {
             rules.parse(original_test_ini(argv[1],"RULES.INI",true));
             const auto* base=rules.find("General","LeptonsPerSightIncrease");
