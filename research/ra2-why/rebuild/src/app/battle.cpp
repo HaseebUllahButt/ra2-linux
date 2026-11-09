@@ -666,9 +666,17 @@ public:
                 human_stage_=12;
             } else if(state.frame_counter%90==0&&!orders_.selected_ids().empty()) {
                 const auto* target=find(world_,human_target_);
-                if(!target||!live(*target))for(const auto& e:world_.entities)if(live(e)&&e.house_id==enemy_) {
-                    const auto at=anchor(e);if(!at||at->x<0||at->x>=804||at->y<0||at->y>=768)continue;
-                    human_target_=e.id;test_click(at->x,at->y);break;
+                if(!target||!live(*target)) {
+                    target=nullptr;
+                    for(const auto& e:world_.entities)if(live(e)&&e.house_id==enemy_) {
+                        human_target_=e.id;target=&e;break;
+                    }
+                }
+                // Continue through window input after winning the first fight.
+                // Remaining enemies can be outside the current camera view.
+                if(target)if(const auto at=anchor(*target)) {
+                    if(at->x<40||at->x>760||at->y<40||at->y>720)test_pan_to(*at);
+                    else {test_pan_to({400,380});test_click(at->x,at->y);}
                 }
             }
             break;

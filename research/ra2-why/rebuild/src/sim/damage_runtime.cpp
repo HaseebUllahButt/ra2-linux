@@ -241,6 +241,7 @@ bool base_complete_area_damage_request(AreaDamageCursor& cursor,std::uint32_t id
 #include "../weapons/object_damage.h"
 #include "../weapons/projectile_damage.h"
 #include "../weapons/techno_damage.h"
+#include "prototype_turret.h"
 #include <algorithm>
 #include <cctype>
 #include <limits>
@@ -320,9 +321,13 @@ bool prototype_bool(const IniFile& b,const IniFile& m,
 struct PrototypeWeapon {
     std::string name,warhead,projectile;
     int damage=0,rof=0,range=0,max_damage=0;
+    int burst=1; // Original WeaponType +9C.
     double gravity=0,condition_red=0;
+    double prone_damage=1; // Original WarheadType +F8.
     float spread=0,percent=0;
     bool arcing=false,lobber=false;
+    bool omni_fire=false;      // Original WeaponType +107.
+    bool projectile_rot=false; // Original BulletType +2AC is not zero.
     std::array<int,3> fire_flh{{0,0,0}};
 };
 std::optional<PrototypeWeapon> prototype_weapon(const IniFile& base,const IniFile& map,
@@ -341,10 +346,16 @@ std::optional<PrototypeWeapon> prototype_weapon(const IniFile& base,const IniFil
     out.projectile=prototype_string(base,map,out.name,"Projectile");
     if (out.warhead.empty() || out.projectile.empty()) return {};
     out.arcing=prototype_bool(base,map,out.projectile,"Arcing");
+    out.burst=prototype_int(base,map,out.name,"Burst").value_or(1);
+    if (out.burst<1) return {}; // 006CB2F3 divides by Burst.
+    out.omni_fire=prototype_bool(base,map,out.name,"OmniFire");
+    out.projectile_rot=prototype_int(base,map,out.projectile,"ROT").value_or(0)!=0;
     out.lobber=prototype_bool(base,map,out.name,"Lobber");
     // TODO-ORIGINAL: Use constructor values when these rule keys are absent.
     out.spread=static_cast<float>(prototype_double(base,map,out.warhead,"CellSpread").value_or(0));
     out.percent=static_cast<float>(prototype_double(base,map,out.warhead,"PercentAtMax").value_or(1));
+    out.prone_damage=prototype_double(base,map,out.warhead,"ProneDamage").value_or(1);
+    if (!std::isfinite(out.prone_damage) || out.prone_damage<0) return {};
     out.max_damage=prototype_int(base,map,"CombatDamage","MaxDamage").value_or(10000);
     out.condition_red=prototype_double(base,map,"AudioVisual","ConditionRed").value_or(0.25);
     out.gravity=prototype_double(base,map,"AudioVisual","Gravity").value_or(6);
@@ -504,6 +515,35 @@ bool PrototypeCombatRuntime::can_attack(const session::world::Snapshot& world,
     const auto verse=prototype_verse(base_,map_,*weapon,*target);
     return verse && std::isfinite(*verse) && *verse>0;
 }
+std::optional<PrototypeCombatRuntime::TurretAim> PrototypeCombatRuntime::turret_aim(
+    session::world::Entity& source,const session::world::Entity& target,bool omni_fire,std::int32_t frame) {
+    // Base 006FB890 turret branch for UnitType +AAB Turret. OmniFire (+107)
+    // weapons leave the turret alone. TODO-ORIGINAL: TurretSpins, locked
+    // turrets, hull aim for Units without a turret, and the idle return to
+    // the hull or move destination (006FB98E) are not reproduced here.
+    if (source.kind!=session::world::Kind::Unit || omni_fire || !source.position || !target.position ||
+        !prototype_bool(base_,map_,source.type,"Turret") ||
+        prototype_bool(base_,map_,source.type,"TurretSpins")) return {};
+    const auto dx=static_cast<long long>(target.position->x)-source.position->x;
+    const auto dy=static_cast<long long>(target.position->y)-source.position->y;
+    if (std::abs(dx)>100000 || std::abs(dy)>100000 || (!dx && !dy)) return {};
+    // Base 005D2730 GetTargetDirection uses the same atan2 arithmetic.
+    const auto direction=angles_.heading(static_cast<int>(dx),static_cast<int>(dy));
+    // Base 006FA5AD: the turret ROT is the Techno type ROT (+638).
+    const auto rot=base_facing_rot(prototype_int(base_,map_,source.type,"ROT").value_or(0));
+    const auto shown=source.turret_facing_raw.value_or(source.hull_facing_raw.value_or(0));
+    auto state=turrets_.find(source.id);
+    if (state==turrets_.end() || state->second.facing.rot!=rot || state->second.written!=shown) {
+        TurretState fresh;fresh.facing.rot=rot;base_facing_set_current(fresh.facing,shown,frame);
+        state=turrets_.insert_or_assign(source.id,fresh).first;
+    }
+    auto& facing=state->second.facing;
+    base_facing_set_desired(facing,direction,frame);
+    const auto current=base_facing_current(facing,frame);
+    state->second.written=current;
+    source.turret_facing_raw=current;source.turret_facing=static_cast<int>(current>>8);
+    return TurretAim{current,direction};
+}
 bool PrototypeCombatRuntime::attack(session::world::Snapshot& world,std::uint32_t source_id,std::uint32_t target_id) {
     if (!can_attack(world,source_id,target_id)) return false;
     auto* source=prototype_find(world,source_id);
@@ -576,12 +616,27 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
         }
         bool hit_any=false;
         const int radius=static_cast<int>(weapon->spread*256.0f);
+        // Base 004FFB70..004FFBB9: a prone Infantry (+5C3) takes positive
+        // damage times the warhead ProneDamage (+F8), at least 1.
+        const auto raw_for=[&](const session::world::Entity& t) {
+            if (t.kind!=session::world::Kind::Infantry || !prone_.count(t.id) || shot.damage<=0) return shot.damage;
+            return std::max(1,static_cast<int>(shot.damage*weapon->prone_damage));
+        };
+        // Base 00500236..0050028C: a damaged survivor that is not Fearless
+        // (+C0A) starts to panic, and its AI then lies down (00504AB3).
+        // TODO-ORIGINAL: model the panic timer (+5BC), the prone animation
+        // and standing up; here an Infantry stays prone until it moves.
+        const auto panic=[&](const session::world::Entity& t,const PrototypeHit& hit) {
+            if (hit.applied && !hit.destroyed && t.kind==session::world::Kind::Infantry &&
+                !prototype_bool(base_,map_,t.type,"Fearless")) prone_.insert(t.id);
+        };
         for (const auto& candidate:candidates) {
             auto* target=prototype_find(world,candidate.id);
             if (!prototype_alive(target) || candidate.distance>radius) continue;
             const int before=*target->resolved_hp;
-            auto hit=prototype_damage(world,candidate.id,shot.source_id,shot.damage,
+            auto hit=prototype_damage(world,candidate.id,shot.source_id,raw_for(*target),
                                       candidate.distance,*weapon,base_,map_);
+            panic(*target,hit);
             if (!hit.missing.empty()) report.unresolved.push_back(hit.missing);
             if (hit.applied) record(PrototypeCombatEventKind::Damage,shot,*target,before,*target->resolved_hp);
             if (hit.destroyed) record(PrototypeCombatEventKind::Death,shot,*target,before,*target->resolved_hp);
@@ -592,7 +647,8 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             // TODO-ORIGINAL: Permit a direct hit when the flat prototype's
             // impact height misses the original area distance check.
             const int before=*aimed->resolved_hp;
-            auto hit=prototype_damage(world,aimed->id,shot.source_id,shot.damage,0,*weapon,base_,map_);
+            auto hit=prototype_damage(world,aimed->id,shot.source_id,raw_for(*aimed),0,*weapon,base_,map_);
+            panic(*aimed,hit);
             if (!hit.missing.empty()) report.unresolved.push_back(hit.missing);
             if (hit.applied) record(PrototypeCombatEventKind::Damage,shot,*aimed,before,*aimed->resolved_hp);
             if (hit.destroyed) record(PrototypeCombatEventKind::Death,shot,*aimed,before,*aimed->resolved_hp);
@@ -606,6 +662,11 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
         // TODO-ORIGINAL: Run Bullet +11C/+F0, reference cleanup and deferred
         // deletion. Erasing this prototype's value only ends its visual life.
     };
+    for (auto it=prone_.begin();it!=prone_.end();) {
+        const auto* infantry=prototype_find(world,*it);
+        if (!prototype_alive(infantry) || infantry->locomotor_moving.value_or(false)) it=prone_.erase(it);
+        else ++it;
+    }
     std::vector<PrototypeCombatProjectile> flying;
     for (auto shot:projectiles_) {
         try {
@@ -735,6 +796,9 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
                     report.unresolved.push_back("weapon or target armor is unresolved");
                 source->target_id=0;it=orders_.erase(it);continue;
             }
+            // Base 006FB890: a turreted Unit with a target turns its turret
+            // toward that target every frame, also while out of range.
+            const auto aim=turret_aim(*source,*target,weapon->omni_fire,static_cast<std::int32_t>(frame));
             const int d=distance_.between(*source->position,*target->position);
             if (d>weapon->range) {report.out_of_range.emplace_back(source->id,target->id);++it;continue;}
             // TODO-ORIGINAL: Replace these direct range and targeting checks
@@ -743,6 +807,10 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             const weapons::FireTimer timer{source->weapon_timer_start_frame.value_or(-1),
                                            source->weapon_timer_duration.value_or(0)};
             if (!weapons::base_fire_timer_ready(timer,static_cast<int>(frame))) {++it;continue;}
+            // Base 00704DF0..00704E8E: FIRE_FACING until the turret is close
+            // enough. OmniFire weapons skip the check.
+            if (aim && !weapon->omni_fire &&
+                !base_unit_facing_ready(aim->current,aim->direction,weapon->projectile_rot)) {++it;continue;}
             const auto* house=prototype_house(world,source->house_id);
             weapons::ProjectileDamageInput damage{weapon->damage,false,false,
                 house?house->firepower_multiplier.value_or(1):1,source->firepower_multiplier.value_or(1),
@@ -756,8 +824,10 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
                 const auto dx=static_cast<long long>(target->position->x)-source->position->x;
                 const auto dy=static_cast<long long>(target->position->y)-source->position->y;
                 if (std::abs(dx)>100000 || std::abs(dy)>100000 || (!dx && !dy)) {++it;continue;}
-                const auto turret=angles_.heading(static_cast<int>(dx),static_cast<int>(dy));
-                // TODO-ORIGINAL: Resolve unknown hull facing, turret offset, and burst state.
+                // The muzzle uses the present turret facing, which can still
+                // be up to the fire tolerance away from the target.
+                const auto turret=aim?aim->current:angles_.heading(static_cast<int>(dx),static_cast<int>(dy));
+                // TODO-ORIGINAL: Resolve unknown hull facing and turret offset.
                 const auto fallback_hull=(static_cast<std::uint32_t>(source->hull_facing.value_or(0))&255u)<<8;
                 const auto hull=source->hull_facing_raw.value_or(static_cast<std::uint16_t>(fallback_hull));
                 const auto muzzle=weapons::base_flat_unit_muzzle({*source->position,hull,turret,
@@ -778,13 +848,25 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
                 if (!launch) {report.unresolved.push_back("Cannon arc is unresolved");++it;continue;}
                 shot.flight.arc={{muzzle->x,muzzle->y,muzzle->z},launch->velocity,weapon->gravity};
                 shot.flight.target=*target->position;shot.flight.source_id=source->id;
-                // TODO-ORIGINAL: Turret turning is instantaneous in this prototype.
-                source->turret_facing_raw=turret;source->turret_facing=static_cast<int>(turret>>8);
+                if (!aim) {source->turret_facing_raw=turret;source->turret_facing=static_cast<int>(turret>>8);}
             }
             Random rng(world.random);
-            const weapons::SingleShotDelayInput reload{weapon->rof,
-                house?house->reload_multiplier.value_or(1):1,false,false,false,false,1};
-            const int delay=weapons::base_single_shot_unit_delay(reload,rng);
+            // Base 006CB2D9..006CB2F3: count the shot, read Rearm_Delay
+            // (006C9C00), then wrap the count by Burst.
+            const int burst_index=source->burst_index.value_or(0)+1;
+            std::int32_t burst_delays[4]={-1,-1,-1,-1};
+            for (int i=0;i<4;++i)
+                burst_delays[i]=prototype_int(base_,map_,source->type,"BurstDelay"+std::to_string(i)).value_or(-1);
+            const auto in_burst=base_burst_delay(burst_index,weapon->burst,
+                source->kind==session::world::Kind::Unit,burst_delays);
+            int delay=0;
+            if (in_burst.in_burst) delay=in_burst.needs_random?rng.ranged(3,5):in_burst.delay;
+            else {
+                const weapons::SingleShotDelayInput reload{weapon->rof,
+                    house?house->reload_multiplier.value_or(1):1,false,false,false,false,1};
+                delay=weapons::base_single_shot_unit_delay(reload,rng);
+            }
+            source->burst_index=burst_index%weapon->burst;
             source->weapon_timer_start_frame=static_cast<int>(frame);source->weapon_timer_duration=delay;
             world.random=rng.state();++report.fired;
             record(PrototypeCombatEventKind::Shot,shot,*target,*target->resolved_hp,*target->resolved_hp);

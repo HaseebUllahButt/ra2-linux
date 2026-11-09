@@ -1,8 +1,10 @@
 #pragma once
 #include "../session/world/world.h"
 #include "../weapons/weapons.h"
+#include "prototype_turret.h"
 #include <functional>
 #include <optional>
+#include <set>
 #include <string>
 
 namespace ra2::sim {
@@ -110,7 +112,9 @@ bool base_complete_area_damage_request(AreaDamageCursor&,std::uint32_t target_id
 
 namespace ra2::sim {
 // Playable prototype only. The exact, guarded APIs above do not use these
-// fallbacks. TODO-ORIGINAL: recover attack missions, turret turning, the full
+// fallbacks. Turreted Units turn with the original FacingClass and fire only
+// within the original facing tolerance; weapons count Burst shots with the
+// original burst delays. TODO-ORIGINAL: recover attack missions, the full
 // projectile/infantry handlers, triggers, death effects and deferred deletion.
 struct PrototypeCombatProjectile {
     std::uint32_t source_id=0, target_id=0;
@@ -163,5 +167,13 @@ private:
     std::map<std::uint32_t,std::uint32_t> orders_;
     std::map<std::uint32_t,std::uint32_t> guard_orders_;
     std::vector<PrototypeCombatProjectile> projectiles_;
+    // Original Unit +2F8 turret FacingClass. The world keeps only the shown
+    // raw facing; a different shown facing restarts this state from it.
+    struct TurretAim { std::uint16_t current, direction; };
+    struct TurretState { BaseFacing facing; std::uint16_t written=0; };
+    std::map<std::uint32_t,TurretState> turrets_;
+    std::set<std::uint32_t> prone_; // Infantry +5C3 after a panic hit.
+    std::optional<TurretAim> turret_aim(session::world::Entity& source,
+        const session::world::Entity& target,bool omni_fire,std::int32_t frame);
 };
 }
