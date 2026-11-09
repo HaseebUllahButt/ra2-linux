@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <sched.h>
 
 namespace ra2::loop::profile {
 
@@ -83,6 +84,10 @@ private:
         static const char* names[] = {"update (all)", "  movement", "  combat", "  economy", "  ai",
             "  production", "  tech", "present (all)", "  scene", "  radar", "  hud refresh",
             "  hud draw", "  upload", "  scene state", "  validation", "  orders", "  auto place", "  autoplay"};
+        const int scheduler=sched_getscheduler(0);
+        const char* policy=scheduler==SCHED_OTHER?"normal":scheduler==SCHED_BATCH?"batch":
+            scheduler==SCHED_IDLE?"idle":"other";
+        std::fprintf(stderr,"RA2_BENCH scheduler=%s policy=%d\n",policy,scheduler);
         std::fprintf(stderr, "RA2_BENCH startup_to_first_present_ms=%.1f\n", startup_ms_);
         std::fprintf(stderr, "RA2_BENCH %-16s %8s %10s %10s %10s %10s\n", "phase", "calls", "avg_ms", "worst_ms", "avg_cpu", "worst_cpu");
         for (std::size_t i = 0; i < stats_.size(); ++i) {

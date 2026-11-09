@@ -7,5 +7,11 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 game=${1:?game folder}
 frames=${2:-3000}
-RA2_BENCH=1 SDL_VIDEODRIVER=dummy "$here/build/ra2-native" --game-dir "$game" --skirmish \
+# Background agent shells can inherit SCHED_IDLE. Measure with the normal
+# desktop policy when this user can select it, without raising priority.
+runner=()
+if command -v chrt >/dev/null && chrt --other 0 true 2>/dev/null; then
+    runner=(chrt --other 0)
+fi
+RA2_BENCH=1 SDL_VIDEODRIVER=dummy "${runner[@]}" "$here/build/ra2-native" --game-dir "$game" --skirmish \
     --autoplay --frames "$frames" 2>&1 | grep -E '^RA2_BENCH|^Native prototype' || true
