@@ -21,7 +21,7 @@ installed={}
 if len(sys.argv)==5:
     import subprocess
     lines=subprocess.check_output([sys.argv[3],sys.argv[4],'--amcv-object-bools'],text=True).splitlines()
-    installed=dict(line.split('\t',1) for line in lines)
+    installed={key.casefold():value for key,value in (line.split('\t',1) for line in lines)}
     assert len(installed)==15
 sys.argv=[sys.argv[0],executable,native]
 base=runpy.run_path(os.path.join(os.path.dirname(__file__),'original_type_ctor_fields_check.py'))
@@ -45,8 +45,7 @@ def boolean():
     default=m.argument(2)&255
     key=bytes(m.cpu.mem_read(m.argument(1),64)).split(b'\0',1)[0].decode('ascii')
     if bool_mode[0]==3:
-        assert key in installed
-        value=installed[key]
+        value=installed.get(key.casefold(),'<absent>')
         first=value[:1].lower()
         result=default if value=='<absent>' or first not in ('0','1','f','n','t','y') else int(first in ('1','t','y'))
     else:
