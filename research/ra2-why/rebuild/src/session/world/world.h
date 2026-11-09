@@ -47,7 +47,6 @@ struct House {
     std::optional<std::int32_t> attacker_damage_count, selected_enemy_index;
     std::optional<bool> observer_flag_13d;
     std::optional<std::uint32_t> alliance_mask_5674;
-    std::optional<double> armor_multiplier; // Base House +D8.
 };
 struct BaseUnitProfile {
     std::optional<std::int32_t> restricted_land, movement_mode, placement_mode, speed_type, level_height;
@@ -97,6 +96,8 @@ struct Entity {
     std::optional<std::int32_t> burst_index;
     std::optional<std::int32_t> techno_field_13c, techno_field_140, techno_field_144;
     std::optional<double> armor_multiplier; // Base Techno +120.
+    // Resolved 004F58A0 country multiplier for this type; it varies by kind.
+    std::optional<double> house_armor_multiplier;
 };
 struct CellState {
     std::optional<bool> allocated; // The original allocated Cell, not the fallback receiver.
