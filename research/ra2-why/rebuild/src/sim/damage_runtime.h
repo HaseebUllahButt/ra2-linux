@@ -84,8 +84,9 @@ std::optional<Coord> base_stationary_unit_aim(
 }
 
 namespace ra2::sim {
-// Candidate order is fixed at collection time. Recipient state is resolved
-// again immediately before each original virtual damage callback.
+// Construct only after the original area entry gate has passed and collection
+// has completed. Candidate order is fixed at collection time. Recipient state
+// is resolved again immediately before each original virtual damage callback.
 struct AreaDamageCursor {
     weapons::AreaDamageEvent event;
     int radius;

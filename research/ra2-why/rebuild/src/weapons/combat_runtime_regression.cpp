@@ -110,6 +110,7 @@ void check_world(const sim::OriginalDistance& distance) {
     const auto recipient=[&](std::uint32_t id)->std::optional<ResolvedImpactRecipient> {
         ResolvedImpactRecipient state{};state.target_id=id;state.original_type=1;
         state.health=(id==1 && !alive)?0:400;state.active=true;state.receives_damage=true;
+        state.scenario_blocks_damage=true; // Entry gate already passed before collection.
         return state;
     };
     auto next=sim::base_next_area_damage(cursor,recipient);

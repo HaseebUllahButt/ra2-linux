@@ -212,6 +212,9 @@ AreaDamageNext base_next_area_damage(AreaDamageCursor& cursor,const AreaRecipien
         state->raw_damage=cursor.event.damage;
         state->distance=candidate.distance;
         state->radius=cursor.radius;
+        // 0047E2E8 checks the scenario gate once, before collection. A
+        // trigger may change that global later; do not recheck it here.
+        state->scenario_blocks_damage=false;
         const auto request=weapons::base_resolved_impact_recipient(*state);
         if (request) { cursor.pending=request; return {S::Request,request}; }
         ++cursor.next;
