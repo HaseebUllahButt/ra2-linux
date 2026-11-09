@@ -5,6 +5,7 @@
 #include "battle_cursor.h"
 #include "battle_orders.h"
 #include "battle_scene.h"
+#include "battle_effects.h"
 #include "scene.h"
 #include "terrain_inputs.h"
 #include "../session/world/setup.h"
@@ -104,6 +105,7 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     BattleOrders orders_;
     BattleHud hud_;
     BattleCursor cursor_;
+    BattleEffects effects_;
     CursorScope cursor_scope_;
     BattleHelp help_;
     ui::ScoreAssets score_assets_;
@@ -144,7 +146,7 @@ public:
          combat_(assets.rules(),assets.battle_rules(),assets.map_ini(),assets.art_ini(),
                  (args.game_directory/"game.exe").string()),economy_(rules_),ai_(rules_),
          window_(window),scene_(scene),terrain_(terrain),geometry_(render::MapGeometry::from_ini(assets.map_ini())),
-         clock_(clock),player_(world_.houses.at(0).id),enemy_(world_.houses.at(1).id),orders_(player_),cursor_(files) {
+         clock_(clock),player_(world_.houses.at(0).id),enemy_(world_.houses.at(1).id),orders_(player_),cursor_(files),effects_(files) {
         if(const auto labels=assets_.read_asset("RA2.CSF"))labels_.parse(labels->data(),labels->size());
         score_assets_=ui::ScoreAssets::load(files,labels_);
         help_visible_=!args_.autoplay;
@@ -171,6 +173,7 @@ public:
         if (start!=world_.entities.end()) center(*start);
         radar_style_=render::battle_radar_style(rules_);
         radar_style_.houses[player_]={70,255,90};radar_style_.houses[enemy_]={255,65,50};
+        effects_.observe(world_,combat_.projectiles(),0,effect_project());
         refresh_hud();
         std::vector<BuildChoice> icons;
         for(const auto& list:{&catalog_.buildings,&catalog_.units,&catalog_.infantry})
@@ -203,6 +206,15 @@ public:
             const auto p=scene_.map_anchor(drawing);
             return BattlePoint{int(p.x)-camera_x_,int(p.y)-camera_y_};
         } catch (const std::exception&) {return {};}
+    }
+    BattleEffects::Project effect_project() const {
+        return [this](sim::Coord p)->std::optional<EffectPoint> {
+            if(p.x<0||p.y<0||p.x>=512*256||p.y>=512*256)return {};
+            sim::Entity e;e.kind=sim::Kind::Unit;e.position=p;
+            e.cell={std::uint16_t(p.x/256),std::uint16_t(p.y/256)};
+            try { const auto at=scene_.map_anchor(e);return EffectPoint{int(at.x),int(at.y)}; }
+            catch(const std::exception&) {return {};}
+        };
     }
     void center(const w::Entity& e) {
         const auto point=anchor(e);
@@ -748,6 +760,7 @@ public:
             for(const auto& [source,target]:acquire)if(combat_.attack(world_,source,target))attacks_[source]=target;
         }
         const auto fighting=combat_.tick(world_,frame);
+        effects_.observe(world_,combat_.projectiles(),frame,effect_project());
         fired+=fighting.fired;impacts+=fighting.impacts;
         for(const auto& detail:fighting.unresolved)gaps_.insert(detail);
         std::set<std::uint32_t> approach;
@@ -886,14 +899,7 @@ public:
                 for(int x=0;x<health;++x)for(int y=0;y<3;++y)pixel(frame_,point->x-15+x,point->y-30+y,color);
             }
         }
-        // TODO-ORIGINAL: Small native shell marks replace projectile art.
-        for(const auto& shot:combat_.projectiles()) {
-            const auto& p=shot.flight.arc.position;
-            if(p[0]<0||p[1]<0||p[0]>=512*256||p[1]>=512*256)continue;
-            w::Entity mark;mark.cell=ra2map::Cell{std::uint16_t(p[0]/256),std::uint16_t(p[1]/256)};
-            mark.position=sim::Coord{p[0],p[1],p[2]};mark.resolved_hp=1;mark.lifetime=w::Lifetime::Placed;
-            if(const auto at=anchor(mark))rectangle(frame_,at->x-1,at->y-1,3,3,{255,235,100});
-        }
+        effects_.draw(frame_,camera_x_,camera_y_,state.frame_counter);
         if(const auto box=orders_.selection_rectangle())rectangle(frame_,box->x,box->y,box->width,box->height,{70,255,90});
         if(!placement_.empty())if(const auto cell=cell_at({pointer_x_,pointer_y_})) {
             const p::CellXY origin{std::int16_t(cell->x),std::int16_t(cell->y)};
