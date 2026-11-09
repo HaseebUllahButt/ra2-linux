@@ -39,32 +39,32 @@ def inputs(seed):
         return state>>16
     present=next()%2; flags=next()%16; land=next()%13
     floats=(0x00000000,0x80000000,0x3f800000,0x3f000000,0xbf800000,0x3c23d709,0x3c23d70a,0x3c23d70b,0x7fc00000,0x7f800000,0xff800000)
-    overlay_track=floats[next()%len(floats)]; land_track=floats[next()%len(floats)]
+    overlay_wheel=floats[next()%len(floats)]; land_wheel=floats[next()%len(floats)]
     actors=[]
     for i in range(next()%5):
         kinds=(6,36,28,15); kind=kinds[next()%4]
         actors.append((kind,next()%8,(0,8,12,17)[next()%4],next()%9,next()%9))
     mode=next()%3; valid=next()%8!=0
-    if seed==0: present,flags,land,land_track,actors,valid=0,0,0,0x3f800000,[],True
+    if seed==0: present,flags,land,land_wheel,actors,valid=0,0,0,0x3f800000,[],True
     if seed in (1,2,3,4,5,6):
-        present,flags,land,land_track,actors,valid=0,0,0,0x3f800000,[(6,2,0,0,0)],True
+        present,flags,land,land_wheel,actors,valid=0,0,0,0x3f800000,[(6,2,0,0,0)],True
         if seed==2: actors.append((6,2,0,0,0))
         if seed==3: actors.append((36,0,0,0,0))
         if seed==4: actors.append((36,0,0,7,7))
         if seed==5: actors=[(6,5,0,0,0)]
         if seed==6: actors=[(6,1,0,0,0)]
-    return present,flags,land,overlay_track,land_track,actors,mode,valid
+    return present,flags,land,overlay_wheel,land_wheel,actors,mode,valid
 
 def run(seed):
     global usable,writes
-    present,flags,land,overlay_track,land_track,actors,mode,usable=inputs(seed)
+    present,flags,land,overlay_wheel,land_wheel,actors,mode,usable=inputs(seed)
     word(CELL+0x44,0 if present else -1); word(CELL+0xec,land); word(CELL+0x4c,0xdeadbeef)
     fields=(0x1fd,0x278,0x285,0x284) if base else (0x22d,0x2a8,0x2b5,0x2b4)
     for bit,offset in enumerate(fields): cpu.mem_write(OVERLAY+offset,bytes([(flags>>bit)&1]))
-    # Separate overlay and cell land slots retain both supplied Track values.
+    # Separate overlay and cell land slots retain both supplied Wheel values.
     word(OVERLAY+(0x268 if base else 0x298),13)
     table=0x850ea8 if base else 0x89ea48
-    word(table+13*36,overlay_track); word(table+land*36,land_track)
+    word(table+13*36,overlay_wheel); word(table+land*36,land_wheel)
     word(SESSION+(0x838 if base else 0x1258),mode)
     word(CELL+0xe4,ACTORS if actors else 0)
     for i,(kind,building_flags,building_state,terrain_a,terrain_b) in enumerate(actors):

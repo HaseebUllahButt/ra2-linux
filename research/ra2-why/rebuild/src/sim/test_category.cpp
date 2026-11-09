@@ -1,5 +1,6 @@
 #include "coarse_category.h"
 #include "../rules/ini_file.h"
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <iostream>
@@ -13,7 +14,7 @@ CoarseCategoryInputs inputs(unsigned seed) {
     const auto next=[&]() { state=state*1664525u+1013904223u; return state>>16; };
     bool present=next()%2; unsigned flags=next()%16,land=next()%13;
     const std::uint32_t floats[]={0,0x80000000u,0x3f800000u,0x3f000000u,0xbf800000u,0x3c23d709u,0x3c23d70au,0x3c23d70bu,0x7fc00000u,0x7f800000u,0xff800000u};
-    auto overlay_track=floats[next()%11],land_track=floats[next()%11];
+    auto overlay_wheel=floats[next()%11],land_wheel=floats[next()%11];
     std::vector<Actor> actors;
     const unsigned count=next()%5;
     for (unsigned i=0;i<count;++i) {
@@ -22,9 +23,9 @@ CoarseCategoryInputs inputs(unsigned seed) {
         actors.push_back({kind,next()%8,states[next()%4],next()%9,next()%9});
     }
     const int mode=next()%3; bool usable=next()%8!=0;
-    if (!seed) { present=false; flags=0; land=0; land_track=0x3f800000; actors.clear(); usable=true; }
+    if (!seed) { present=false; flags=0; land=0; land_wheel=0x3f800000; actors.clear(); usable=true; }
     if (seed>=1 && seed<=6) {
-        present=false; flags=0; land=0; land_track=0x3f800000; actors={{6,2,0,0,0}}; usable=true;
+        present=false; flags=0; land=0; land_wheel=0x3f800000; actors={{6,2,0,0,0}}; usable=true;
         if (seed==2) actors.push_back({6,2,0,0,0});
         if (seed==3) actors.push_back({36,0,0,0,0});
         if (seed==4) actors.push_back({36,0,0,7,7});
@@ -33,8 +34,8 @@ CoarseCategoryInputs inputs(unsigned seed) {
     }
     CoarseCategoryInputs result;
     result.usable=usable; result.overlay_index=present?0:-1;
-    result.overlay=CoarseOverlayState{static_cast<bool>(flags&1),static_cast<bool>(flags&2),static_cast<bool>(flags&4),static_cast<bool>(flags&8),as_float(overlay_track)};
-    result.land_type=land; result.land_track=as_float(land_track); result.session_field_1258=mode;
+    result.overlay=CoarseOverlayState{static_cast<bool>(flags&1),static_cast<bool>(flags&2),static_cast<bool>(flags&4),static_cast<bool>(flags&8),as_float(overlay_wheel)};
+    result.land_type=land; result.land_wheel=as_float(land_wheel); result.session_field_1258=mode;
     result.occupants=std::vector<CoarseOccupantState>{};
     for (const auto& actor:actors) {
         CoarseOccupantState value;
@@ -78,17 +79,35 @@ int main(int argc,char** argv) try {
     value.overlay=CoarseOverlayState{}; rejected(value);
     value.overlay->flag_22d=true; require(original_coarse_category(value).category==1,"overlay early return reads unresolved fields"); ++checks;
     value=inputs(0); value.land_type.reset(); rejected(value);
-    value=inputs(0); value.land_track.reset(); rejected(value);
+    value=inputs(0); value.land_wheel.reset(); rejected(value);
     value=inputs(0); value.occupants.reset(); rejected(value);
     value=inputs(1); value.occupants->front().runtime_type.reset(); rejected(value);
     value=inputs(3); value.session_field_1258.reset(); rejected(value);
     if (argc!=2) throw std::runtime_error("usage: test_category ORIGINAL_RULESMD_INI");
     const auto rules=ra2::rules::IniFile::from_file(argv[1]);
+    std::uint32_t columns=2166136261u;
+    for (const auto& profile:std::array<std::array<float,2>,8>{{{0,1},{1,0},{.125f,.5f},{.5f,.125f},{1,1.f/128},{0,1.f/64},{.5f,-.25f},{0,1.5f}}}) {
+        const float track=std::min(profile[0],1.0f),wheel=std::min(profile[1],1.0f);
+        value=inputs(0); value.land_wheel=wheel;
+        const auto category=original_coarse_category(value).category;
+        require(category==(wheel<=.01f?6:0),"distinct Wheel category differs"); ++checks;
+        std::uint32_t track_bits,wheel_bits; std::memcpy(&track_bits,&track,4); std::memcpy(&wheel_bits,&wheel,4);
+        std::uint32_t row=2166136261u;
+        for (auto word:{track_bits,wheel_bits,static_cast<std::uint32_t>(category)}) row=(row^word)*16777619u;
+        columns=(columns^row)*16777619u;
+    }
+    require(columns==0x8d749c93u,"original loader-to-category columns differ");
+    const auto tiberium_track=rules.read_double("Tiberium","Track");
+    const auto tiberium_wheel=rules.read_double("Tiberium","Wheel");
+    require(rules.read_string("Tiberium","Track")=="70%" && rules.read_string("Tiberium","Wheel")=="50%" &&
+        static_cast<float>(tiberium_track)==.7f && tiberium_wheel==.5,"original distinct Tiberium columns differ");
+    value=inputs(0); value.land_type=5; value.land_wheel=static_cast<float>(tiberium_wheel);
+    require(original_coarse_category(value).category==0,"original Tiberium Wheel category differs"); ++checks;
     struct Fixture { const char* name; int land,category; };
     for (const auto& fixture:std::array<Fixture,5>{{{"Clear",0,0},{"Road",1,0},{"Water",2,4},{"Rock",3,6},{"Beach",6,3}}}) {
-        const auto multiplier=ra2::rules::IniFile::double_value(rules.read_string(fixture.name,"Track"));
-        require(multiplier.has_value(),"original rules Track input is missing");
-        value=inputs(0); value.land_type=fixture.land; value.land_track=static_cast<float>(*multiplier);
+        const auto multiplier=ra2::rules::IniFile::double_value(rules.read_string(fixture.name,"Wheel"));
+        require(multiplier.has_value(),"original rules Wheel input is missing");
+        value=inputs(0); value.land_type=fixture.land; value.land_wheel=static_cast<float>(*multiplier);
         require(original_coarse_category(value).category==fixture.category,"original rules coarse category differs"); ++checks;
     }
     std::cout<<"original Cell coarse category and ordered writes: "<<checks<<" checks passed, hash="<<std::hex<<h<<"\n";

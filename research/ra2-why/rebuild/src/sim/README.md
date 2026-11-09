@@ -684,7 +684,17 @@ Hierarchy search and the Cell +4C producer still need integration before ordinar
 
 `original_coarse_category()` ports base 00478F40 and expansion 00483C80, which write Cell +4C.
 Its result is the input category for map regions. It is not LandType or full Unit entry eligibility.
-Inputs preserve the usable-area answer, overlay bytes, final LandType, Track table floats, and ordered ground occupants.
+Inputs preserve the usable-area answer, overlay bytes, final LandType, Wheel table floats, and ordered ground occupants.
+The Wheel field corrects an earlier Track label. Unit movement speed remains a separate input.
+Base reader 0064D610 writes Track at 00850EA4 and Wheel at 00850EA8, with a 36-byte land stride.
+Expansion reader 00674000 writes Track at 0089EA44 and Wheel at 0089EA48.
+Category functions read Wheel at 00850EA8 / 0089EA48 for both overlay and final Cell land.
+`CoarseOverlayState.land_wheel` and `CoarseCategoryInputs.land_wheel` require that original column.
+`original_land_category_check.py executable [--base]` executes the actual reader, then the actual category function.
+Its supplied INI answers use eight distinct Track and Wheel pairs, including opposite zero and nonzero values.
+Original table writes, clamps, float storage, and category reads execute unchanged.
+Both editions match hash 8D749C93.
+The native category test compares those vectors and checks real Tiberium Track=70% versus Wheel=50%.
 Building, owner, terrain-type, and Session fields keep explicit offset labels until their meanings are proved.
 The header lists both editions' offsets. Unknown required fields produce errors at the original point of use.
 Early returns do not require fields that the original branch does not read.

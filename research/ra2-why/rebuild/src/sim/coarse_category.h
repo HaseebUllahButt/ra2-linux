@@ -6,7 +6,7 @@ namespace ra2::sim {
 // Field labels use expansion offsets. Base counterparts are listed below.
 struct CoarseOverlayState {
     std::optional<bool> flag_22d,flag_2a8,flag_2b5,flag_2b4; // Base +1FD,+278,+285,+284.
-    std::optional<float> land_track; // Speed table column Track, selected by OverlayType +298 / base +268.
+    std::optional<float> land_wheel; // Wheel at base 00850EA8 / expansion 0089EA48, stride 36; OverlayType +268/+298 selects land.
 };
 struct CoarseOccupantState {
     std::optional<int> runtime_type; // Original virtual +2C; six=Building, 36=Terrain.
@@ -20,7 +20,7 @@ struct CoarseCategoryInputs {
     std::optional<int> overlay_index; // Minus one proves no overlay. Unknown is not empty.
     std::optional<CoarseOverlayState> overlay;
     std::optional<int> land_type;
-    std::optional<float> land_track;
+    std::optional<float> land_wheel; // Original Wheel column, not Track and not this Unit's movement multiplier.
     std::optional<std::vector<CoarseOccupantState>> occupants; // Original ground linked-list order.
     std::optional<int> session_field_1258; // Base Session +838.
 };

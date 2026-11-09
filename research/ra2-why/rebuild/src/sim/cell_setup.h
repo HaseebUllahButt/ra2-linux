@@ -21,7 +21,7 @@ struct CellSetupCallbacks {
     // Empty is unknown. allocated=false is the original fallback Cell.
     std::function<std::optional<CellSetupNeighbor>(ra2map::Cell)> neighbor;
     // Read-only profile for the final terrain and the current ordered occupants.
-    // This function must resolve the matching Land Track value from original rules.
+    // This function must resolve the matching land Wheel value from original rules.
     std::function<std::optional<CoarseCategoryInputs>(const TerrainCell&)> category;
 };
 enum class CellSetupStatus { Complete, NeedsInput, Unsupported };

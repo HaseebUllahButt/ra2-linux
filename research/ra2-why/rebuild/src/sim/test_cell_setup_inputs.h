@@ -62,7 +62,7 @@ struct CellSetupFixture {
         };
         callbacks.category=[&](const TerrainCell& terrain)->std::optional<CoarseCategoryInputs> {
             CoarseCategoryInputs input; input.usable=usable;
-            input.land_track=(seed+terrain.land_type.value())%3?1.0f:0.0f;
+            input.land_wheel=(seed+terrain.land_type.value())%3?1.0f:0.0f;
             input.occupants=std::vector<CoarseOccupantState>{};
             if (unit) { CoarseOccupantState object; object.runtime_type=1; input.occupants->push_back(object); }
             return input;

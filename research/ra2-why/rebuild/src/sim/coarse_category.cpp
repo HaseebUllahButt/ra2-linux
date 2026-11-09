@@ -21,9 +21,9 @@ CoarseCategoryResult original_coarse_category(const CoarseCategoryInputs& input)
         const auto& overlay=*input.overlay;
         if (need(overlay.flag_22d,"overlay +22D")) return finish(1);
         if (need(overlay.flag_2a8,"overlay +2A8")) return finish(2);
-        const auto track=need(overlay.land_track,"the overlay land Track value");
+        const auto wheel=need(overlay.land_wheel,"the overlay land Wheel value");
         // FCOMP equality also takes this branch on an unordered comparison.
-        if (track==0 || std::isnan(track)) return finish(6);
+        if (wheel==0 || std::isnan(wheel)) return finish(6);
         if (need(overlay.flag_2b5,"overlay +2B5")) return finish(6);
         if (need(overlay.flag_2b4,"overlay +2B4")) return finish(0);
     }
@@ -31,9 +31,9 @@ CoarseCategoryResult original_coarse_category(const CoarseCategoryInputs& input)
     if (land<0) throw std::invalid_argument("original coarse category LandType is invalid");
     if (land==2) return finish(4);
     if (land==6) return finish(3);
-    const auto track=need(input.land_track,"the land Track value");
+    const auto wheel=need(input.land_wheel,"the land Wheel value");
     // FCOMP uses the double constant at base 0079C518 / expansion 007E3808.
-    if (static_cast<double>(track)<=0.01 || std::isnan(track)) return finish(6);
+    if (static_cast<double>(wheel)<=0.01 || std::isnan(wheel)) return finish(6);
     if (!input.occupants) throw std::invalid_argument("original coarse category ground occupant order is unresolved");
     for (const auto& occupant:*input.occupants) {
         const int kind=need(occupant.runtime_type,"the occupant runtime type");
