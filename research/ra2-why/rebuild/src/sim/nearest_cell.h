@@ -22,6 +22,7 @@ struct NearestFitQuery {
     unsigned movement_zone=0;
     bool above_bridge=false;
     // Original rectangle arguments are width=1, height=1, layer=-1, final flag=0.
+    DriveEdition edition=DriveEdition::BaseRa2;
 };
 struct NearestCellCallbacks {
     // Read-only callbacks. Resolve original linear aliases and the fallback Cell before supplying metadata.

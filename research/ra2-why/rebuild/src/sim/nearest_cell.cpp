@@ -48,7 +48,7 @@ NearestCellResult original_foot_nearest_cell(const NearestCellInputs& input,cons
             const auto current=cell(point);
             if (!need(current.usable,"nearest-cell usable-area answer is unresolved")) return false;
             if (!cb.fits) throw Missing{"nearest-cell rectangle eligibility body is missing"};
-            if (!need(cb.fits({point,input.query.speed_type,component,input.query.movement_zone,input.query.above_bridge}),"nearest-cell rectangle eligibility is unresolved")) return false;
+            if (!need(cb.fits({point,input.query.speed_type,component,input.query.movement_zone,input.query.above_bridge,input.query.edition}),"nearest-cell rectangle eligibility is unresolved")) return false;
             const int bridge=need(current.bridge,"nearest-cell candidate bridge flag is unresolved")?4:0;
             if (std::abs(reference-bridge-level(current))>=2) return false;
             out.admitted.push_back(point);
