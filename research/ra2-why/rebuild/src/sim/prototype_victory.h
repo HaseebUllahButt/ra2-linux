@@ -47,9 +47,9 @@ struct VictoryRules {
 bool original_house_fallen(const session::world::Snapshot& world, std::uint32_t house,
     const VictoryRules& rules);
 // Verdict from the original rule. Only objects on the map count (Placed).
-// TODO-ORIGINAL: 004E7DF0 then destroys every object of the fallen house, and
-// Harvester Truce (scenario flag 0x800) removes HarvesterUnit types from the
-// unit count. Both are not modeled. Throws like evaluate_prototype_victory.
+// The match runs 004E7DF0 cleanup through the combat runtime.
+// TODO-ORIGINAL: Harvester Truce (scenario flag 0x800) removes HarvesterUnit types from the
+// unit count. That rule is not modeled. Throws like evaluate_prototype_victory.
 Victory evaluate_original_victory(const session::world::Snapshot& world,
     std::uint32_t player_house, std::uint32_t enemy_house, const VictoryRules& rules);
 

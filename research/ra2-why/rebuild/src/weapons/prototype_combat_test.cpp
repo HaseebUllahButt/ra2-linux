@@ -1,6 +1,9 @@
 #include <fs/mix_bootstrap.h>
 #include <rules/ini_file.h>
 #include <sim/damage_runtime.h>
+#include <app/battle_fallout.h>
+#include <app/battle_score.h>
+#include <app/battle_effects.h>
 #include <weapons/detonation.h>
 #include <weapons/fire_timer.h>
 #include <array>
@@ -117,6 +120,74 @@ void air_ground_test(const rules::IniFile& rules,const rules::IniFile& art,const
     check(took_off.fired==0 && took_off.unresolved.empty() && w.entities[0].target_id==0,
           "Pillbox kept firing after takeoff");
     std::cout<<"Projectile AA/AG, height threshold, hills, secondary weapons and takeoff passed\n";
+}
+void fallen_house_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe,fs::MixFileSystem& files) {
+    auto w=make_world("HTNK","GACNST",world::Kind::Unit,world::Kind::Structure,400,1);
+    w.setup_progress=world::SetupProgress::PrototypeComplete;
+    auto third=w.houses[0];third.id=103;w.houses.push_back(third);
+    const auto add=[&](unsigned id,unsigned owner,world::Kind kind,const char* type,int x,int y) {
+        auto e=w.entities[0];e.id=id;e.house_id=owner;e.kind=kind;e.type=type;e.next=0;
+        e.resolved_hp=e.maximum_hp=1000;e.target_id=0;
+        e.cell=ra2map::Cell{std::uint16_t(x),std::uint16_t(y)};
+        e.position=sim::Coord{x*256+128,y*256+128,0};
+        auto& c=w.cells.at(y*512+x);c.heads->ground_head=id;c.ground_occupancy_124=0x20;
+        w.entities.push_back(e);
+    };
+    add(4,103,world::Kind::Structure,"GACNST",55,52);
+    add(5,102,world::Kind::Unit,"HTNK",54,51);
+    add(6,102,world::Kind::Infantry,"E1",53,52);
+    add(8,101,world::Kind::Structure,"GACNST",46,46);
+    auto product=w.entities[0];product.id=7;product.house_id=102;
+    product.lifetime=world::Lifetime::Created;product.cell.reset();product.position.reset();
+    w.entities.push_back(product);
+    sim::PrototypeCombatRuntime combat(rules,{},art,exe);
+    sim::VictoryState victory;sim::VictoryRules settings;settings.base_units={"AMCV","SMCV"};
+    app::BattleScore score({{101,"Player"},{102,"Computer"},{103,"Computer 2"}});
+    check(combat.attack(w,1,2)&&combat.attack(w,5,4),"three-house orders failed");
+    bool saw_fall=false;
+    for(unsigned frame=0;frame<200;++frame) {
+        const auto fight=combat.tick(w,frame);score.combat(fight.events);
+        check(fight.unresolved.empty(),"three-house combat needs input");
+        const auto cleanup=app::resolve_fallen_houses(w,victory,combat,101,{102,103},settings,frame);
+        score.combat(cleanup.events);
+        check(cleanup.unresolved.empty(),"fallen-house cleanup needs input");
+        if(w.entities[1].lifetime!=world::Lifetime::Destroyed) {
+            check(cleanup.destroyed==0,"house fell before its last building died");continue;
+        }
+        saw_fall=true;
+        check(victory.fallen(102)&&!victory.settled(),"one lost house ended the three-house match");
+        check(cleanup.destroyed==3 && cleanup.events.size()==3,"remaining army or factory product survived");
+        for(const auto& event:cleanup.events)check(event.kind==sim::PrototypeCombatEventKind::Death &&
+            event.frame==frame && event.source_id==0 && event.source_house==0 && event.target_house==102,
+            "cleanup death has wrong frame or attacker");
+        for(const auto& e:w.entities)if(e.house_id==102)
+            check(e.lifetime==world::Lifetime::Destroyed && e.resolved_hp==0 && e.target_id==0,
+                "fallen house kept a live actor or target");
+        check(w.cells.at(51*512+54).heads->ground_head==0 && w.cells.at(51*512+54).ground_occupancy_124==0 &&
+            w.cells.at(52*512+53).heads->ground_head==0 && w.cells.at(52*512+53).ground_occupancy_124==0,
+            "fallen army kept occupied cells");
+        check(w.entities[2].lifetime==world::Lifetime::Placed && w.cells.at(50*512+54).heads->ground_head==3,
+            "cleanup removed another house or changed a surviving chain");
+        const auto tally=score.finish(false);
+        check(tally.houses[0].kills()==1 && tally.houses[1].losses()==4 && tally.houses[2].losses()==0,
+            "mass death changed kill credit or lost its losses");
+        app::BattleEffects effects(files);
+        const auto project=[](sim::Coord at)->std::optional<app::EffectPoint> {
+            if(at.x<0||at.y<0)return {};
+            return app::EffectPoint{at.x/32,at.y/32};
+        };
+        effects.observe(w,{},frame,project,&cleanup.events,&rules);
+        check(effects.active()==2,"placed army deaths did not make effects or a limbo product made one");
+        effects.observe(w,{},frame,project,&cleanup.events,&rules);
+        check(effects.active()==2,"same-frame deaths made duplicate effects");
+        check(combat.destroy_house(w,102,frame).events.empty(),"house destruction repeated deaths");
+        const auto later=combat.tick(w,frame+1);
+        for(const auto& event:later.events)if(event.kind==sim::PrototypeCombatEventKind::Shot)
+            check(event.source_house!=102,"fallen tank kept firing");
+        break;
+    }
+    check(saw_fall,"last building never died");
+    std::cout<<"Three-house defeat removes its army in the same frame, with events, score and clear cells\n";
 }
 void tank_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
     rules::IniFile map;
@@ -555,6 +626,7 @@ int main(int argc,char** argv) {
         }
         std::cout<<"TeamDelays="<<rules.read_string("General","TeamDelays")<<'\n';
         air_ground_test(rules,art,std::string(argv[1])+"/game.exe");
+        fallen_house_test(rules,art,std::string(argv[1])+"/game.exe",files);
         tank_test(rules,art,std::string(argv[1])+"/game.exe");
         infantry_test(rules,art,std::string(argv[1])+"/game.exe");
         cyclic_link_test(rules,art,std::string(argv[1])+"/game.exe");

@@ -468,6 +468,13 @@ bool prototype_unlink(Snapshot& w,Entity& victim) {
     for (auto* cell:emptied) if (cell->ground_occupancy_124) cell->ground_occupancy_124=0;
     return true;
 }
+bool prototype_die(Snapshot& world,Entity& target) {
+    if (target.lifetime==Lifetime::Placed && !prototype_unlink(world,target)) return false;
+    target.resolved_hp=0;
+    if (target.techno_field_329) target.techno_field_329=1;
+    target.active=false;target.in_limbo=true;target.target_id=0;target.lifetime=Lifetime::Destroyed;
+    return true;
+}
 struct PrototypeHit { bool applied=false,destroyed=false; std::string missing; };
 PrototypeHit prototype_damage(Snapshot& world,std::uint32_t target_id,std::uint32_t source_id,
     int raw,int distance,const PrototypeWeapon& weapon,const IniFile& base,const IniFile& map) {
@@ -507,14 +514,35 @@ PrototypeHit prototype_damage(Snapshot& world,std::uint32_t target_id,std::uint3
             [](const weapons::ObjectDamageAction&,weapons::ObjectDamageState&){});
         health=path.state.health;status=path.status;
     }
-    if (status==4 && !prototype_unlink(world,*target))
+    if (status==4 && !prototype_die(world,*target))
         return {false,false,"dead actor has unresolved Cell links"};
     target->resolved_hp=health;
     if (status && target->techno_field_329) target->techno_field_329=1;
-    if (status==4) {
-        target->active=false;target->in_limbo=true;target->target_id=0;target->lifetime=Lifetime::Destroyed;
-    }
     return {true,status==4,{}};
+}
+void prototype_record(const Snapshot& world,PrototypeCombatTick& report,std::uint64_t frame,
+    PrototypeCombatEventKind kind,const PrototypeCombatProjectile& shot,const Entity& target,int before,int after) {
+        const auto* source=prototype_find(world,shot.source_id);
+        PrototypeCombatEvent event;
+        event.kind=kind;event.frame=frame;event.fired_frame=shot.fired_frame;
+        event.source_id=shot.source_id;event.target_id=target.id;
+        if (source) {
+            event.source_house=source->house_id;event.source_type=source->type;
+            event.source_position=source->position.value_or(Coord{});
+        }
+        event.target_house=target.house_id;event.target_type=target.type;
+        event.target_position=target.position.value_or(Coord{});
+        event.weapon=shot.weapon;event.warhead=shot.warhead;event.raw_damage=shot.damage;
+        event.hp_before=before;event.hp_after=after;
+        report.events.push_back(event);
+        // Always keep attribution in the captured match log, including off-screen deaths.
+        std::fprintf(stderr,"combat event=%s frame=%llu fired_frame=%llu source=%u type=%s house=%u source_pos=%d,%d,%d weapon=%s warhead=%s target=%u target_type=%s target_house=%u target_pos=%d,%d,%d raw=%d hp_before=%d hp_after=%d\n",
+            kind==PrototypeCombatEventKind::Shot?"shot":kind==PrototypeCombatEventKind::Death?"death":"damage",
+            static_cast<unsigned long long>(frame),static_cast<unsigned long long>(shot.fired_frame),
+            event.source_id,event.source_type.c_str(),event.source_house,
+            event.source_position.x,event.source_position.y,event.source_position.z,
+            event.weapon.c_str(),event.warhead.c_str(),event.target_id,event.target_type.c_str(),event.target_house,
+            event.target_position.x,event.target_position.y,event.target_position.z,shot.damage,before,after);
 }
 }
 
@@ -584,6 +612,30 @@ void PrototypeCombatRuntime::stop(session::world::Snapshot& world,std::uint32_t 
     if (auto* source=prototype_find(world,source_id)) source->target_id=0;
 }
 
+PrototypeCombatTick PrototypeCombatRuntime::destroy_house(session::world::Snapshot& world,
+    std::uint32_t house,std::uint64_t frame) {
+    PrototypeCombatTick report;
+    if(!house || world.edition!=session::world::Edition::Base || world.pending_cell_setup) {
+        report.unresolved.push_back("house destruction needs a ready base world");return report;
+    }
+    // Base 004E7DF0: current HP, C4Warhead, null attacker, ignore defenses.
+    // Transport-derived ownership and the pre-death stun callback are not modeled.
+    for(auto& target:world.entities) {
+        if(target.house_id!=house || target.kind==session::world::Kind::Terrain || target.lifetime==Lifetime::Destroyed)continue;
+        if(!target.resolved_hp) {report.unresolved.push_back("fallen actor health is unresolved");continue;}
+        const int before=*target.resolved_hp;
+        if(!prototype_die(world,target)) {report.unresolved.push_back("fallen actor has unresolved Cell links");continue;}
+        stop(world,target.id);turrets_.erase(target.id);prone_.erase(target.id);
+        PrototypeCombatProjectile death;
+        death.target_id=target.id;death.fired_frame=frame;death.damage=before;
+        death.warhead=prototype_string(base_,map_,"CombatDamage","C4Warhead");
+        prototype_record(world,report,frame,PrototypeCombatEventKind::Death,death,target,before,0);
+        if(!target.position)report.events.back().target_position={-1,-1,-1};
+        ++report.destroyed;
+    }
+    return report;
+}
+
 PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world,std::uint64_t frame) {
     loop::profile::Scope probe(loop::profile::Phase::Combat);
     PrototypeCombatTick report;
@@ -595,27 +647,7 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
     }
     const auto record=[&](PrototypeCombatEventKind kind,const PrototypeCombatProjectile& shot,
                           const session::world::Entity& target,int before,int after) {
-        const auto* source=prototype_find(world,shot.source_id);
-        PrototypeCombatEvent event;
-        event.kind=kind;event.frame=frame;event.fired_frame=shot.fired_frame;
-        event.source_id=shot.source_id;event.target_id=target.id;
-        if (source) {
-            event.source_house=source->house_id;event.source_type=source->type;
-            event.source_position=source->position.value_or(Coord{});
-        }
-        event.target_house=target.house_id;event.target_type=target.type;
-        event.target_position=target.position.value_or(Coord{});
-        event.weapon=shot.weapon;event.warhead=shot.warhead;event.raw_damage=shot.damage;
-        event.hp_before=before;event.hp_after=after;
-        report.events.push_back(event);
-        // Always keep attribution in the captured match log, including off-screen deaths.
-        std::fprintf(stderr,"combat event=%s frame=%llu fired_frame=%llu source=%u type=%s house=%u source_pos=%d,%d,%d weapon=%s warhead=%s target=%u target_type=%s target_house=%u target_pos=%d,%d,%d raw=%d hp_before=%d hp_after=%d\n",
-            kind==PrototypeCombatEventKind::Shot?"shot":kind==PrototypeCombatEventKind::Death?"death":"damage",
-            static_cast<unsigned long long>(frame),static_cast<unsigned long long>(shot.fired_frame),
-            event.source_id,event.source_type.c_str(),event.source_house,
-            event.source_position.x,event.source_position.y,event.source_position.z,
-            event.weapon.c_str(),event.warhead.c_str(),event.target_id,event.target_type.c_str(),event.target_house,
-            event.target_position.x,event.target_position.y,event.target_position.z,shot.damage,before,after);
+        prototype_record(world,report,frame,kind,shot,target,before,after);
     };
     // TODO-ORIGINAL: The prototype advances saved bullets before attack orders.
     // Recover global object update order before treating this as replay exact.
