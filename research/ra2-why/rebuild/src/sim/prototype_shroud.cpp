@@ -8,15 +8,12 @@ using session::world::Entity;
 using session::world::HouseRole;
 using session::world::Lifetime;
 
-// The original display reveal caps the sight range at ten cells: RA1
-// MapClass::Sight_From rejects sightrange > 10 outright and RA2
-// RevealArea1 005673A0 clamps the range down to ten.
+// RevealArea 0054A110 clamps the sight range down to ten cells.
 constexpr std::int32_t max_sight_range = 10;
 
-// The Red Alert sight diamond, from RA1 MapClass::Sight_From. A cell counts
-// when max(|dx|,|dy|) + min(|dx|,|dy|)/2 <= range, which reproduces the
-// RadiusOffset/RadiusCount rings exactly (verified against the RA1 table in
-// CODE/MAP.CPP, e.g. ring 2 is the 5x5 square without its four corners).
+// The base CellSpread area for one range (offsets 00A6F248, counts
+// 007A5908). A cell counts when max(|dx|,|dy|) + min(|dx|,|dy|)/2 <= range;
+// test_prototype_shroud checks every count of the original table.
 template <typename Visit>
 void for_each_cell_in_diamond(ra2map::Cell center, std::int32_t range, Visit visit) {
     const auto cx = static_cast<std::int32_t>(center.x);
@@ -110,19 +107,19 @@ void PrototypeShroud::reshroud_all(std::uint32_t house) {
 
 std::int32_t PrototypeShroud::sight_range(const rules::IniFile& rules,
     const std::string& type) const {
-    return rules.read_integer(type, "Sight", 1);
+    return rules.read_integer(type, "Sight", 0);
 }
 
 void PrototypeShroud::tick(const session::world::Snapshot& world,
-    const rules::IniFile& rules) {
+    const rules::IniFile& rules, const SightCenter& center) {
     // Every snapshot house gets a map, so queries never depend on tick order.
     for (const auto& house : world.houses) map_for(house.id);
 
     // Spy satellite: a live SpySat=yes building sees the whole map. Losing
     // the last one reshrouds the whole map first, then normal sight rebuilds
-    // the view. TODO-ORIGINAL: FUN_00508F60 checks the live SpySat flag on
-    // the building type and calls HouseClass::ReshroudMap 0050BD10 ->
-    // MapClass::Reshroud 00577AB0 on loss. Power state is not modeled.
+    // the view. TODO-ORIGINAL: the old notes name Yuri's Revenge addresses
+    // 00508F60, 0050BD10 and 00577AB0; the base SpySat loss path and power
+    // state are not recovered.
     std::map<std::uint32_t, bool> satellite_now;
     for (const auto& house : world.houses) {
         bool active = false;
@@ -152,26 +149,38 @@ void PrototypeShroud::tick(const session::world::Snapshot& world,
     for (const auto& entity : world.entities) {
         if (!sight_source(entity)) continue;
         const auto range = sight_range(rules, entity.type);
-        // TODO-ORIGINAL: the original sights from the object footprint center
-        // (RA1 MapClass::Sight_From callers pass Center_Coord); this
-        // prototype sights from the entity's anchor cell.
-        if (range > 0) sight_from(entity.house_id, *entity.cell, range);
+        // 006D5C30 sights from the object coordinate: a building's centre.
+        // TODO-ORIGINAL: RevealByHeight, height-shifted centres and veteran
+        // sight bonuses are not modeled.
+        if (range <= 0) continue;
+        std::optional<ra2map::Cell> from;
+        if (center) from = center(entity);
+        sight_from(entity.house_id, from.value_or(*entity.cell), range);
     }
 
     // Gap generators hide their radius from every other house. The hidden
     // cells keep their explored state underneath, so the old view returns
-    // when the generator dies (CellClass ShroudCounter 00487690/00487630).
-    // TODO-ORIGINAL: allied houses of the owner are hidden too, the shroud
-    // pulse timing and SuperGapRadiusInCells are not modeled, and low power
-    // is ignored. A satellite view ignores gaps, like RA1
+    // when the generator dies (base IncreaseShroudCounter 0047C8A0 caps the
+    // counter at the gaps covering the cell; ReduceShroudCounter 0047C840).
+    // Allies of the owner keep their view: the base alliance mask House
+    // +5674 holds one bit per allied house index (IsAlliedWith use in
+    // 004EB360). TODO-ORIGINAL: the shroud pulse timing and
+    // SuperGapRadiusInCells are not modeled, and low power is ignored. A satellite view ignores gaps, like RA1
     // DisplayClass::Shroud_Cell with GPS active.
     for (const auto& entity : world.entities) {
         if (entity.kind != session::world::Kind::Structure || !sight_source(entity)) continue;
         if (!rules.read_bool(entity.type, "GapGenerator")) continue;
         const auto range = rules.read_integer(entity.type, "GapRadiusInCells", 0);
         if (range <= 0 || !entity.cell.has_value() || !in_grid(*entity.cell)) continue;
+        const auto owner = std::find_if(world.houses.begin(), world.houses.end(),
+            [&](const auto& house) { return house.id == entity.house_id; });
         for (const auto& house : world.houses) {
             if (house.id == entity.house_id || map_neutral(house)) continue;
+            if (owner != world.houses.end() && owner->alliance_mask_5674 &&
+                house.original_index && *house.original_index >= 0 &&
+                *house.original_index < 32 &&
+                (*owner->alliance_mask_5674 >> *house.original_index & 1u) != 0)
+                continue;
             if (satellite_now[house.id]) continue;
             auto& map = map_for(house.id);
             for_each_cell_in_diamond(*entity.cell, std::min(range, max_sight_range),
@@ -195,6 +204,30 @@ bool PrototypeShroud::cell_visible_to(std::uint32_t house, ra2map::Cell cell) co
     if (!map || !in_grid(cell)) return false;
     const auto index = index_of(cell);
     return map->visible[index] != 0 && map->gaps[index] == 0;
+}
+
+void PrototypeShroud::revealed_layer(std::uint32_t house,
+    std::vector<std::uint8_t>& out) const {
+    const auto cells = static_cast<std::size_t>(width_) * static_cast<std::size_t>(height_);
+    out.assign(cells, 0);
+    const auto* map = find_map(house);
+    if (!map) return;
+    for (std::size_t index = 0; index < cells; ++index)
+        out[index] = map->revealed[index] != 0 && map->gaps[index] == 0;
+}
+
+void PrototypeShroud::revealed_layer(std::uint32_t house, std::int32_t x0, std::int32_t y0,
+    std::int32_t x1, std::int32_t y1, std::vector<std::uint8_t>& out) const {
+    const auto width = std::max(0, x1 - x0), height = std::max(0, y1 - y0);
+    out.assign(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), 0);
+    const auto* map = find_map(house);
+    if (!map) return;
+    for (std::int32_t y = std::max(0, y0); y < std::min(y1, height_); ++y) {
+        const auto row = static_cast<std::size_t>(y) * static_cast<std::size_t>(width_);
+        auto* target = &out[static_cast<std::size_t>(y - y0) * static_cast<std::size_t>(width)];
+        for (std::int32_t x = std::max(0, x0); x < std::min(x1, width_); ++x)
+            target[x - x0] = map->revealed[row + x] != 0 && map->gaps[row + x] == 0;
+    }
 }
 
 PrototypeShroud::Vision PrototypeShroud::vision(std::uint32_t house, ra2map::Cell cell) const {

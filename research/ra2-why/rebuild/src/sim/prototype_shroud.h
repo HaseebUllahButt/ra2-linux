@@ -1,21 +1,29 @@
 #pragma once
-// Prototype shroud and fog of war for the first playable native Linux
-// skirmish. Every house owns one shroud map over one shared rectangular cell
-// grid. A cell starts black. A live unit or building with Sight= reveals the
-// cells in its sight diamond; a revealed cell stays explored, and objects in
-// it draw only while some sight source sees the cell right now. A gap
-// generator hides its radius from enemy houses. A SpySat=yes building
-// reveals the whole map; losing it reshrouds the whole map again.
+// Shroud for the native Linux skirmish. Every house owns one shroud map over
+// one shared rectangular cell grid. A cell starts black. A live unit or
+// building with Sight= reveals the cells in its sight area; a revealed cell
+// stays explored. A gap generator hides its radius from enemy houses. A
+// SpySat=yes building reveals the whole map; losing it reshrouds the map.
 //
-// The sight shape is the Red Alert sight diamond: a cell at offset (dx,dy) is
-// in range when max(|dx|,|dy|) + min(|dx|,|dy|)/2 <= range. That is the shape
-// of RA1 MapClass::Sight_From (ref/CnC_Red_Alert CODE/MAP.CPP,
-// RadiusOffset/RadiusCount) and the RA2 engine keeps the same tables
-// (RevealArea1 005673A0, RevealArea3 00567DA0 read the same offset list).
+// Base RA2 evidence (game.exe 1.006, base addresses):
+// - RevealArea 0054A110 caps the range at ten cells and walks the CellSpread
+//   offset table 00A6F248 (built by 005441E0, counts 007A5908:
+//   1,9,21,37,61,89,121,161,205,253,309). It also drops cells whose
+//   truncated Euclid distance exceeds the range, which never removes a table
+//   cell. The table is exactly the cells with
+//   max(|dx|,|dy|) + min(|dx|,|dy|)/2 <= range (checked for ranges 0..10).
+// - TechnoTypeClass 006D9B40 sets Sight to zero and 006DAF60 (006DC9D9)
+//   reads Sight= over it. A type without Sight= reveals nothing.
+// - Techno sight 006D5C30 passes the object coordinate, so a building sees
+//   from its footprint centre. Use tick()'s centre callback for that.
+// - RevealFogShroud 00499FC0 runs CleanFog only with the scenario FogOfWar
+//   flag. Base skirmish has no fog: an explored cell shows its objects.
 #include "rules/ini_file.h"
 #include "session/world/world.h"
 #include <cstdint>
+#include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -31,15 +39,18 @@ public:
     // Grid size in cells; the caller owns the snapshot and the rules.
     PrototypeShroud(std::int32_t width, std::int32_t height);
 
+    // The cell an entity sees from. Return no value to use entity.cell.
+    using SightCenter =
+        std::function<std::optional<ra2map::Cell>(const session::world::Entity&)>;
+
     // Recompute every house's view from one snapshot. Sight=, GapGenerator=,
     // GapRadiusInCells= and SpySat= come from the authored rules. Call once
-    // per game frame; repeated frames and rewinds are safe: the view is a
-    // pure recompute, so the caller can replay snapshots in any order.
-    void tick(const session::world::Snapshot& world, const rules::IniFile& rules);
+    // per game frame. Explored cells stay explored; current sight is rebuilt.
+    void tick(const session::world::Snapshot& world, const rules::IniFile& rules,
+              const SightCenter& center = {});
 
-    // MapClass::Sight_From: reveal the sight diamond around one cell for one
-    // house. Range zero or less does nothing; the original display reveal
-    // caps the range at ten cells (RevealArea1 005673A0).
+    // Reveal the sight area around one cell for one house. Range zero or
+    // less does nothing; RevealArea 0054A110 caps the range at ten cells.
     void sight_from(std::uint32_t house, ra2map::Cell center, std::int32_t range);
 
     // MapClass::Shroud_From: hide the sight diamond from every other known
@@ -49,7 +60,7 @@ public:
     // Spy satellite: explore and reveal the whole map for one house.
     void reveal_all(std::uint32_t house);
 
-    // MapClass::Reshroud 00577AB0: forget the whole map for one house.
+    // Forget the whole map for one house (spy satellite loss).
     void reshroud_all(std::uint32_t house);
 
     // Terrain draws when the cell is revealed, objects draw when it is
@@ -58,8 +69,15 @@ public:
     bool cell_visible_to(std::uint32_t house, ra2map::Cell cell) const;
     Vision vision(std::uint32_t house, ra2map::Cell cell) const;
 
-    // Sight= in cells for one type. A missing key reads as one cell.
-    // TODO-ORIGINAL: the TechnoTypeClass Sight default is not recovered.
+    // One byte per grid cell (index y*width+x): 1 when cell_revealed_to is
+    // true. For fast drawing passes; unknown houses give all zeros.
+    void revealed_layer(std::uint32_t house, std::vector<std::uint8_t>& out) const;
+    // The same for the box [x0,x1) x [y0,y1) only (index (y-y0)*(x1-x0)+x-x0).
+    // Cells outside the grid read as zero.
+    void revealed_layer(std::uint32_t house, std::int32_t x0, std::int32_t y0,
+                        std::int32_t x1, std::int32_t y1, std::vector<std::uint8_t>& out) const;
+
+    // Sight= in cells for one type. A missing key reads as zero (006D9B40).
     std::int32_t sight_range(const rules::IniFile& rules, const std::string& type) const;
 
     // Grid size in cells, for callers that draw or query the map.
