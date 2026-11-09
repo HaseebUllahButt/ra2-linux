@@ -27,7 +27,7 @@ OrdinaryUnitFireInput ordinary() {
     in.weapon_special_flags_clear=true;in.alternate_weapon_effects_clear=true;in.warhead_special_flags_clear=true;
     in.warhead_present=true;in.target_virtual_1bc=false;in.target_virtual_54=false;in.target_cell_land_type=0;
     in.target_virtual_50=false;in.barrel_override_active=false;in.timer=FireTimer{-1,0};in.frame=100;
-    in.ammo_field_254=1;in.shooter_type_af2=false;in.warhead_armor_verse=1;in.target_flag_325=false;
+    in.ammo_field_254=1;in.weapon_flag_10f=true;in.shooter_state_1b8=0;in.shooter_type_af2=false;in.warhead_armor_verse=1;in.target_flag_325=false;
     in.matching_bridge_flags=true;in.shooter_type_b47=false;return in;
 }
 void check_fire_and_damage() {
@@ -36,6 +36,8 @@ void check_fire_and_damage() {
     fire.timer=FireTimer{100,65};fire.frame=164;
     check(base_ordinary_unit_fire_check(fire).rejection==3,"fire timer before expiry");
     fire.frame=165;check(base_ordinary_unit_fire_check(fire).rejection==0,"fire timer expiry");
+    fire.shooter_state_1b8=1;check(base_ordinary_unit_fire_check(fire).rejection==9,"DecloakToFire state");
+    fire.shooter_state_1b8=0;
     fire.alternate_weapon_effects_clear.reset();
     check(!base_ordinary_unit_fire_check(fire).rejection,"unknown secondary slot accepted");
     check(!base_fire_timer_ready({-1,65},100) && base_fire_timer_ready({-1,0},100),"stopped timer");
@@ -106,6 +108,16 @@ void check_projectile(const std::string& path,const sim::OriginalDistance& dista
     check(trace.status==TerrainTraceStatus::Hit && trace.cell_id==26164,"original Cannon line trace");
     const CannonLineLookup missing_line=[](std::int16_t,std::int16_t)->std::optional<CannonLineCell> {return {};};
     check(base_cannon_line_trace(line,missing_line).status==TerrainTraceStatus::NeedsCell,"unknown Cannon line cell accepted");
+    // The exception must read the returned hit Cell. This intentionally
+    // varies the lookup to detect use of the earlier sampled-cell snapshot.
+    int calls=0;
+    CannonLineLookup changing=[&](std::int16_t,std::int16_t)->std::optional<CannonLineCell> {
+        ++calls;
+        if (calls==4) return CannonLineCell{{7,4,true,false,false},0,2};
+        return CannonLineCell{{static_cast<unsigned>(calls==2?2:1),0,false,false,false},0,0};
+    };
+    CannonLineInput exception{{0,0,0},{512,0,0},true,true,false,true};
+    check(base_cannon_line_trace(exception,changing).status==TerrainTraceStatus::Clear,"line exception used the wrong cell");
     CannonRangeInput range_input{{0,0,0},{512,0,0},1024,0,6,true,false};
     check(base_cannon_range(range_input,distance)==CannonRangeStatus::InRange,"original Cannon range");
     range_input.target.x=1030;

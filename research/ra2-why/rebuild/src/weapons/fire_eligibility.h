@@ -34,7 +34,7 @@ namespace ra2::weapons {
 struct OrdinaryUnitFireInput {
     FireEligibilityPrefixInput prefix;
     std::optional<bool> shooter_is_unit, target_is_unit, weapon_present, primary_weapon_index_zero;
-    // Weapon +125, +10D, +105, +106, +109, +10C, +10F are all zero.
+    // Weapon +125, +10D, +105, +106, +109, +10C are all zero.
     std::optional<bool> weapon_special_flags_clear;
     // The original separately reads slot 1 and checks its four effect flags
     // against live effect pointers, even when slot 0 is selected.
@@ -50,6 +50,8 @@ struct OrdinaryUnitFireInput {
     std::optional<bool> barrel_override_active;
     std::optional<FireTimer> timer;
     std::optional<int> frame, ammo_field_254;
+    std::optional<bool> weapon_flag_10f; // DecloakToFire; constructor default is true.
+    std::optional<int> shooter_state_1b8;
     std::optional<bool> shooter_type_af2;
     std::optional<double> warhead_armor_verse;
     std::optional<bool> target_flag_325, matching_bridge_flags;

@@ -97,6 +97,11 @@ FireEligibilityPrefixResult base_ordinary_unit_fire_check(const OrdinaryUnitFire
     catch (const std::exception&) { return need("weapon timer arithmetic"); }
     if (!in.ammo_field_254) return need("shooter +254");
     if (*in.ammo_field_254==0) return done(1);
+    if (!in.weapon_flag_10f) return need("weapon DecloakToFire flag");
+    if (*in.weapon_flag_10f) {
+        if (!in.shooter_state_1b8) return need("shooter +1B8 cloak state");
+        if (*in.shooter_state_1b8!=0) return done(9);
+    }
     if (!in.shooter_type_af2) return need("shooter type +AF2");
     if (*in.shooter_type_af2) return done(8);
     if (!*in.warhead_present) return need("warhead required for armor check");

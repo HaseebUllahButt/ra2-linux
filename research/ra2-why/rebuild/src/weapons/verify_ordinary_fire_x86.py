@@ -32,7 +32,7 @@ def hook(cpu,addr,size,user):
   ptr=read(cpu.reg_read(UC_X86_REG_ESP)+4);cpu.mem_write(ptr,b'\0'*12);ret(cpu,ptr,1)
  elif addr==stop+0x150:ret(cpu,0,2)
  elif addr==stop+0x160:ret(cpu,case[1])
- elif addr==stop+0x170:ret(cpu,case[14])
+ elif addr==stop+0x170:ret(cpu,case[16])
  elif addr==stop+0x180:ret(cpu,cell)
  elif addr==stop+0x190:ret(cpu,case[4])
  elif addr==0x548000:ret(cpu,cell,1)
@@ -48,14 +48,14 @@ rng=random.Random(0x6c9261);cases=[]
 for _ in range(3000):
  b=lambda:int(rng.randrange(5)==0)
  cases.append((1-b(),b(),b(),rng.choice((0,1,4)),b(),rng.choice((0,1)),rng.choice((-1,0,100)),
-               rng.choice((0,1,5,65)),rng.choice((0,1,10,100,105,165)),rng.choice((0,1,10,-1)),b(),
+               rng.choice((0,1,5,65)),rng.choice((0,1,10,100,105,165)),rng.choice((0,1,10,-1)),b(),rng.choice((0,0,1,2)),b(),
                rng.choice((0.,.1,.5,1.,2.)),b(),b(),b()))
 lines=subprocess.check_output([sys.argv[1]],input=''.join(' '.join(map(str,c))+'\n' for c in cases),text=True).splitlines();counts={}
 for case,line in zip(cases,lines):
- (present,immune,flag157,land,cell50,f54c,start,duration,frame,ammo,af2,verse,target325,b47,v328)=case
+ (present,immune,flag157,land,cell50,f54c,start,duration,frame,ammo,decloak,cloak,af2,verse,target325,b47,v328)=case
  w(slot,weapon if present else 0);w(cell+0xec,land);w(kind+0x54c,f54c);w(actor+0x244,start);w(actor+0x24c,duration)
- w(0xa40d2c,frame);w(actor+0x254,ammo)
- for addr,val in ((warhead+0x157,flag157),(kind+0xaf2,af2),(target+0x325,target325),(kind+0xb47,b47)):
+ w(0xa40d2c,frame);w(actor+0x254,ammo);w(actor+0x1b8,cloak)
+ for addr,val in ((warhead+0x157,flag157),(weapon+0x10f,decloak),(kind+0xaf2,af2),(target+0x325,target325),(kind+0xb47,b47)):
   u.mem_write(addr,bytes((val,)))
  u.mem_write(warhead+0xa0,struct.pack('<d',verse))
  w(stack,stop);w(stack+4,target);w(stack+8,0);w(stack+12,0)
@@ -64,5 +64,5 @@ for case,line in zip(cases,lines):
  actual=u.reg_read(UC_X86_REG_EAX);expected=int(line)
  assert actual==expected,(case,actual,expected)
  counts[actual]=counts.get(actual,0)+1
-assert len(lines)==len(cases) and set(counts)=={0,1,3,5,6,8},counts
+assert len(lines)==len(cases) and set(counts)=={0,1,3,5,6,8,9},counts
 print(f'Base game.exe: {len(cases)} ordinary Unit firing checks match; results {counts}')

@@ -181,8 +181,9 @@ with matching bridge flags, standard timer, and the listed special weapon and
 warhead flags clear. It also requires the separately selected secondary slot's
 live effect checks to be clear. A zero result passes this one original virtual
 check; range, turret facing, target assignment and projectile creation remain
-separate. The original comparison covers 3,000 complete checks and all six
-results in this slice. Unknown inputs block the decision.
+separate. The original comparison covers 3,000 complete checks and all seven
+results in this slice. The shipped 120mm uses the constructor default
+DecloakToFire=true, so the live shooter cloak state must be resolved. Unknown inputs block the decision.
 
 `combat_runtime_regression.cpp` is the fixed native regression entry point. Pass
 it the owned base `game.exe` path. It checks firing, reload RNG replay, Techno

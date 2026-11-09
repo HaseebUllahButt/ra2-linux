@@ -44,16 +44,18 @@ TerrainTraceResult base_cannon_line_trace(const CannonLineInput& input,const Can
             target->terrain.id,previous.terrain.floor,source->terrain.floor,source->level,target->level,
             input.checks_cliffs,input.checks_walls,input.allied_wall_rule};
         TerrainTraceResult result{S::NeedsCell,0};
+        std::optional<CannonLineCell> hit_cell;
         try {
             result=base_trace_terrain(step,[&](std::int16_t cx,std::int16_t cy)->std::optional<TerrainTraceCell> {
-                auto cell=lookup(cx,cy); if (!cell) return {}; return cell->terrain;
+                auto cell=lookup(cx,cy); if (!cell) return {}; hit_cell=cell; return cell->terrain;
             });
         } catch (const std::invalid_argument&) { return missing(); }
         if (result.status==S::NeedsCell) return result;
         if (result.status==S::Hit) {
             // 004BBAA0 accepts the first hit if 00475840(-1,-1) sees
             // overlay index 2 or 26 and Warhead +144 is set.
-            if (input.warhead_flag_144 && (current->overlay_index==2 || current->overlay_index==26))
+            if (!hit_cell || hit_cell->terrain.id!=result.cell_id) return missing();
+            if (input.warhead_flag_144 && (hit_cell->overlay_index==2 || hit_cell->overlay_index==26))
                 return {S::Clear,0};
             return result;
         }
