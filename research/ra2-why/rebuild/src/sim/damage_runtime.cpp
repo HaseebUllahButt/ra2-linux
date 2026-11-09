@@ -323,6 +323,7 @@ struct PrototypeWeapon {
     int damage=0,rof=0,range=0,max_damage=0;
     int burst=1; // Original WeaponType +9C.
     double gravity=0,condition_red=0;
+    double prone_damage=1; // Original WarheadType +F8.
     float spread=0,percent=0;
     bool arcing=false,lobber=false;
     bool omni_fire=false;      // Original WeaponType +107.
@@ -353,6 +354,8 @@ std::optional<PrototypeWeapon> prototype_weapon(const IniFile& base,const IniFil
     // TODO-ORIGINAL: Use constructor values when these rule keys are absent.
     out.spread=static_cast<float>(prototype_double(base,map,out.warhead,"CellSpread").value_or(0));
     out.percent=static_cast<float>(prototype_double(base,map,out.warhead,"PercentAtMax").value_or(1));
+    out.prone_damage=prototype_double(base,map,out.warhead,"ProneDamage").value_or(1);
+    if (!std::isfinite(out.prone_damage) || out.prone_damage<0) return {};
     out.max_damage=prototype_int(base,map,"CombatDamage","MaxDamage").value_or(10000);
     out.condition_red=prototype_double(base,map,"AudioVisual","ConditionRed").value_or(0.25);
     out.gravity=prototype_double(base,map,"AudioVisual","Gravity").value_or(6);
@@ -613,12 +616,27 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
         }
         bool hit_any=false;
         const int radius=static_cast<int>(weapon->spread*256.0f);
+        // Base 004FFB70..004FFBB9: a prone Infantry (+5C3) takes positive
+        // damage times the warhead ProneDamage (+F8), at least 1.
+        const auto raw_for=[&](const session::world::Entity& t) {
+            if (t.kind!=session::world::Kind::Infantry || !prone_.count(t.id) || shot.damage<=0) return shot.damage;
+            return std::max(1,static_cast<int>(shot.damage*weapon->prone_damage));
+        };
+        // Base 00500236..0050028C: a damaged survivor that is not Fearless
+        // (+C0A) starts to panic, and its AI then lies down (00504AB3).
+        // TODO-ORIGINAL: model the panic timer (+5BC), the prone animation
+        // and standing up; here an Infantry stays prone until it moves.
+        const auto panic=[&](const session::world::Entity& t,const PrototypeHit& hit) {
+            if (hit.applied && !hit.destroyed && t.kind==session::world::Kind::Infantry &&
+                !prototype_bool(base_,map_,t.type,"Fearless")) prone_.insert(t.id);
+        };
         for (const auto& candidate:candidates) {
             auto* target=prototype_find(world,candidate.id);
             if (!prototype_alive(target) || candidate.distance>radius) continue;
             const int before=*target->resolved_hp;
-            auto hit=prototype_damage(world,candidate.id,shot.source_id,shot.damage,
+            auto hit=prototype_damage(world,candidate.id,shot.source_id,raw_for(*target),
                                       candidate.distance,*weapon,base_,map_);
+            panic(*target,hit);
             if (!hit.missing.empty()) report.unresolved.push_back(hit.missing);
             if (hit.applied) record(PrototypeCombatEventKind::Damage,shot,*target,before,*target->resolved_hp);
             if (hit.destroyed) record(PrototypeCombatEventKind::Death,shot,*target,before,*target->resolved_hp);
@@ -629,7 +647,8 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             // TODO-ORIGINAL: Permit a direct hit when the flat prototype's
             // impact height misses the original area distance check.
             const int before=*aimed->resolved_hp;
-            auto hit=prototype_damage(world,aimed->id,shot.source_id,shot.damage,0,*weapon,base_,map_);
+            auto hit=prototype_damage(world,aimed->id,shot.source_id,raw_for(*aimed),0,*weapon,base_,map_);
+            panic(*aimed,hit);
             if (!hit.missing.empty()) report.unresolved.push_back(hit.missing);
             if (hit.applied) record(PrototypeCombatEventKind::Damage,shot,*aimed,before,*aimed->resolved_hp);
             if (hit.destroyed) record(PrototypeCombatEventKind::Death,shot,*aimed,before,*aimed->resolved_hp);
@@ -643,6 +662,11 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
         // TODO-ORIGINAL: Run Bullet +11C/+F0, reference cleanup and deferred
         // deletion. Erasing this prototype's value only ends its visual life.
     };
+    for (auto it=prone_.begin();it!=prone_.end();) {
+        const auto* infantry=prototype_find(world,*it);
+        if (!prototype_alive(infantry) || infantry->locomotor_moving.value_or(false)) it=prone_.erase(it);
+        else ++it;
+    }
     std::vector<PrototypeCombatProjectile> flying;
     for (auto shot:projectiles_) {
         try {

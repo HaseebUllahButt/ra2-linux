@@ -4,6 +4,7 @@
 #include "prototype_turret.h"
 #include <functional>
 #include <optional>
+#include <set>
 #include <string>
 
 namespace ra2::sim {
@@ -171,6 +172,7 @@ private:
     struct TurretAim { std::uint16_t current, direction; };
     struct TurretState { BaseFacing facing; std::uint16_t written=0; };
     std::map<std::uint32_t,TurretState> turrets_;
+    std::set<std::uint32_t> prone_; // Infantry +5C3 after a panic hit.
     std::optional<TurretAim> turret_aim(session::world::Entity& source,
         const session::world::Entity& target,bool omni_fire,std::int32_t frame);
 };

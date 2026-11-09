@@ -288,6 +288,46 @@ void burst_test(const rules::IniFile& rules,const rules::IniFile& art,const std:
     const int fixed_reload=weapons::base_single_shot_unit_delay({65,1,false,false,false,false,1},fixed);
     check(frames.size()>=3 && frames[1]==7 && frames[2]==unsigned(7+fixed_reload),"Unit BurstDelay0");
 }
+// Oracle duels at middle speed (reference/REFERENCE.md). Returns the
+// impact frames until the target dies.
+std::vector<unsigned> duel(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe,
+                           const char* shooter,world::Kind shooter_kind,const char* victim,world::Kind victim_kind,int cells) {
+    rules::IniFile map;
+    auto w=make_world(shooter,victim,shooter_kind,victim_kind,rules.read_integer(shooter,"Strength"),
+                      rules.read_integer(victim,"Strength"));
+    w.entities[1].position=sim::Coord{(50+cells)*256+128,50*256+128,0};
+    w.entities[1].cell=ra2map::Cell{std::uint16_t(50+cells),50};
+    w.entities[1].collision_virtual_position=w.entities[1].position;
+    w.cells.at(50*512+54).heads->ground_head=0;w.cells.at(50*512+50+cells).heads->ground_head=2;
+    sim::PrototypeCombatRuntime combat(rules,map,art,exe);
+    check(combat.attack(w,1,2),"duel attack rejected");
+    std::vector<unsigned> hits;
+    for (unsigned frame=0;frame<3000;++frame) {
+        const auto r=combat.tick(w,frame);
+        check(r.unresolved.empty(),"duel unresolved");
+        for (const auto& e:r.events) if (e.kind==sim::PrototypeCombatEventKind::Damage && e.hp_after<e.hp_before) hits.push_back(frame);
+        if (r.destroyed) break;
+    }
+    std::cout<<shooter<<" vs "<<victim<<": hits="<<hits.size();
+    if (hits.size()>1) std::cout<<" mean gap="<<double(hits.back()-hits.front())/(hits.size()-1)<<" frames";
+    std::cout<<" kill="<<(hits.empty()?0:hits.back())<<" frames\n";
+    return hits;
+}
+void oracle_duel_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+    // 20.7 frames/s. Grizzly 5 hits 2.93 s apart (60.7 frames), Rhino 5 hits
+    // 3.19 s apart (66.0 frames), GI ~12 hits 1.06 s apart (21.9 frames).
+    const auto gap=[](const std::vector<unsigned>& h){return double(h.back()-h.front())/(h.size()-1);};
+    const auto mtnk=duel(rules,art,exe,"MTNK",world::Kind::Unit,"MTNK",world::Kind::Unit,4);
+    check(mtnk.size()==5 && gap(mtnk)>=59 && gap(mtnk)<=63,"Grizzly duel differs from the original");
+    const auto htnk=duel(rules,art,exe,"HTNK",world::Kind::Unit,"HTNK",world::Kind::Unit,4);
+    check(htnk.size()==5 && gap(htnk)>=64 && gap(htnk)<=68,"Rhino duel differs from the original");
+    const auto gi=duel(rules,art,exe,"E1",world::Kind::Infantry,"E1",world::Kind::Infantry,2);
+    // SA ProneDamage=70%: the first hit is 15, then the prone GI takes 10.
+    check(gi.size()==12 && gap(gi)>=20 && gap(gi)<=24,"GI duel differs from the original");
+    // Pillbox vs GI: 4 bursts about 1.2 s (25 frames) apart in the original.
+    const auto pill=duel(rules,art,exe,"GAPILL",world::Kind::Structure,"E1",world::Kind::Infantry,2);
+    check(pill.size()==4 && gap(pill)>=24 && gap(pill)<=29,"Pillbox duel differs from the original");
+}
 void structure_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
     rules::IniFile map;
     const int strength=rules.read_integer("NAPOWR","Strength");
@@ -325,6 +365,7 @@ int main(int argc,char** argv) {
         structure_test(rules,art,std::string(argv[1])+"/game.exe");
         turret_turn_test(rules,art,std::string(argv[1])+"/game.exe");
         burst_test(rules,art,std::string(argv[1])+"/game.exe");
+        oracle_duel_test(rules,art,std::string(argv[1])+"/game.exe");
         overlay_and_range_test(rules,art,std::string(argv[1])+"/game.exe");
         std::cout<<"Prototype tank, infantry, and structure combat replay passes\n";return 0;
     } catch (const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
