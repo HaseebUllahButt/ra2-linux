@@ -18,7 +18,7 @@ struct UnitFlagResult {
     std::optional<bool> value;
 };
 struct BaseUnitFlagResults { UnitFlagResult is_train, crusher; };
-// Defaults at the checked UnitType constructor boundary only. Later INI and
+// Defaults at the checked UnitType constructor return only. Later INI and
 // type-loading writes can change these fields.
 struct BaseUnitTypeConstructorFields {
     bool raw_205, is_train, crusher, raw_bb0, raw_bb1;
