@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <map>
 #include <iostream>
 #include <limits>
 #include <sstream>
@@ -205,6 +207,244 @@ void check_clock_and_guards(const IniFile& rules, const Faction& faction) {
     ai.reset();
     require(same_orders(expected, ai.tick(world, computer, player, last)), "Explicit reset retained decision clocks");
 }
+
+// ---- AI.INI teams ---------------------------------------------------------
+std::vector<std::string> fields(const std::string& value) {
+    std::vector<std::string> result;
+    std::size_t start = 0;
+    for (;;) {
+        const auto comma = value.find(',', start);
+        result.emplace_back(IniFile::trim(std::string_view(value).substr(start, comma - start)));
+        if (comma == std::string::npos) return result;
+        start = comma + 1;
+    }
+}
+
+std::vector<std::pair<int, std::string>> task_force(const IniFile& ai, const std::string& team_type) {
+    std::vector<std::pair<int, std::string>> result;
+    const auto id = ai.read_string(team_type, "TaskForce");
+    for (int i = 0; i < 6; ++i) {
+        const auto parts = fields(ai.read_string(id, std::to_string(i)));
+        if (parts.size() >= 2) result.emplace_back(std::stoi(parts[0]), parts[1]);
+    }
+    return result;
+}
+
+bool listed(const IniFile& rules, const char* registry, const std::string& type) {
+    const auto* section = rules.find_section(registry);
+    return section && std::any_of(section->entries.begin(), section->entries.end(),
+        [&](const auto& entry) { return entry.value == type; });
+}
+
+sw::Kind kind_of(const IniFile& rules, const std::string& type) {
+    return listed(rules, "InfantryTypes", type) ? sw::Kind::Infantry :
+        listed(rules, "AircraftTypes", type) ? sw::Kind::Aircraft : sw::Kind::Unit;
+}
+
+void check_base_teams(const IniFile& rules, const IniFile& ai, const Faction& faction, const char* enemy_country,
+                      const Faction& enemy, PrototypeAI::Difficulty level, const char* side) {
+    sw::Snapshot world;
+    world.houses = {house(computer, faction.country, false), house(player, enemy_country, true)};
+    world.entities.push_back(actor(rules, 10, computer, faction.yard, sw::Kind::Structure, {10, 10}));
+    std::uint32_t id = 11;
+    for (const auto* type : faction.buildings)
+        world.entities.push_back(actor(rules, id++, computer, type, sw::Kind::Structure, {static_cast<std::uint16_t>(id * 3), 10}));
+    world.entities.push_back(actor(rules, 30, player, enemy.yard, sw::Kind::Structure, {60, 60}));
+    world.entities.push_back(actor(rules, 31, player, enemy.buildings[0], sw::Kind::Structure, {64, 60}));
+    world.entities.push_back(actor(rules, 32, player, enemy.tank, sw::Kind::Unit, {58, 58}));
+    const auto before = world;
+    PrototypeAI policy(rules, &ai, level), replay(rules, &ai, level);
+    require(policy.uses_ai_ini() && policy.difficulty() == level, "Base AI.INI was not loaded");
+    require(policy.trigger_count() > 80 && policy.trigger_weight("0CA6621C-G") == 40.0,
+        "Base AITriggerTypes were not parsed with their authored weights");
+    const auto first = policy.tick(world, computer, player, 0);
+    require(same_orders(first, replay.tick(world, computer, player, 0)), "Team choice was not deterministic");
+    require(world.houses[0].cash == before.houses[0].cash && world.entities.size() == before.entities.size() &&
+        world.random.first == before.random.first, "Team policy changed the shared world");
+    const auto teams = policy.teams();
+    require(!teams.empty(), "Computer did not pick a base AI.INI team");
+    const std::size_t enabled_field = level == PrototypeAI::Difficulty::Easy ? 15 :
+        level == PrototypeAI::Difficulty::Normal ? 16 : 17;
+    std::vector<std::string> wanted;
+    for (const auto& team : teams) {
+        const auto f = fields(ai.read_string("AITriggerTypes", team.trigger));
+        require(f.size() >= 18 && f[10] == "1" && f[enabled_field] == "1" && (f[12] == "0" || f[12] == side) &&
+            (f[2] == "<all>" || f[2] == faction.country) && std::stoi(f[3]) <= 10 &&
+            (f[1] == team.team_type || f[14] == team.team_type),
+            "Picked AI trigger is not enabled for this skirmish house, side and difficulty");
+        require(team.forming && team.members.empty(), "New team did not start empty and forming");
+        for (const auto& [count, type] : task_force(ai, team.team_type)) { (void)count; wanted.push_back(type); }
+    }
+    std::vector<std::uint32_t> factories;
+    for (const auto& order : first) {
+        if (order.kind != OrderKind::Build || listed(rules, "BuildingTypes", order.type)) continue;
+        require(std::find(wanted.begin(), wanted.end(), order.type) != wanted.end(),
+            "Computer built a unit no forming team asked for");
+        const auto owners = IniFile::split_list(rules.read_string(order.type, "Owner"));
+        require(std::find(owners.begin(), owners.end(), faction.country) != owners.end(),
+            "Computer built a unit its country may not own");
+        const auto& plant = *std::find_if(world.entities.begin(), world.entities.end(),
+            [&](const sw::Entity& e) { return e.id == order.entity; });
+        const auto factory = rules.read_string(plant.type, "Factory");
+        require(plant.house_id == computer && factory == (listed(rules, "InfantryTypes", order.type) ? "InfantryType" :
+            listed(rules, "VehicleTypes", order.type) ? "UnitType" : "AircraftType"),
+            "Team member was requested from the wrong factory");
+        require(std::find(factories.begin(), factories.end(), order.entity) == factories.end(),
+            "One factory got two production requests in one decision");
+        factories.push_back(order.entity);
+    }
+
+    // Completed products appear as free units. The next decision recruits and launches.
+    id = 100;
+    for (const auto& team : teams)
+        for (const auto& [count, type] : task_force(ai, team.team_type))
+            for (int i = 0; i < count; ++i)
+                world.entities.push_back(actor(rules, id++, computer, type, kind_of(rules, type), {14, 14}));
+    const auto launch = policy.tick(world, computer, player, 45);
+    std::map<std::string, double> weights;
+    std::map<std::string, int> launched;
+    for (const auto& team : policy.teams()) {
+        weights[team.trigger] = *policy.trigger_weight(team.trigger);
+        if (team.forming) continue;
+        ++launched[team.trigger];
+        for (const auto member : team.members)
+            require(std::any_of(launch.begin(), launch.end(), [&](const Order& o) {
+                return o.entity == member && (o.kind == OrderKind::Attack || o.kind == OrderKind::Move);
+            }), "Launched team member got no script order");
+    }
+    require(!launched.empty(), "Full base team did not launch");
+    for (auto& entity : world.entities) if (entity.id >= 100) entity.lifetime = sw::Lifetime::Destroyed;
+    policy.tick(world, computer, player, 90);
+    for (const auto& [trigger, count] : launched) {
+        const auto f = fields(ai.read_string("AITriggerTypes", trigger));
+        double expected = weights[trigger];
+        for (int i = 0; i < count; ++i) expected = std::max(std::stod(f[8]), expected - 50.0);
+        require(std::abs(*policy.trigger_weight(trigger) - expected) < 1e-9,
+            "Destroyed team did not lower its trigger weight by the rules failure delta");
+    }
+}
+
+IniFile parse(const std::string& text) {
+    IniFile result;
+    result.parse(text);
+    return result;
+}
+
+void check_team_policy() {
+    const auto rules = parse(
+        "[General]\nTeamDelays=300,200,100\nTotalAITeamCap=4,4,4\nMaximumAIDefensiveTeams=1,1,1\n"
+        "AITriggerSuccessWeightDelta=20\nAITriggerFailureWeightDelta=-50\n"
+        "[Sides]\nAllies=LocalCountry\nSoviets=OtherCountry\n"
+        "[BuildingTypes]\n0=YARD\n1=BARR\n2=WORKS\n3=LAB\n[InfantryTypes]\n0=GI\n[VehicleTypes]\n0=TANK\n"
+        "[YARD]\nStrength=100\n[BARR]\nFactory=InfantryType\nStrength=100\n[WORKS]\nFactory=UnitType\nStrength=100\n"
+        "[LAB]\nStrength=100\n"
+        "[GI]\nStrength=50\nCost=100\nTechLevel=1\nOwner=LocalCountry\nPrerequisite=BARR\n"
+        "[TANK]\nStrength=50\nCost=500\nTechLevel=1\nOwner=LocalCountry\nPrerequisite=WORKS\n");
+    const auto ai = parse(
+        "[TaskForces]\n0=TF_GI\n1=TF_TANK\n[TF_GI]\n0=2,GI\n[TF_TANK]\n0=1,TANK\n"
+        "[ScriptTypes]\n0=S_ATTACK\n1=S_PATROL\n[S_ATTACK]\n0=54,0\n1=46,3\n2=0,2\n[S_PATROL]\n0=58,1\n1=5,2\n2=6,1\n"
+        "[TeamTypes]\n0=T_GI\n1=T_TANK\n2=T_PATROL\n"
+        "[T_GI]\nTaskForce=TF_GI\nScript=S_ATTACK\nMax=1\n[T_TANK]\nTaskForce=TF_TANK\nScript=S_ATTACK\nMax=1\n"
+        "[T_PATROL]\nTaskForce=TF_GI\nScript=S_PATROL\nMax=1\nIsBaseDefense=yes\n"
+        "[AITriggerTypes]\n"
+        "TR_GI=GIs,T_GI,<all>,1,1,BARR,0100000003000000000000000000000000000000000000000000000000000000,50,10,100,1,0,1,0,<none>,1,1,1\n"
+        "TR_LAB=Tank vs lab,T_TANK,<all>,1,0,LAB,0100000003000000000000000000000000000000000000000000000000000000,50,10,100,1,0,0,0,<none>,1,1,1\n"
+        "TR_HARD=Patrol,T_PATROL,LocalCountry,1,-1,<none>,0000000000000000000000000000000000000000000000000000000000000000,5000,10,5000,1,0,1,1,<none>,0,0,1\n"
+        "TR_SIDE=Wrong side,T_TANK,<all>,1,-1,<none>,0000000000000000000000000000000000000000000000000000000000000000,90,10,100,1,0,2,0,<none>,1,1,1\n"
+        "TR_HOUSE=Wrong house,T_TANK,OtherCountry,1,-1,<none>,0000000000000000000000000000000000000000000000000000000000000000,90,10,100,1,0,0,0,<none>,1,1,1\n"
+        "TR_TECH=Future,T_TANK,<all>,11,-1,<none>,0000000000000000000000000000000000000000000000000000000000000000,90,10,100,1,0,0,0,<none>,1,1,1\n"
+        "TR_CAMPAIGN=Campaign,T_TANK,<all>,1,-1,<none>,0000000000000000000000000000000000000000000000000000000000000000,90,10,100,0,0,0,0,<none>,1,1,1\n"
+        "TR_RICH=Rich enemy,T_TANK,<all>,1,4,<none>,1027000003000000000000000000000000000000000000000000000000000000,90,10,100,1,0,0,0,<none>,1,1,1\n");
+    sw::Snapshot world;
+    world.houses = {house(computer, "LocalCountry", false), house(player, "OtherCountry", true)};
+    world.houses[0].cash = 150;
+    world.houses[1].cash = 9999; // TR_RICH wants at least 10000.
+    world.entities = {actor(rules, 10, computer, "YARD", sw::Kind::Structure, {10, 10}),
+        actor(rules, 11, computer, "BARR", sw::Kind::Structure, {14, 10}),
+        actor(rules, 30, player, "YARD", sw::Kind::Structure, {40, 40}),
+        actor(rules, 31, player, "YARD", sw::Kind::Structure, {60, 60}),
+        actor(rules, 32, player, "GI", sw::Kind::Infantry, {70, 70})};
+
+    PrototypeAI easy(rules, &ai);
+    require(easy.difficulty() == PrototypeAI::Difficulty::Easy && easy.trigger_count() == 8,
+        "Optional AI.INI constructor did not default to Easy or dropped triggers");
+    auto orders = easy.tick(world, computer, player, 0);
+    auto teams = easy.teams();
+    require(teams.size() == 1 && teams[0].team_type == "T_GI" && teams[0].forming,
+        "Easy computer did not pick the only enabled trigger whose condition holds");
+    require(orders.size() == 1 && orders[0].kind == OrderKind::Build && orders[0].type == "GI" && orders[0].entity == 11,
+        "Forming team did not request one legal member from the barracks");
+    world.houses[0].cash = 99;
+    require(easy.tick(world, computer, player, 90).empty(), "Team production ignored the authored cost");
+    require(easy.teams().size() == 1, "Max=1 team type was picked twice");
+
+    // An enemy lab makes TR_LAB true, but the tank needs a war factory first.
+    world.entities.push_back(actor(rules, 33, player, "LAB", sw::Kind::Structure, {50, 50}));
+    easy.tick(world, computer, player, 100);
+    require(easy.teams().size() == 1, "Computer picked a team it cannot build or recruit");
+    world.entities.push_back(actor(rules, 12, computer, "WORKS", sw::Kind::Structure, {18, 10}));
+    easy.tick(world, computer, player, 150);
+    require(easy.teams().size() == 1, "Easy TeamDelays (third value) was not used");
+    easy.tick(world, computer, player, 200);
+    teams = easy.teams();
+    require(teams.size() == 2 && teams[1].team_type == "T_TANK", "Enemy-owns condition did not pick its team");
+
+    // Finished GIs are recruited. Line 0 (54) is skipped, line 1 attacks the lab.
+    world.houses[0].cash = 0;
+    world.entities.push_back(actor(rules, 50, computer, "GI", sw::Kind::Infantry, {12, 12}));
+    world.entities.push_back(actor(rules, 51, computer, "GI", sw::Kind::Infantry, {13, 12}));
+    orders = easy.tick(world, computer, player, 245);
+    require(orders.size() == 2 && orders[0].kind == OrderKind::Attack && orders[0].entity == 50 &&
+        orders[0].target == 33 && orders[1].entity == 51 && orders[1].target == 33,
+        "Full team did not run its script against the named enemy structure");
+    require(!easy.teams()[0].forming && easy.teams()[0].script_line == 1, "Team did not launch on line 1");
+    world.entities.back().lifetime = sw::Lifetime::Created; // Member 51 leaves the map.
+    world.entities[5].resolved_hp = 0;                      // The lab dies.
+    orders = easy.tick(world, computer, player, 290);
+    require(orders.size() == 1 && orders[0].entity == 50 && orders[0].target == 30,
+        "Team did not move to the next line and attack the closest enemy structure");
+    world.entities[2].resolved_hp = 0;
+    world.entities[3].resolved_hp = 0;
+    easy.tick(world, computer, player, 335);
+    require(easy.teams().size() == 1 && easy.teams()[0].team_type == "T_TANK" &&
+        *easy.trigger_weight("TR_GI") == 70.0, "Finished script did not disband the team and add the success delta");
+
+    // TR_GI picks again. Its members die after launch: failure, clamped at the minimum.
+    world.entities[2].resolved_hp = 100;
+    world.houses[0].cash = 0;
+    world.entities.back().lifetime = sw::Lifetime::Placed;
+    easy.tick(world, computer, player, 435);
+    require(easy.teams().size() == 2 && !easy.teams()[1].forming, "Second GI team did not form from free units");
+    world.entities[world.entities.size() - 2].resolved_hp = 0;
+    world.entities.back().resolved_hp = 0;
+    easy.tick(world, computer, player, 480);
+    require(easy.teams().size() == 1 && *easy.trigger_weight("TR_GI") == 20.0, "Lost team did not add the failure delta");
+
+    // Hard enables the 5000-weight trigger, which beats every normal weight.
+    world.entities[world.entities.size() - 2].resolved_hp = 50;
+    world.entities.back().resolved_hp = 50;
+    for (auto& e : world.entities) if (e.id == 50 || e.id == 51) e.cell = ra2map::Cell{30, 12};
+    PrototypeAI hard(rules, &ai, PrototypeAI::Difficulty::Hard), normal(rules, &ai, PrototypeAI::Difficulty::Normal);
+    orders = hard.tick(world, computer, player, 0); // Free GIs fill the team at once.
+    require(hard.teams().size() == 1 && hard.teams()[0].team_type == "T_PATROL", "Hard did not use its urgent trigger");
+    require(orders.size() == 2 && orders[0].kind == OrderKind::Move && orders[0].cell.x == 14 &&
+        orders[0].cell.y == 10, "Patrol script did not move to the own barracks");
+    require(hard.tick(world, computer, player, 45).empty() && hard.teams()[0].script_line == 0,
+        "Move finished before arrival");
+    for (auto& e : world.entities) if (e.id == 50 || e.id == 51) e.cell = ra2map::Cell{15, 11};
+    hard.tick(world, computer, player, 90); // Arrived: guard 2 seconds.
+    require(hard.teams()[0].script_line == 1, "Arrival did not start the guard line");
+    orders = hard.tick(world, computer, player, 135);
+    require(hard.teams()[0].script_line == 0 && orders.size() == 2 && orders[0].kind == OrderKind::Move,
+        "Jump 6,1 did not return to the first line");
+    normal.tick(world, computer, player, 0);
+    require(normal.teams().size() == 1 && normal.teams()[0].team_type != "T_PATROL",
+        "Normal used a hard-only trigger");
+
+    // Without AI.INI the old policy stays: no teams and plain attacks.
+    PrototypeAI old(rules);
+    require(!old.uses_ai_ini() && old.teams().empty(), "One-argument constructor changed the old policy");
+}
 } // namespace
 
 int main(int argc, char** argv) try {
@@ -224,7 +464,16 @@ int main(int argc, char** argv) try {
     check_base_match(rules, soviet);
     check_rule_filters();
     check_clock_and_guards(rules, allied);
-    std::cout << "Prototype AI spot checks passed: both base factions, rule filters, deterministic clocks and targets.\n";
+    const auto ai_bytes = files.read_file("AI.INI");
+    require(ai_bytes.has_value(), "Installed base AI.INI is missing");
+    IniFile ai;
+    ai.parse(std::string_view(reinterpret_cast<const char*>(ai_bytes->data()), ai_bytes->size()));
+    for (const auto level : {PrototypeAI::Difficulty::Easy, PrototypeAI::Difficulty::Normal, PrototypeAI::Difficulty::Hard}) {
+        check_base_teams(rules, ai, allied, "Russians", soviet, level, "1");
+        check_base_teams(rules, ai, soviet, "Americans", allied, level, "2");
+    }
+    check_team_policy();
+    std::cout << "Prototype AI spot checks passed: both base factions, rule filters, deterministic clocks and targets, base AI.INI teams.\n";
     return 0;
 } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
