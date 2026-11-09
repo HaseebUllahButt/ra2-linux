@@ -50,6 +50,14 @@ ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -
     "$shared/gfx/palette.cpp" "$shared"/fs/{mix_archive,mix_bootstrap,filename_hash}.cpp \
     "$shared/rules/ini_file.cpp" "$shared/map/map_file.cpp" "$shared/pack/map_pack.cpp" -ldl -o "$build/overlay_shape_case"
 "$build/overlay_shape_case" "$game" > /dev/null
+${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -I "$shared/render" \
+    overlay_profiles.cpp overlay_profiles_case.cpp overlay_shape.cpp overlay_rules.cpp setup.cpp world.cpp \
+    ../session.cpp ../map_geometry.cpp ../placement_terrain.cpp \
+    "$shared"/sim/{random,distance,coarse_category,cell_setup,replacement,world,world_init,floor}.cpp \
+    "$shared/weapons/occupant_order.cpp" "$shared"/render/{minimap,tmp_decode}.cpp \
+    "$shared/gfx/palette.cpp" "$shared"/fs/{mix_archive,mix_bootstrap,filename_hash}.cpp \
+    "$shared/rules/ini_file.cpp" "$shared/map/map_file.cpp" "$shared/pack/map_pack.cpp" -ldl -o "$build/overlay_profiles_case"
+"$build/overlay_profiles_case" "$game"
 "$build/test_snapshot"
 "$build/house_updates_case" > /dev/null
 "$build/cell_setup_case"
@@ -81,7 +89,17 @@ ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -
     "$shared/gfx/palette.cpp" "$shared"/fs/{mix_archive,mix_bootstrap,filename_hash}.cpp \
     "$shared/rules/ini_file.cpp" "$shared/map/map_file.cpp" "$shared/pack/map_pack.cpp" -ldl -o "$build/overlay_shape_case"
 "$build/overlay_shape_case" "$game" > /dev/null
+${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -I "$shared/render" \
+    overlay_profiles.cpp overlay_profiles_case.cpp overlay_shape.cpp overlay_rules.cpp setup.cpp world.cpp \
+    ../session.cpp ../map_geometry.cpp ../placement_terrain.cpp \
+    "$shared"/sim/{random,distance,coarse_category,cell_setup,replacement,world,world_init,floor}.cpp \
+    "$shared/weapons/occupant_order.cpp" "$shared"/render/{minimap,tmp_decode}.cpp \
+    "$shared/gfx/palette.cpp" "$shared"/fs/{mix_archive,mix_bootstrap,filename_hash}.cpp \
+    "$shared/rules/ini_file.cpp" "$shared/map/map_file.cpp" "$shared/pack/map_pack.cpp" -ldl -o "$build/overlay_profiles_case"
+"$build/overlay_profiles_case" "$game"
     ${PYTHON:-python3} original_overlay_fields_check.py "$game/game.exe" "$build/overlay_rules_case" "$game"
+    ${PYTHON:-python3} original_overlay_types_check.py "$game/game.exe" "$build/overlay_rules_case" "$game"
+    ${PYTHON:-python3} original_overlay_art_check.py "$game/game.exe" "$build/overlay_shape_case" "$game"
     ${PYTHON:-python3} original_overlay_shape_check.py "$game/game.exe" "$build/overlay_shape_case" "$game"
     ${PYTHON:-python3} original_battle_start_check.py "$game/game.exe" "$build/setup_case"
     ${PYTHON:-python3} original_constructor_check.py "$game/game.exe" "$build/constructor_case"

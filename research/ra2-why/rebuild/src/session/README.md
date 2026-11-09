@@ -216,3 +216,12 @@ true and DemandLoad is false. It needs resolved reader fields and returns the
 installed bytes. With supplied reader fields, all 17 MP02T2 Overlay types
 find their named theater files. Original x86 builds the same filenames. The
 archive cache, other branches, fallback, and later type state remain separate.
+
+`world/overlay_profiles.h` joins the ordered packed Overlay indexes with their
+checked base rule fields and installed theater files. It resolves all 17 types
+used by MP02T2 without supplied type values. It refuses changed mode/map keys,
+missing images, unsupported theater paths, and CellAnim. This prepares inputs;
+it does not prove complete live type loading or place Overlay objects. Base x86
+registration matches 243 installed names when the initial registry is supplied
+empty. Constructor and art reader slices match the 17 used types with supplied
+INI services.
