@@ -8,7 +8,7 @@ not prove the AMCV SpeedType or any live Cell state.
 import struct
 import subprocess
 import sys
-from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_ESP
+from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_EIP, UC_X86_REG_ESP
 
 if len(sys.argv) != 4:
     raise SystemExit('usage: original_land_table_check.py game.exe real_map_case game_dir')
@@ -44,6 +44,7 @@ m.cpu.reg_write(UC_X86_REG_ECX, 0x100b000)
 m.cpu.reg_write(UC_X86_REG_ESP, 0x103f000)
 m.cpu.mem_write(0x103f000, struct.pack('<I', 0x103e000))
 m.cpu.emu_start(0x64d610, 0x103e000, count=1000000)
+assert m.cpu.reg_read(UC_X86_REG_EIP)==0x103e000, 'original land reader did not return'
 def chopped_float(value):
     # original_move_trace sets the x87 control word to 0xE7F (toward zero).
     bits = struct.unpack('<I', struct.pack('<f', value))[0]

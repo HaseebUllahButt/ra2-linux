@@ -11,7 +11,7 @@ import sys
 import os
 import runpy
 from unicorn import UC_HOOK_MEM_READ
-from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_EBP, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDI, UC_X86_REG_ESI, UC_X86_REG_ESP
+from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_EBP, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDI, UC_X86_REG_EIP, UC_X86_REG_ESI, UC_X86_REG_ESP
 
 if len(sys.argv) != 4:
     raise SystemExit('usage: original_speed_type_check.py game.exe real_map_case game_dir')
@@ -65,6 +65,7 @@ for override, expected_index in ((None,1),('Wheel',2)):
     m.cpu.reg_write(UC_X86_REG_ESP, 0x103f000)
     m.cpu.mem_write(0x103f000, struct.pack('<II', 0x103e000, 0x100a000))
     m.cpu.emu_start(0x70a600, 0x6da05f, count=100000)
+    assert m.cpu.reg_read(UC_X86_REG_EIP)==0x6da05f, 'constructor prefix did not reach the +5A4 write boundary'
     assert m.read(m.TYPE+0x5a4)==0xffffffff
     m.cpu.reg_write(UC_X86_REG_EBP, m.TYPE)
     m.cpu.reg_write(UC_X86_REG_ESI, 0x100b000)
@@ -72,6 +73,7 @@ for override, expected_index in ((None,1),('Wheel',2)):
     m.cpu.reg_write(UC_X86_REG_ESP, 0x103f000)
     # Base 006DD104 reads Crusher and writes Type +AF3.
     m.cpu.emu_start(0x6dd104, 0x6dd11e, count=1000)
+    assert m.cpu.reg_read(UC_X86_REG_EIP)==0x6dd11e, 'Crusher reader did not reach its write boundary'
     assert m.cpu.mem_read(m.TYPE+0xaf3,1)==b'\x01'
     m.cpu.reg_write(UC_X86_REG_EDI, m.TYPE)
     m.cpu.reg_write(UC_X86_REG_EBX, 0x100b000)
@@ -79,6 +81,7 @@ for override, expected_index in ((None,1),('Wheel',2)):
     m.cpu.reg_write(UC_X86_REG_ESP, 0x103f000)
     # Base 0070ABEA chooses default 1; 0046C400 also accepts an explicit Wheel.
     m.cpu.emu_start(0x70abea, 0x70ac28, count=10000)
+    assert m.cpu.reg_read(UC_X86_REG_EIP)==0x70ac28, 'SpeedType reader did not reach its write boundary'
     index=m.read(m.TYPE+0x5a4)
     assert index==expected_index
     for land, expected in ((0,0x3f800000),(5,0x3f333333 if index==1 else 0x3f000000)):
@@ -88,6 +91,7 @@ for override, expected_index in ((None,1),('Wheel',2)):
         reads.clear()
         # Base 00471CDD computes land*9 + SpeedType and loads the float.
         m.cpu.emu_start(0x471cdd,0x471cef,count=100)
+        assert m.cpu.reg_read(UC_X86_REG_EIP)==0x471cef, 'land lookup did not reach its load boundary'
         address=0x850ea0+4*(land*9+index)
         assert reads==[(address,4)] and m.read(address)==expected
 print('base x86 AMCV default and Wheel override read separate real land values')
