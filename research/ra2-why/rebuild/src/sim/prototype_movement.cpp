@@ -37,20 +37,31 @@ std::optional<std::string> unit_error(const Entity* e) {
 }
 // TODO-ORIGINAL: this prototype uses explicit staged Cell occupancy and a
 // conservative ground-only check, not original Unit CanEnterCell decisions.
-std::optional<bool> open_state(const session::world::CellState& cell,std::uint32_t self);
-std::optional<bool> open_cell(const World& w,ra2map::Cell c,std::uint32_t self) {
-    if (c.x>=512 || c.y>=512) return false;
-    const auto it=w.cells.find(key(c));
-    if (it==w.cells.end()) return false; // The prototype setup owns the complete allocation list.
-    return open_state(it->second,self);
-}
-std::optional<bool> open_state(const session::world::CellState& cell,std::uint32_t self) {
+// Busy is open ground held only by a Unit that has a pending move. A route
+// may plan through it, as original pathing treats a moving blocker as
+// temporary. Held is ground held only by a stopped Unit. Busy and Held
+// Cells do not stop a planned diagonal step past their corner; walls,
+// buildings and blocked terrain do. A Unit may only enter an Open Cell.
+// At move time, a diagonal step waits while a corner Cell is Busy, so two
+// Units never cross one Cell corner together.
+enum class Pass : std::uint8_t { Unknown=0,Open=1,Closed=2,Unresolved=3,Busy=4,Held=5 };
+using Movers=std::set<std::uint32_t>;
+Pass open_state(const session::world::CellState& cell,std::uint32_t self,const Movers* movers) {
     if (!cell.allocated || !cell.heads || !cell.ground_occupancy_124 || !cell.cell_flag_100 ||
-        !cell.terrain || !cell.terrain->floor_world_height) return {};
-    if (!*cell.allocated || *cell.cell_flag_100) return false;
-    if (cell.unit_land_speed && *cell.unit_land_speed<=0) return false;
-    if (cell.heads->ground_head==self) return true;
-    return cell.heads->ground_head==0 && *cell.ground_occupancy_124==0;
+        !cell.terrain || !cell.terrain->floor_world_height) return Pass::Unresolved;
+    if (!*cell.allocated || *cell.cell_flag_100) return Pass::Closed;
+    if (cell.unit_land_speed && *cell.unit_land_speed<=0) return Pass::Closed;
+    const auto head=cell.heads->ground_head;
+    if (head==self) return Pass::Open;
+    if (head==0 && *cell.ground_occupancy_124==0) return Pass::Open;
+    if (head && *cell.ground_occupancy_124==0x20u) return movers && movers->count(head)?Pass::Busy:Pass::Held;
+    return Pass::Closed;
+}
+Pass pass_cell(const World& w,ra2map::Cell c,std::uint32_t self,const Movers* movers) {
+    if (c.x>=512 || c.y>=512) return Pass::Closed;
+    const auto it=w.cells.find(key(c));
+    if (it==w.cells.end()) return Pass::Closed; // The prototype setup owns the complete allocation list.
+    return open_state(it->second,self,movers);
 }
 struct RouteResult { PrototypeMoveStatus status=PrototypeMoveStatus::Blocked;std::vector<ra2map::Cell> path;std::string detail; };
 // Work shared by the searches of one route_or_nearby call. The World, the
@@ -59,18 +70,19 @@ struct RouteResult { PrototypeMoveStatus status=PrototypeMoveStatus::Blocked;std
 // touched Cells are every Cell reachable from the start; a later goal
 // outside that set gets the same "no route" answer without a new search.
 struct SearchMemo {
-    // 0 unknown, 1 open, 2 closed, 3 unresolved.
+    // One Pass value for each Cell; Unknown until it is read.
     std::vector<std::uint8_t> open=std::vector<std::uint8_t>(512*512,0);
     std::vector<std::uint8_t> reachable=std::vector<std::uint8_t>(512*512,0);
     std::vector<std::uint32_t> touched,reached;
     bool have_reachable=false,all=false;
-    static std::uint8_t code(std::optional<bool> answer) { return !answer?3:*answer?1:2; }
-    std::optional<bool> cell(const World& w,ra2map::Cell c,std::uint32_t self) {
-        if (c.x>=512 || c.y>=512) return false;
+    const Movers* movers=nullptr;
+    static std::uint8_t code(Pass answer) { return static_cast<std::uint8_t>(answer); }
+    Pass cell(const World& w,ra2map::Cell c,std::uint32_t self) {
+        if (c.x>=512 || c.y>=512) return Pass::Closed;
         auto& value=open[key(c)];
         if (!value) {
             // After fill(), a Cell without an answer is not in the map.
-            if (all) return false;
+            if (all) return Pass::Closed;
             // A map search is slow when the map is not in the CPU cache.
             // Answer the 16 Cells of this row block with one search and a
             // short ordered walk; a route search reads nearby Cells next.
@@ -78,15 +90,14 @@ struct SearchMemo {
             const auto first=key(c)&~15u,last=first+16;
             auto it=w.cells.lower_bound(first);
             for (auto k=first;k<last;++k) {
-                std::optional<bool> answer=false;
-                if (it!=w.cells.end() && it->first==k) { answer=open_state(it->second,self); ++it; }
+                auto answer=Pass::Closed;
+                if (it!=w.cells.end() && it->first==k) { answer=open_state(it->second,self,movers); ++it; }
                 if (!open[k]) { open[k]=code(answer); touched.push_back(k); }
             }
             // A large search reads every Cell once instead.
             if (touched.size()>=8192) fill(w,self);
         }
-        if (value==3) return {};
-        return value==1;
+        return static_cast<Pass>(value);
     }
     // Answer every Cell of the map in one ordered walk. It walks eight key
     // ranges in step so the CPU can load several map nodes at once.
@@ -113,25 +124,25 @@ struct SearchMemo {
         if (item.first>=512u*512u) return; // open_cell() never looks up such a key.
         auto& value=open[item.first];
         if (value) return;
-        value=code(open_state(item.second,self));
+        value=code(open_state(item.second,self,movers));
         touched.push_back(item.first);
     }
     void clear() {
         for (const auto i:touched) open[i]=0;
         for (const auto i:reached) reachable[i]=0;
-        touched.clear();reached.clear();have_reachable=false;all=false;
+        touched.clear();reached.clear();have_reachable=false;all=false;movers=nullptr;
     }
     static constexpr std::size_t lanes=8;
 };
 RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map::Cell goal,SearchMemo* memo=nullptr) {
     const auto open_cell=[&](const World& w,ra2map::Cell c,std::uint32_t self) {
-        return memo?memo->cell(w,c,self):ra2::sim::open_cell(w,c,self);
+        return memo?memo->cell(w,c,self):pass_cell(w,c,self,nullptr);
     };
     if (!world.cell_order) return {PrototypeMoveStatus::NeedsInput,{},"prototype Cell allocation order is unresolved"};
     if (goal.x>=512 || goal.y>=512) return {PrototypeMoveStatus::Invalid,{},"goal is outside the Cell array"};
     const auto destination=open_cell(world,goal,id);
-    if (!destination) return {PrototypeMoveStatus::NeedsInput,{},"goal Cell state is unresolved"};
-    if (!*destination) return {PrototypeMoveStatus::Blocked,{},"goal Cell is blocked"};
+    if (destination==Pass::Unresolved) return {PrototypeMoveStatus::NeedsInput,{},"goal Cell state is unresolved"};
+    if (destination==Pass::Closed || destination==Pass::Held) return {PrototypeMoveStatus::Blocked,{},"goal Cell is blocked"};
     if (same(start,goal)) return {PrototypeMoveStatus::Complete,{},{}};
     struct Node { int f,g;std::uint32_t serial,index; };
     struct Later { bool operator()(const Node& a,const Node& b) const {return a.f!=b.f?a.f>b.f:a.serial>b.serial;} };
@@ -167,15 +178,17 @@ RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map:
             const int nx=x+directions[d][0],ny=y+directions[d][1];if (nx<0 || ny<0 || nx>=512 || ny>=512) continue;
             const ra2map::Cell next{static_cast<std::uint16_t>(nx),static_cast<std::uint16_t>(ny)};
             const auto available=open_cell(world,next,id);
-            if (!available) return {PrototypeMoveStatus::NeedsInput,{},"prototype path reached unknown Cell state"};
-            if (!*available) continue;
+            if (available==Pass::Unresolved) return {PrototypeMoveStatus::NeedsInput,{},"prototype path reached unknown Cell state"};
+            if (available==Pass::Closed || available==Pass::Held) continue;
             if (d%2) {
                 const auto horizontal=open_cell(world,{static_cast<std::uint16_t>(nx),static_cast<std::uint16_t>(y)},id);
                 const auto vertical=open_cell(world,{static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(ny)},id);
-                if (!horizontal || !vertical) return {PrototypeMoveStatus::NeedsInput,{},"prototype corner Cell state is unresolved"};
-                if (!*horizontal || !*vertical) continue;
+                if (horizontal==Pass::Unresolved || vertical==Pass::Unresolved) return {PrototypeMoveStatus::NeedsInput,{},"prototype corner Cell state is unresolved"};
+                if (horizontal==Pass::Closed || vertical==Pass::Closed) continue;
             }
-            const auto index=key(next);const int next_cost=node.g+(d%2?14:10);
+            // A Cell held by a moving Unit costs two extra steps. The route
+            // goes around a long column but not far around one tank.
+            const auto index=key(next);const int next_cost=node.g+(d%2?14:10)+(available==Pass::Busy?20:0);
             if (next_cost>=cost[index]) continue;
             if (cost[index]==infinity) touched.push_back(index);
             cost[index]=next_cost;previous[index]=node.index;open.push({next_cost+heuristic(nx,ny),next_cost,serial++,index});
@@ -189,31 +202,45 @@ RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map:
 }
 // TODO-ORIGINAL: the playable group order chooses a nearby open Cell when
 // the requested Cell is blocked. Original Foot retargeting remains separate.
-RouteResult route_or_nearby(const World& world,std::uint32_t id,ra2map::Cell start,ra2map::Cell goal) {
+// With movers, a Cell held by a moving Unit is not a wall; without them,
+// every Unit is a wall. Each ring around the goal is read nearest to the
+// start first, so the Unit stops on the near side and does not drive
+// around the goal. If the start is the best open Cell, the Unit stays.
+RouteResult route_or_nearby(const World& world,std::uint32_t id,ra2map::Cell start,ra2map::Cell goal,const Movers* movers) {
     static thread_local SearchMemo shared;
     struct Clear { SearchMemo& m; ~Clear() { m.clear(); } } clear{shared};
-    auto* memo=&shared;
-    const auto open_cell=[&](const World& w,ra2map::Cell c,std::uint32_t self) { return memo->cell(w,c,self); };
+    auto* memo=&shared;memo->movers=movers;
     auto result=route(world,id,start,goal,memo);
     if (result.status!=PrototypeMoveStatus::Blocked) return result;
-    for (int radius=1;radius<=8;++radius) for (int dy=-radius;dy<=radius;++dy) for (int dx=-radius;dx<=radius;++dx) {
-        if (std::max(std::abs(dx),std::abs(dy))!=radius) continue;
-        const int x=int(goal.x)+dx,y=int(goal.y)+dy;
-        if (x<0 || y<0 || x>=512 || y>=512) continue;
-        const ra2map::Cell candidate{static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)};
-        if (same(candidate,start)) continue;
-        const auto open=open_cell(world,candidate,id);
-        if (!open) return {PrototypeMoveStatus::NeedsInput,{},"nearby prototype Cell state is unresolved"};
-        if (!*open) continue;
-        // A Cell outside the known reachable set gives the same "no route"
-        // result that a full search would return.
-        if (memo->have_reachable && !memo->reachable[key(candidate)]) continue;
-        auto alternative=route(world,id,start,candidate,memo);
-        if (alternative.status==PrototypeMoveStatus::Complete && !alternative.path.empty()) return alternative;
-        if (alternative.status==PrototypeMoveStatus::NeedsInput || alternative.status==PrototypeMoveStatus::Invalid) return alternative;
+    std::vector<std::pair<std::int64_t,ra2map::Cell>> ring;
+    for (int radius=1;radius<=8;++radius) {
+        ring.clear();
+        for (int dy=-radius;dy<=radius;++dy) for (int dx=-radius;dx<=radius;++dx) {
+            if (std::max(std::abs(dx),std::abs(dy))!=radius) continue;
+            const int x=int(goal.x)+dx,y=int(goal.y)+dy;
+            if (x<0 || y<0 || x>=512 || y>=512) continue;
+            const std::int64_t sx=x-int(start.x),sy=y-int(start.y);
+            ring.push_back({sx*sx+sy*sy,{static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)}});
+        }
+        // Stable: equal distances keep the row order, so replays match.
+        std::stable_sort(ring.begin(),ring.end(),[](const auto& a,const auto& b){return a.first<b.first;});
+        for (const auto& [distance,candidate]:ring) {
+            if (same(candidate,start)) return {PrototypeMoveStatus::Complete,{},{}};
+            const auto open=memo->cell(world,candidate,id);
+            if (open==Pass::Unresolved) return {PrototypeMoveStatus::NeedsInput,{},"nearby prototype Cell state is unresolved"};
+            if (open!=Pass::Open) continue;
+            // A Cell outside the known reachable set gives the same "no route"
+            // result that a full search would return.
+            if (memo->have_reachable && !memo->reachable[key(candidate)]) continue;
+            auto alternative=route(world,id,start,candidate,memo);
+            if (alternative.status==PrototypeMoveStatus::Complete && !alternative.path.empty()) return alternative;
+            if (alternative.status==PrototypeMoveStatus::NeedsInput || alternative.status==PrototypeMoveStatus::Invalid) return alternative;
+        }
     }
     return result;
 }
+// Frames a Unit waits behind a moving Unit before it plans around it.
+constexpr int wait_limit=32;
 std::optional<std::string> transfer(World& world,std::uint32_t id,ra2map::Cell from,ra2map::Cell to) {
     auto source=world.cells.find(key(from)),target=world.cells.find(key(to));
     if (source==world.cells.end() || target==world.cells.end() || !source->second.heads || !target->second.heads ||
@@ -254,7 +281,9 @@ PrototypeMoveResult PrototypeMovement::issue(const World& world,std::uint32_t id
     if (*source->second.cell_flag_100 || source->second.heads->ground_head!=id || *actor->next!=0 ||
         !(*source->second.ground_occupancy_124&0x20u))
         return fail(PrototypeMoveStatus::Blocked,"prototype source Unit is not isolated on ground");
-    const auto path=route_or_nearby(world,id,*actor->cell,goal);
+    Movers movers;
+    for (const auto& item:moves_) if (item.first!=id) movers.insert(item.first);
+    const auto path=route_or_nearby(world,id,*actor->cell,goal,&movers);
     if (path.status!=PrototypeMoveStatus::Complete) return fail(path.status,path.detail);
     moves_[id]={goal,speed,path.path};
     return {PrototypeMoveStatus::Complete,{},{},{},{}};
@@ -293,11 +322,14 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
         }
     } journal{world,world.entities,{}};
     auto& candidate=world;auto moves=moves_;PrototypeMoveResult result;result.status=PrototypeMoveStatus::Complete;
+    Movers movers;
+    for (const auto& item:moves) movers.insert(item.first);
+    const auto finish=[&](std::uint32_t id,session::world::Entity* actor) { actor->locomotor_moving=false;movers.erase(id);result.arrived.push_back(id); };
     for (auto it=moves.begin();it!=moves.end();) {
         const auto id=it->first;auto& movement=it->second;auto* actor=find_unit(candidate,id);
         if (!actor || actor->lifetime==session::world::Lifetime::Destroyed || (actor->resolved_hp && *actor->resolved_hp<=0)) {
             if (actor) actor->locomotor_moving=false;
-            it=moves.erase(it);continue;
+            movers.erase(id);it=moves.erase(it);continue;
         }
         if (const auto error=unit_error(actor)) return fail(PrototypeMoveStatus::NeedsInput,*error);
         const auto source=candidate.cells.find(key(*actor->cell));
@@ -305,48 +337,99 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
             !source->second.cell_flag_100) return fail(PrototypeMoveStatus::NeedsInput,"prototype source Cell is unresolved");
         if (*source->second.cell_flag_100 || source->second.heads->ground_head!=id || *actor->next!=0 ||
             !(*source->second.ground_occupancy_124&0x20u)) return fail(PrototypeMoveStatus::Blocked,"prototype source Unit is not isolated on ground");
-        if (movement.path.empty()) { actor->locomotor_moving=false;result.arrived.push_back(id);it=moves.erase(it);continue; }
-        auto target=movement.path.front();auto available=open_cell(candidate,target,id);
-        if (!available) return fail(PrototypeMoveStatus::NeedsInput,"prototype next Cell is unresolved");
-        if (!*available) {
-            const auto revised=route_or_nearby(candidate,id,*actor->cell,movement.goal);
+        if (movement.path.empty() && !same(*actor->cell,movement.goal)) {
+            // The route ended on a nearby Cell because the goal was held
+            // when it was planned. The holder can be a group Unit that
+            // has since left. Plan once more; a nearby route can only come
+            // closer to the goal, so this ends.
+            const auto revised=route_or_nearby(candidate,id,*actor->cell,movement.goal,&movers);
             if (revised.status==PrototypeMoveStatus::NeedsInput || revised.status==PrototypeMoveStatus::Invalid) return fail(revised.status,revised.detail);
-            if (revised.status==PrototypeMoveStatus::Blocked) { actor->locomotor_moving=false;result.blocked.push_back(id);++it;continue; }
+            if (revised.status==PrototypeMoveStatus::Complete) movement.path=revised.path;
+        }
+        if (movement.path.empty()) { finish(id,actor);it=moves.erase(it);continue; }
+        // Wait behind a Unit that still moves. Do not plan a detour around
+        // it, as that sends a group sideways and back. Plan again when the
+        // blocker stops, or after a long wait.
+        const auto wait_for=[&](ra2map::Cell cell) {
+            const auto found=candidate.cells.find(key(cell));
+            if (found==candidate.cells.end() || !found->second.heads) return false;
+            const auto blocker=moves.find(found->second.heads->ground_head);
+            return blocker!=moves.end() && blocker->first!=id && !blocker->second.stalled && movement.waited<wait_limit;
+        };
+        const auto hold=[&] {
+            ++movement.waited;movement.stalled=true;actor->locomotor_moving=false;++it;
+        };
+        // A moving Unit in a corner Cell of a diagonal step, if any.
+        const auto busy_corner=[&](ra2map::Cell from,ra2map::Cell to)->std::optional<ra2map::Cell> {
+            if (from.x==to.x || from.y==to.y) return {};
+            for (const ra2map::Cell corner:{ra2map::Cell{to.x,from.y},ra2map::Cell{from.x,to.y}})
+                if (pass_cell(candidate,corner,id,&movers)==Pass::Busy) return corner;
+            return {};
+        };
+        auto target=movement.path.front();auto available=pass_cell(candidate,target,id,&movers);
+        if (available==Pass::Unresolved) return fail(PrototypeMoveStatus::NeedsInput,"prototype next Cell is unresolved");
+        if (available==Pass::Busy && wait_for(target)) { hold();continue; }
+        if (available!=Pass::Open) {
+            // A wall or a stopped Unit: plan around it, through moving
+            // Units. A Unit that blocks too long becomes a wall too.
+            const bool strict=available==Pass::Busy;
+            const auto revised=route_or_nearby(candidate,id,*actor->cell,movement.goal,strict?nullptr:&movers);
+            if (revised.status==PrototypeMoveStatus::NeedsInput || revised.status==PrototypeMoveStatus::Invalid) return fail(revised.status,revised.detail);
+            if (revised.status==PrototypeMoveStatus::Blocked) { actor->locomotor_moving=false;movement.stalled=true;result.blocked.push_back(id);++it;continue; }
             movement.path=revised.path;
-            if (movement.path.empty()) { actor->locomotor_moving=false;result.arrived.push_back(id);it=moves.erase(it);continue; }
+            if (movement.path.empty()) { finish(id,actor);it=moves.erase(it);continue; }
             target=movement.path.front();
+            if (pass_cell(candidate,target,id,nullptr)!=Pass::Open) { hold();continue; }
         }
-        auto found=candidate.cells.find(key(target));
-        if (found==candidate.cells.end() || !found->second.terrain || !found->second.terrain->floor_world_height)
-            return fail(PrototypeMoveStatus::NeedsInput,"prototype target floor is unresolved");
-        const auto old=*actor->position;const Coord desired{int(target.x)*256+128,int(target.y)*256+128,*found->second.terrain->floor_world_height};
-        const auto dx=std::int64_t(desired.x)-old.x,dy=std::int64_t(desired.y)-old.y,dz=std::int64_t(desired.z)-old.z;
-        const auto distance=std::max(std::abs(dx),std::abs(dy));
-        Coord next=desired;
-        if (distance>movement.speed) {
-            next.x=old.x+static_cast<int>(dx*movement.speed/distance);
-            next.y=old.y+static_cast<int>(dy*movement.speed/distance);
-            next.z=old.z+static_cast<int>(dz*movement.speed/distance);
+        if (const auto corner=busy_corner(*actor->cell,target)) {
+            if (wait_for(*corner)) { hold();continue; }
         }
-        if (next.x<0 || next.y<0 || next.x/256>=512 || next.y/256>=512)
-            return fail(PrototypeMoveStatus::Invalid,"prototype position leaves the Cell array");
-        const ra2map::Cell entered{static_cast<std::uint16_t>(next.x/256),static_cast<std::uint16_t>(next.y/256)};
-        if (!same(*actor->cell,entered)) {
-            const auto step=open_cell(candidate,entered,id);
-            if (!step) return fail(PrototypeMoveStatus::NeedsInput,"prototype crossed Cell is unresolved");
-            if (!*step) {actor->locomotor_moving=false;result.blocked.push_back(id);++it;continue;}
-            journal.cell(key(*actor->cell));journal.cell(key(entered));
-            if (const auto error=transfer(candidate,id,*actor->cell,entered)) return fail(PrototypeMoveStatus::NeedsInput,*error);
-            actor=find_unit(candidate,id);actor->cell=entered;
+        // Move speed world units this frame. Units left at a Cell center
+        // carry on toward the next Cell in the same frame if it is open.
+        int budget=movement.speed;bool moved=false,blocked=false;
+        while (budget>0 && !movement.path.empty()) {
+            target=movement.path.front();
+            if (moved && (pass_cell(candidate,target,id,nullptr)!=Pass::Open || busy_corner(*actor->cell,target))) break;
+            auto found=candidate.cells.find(key(target));
+            if (found==candidate.cells.end() || !found->second.terrain || !found->second.terrain->floor_world_height)
+                return fail(PrototypeMoveStatus::NeedsInput,"prototype target floor is unresolved");
+            const auto old=*actor->position;const Coord desired{int(target.x)*256+128,int(target.y)*256+128,*found->second.terrain->floor_world_height};
+            const auto dx=std::int64_t(desired.x)-old.x,dy=std::int64_t(desired.y)-old.y,dz=std::int64_t(desired.z)-old.z;
+            const auto distance=std::max(std::abs(dx),std::abs(dy));
+            Coord next=desired;auto used=distance;
+            if (distance>budget) {
+                next.x=old.x+static_cast<int>(dx*budget/distance);
+                next.y=old.y+static_cast<int>(dy*budget/distance);
+                next.z=old.z+static_cast<int>(dz*budget/distance);
+                used=budget;
+            }
+            if (next.x<0 || next.y<0 || next.x/256>=512 || next.y/256>=512)
+                return fail(PrototypeMoveStatus::Invalid,"prototype position leaves the Cell array");
+            const ra2map::Cell entered{static_cast<std::uint16_t>(next.x/256),static_cast<std::uint16_t>(next.y/256)};
+            if (!same(*actor->cell,entered)) {
+                const auto step=pass_cell(candidate,entered,id,&movers);
+                if (step==Pass::Unresolved) return fail(PrototypeMoveStatus::NeedsInput,"prototype crossed Cell is unresolved");
+                if (step!=Pass::Open) {
+                    if (!moved) blocked=!(step==Pass::Busy && wait_for(entered));
+                    break;
+                }
+                journal.cell(key(*actor->cell));journal.cell(key(entered));
+                if (const auto error=transfer(candidate,id,*actor->cell,entered)) return fail(PrototypeMoveStatus::NeedsInput,*error);
+                actor=find_unit(candidate,id);actor->cell=entered;
+            }
+            // TODO-ORIGINAL: turn rates, acceleration, track samples and facing AI.
+            const int sx=(dx>0)-(dx<0),sy=(dy>0)-(dy<0);
+            for (unsigned d=0;d<8;++d) if (directions[d][0]==sx && directions[d][1]==sy) {
+                actor->hull_facing=static_cast<int>(d*32);actor->hull_facing_raw=static_cast<std::uint16_t>(d*8192);break;
+            }
+            actor->position=next;actor->collision_virtual_position=next;moved=true;budget-=static_cast<int>(used);
+            if (next.x==desired.x && next.y==desired.y && next.z==desired.z) movement.path.erase(movement.path.begin());
+            else break;
         }
-        // TODO-ORIGINAL: turn rates, acceleration, track samples and facing AI.
-        const int sx=(dx>0)-(dx<0),sy=(dy>0)-(dy<0);
-        for (unsigned d=0;d<8;++d) if (directions[d][0]==sx && directions[d][1]==sy) {
-            actor->hull_facing=static_cast<int>(d*32);actor->hull_facing_raw=static_cast<std::uint16_t>(d*8192);break;
-        }
-        actor->position=next;actor->collision_virtual_position=next;actor->locomotor_moving=true;result.moved.push_back(id);
-        if (next.x==desired.x && next.y==desired.y && next.z==desired.z) movement.path.erase(movement.path.begin());
-        if (movement.path.empty()) {actor->locomotor_moving=false;result.arrived.push_back(id);it=moves.erase(it);} else ++it;
+        if (blocked) { actor->locomotor_moving=false;movement.stalled=true;result.blocked.push_back(id);++it;continue; }
+        if (!moved) { hold();continue; }
+        movement.waited=0;movement.stalled=false;actor->locomotor_moving=true;result.moved.push_back(id);
+        if (movement.path.empty() && same(*actor->cell,movement.goal)) {finish(id,actor);it=moves.erase(it);} else ++it;
     }
     journal.keep=true;moves_=std::move(moves);last_frame_=frame;return result;
 }
