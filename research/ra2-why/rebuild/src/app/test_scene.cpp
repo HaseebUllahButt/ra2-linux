@@ -146,6 +146,33 @@ int main(int argc, char** argv) {
             }
             require(checked > 100, "Original actor pixel check was empty");
             if(!expansion) {
+                app::Scene resources(files,art,rules,geometry,{flat},"TEMPERATE",{},true);
+                const sim::Snapshot no_actors;
+                const auto baseline=resources.render(empty,no_actors,view);
+                const auto* overlays=rules.find_section("OverlayTypes");
+                require(overlays,"Missing resource registry");
+                auto ore=std::find_if(overlays->entries.begin(),overlays->entries.end(),
+                    [&](const auto& entry) { return rules.read_bool(entry.value,"Tiberium",false); });
+                require(ore!=overlays->entries.end(),"Missing resource type");
+                session::world::Snapshot world;
+                auto& resource=world.cells[flat.cell.y*512u+flat.cell.x];
+                resource.terrain=flat;
+                resource.terrain->overlay_type_index=int(ore-overlays->entries.begin());
+                resource.overlay_data_11e=11;
+                const auto visible=resources.render(empty,no_actors,view,&world);
+                require(visible.gaps.empty() && visible.drawn==1 &&
+                    visible.image.rgba!=baseline.image.rgba,"Live ore did not change scene pixels");
+                require(resources.render(empty,no_actors,view).image.rgba==baseline.image.rgba,
+                    "Default null world changed the old scene result");
+                resource.terrain->overlay_type_index=-1;
+                const auto depleted=resources.render(empty,no_actors,view,&world);
+                require(depleted.gaps.empty() && depleted.drawn==0 &&
+                    depleted.image.rgba==baseline.image.rgba,"Depletion did not restore scene terrain");
+                const auto guarded=fixture.render(empty,no_actors,view,&world);
+                require(guarded.image.rgba==baseline.image.rgba && !guarded.gaps.empty(),
+                    "Strict scene accepted unfinished resource drawing");
+            }
+            if(!expansion) {
                 app::Scene coloured(files,art,rules,geometry,{flat},"TEMPERATE",{},true);
                 state.entities[0].type="GAPOWR";
                 state.entities[0].house="Player";
