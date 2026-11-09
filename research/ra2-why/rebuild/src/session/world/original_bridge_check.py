@@ -36,7 +36,39 @@ for address in (0x4732d0,0x473700):
                     assert bool(m.read(cell+0x140)&0x80)==(bool(enabled) and (x,y)==(20,20))
                 expected.append(''.join(str(int(bool(m.read(m.cell_for(x,y)+0x140)&0x100)))
                                         for y in range(17,24) for x in range(17,24)))
+# Execute the original Overlay entry to the return from its bridge setter.
+# Placement eligibility, its cell getter, and map services are supplied.
+m.bind(0x5d4160,4,m.ret(1))
+m.word(m.FOOT,m.VT);m.word(m.FOOT+0x98,m.TYPE)
+point=0x100d000
+m.word(point,20|(20<<16));m.virtual(0x1a0,4,m.ret(point))
+for kind in (24,25,237,238):
+    for mode in (1,3):
+        for ramp in (0,4):
+            for cell in m.cells.values(): m.word(cell+0x140,0)
+            root=m.cell_for(20,20)
+            m.cpu.mem_write(root+0x11c,bytes((ramp,)))
+            m.word(m.TYPE+0x264,kind)
+            m.cpu.reg_write(UC_X86_REG_ECX,m.FOOT)
+            m.cpu.reg_write(UC_X86_REG_ESP,0x103f000)
+            m.cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,mode))
+            m.cpu.emu_start(0x5da970,0x5daa31,count=100000)
+            expected.append(''.join(str(int(bool(m.read(m.cell_for(x,y)+0x140)&0x100)))
+                                    for y in range(17,24) for x in range(17,24)))
+# These branches exit before root creation.
+for kind in (24,25,237,238):
+    for allowed,mode,ramp in ((0,1,0),(1,2,0),(1,1,5)):
+        for cell in m.cells.values(): m.word(cell+0x140,0)
+        root=m.cell_for(20,20)
+        m.cpu.mem_write(root+0x11c,bytes((ramp,)))
+        m.word(m.TYPE+0x264,kind)
+        m.bind(0x5d4160,4,m.ret(allowed))
+        m.cpu.reg_write(UC_X86_REG_ECX,m.FOOT)
+        m.cpu.reg_write(UC_X86_REG_ESP,0x103f000)
+        m.cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,mode))
+        m.cpu.emu_start(0x5da970,0x5dab84,count=100000)
+        assert all(not (m.read(cell+0x140)&0x100) for cell in m.cells.values())
 actual=subprocess.check_output([native],text=True).splitlines()
 assert actual==expected, next(((i,a,b) for i,(a,b) in enumerate(zip(actual,expected)) if a!=b),None)
-assert len(actual)==len(expected)==64
-print('3136 bridge-flag observations match both original base setters')
+assert len(actual)==len(expected)==80
+print('3136 setter and 784 Overlay root cell observations match original base x86; 12 exits match')
