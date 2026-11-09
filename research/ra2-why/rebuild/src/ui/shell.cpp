@@ -37,6 +37,16 @@ const std::optional<bool>* option(const SkirmishSetup& setup, std::uint32_t id) 
     }
 }
 
+struct SliderValue { std::optional<int> value; int minimum, maximum, increment; };
+SliderValue slider_value(const SkirmishSetup& setup, std::uint32_t id) {
+    if (id==SkirmishControls::speed)
+        return {setup.game_speed ? std::optional<int>(6-*setup.game_speed) : std::nullopt,0,6,1};
+    if (id==SkirmishControls::units) return {setup.unit_count,setup.min_units,setup.max_units,1};
+    return {setup.credits,setup.min_credits,setup.max_credits,setup.credit_increment};
+}
+bool is_slider(std::optional<std::uint32_t> id) {
+    return id==SkirmishControls::credits || id==SkirmishControls::speed || id==SkirmishControls::units;
+}
 void blit(gfx::RgbaImage& dst, const gfx::RgbaImage& src, int x, int y,
           int clip_width = 65535, int clip_height = 65535) {
     for (int sy = 0; sy < src.height && sy < clip_height; ++sy) {
@@ -331,31 +341,35 @@ Rect Menu::dropdown_list_bounds(const Dropdown& d) const {
     const int y=std::min(d.bounds.y+d.bounds.height,600-height);
     return {d.bounds.x,std::max(0,y),d.bounds.width,height};
 }
-std::optional<Rect> Menu::credit_bounds() const {
-    if (confirming_exit_ || choosing_map_ || page()!=Page::Skirmish || !setup_.credits ||
-        setup_.min_credits<0 || setup_.max_credits>65535 ||
-        setup_.min_credits>=setup_.max_credits || setup_.credit_increment<=0) return std::nullopt;
+std::optional<Rect> Menu::slider_bounds(std::uint32_t id) const {
+    const auto v=slider_value(setup_,id);
+    if (confirming_exit_ || choosing_map_ || page()!=Page::Skirmish || !v.value ||
+        v.minimum<0 || v.maximum>65535 || v.minimum>=v.maximum || v.increment<=0) return std::nullopt;
     for (const auto& control : skirmish_.controls) {
-        if (control.id!=SkirmishControls::credits || !(control.style&0x10000000u) ||
-            (control.style&0x08000000u)) continue;
+        if (control.id!=id || !(control.style&0x10000000u) || (control.style&0x08000000u)) continue;
         return Rect{(control.bounds.x*3+1)/2, (control.bounds.y*163+50)/100,
                     (control.bounds.width*3+1)/2+1, (control.bounds.height*163+50)/100+1};
     }
     return std::nullopt;
 }
-void Menu::move_credit(int x) {
-    const auto bounds=credit_bounds();
+void Menu::move_slider(std::uint32_t id, int x) {
+    const auto bounds=slider_bounds(id);
     if (!bounds) return;
+    const auto v=slider_value(setup_,id);
     const auto local=std::clamp<std::int64_t>(std::int64_t(x)-bounds->x,
-                                              std::numeric_limits<int>::min(),std::numeric_limits<int>::max());
+        std::numeric_limits<int>::min(),std::numeric_limits<int>::max());
     const auto next=credit_from_slider_pointer(static_cast<int>(local),bounds->width,
-                                                setup_.min_credits,setup_.max_credits,
-                                                setup_.credit_increment);
-    if (next && setup_.credits!=next) {setup_.credits=next; credit_changed_=true;}
+                                              v.minimum,v.maximum,v.increment);
+    if (next && v.value!=next) {
+        if (id==SkirmishControls::speed) setup_.game_speed=6-*next;
+        else if (id==SkirmishControls::units) setup_.unit_count=next;
+        else setup_.credits=next;
+        slider_changed_=true;
+    }
 }
 
 void Menu::pointer_move(int x, int y) {
-    if (held_==SkirmishControls::credits) move_credit(x);
+    if (is_slider(held_)) move_slider(*held_,x);
     hovered_.reset();
     for (const auto& b : buttons()) {
         if (b.enabled && x >= b.bounds.x && y >= b.bounds.y &&
@@ -411,12 +425,14 @@ void Menu::pointer_down(int x, int y) {
     }
     pointer_move(x, y);
     held_ = hovered_;
-    const auto slider=credit_bounds();
-    if (slider && x>=slider->x && x<slider->x+slider->width-50 &&
-        y>slider->y+slider->height-18 && y<slider->y+slider->height) {
-        held_=SkirmishControls::credits;
-        credit_changed_=false;
-        move_credit(x);
+    for (auto id : {SkirmishControls::credits,SkirmishControls::speed,SkirmishControls::units}) {
+        const auto slider=slider_bounds(id);
+        if (slider && x>=slider->x && x<slider->x+slider->width-50 &&
+            y>slider->y+slider->height-18 && y<slider->y+slider->height) {
+            held_=id;
+            slider_changed_=false;
+            move_slider(id,x);
+        }
     }
 }
 void Menu::pointer_scroll(int x, int y, int delta) {
@@ -480,10 +496,10 @@ Action Menu::pointer_up(int x, int y) {
         return Action::None;
     }
     pointer_move(x, y);
-    if (held_==SkirmishControls::credits) {
+    if (is_slider(held_)) {
         held_.reset();
-        const bool changed=credit_changed_;
-        credit_changed_=false;
+        const bool changed=slider_changed_;
+        slider_changed_=false;
         return changed ? Action::SetupChanged : Action::None;
     }
     if (!held_ || !hovered_ || *held_ != *hovered_) {
@@ -704,6 +720,20 @@ gfx::RgbaImage Menu::render() const {
     }
     if (!confirming_exit_ && !choosing_map_ && page()==Page::Skirmish) {
         for (const auto& control : skirmish_.controls) {
+            // Base 0x005C34B0 writes the selected map name to control 0x5A8.
+            if (control.id!=1448 || !setup_.map_filename) continue;
+            const auto map=std::find_if(maps_.begin(),maps_.end(),[&](const auto& m) {
+                return m.filename==setup_.map_filename && m.source_archive==setup_.map_archive.value_or("");
+            });
+            if (map==maps_.end()) continue;
+            const int width=(control.bounds.width*3+1)/2;
+            const int height=(control.bounds.height*163+50)/100;
+            gfx::RgbaImage name{static_cast<std::uint16_t>(width),static_cast<std::uint16_t>(height),
+                               std::vector<std::uint8_t>(width*height*4)};
+            font_.draw_text(name,map->name,0,0,{255,255,0,255});
+            blit(image,name,(control.bounds.x*3+1)/2,(control.bounds.y*163+50)/100);
+        }
+        for (const auto& control : skirmish_.controls) {
             const auto id=control.id;
             if (id!=1689 && id!=1691 && id!=1692 &&
                 id!=1937 && id!=1938 && id!=1939 && id!=1940 && id!=1942) continue;
@@ -713,19 +743,24 @@ gfx::RgbaImage Menu::render() const {
             const int y=(control.bounds.y*163+50)/100;
             font_.draw_text(image,control.label,x,y,{255,255,0,255});
         }
-        if (const auto slider=credit_bounds()) {
+        for (auto id : {SkirmishControls::credits,SkirmishControls::speed,SkirmishControls::units})
+        if (const auto slider=slider_bounds(id)) {
+            const auto v=slider_value(setup_,id);
             // 0x0061DE9E draws the original value trough. 0x0061E042
             // draws the 12-pixel grip at the scaled current value.
             const int value_x=slider->x+slider->width-49;
+            blit_strip(image,slider_middle_,slider->x,slider->y-1,slider->width-50);
+            blit(image,slider_left_,slider->x,slider->y-1);
+            blit(image,slider_right_,value_x-1-slider_right_.width,slider->y-1);
             blit_strip(image,slider_middle_,value_x,slider->y-1,50);
             blit(image,slider_left_,value_x,slider->y-1);
             blit(image,slider_right_,slider->x+slider->width-slider_right_.width+1,slider->y-1);
-            const auto value=std::clamp(*setup_.credits,setup_.min_credits,setup_.max_credits);
+            const auto value=std::clamp(*v.value,v.minimum,v.maximum);
             const auto travel=slider->width-63;
-            const auto position=static_cast<int>(std::int64_t(travel)*(value-setup_.min_credits)/
-                                                  (setup_.max_credits-setup_.min_credits));
+            const auto position=static_cast<int>(std::int64_t(travel)*(value-v.minimum)/
+                                                  (v.maximum-v.minimum));
             blit(image,slider_grip_,slider->x+1+position,slider->y);
-            const auto text=std::to_string(value/setup_.credit_increment*setup_.credit_increment);
+            const auto text=std::to_string(value/v.increment*v.increment);
             const int text_x=value_x+(50-static_cast<int>(font_.text_width(text)))/2;
             const int text_y=slider->y+(slider->height-static_cast<int>(font_.line_height()))/2;
             font_.draw_text(image,text,text_x,text_y,{255,255,0,255});
