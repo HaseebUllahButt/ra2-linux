@@ -41,19 +41,21 @@ The tests need the owned game files in `../game-full` or `../game` (not in git).
 
 ## Open items, most important first
 
-1. Computer attack timing. Medium attacks at about frame 7,400; the original at about 16,500.
-   Team scripts skip steps 53 and 54 (gather near the enemy base and at the own base,
-   original 006BDAA0 and 006BDDB0) and step 49.
-2. A computer harvester can be boxed in by its own guard team and then stops for the rest of the
-   match (Brutal, MP02T2). The computer's money stays flat. A fix is in progress on branch
-   `remote tool/harvester-unblock`.
+1. Computer attack timing against the original. A Russian Medium computer first attacks at about
+   frame 8,845 (headless opening check, MP02T2) with its "Nation Russian" team of Tesla Tanks.
+   The old reference of about 16,500 frames likely had a computer that was not Russian. A like
+   for like reference run is requested. Team scripts now run steps 53 and 54.
+2. The computer builds each base building once. The original base plan (004EF890) adds extra
+   refineries and defenses. Parked friendly vehicles do not move aside for a blocked unit; only
+   foot soldiers do (original scatter 00476920). Economy ignores a miner that walls block.
 3. A defeated house keeps its leftover units. The original destroys them (004E7DF0).
 4. MP10S4 and maps like it: armies never meet (fired=0). Units cannot reach the enemy.
 5. Setup options with no effect: Crates, MCV Repacks, Build Off Ally. Random country and color
    use a fixed rule, not the scenario random stream.
 6. Esc screen: Load, Save, Delete and Game Controls are disabled. Save slots exist
    (`app/battle_saves`), but no match state is written.
-7. Sidebar: the order of some cameos differs from the original (Vehicles and Buildings tabs).
+7. Radar power-on animation: two RADAR.SHP frames draw about 14,000 white pixels. No capture of
+   the original radar switching on exists yet, so the art is drawn unchanged.
 8. Shroud edge is a soft fade; the original uses edge art (00475520). Map colors look brighter
    than the original.
 9. Miner docking at the refinery, the purifier bonus, and threat scoring are simplified.
