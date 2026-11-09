@@ -1049,3 +1049,49 @@ Base Foot wrapper 004C3000 calls probe 00783850; expansion 004D3920 calls 007CA6
 The original instructions allocate 0x1F9C bytes and return with `ret 0xC`.
 The fixup exposes the frame, but some indirect call signatures still need instruction checks.
 Use `-readOnly -noanalysis`; the script must not save changes to either shared project.
+
+## Checked single-Cell setup
+
+`original_overlay_free_cell_setup` ports the allocated, flat, no-overlay slice of base 00472540 / expansion 0047D2B0.
+Its fixed argument is -1. It updates one Cell and reads neighbors without changing them.
+`CellSetupState` preserves terrain, explicit allocation, raw byte +11D, and animation bit 20000.
+The existing ordered map pass shares the same terrain decision code.
+It still does not claim to execute all map effect objects.
+
+`CellSetupStatic` must describe the old TileType receiver, read before replacement.
+Its bounds height comes from base 0052B690 / expansion 00547150.
+The TMP header contains column count, row count, pixel width, and pixel height as its first four words.
+The following pointer array selects the record with the original subtile modulo.
+Bounds height starts with header height.
+Record flags at +24 with mask 0x01 add record Y at +4 and subtract extra Y at +18.
+The Cell stores the low byte of signed `(bounds_height - 30) / 15` at +11D.
+The implementation preserves original 32-bit subtraction and signed division.
+
+The checked branch must prove that Tube, tile animation, and shadow effects do not execute.
+LandType 10 remains Unsupported.
+An animation is absent when bit 20000 is known set, its index is -1, or its subtile does not match.
+Shadows are absent when the flag is false or the resolved footprint is empty.
+Unknown required guards return NeedsInput. Required effect construction or writes return Unsupported.
+Guard receiver identity must match the old live tile index.
+Replacement metadata is not read early; the old receiver supplies this call's terrain, bounds, and effect guards.
+
+A read-only category callback receives the final terrain and supplies current original rule and occupant inputs.
+The function runs `original_coarse_category`, then returns its ordered writes and both cache height values.
+Only Complete supplies publishable state. Errors retain the original input state.
+The caller must preserve all other Cell fields and apply the returned category and cache bytes together.
+Bridge state stays unchanged, including unknown.
+The function has no Unit position or RNG mutation API. It must not relocate an already placed Unit.
+The general overlay, nonflat, Tube, animation, and shadow-write branches remain explicit gaps.
+
+`original_cell_setup_check.py executable [--base] --vectors` runs 4,096 full original Cell calls per edition.
+The real category producer, replacement decisions, bounds getter, and empty-shadow getter execute.
+Tile headers, cell lookup, usable-area, and the constant Unit runtime kind are resolved test inputs.
+The only extra service adapter suppresses C runtime exit registration.
+The cases include sentinel and invalid tiles, invalid subtiles, replacement receiver retention, cliffs, and signed bounds.
+Animation cases cover absent indexes, matching subtiles with bit 20000 set, and mismatched subtiles.
+Shadow cases cover a false flag and a real getter that returns an empty footprint.
+The check asserts unchanged placed-Unit bytes and all raw Cell flags.
+Any original shared RNG call fails the check.
+Both editions match every native vector and aggregate hash 0A4940C2.
+Compare with `test_cell_setup.sh --vectors`.
+The native test also checks eleven effect guards, unknown values, receiver identity, and atomic results.
