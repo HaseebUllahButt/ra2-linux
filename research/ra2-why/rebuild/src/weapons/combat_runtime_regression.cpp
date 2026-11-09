@@ -3,6 +3,7 @@
 #include "fire_eligibility.h"
 #include "fire_timer.h"
 #include "techno_damage.h"
+#include "projectile_damage.h"
 #include <sim/damage_runtime.h>
 #include <array>
 #include <cstdint>
@@ -45,6 +46,10 @@ void check_fire_and_damage() {
     check(base_single_shot_unit_delay(delay,rng)==67,"original reload delay");
     auto state=rng.state();check(state.first==2 && state.second==105 && hash(state)==1127516651u,"original reload RNG state");
     sim::Random replay(0);check(base_single_shot_unit_delay(delay,replay)==67 && hash(replay.state())==hash(state),"reload replay");
+    ProjectileDamageInput shot{90,false,false,1.2,0.5,false,false,false,false,1};
+    check(base_projectile_damage(shot)==53,"original projectile damage rounding");
+    shot.house_firepower=std::numeric_limits<double>::infinity();
+    check(!base_projectile_damage(shot),"unknown projectile firepower accepted");
     TechnoDamageInput d{};d.raw_damage=100;d.house_armor_multiplier=2;d.object_armor_multiplier=1;
     d.veteran_armor_multiplier=1;d.attacker_present=true;d.warhead_present=true;
     auto result=base_techno_damage_prefix(d);

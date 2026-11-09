@@ -210,3 +210,9 @@ supply Cell +140 bit 80, wall ownership and alliance state.
 checks AP spread, damage falloff and the absent Burst and DecloakToFire keys.
 The original WeaponType constructor sets those two absent fields to one. The
 original comparison checks those defaults and 3,003 range conversions.
+
+`base_projectile_damage()` recovers the 006CAB7C projectile damage calculation.
+It applies House and object firepower, truncates, then applies the relevant
+veteran firepower multiplier. It includes the original sonic and fire-particle
+zero-damage branches. The comparison covers 5,000 original cases. Target
+armor and derived target damage remain separate.
