@@ -1,4 +1,6 @@
 #include "prototype_production.h"
+#include "build_time.h"
+#include "sim.h"
 #include "session/world/setup.h"
 #include <algorithm>
 #include <iostream>
@@ -70,7 +72,7 @@ std::uint32_t build(w::Snapshot& world,p::FactorySet& factories,const p::Catalog
                 *item.second.ground_occupancy_124|=0x20;
             }
         }
-        frame=std::max(frame+1,state->timer_start+std::uint64_t(state->interval));
+        frame=std::max(frame+1,state->timer_start+std::uint64_t(state->timer_duration));
         done(proto::tick(world,factories,catalog,frame),"tick "+type);
         require_prototype(world);
         state=factory(factories,id);
@@ -191,7 +193,7 @@ int main(int argc,char** argv) try {
         require(started.entity.has_value(),"queued plant is missing");
         auto* pending=factory(lost_factories,*started.entity);
         require(pending,"queued plant factory is missing");
-        const auto paid_frame=frame+pending->interval;
+        const auto paid_frame=frame+pending->timer_duration;
         done(proto::tick(lost,lost_factories,catalog,paid_frame),"pay one plant stage");
         require(*lost.houses[0].cash<before_cash,"plant stage did not debit cash");
         std::vector<std::uint32_t> victims;
@@ -286,7 +288,7 @@ int main(int argc,char** argv) try {
                 *surviving.houses[0].cash==cash && surviving_factories.house_factory_counts.at(player)[1]==1,
                 "surviving barracks did not retain the queued infantry");
         pending->progress=53;
-        local_frame=std::max(local_frame+1,pending->timer_start+std::uint64_t(pending->interval));
+        local_frame=std::max(local_frame+1,pending->timer_start+std::uint64_t(pending->timer_duration));
         done(proto::tick(surviving,surviving_factories,catalog,local_frame),"finish at surviving barracks");
         require(!factory(surviving_factories,*started.entity) &&
                 actor(surviving,*started.entity).lifetime==w::Lifetime::Placed,
@@ -302,7 +304,9 @@ int main(int argc,char** argv) try {
     require((*world.cells.at(std::uint32_t(foot.y)*512+foot.x).ground_occupancy_124&0x20)!=0,
             "infantry exit did not reserve its Cell");
 
-    const auto pending_refinery=build(world,factories,catalog,player,"GAREFN",frame,false);
+    const auto refinery_start=frame;
+    const auto pending_refinery=build(world,factories,catalog,player,"GAREFN",frame,true);
+    const auto first_refinery_frames=frame-refinery_start;
     {
         auto probe=world;
         auto probe_factories=factories;
@@ -337,6 +341,17 @@ int main(int argc,char** argv) try {
             world.random.second==free_unit_random.second() && *world.houses[0].cash==cash_before_free_unit,
             "free miner changed cash or used a different random stream");
     done(proto::tick(world,factories,catalog,++frame),"refinery power update");
+    // A second refinery takes the same frames as the first when power is
+    // enough: build time depends on cost, power, and factory count only.
+    {
+        auto second=world; auto second_factories=factories; auto local=frame;
+        build(second,second_factories,catalog,player,"GAREFN",local,true);
+        const auto second_refinery_frames=local-frame;
+        // 006C22A0: 2000 * BuildSpeed 0.7 * 0.9 = 1260 frames; 1260/54 = 23 frames a stage.
+        require(first_refinery_frames==54*23 && second_refinery_frames==first_refinery_frames,
+                "refinery build frames differ: first "+std::to_string(first_refinery_frames)+
+                ", second "+std::to_string(second_refinery_frames));
+    }
     build(world,factories,catalog,player,"GAWEAP",frame,false);
     place_building(world,factories,catalog,player,"GAWEAP",frame,base);
     done(proto::tick(world,factories,catalog,++frame),"factory power update");
@@ -345,6 +360,44 @@ int main(int argc,char** argv) try {
             actor(world,tank).lifetime==w::Lifetime::Placed && actor(world,tank).resolved_hp>0 &&
             actor(world,tank).active==true && actor(world,tank).next,
             "tank did not leave the war factory");
+    // Low power slows production that is already running. Recalc_Power
+    // 004F2CC0 calls 004B9EB0, which gives each factory a new stage rate.
+    // The running stage keeps its timer; the next stage uses the new rate.
+    {
+        auto dark=world; auto dark_factories=factories; auto local=frame;
+        const auto started=proto::begin_production(dark,dark_factories,catalog,player,"MTNK",local);
+        done(started,"begin tank before power loss");
+        require(started.entity && started.value,"tank production result is missing");
+        auto* pending=factory(dark_factories,*started.entity);
+        require(pending,"tank factory is missing");
+        const auto full_rate=pending->interval;
+        require(full_rate==sim::factory_stage_frames(*started.value) && pending->timer_duration==full_rate,
+                "tank stage rate differs from its build time");
+        std::vector<std::uint32_t> plants;
+        for (const auto& item:dark.entities)
+            if (item.house_id==player && item.type=="GAPOWR" && item.lifetime==w::Lifetime::Placed) plants.push_back(item.id);
+        require(!plants.empty(),"power plant is missing");
+        for (const auto id:plants) destroy_actor(dark,id);
+        done(proto::tick(dark,dark_factories,catalog,++local),"power loss update");
+        const auto& house=dark.houses[0];
+        require(house.power_output==0 && house.power_drain && *house.power_drain>0,"power loss did not reach the House");
+        sim::BuildTimeInputs low;
+        low.cost=catalog.find("MTNK")->cost; low.build_speed=catalog.build_speed;
+        low.power_output=0; low.power_drain=*house.power_drain;
+        low.minimum_low_power=catalog.minimum_low_power; low.maximum_low_power=catalog.maximum_low_power;
+        low.low_power_penalty=catalog.low_power_penalty; low.multiple_factory=catalog.multiple_factory;
+        low.factories=dark_factories.house_factory_counts.at(player)[2];
+        const auto low_rate=sim::factory_stage_frames(sim::original_build_time(low));
+        pending=factory(dark_factories,*started.entity);
+        require(pending && pending->interval==low_rate && low_rate>full_rate && pending->timer_duration==full_rate &&
+                pending->progress==0,"power loss did not slow the next tank stage");
+        local=pending->timer_start+std::uint64_t(pending->timer_duration);
+        done(proto::tick(dark,dark_factories,catalog,local),"first slow tank stage");
+        pending=factory(dark_factories,*started.entity);
+        require(pending && pending->progress==1 && pending->timer_duration==low_rate,
+                "next tank stage did not use the low-power rate");
+        require_prototype(dark);
+    }
     build(world,factories,catalog,enemy,"NAPOWR",frame,false);
     place_building(world,factories,catalog,enemy,"NAPOWR",frame,enemy_base);
     done(proto::tick(world,factories,catalog,++frame),"AI power update");
