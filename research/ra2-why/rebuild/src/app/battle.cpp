@@ -44,11 +44,6 @@ std::uint32_t frame_delay_ticks(const BattleOptions& args) {
     return std::uint32_t(std::clamp(args.setup.game_speed.value_or(2),0,6));
 }
 
-const std::vector<std::string>& build_palette() {
-    static const std::vector<std::string> palette={"GAPOWR","GAPILE","GAREFN","GAWEAP","GARADR","GAPILL",
-        "NAPOWR","NAHAND","NAREFN","NAWEAP","NARADR","NALASR","E1","E2","MTNK","HTNK","CMIN","HARV"};
-    return palette;
-}
 bool live(const w::Entity& e) {
     return e.lifetime==w::Lifetime::Placed && e.resolved_hp.value_or(0)>0 && e.cell && e.position;
 }
@@ -190,7 +185,7 @@ public:
         if(!args_.headless&&!audio_.enabled())std::cerr<<"Combat audio unavailable: "<<audio_.failure()<<'\n';
         refresh_hud();
         std::vector<BuildChoice> icons;
-        for(const auto& list:{&catalog_.buildings,&catalog_.units,&catalog_.infantry})
+        for(const auto& list:{&catalog_.buildings,&catalog_.units,&catalog_.infantry,&catalog_.aircraft})
             for(const auto& type:*list)icons.push_back({type.id,type.id,type.cost,true,0});
         hud_.load_assets(files,rules_,assets.art_ini(),icons);
         // Compose the initial view while loading. The first event pump can
@@ -922,21 +917,18 @@ public:
         hud_state_.choices.clear();
         const auto eligible=proto::options(world_,factories_,catalog_,player_);
         const auto available=sim::tech::buildable_types(rules_,world_,player_);
-        // TODO-ORIGINAL: A small build palette for the first base match.
-        // The checked production adapter validates prerequisites and factories.
-        const auto& palette=build_palette();
-        for(const auto& type:palette) {
+        // Keep the eligible types in their original rules order within each list.
+        for(const auto* list:{&available.buildings,&available.units,&available.infantry,&available.aircraft})
+        for(const auto& type:*list) {
             const auto* facts=catalog_.find(type);if(!facts)continue;
             const auto gate=std::find_if(eligible.begin(),eligible.end(),[&](const auto& item){return item.first==type;});
             const p::FactoryState* factory=nullptr;
             for(const auto& f:factories_.factories)if(f.house_id==player_&&f.object&&f.object_type==type)factory=&f;
-            bool allowed=false;
-            for(const auto* list:{&available.buildings,&available.units,&available.infantry})
-                if(std::find(list->begin(),list->end(),type)!=list->end())allowed=true;
-            if((!allowed || gate==eligible.end()||gate->second!=p::CanBuild::Can)&&!factory)continue;
+            if((gate==eligible.end()||gate->second!=p::CanBuild::Can)&&!factory)continue;
             BuildChoice choice;choice.type=type;choice.name=name(type);choice.cost=facts->cost;choice.enabled=true;
             choice.category=facts->rtti==p::Rtti::BuildingType?BuildCategory::Buildings:
-                facts->rtti==p::Rtti::InfantryType?BuildCategory::Infantry:BuildCategory::Vehicles;
+                facts->rtti==p::Rtti::InfantryType?BuildCategory::Infantry:
+                facts->rtti==p::Rtti::AircraftType?BuildCategory::Aircraft:BuildCategory::Vehicles;
             if(factory)choice.progress=factory->progress*1000/54;
             choice.queued=build_queue_.count(type)+active_count(type);
             hud_state_.choices.push_back(std::move(choice));
@@ -1129,8 +1121,10 @@ int run_prototype_battle(const BattleOptions& args) {
     const auto rules=rules_job.get();
     Scene scene(files,assets.art_ini(),rules,geometry,cells,assets.map_ini().read_string("Map","Theater"),
         assets.map().terrain(),true);
-    auto products=build_palette();
-    products.emplace_back("DRON"); // AI teams can request this outside the small human palette.
+    std::vector<std::string> products;
+    const auto catalog=p::Catalog::from(rules,{},{});
+    for(const auto* list:{&catalog.buildings,&catalog.units,&catalog.infantry,&catalog.aircraft})
+        for(const auto& type:*list)products.push_back(type.id);
     scene.prepare(battle_scene_state(battle->snapshot,0),products);
     Window window("Red Alert 2 native prototype: skirmish",1024,768,!args.headless);
     loop::SteadyClock real_clock;loop::SimulatedClock fast_clock;

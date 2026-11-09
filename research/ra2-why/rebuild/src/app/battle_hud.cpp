@@ -105,13 +105,24 @@ render::Rectangle BattleHud::minimap_bounds() { return {minimap_x,minimap_y,mini
 HudAction BattleHud::handle_click(int x,int y,const HudState& s) const {
     if (y >= 36 && y < 58 && x >= 808 && x < 1018) {
         active_category_ = static_cast<BuildCategory>((x-808)/42);
+        page_=0;
+        return {};
+    }
+    const int count=int(std::count_if(s.choices.begin(),s.choices.end(),[&](const auto& c){
+        return active_category_==BuildCategory::All || c.category==active_category_;
+    }));
+    const int pages=std::max(1,(count+build_columns*build_rows-1)/(build_columns*build_rows));
+    page_=std::min(page_,pages-1);
+    if(y>=550 && y<560 && x>=808 && x<1020 && pages>1) {
+        page_=(page_+(x<914?pages-1:1))%pages;
         return {};
     }
     int slot=0;
     for (const auto& c : s.choices) {
         if (active_category_ != BuildCategory::All && c.category != active_category_) continue;
-        if (slot >= build_columns*build_rows) break;
-        if (inside(x,y,build_button_bounds(slot)) && c.enabled)
+        if(slot<page_*build_columns*build_rows){++slot;continue;}
+        if (slot >= (page_+1)*build_columns*build_rows) break;
+        if (inside(x,y,build_button_bounds(slot-page_*build_columns*build_rows)) && c.enabled)
             return {HudActionKind::Build,c.type,{}};
         ++slot;
     }
@@ -125,7 +136,7 @@ HudAction BattleHud::handle_click(int x,int y,const HudState& s) const {
 }
 bool BattleHud::same_panel(const HudState& s) const {
     const auto& old=panel_state_;
-    return panel_valid_&&panel_category_==active_category_&&old.cash==s.cash&&
+    return panel_valid_&&panel_page_==page_&&panel_category_==active_category_&&old.cash==s.cash&&
         old.power_output==s.power_output&&old.power_drain==s.power_drain&&
         old.status==s.status&&old.result==s.result&&old.selected_labels==s.selected_labels&&
         old.can_deploy==s.can_deploy&&
@@ -167,8 +178,9 @@ void BattleHud::draw_panel(render::Bitmap& b,const HudState& s) const {
     int i=0;
     for (const auto& c : s.choices) {
         if (active_category_ != BuildCategory::All && c.category != active_category_) continue;
-        if (i>=build_columns*build_rows) break;
-        auto r=build_button_bounds(i++); border(b,r,edge);
+        if(i<page_*build_columns*build_rows){++i;continue;}
+        if (i>=(page_+1)*build_columns*build_rows) break;
+        auto r=build_button_bounds(i++-page_*build_columns*build_rows); border(b,r,edge);
         const auto* image=cameo(c.type);
         if (image) {
             const auto& src=*image;
@@ -182,7 +194,7 @@ void BattleHud::draw_panel(render::Bitmap& b,const HudState& s) const {
         if (art_loaded) {
             // Original cameo art: no name, cost or BUILD text on top.
             if (c.progress>=1000) {
-                text(b,r.x+32,r.y+22,"READY",gold,r.width-8,2);
+                text(b,r.x+4,r.y+22,c.category==BuildCategory::Buildings?"READY":"WAITING FOR EXIT",gold,r.width-8,1);
             } else if (c.progress>0) {
                 // Clock shading, like the original CLOCK.SHP overlay: a dark
                 // wedge that grows clockwise from 12 o'clock.
@@ -213,13 +225,18 @@ void BattleHud::draw_panel(render::Bitmap& b,const HudState& s) const {
             text(b,r.x+4,r.y+31,c.progress>=1000?"READY":c.progress>0?std::to_string(c.progress/10)+"%":"BUILD",color,r.width-8);
             fill(b,{r.x+4,r.y+46,(r.width-8)*std::clamp(c.progress,0,1000)/1000,5},c.enabled?green:edge);
         }
-        if(c.queued>1) {  // Queue count badge: total items, active one included.
+        if(c.queued>0) {  // Queue count badge: total items, active one included.
             const std::string n=std::to_string(c.queued);
-            const int w=4*static_cast<int>(n.size())+3;
-            fill(b,{r.x+r.width-w-2,r.y+r.height-9,w,7},dark);
-            text(b,r.x+r.width-w-1,r.y+r.height-8,n,gold,214,1);
+            const int w=8*static_cast<int>(n.size())+6;
+            fill(b,{r.x+r.width-w-2,r.y+r.height-15,w,13},dark);
+            text(b,r.x+r.width-w-1,r.y+r.height-13,n,gold,w-2,2);
         }
     }
+    const int count=int(std::count_if(s.choices.begin(),s.choices.end(),[&](const auto& c){
+        return active_category_==BuildCategory::All || c.category==active_category_;
+    }));
+    const int pages=std::max(1,(count+build_columns*build_rows-1)/(build_columns*build_rows));
+    if(pages>1)text(b,808,552,"PREV     "+std::to_string(page_+1)+"/"+std::to_string(pages)+"     NEXT",gold,212,1);
     if(s.can_deploy) {
         border(b,deploy_bounds(),ink); text(b,816,577,"DEPLOY",ink,190);
     }
@@ -239,12 +256,16 @@ void BattleHud::draw_panel(render::Bitmap& b,const HudState& s) const {
         row1=st.substr(0,cut);
         row2=st.substr(cut+(st[cut]==' '?1:0));
     }
-    text(b,808,650,row1,ink,212);
-    text(b,808,662,row2,ink,212);
+    text(b,808,650,row1,ink,212,row1.size()>26?1:2);
+    text(b,808,662,row2,ink,212,row2.size()>26?1:2);
 }
 void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
     loop::profile::Timer probe(loop::profile::Phase::HudDraw);
     if(!valid(b))return;
+    const int count=int(std::count_if(s.choices.begin(),s.choices.end(),[&](const auto& c){
+        return active_category_==BuildCategory::All || c.category==active_category_;
+    }));
+    page_=std::min(page_,std::max(0,(count-1)/(build_columns*build_rows)));
     if(!same_panel(s)) {
         panel_valid_=false;
         if(panel_.rgba.empty())panel_={view_width,minimap_y,render::Bytes(std::size_t(view_width)*minimap_y*4)};
@@ -252,7 +273,7 @@ void BattleHud::draw(render::Bitmap& b,const HudState& s) const {
         panel_state_.cash=s.cash;panel_state_.power_output=s.power_output;panel_state_.power_drain=s.power_drain;
         panel_state_.selected_labels=s.selected_labels;panel_state_.choices=s.choices;
         panel_state_.status=s.status;panel_state_.result=s.result;panel_state_.can_deploy=s.can_deploy;
-        panel_category_=active_category_;panel_valid_=true;
+        panel_category_=active_category_;panel_page_=page_;panel_valid_=true;
     }
     const int right=std::min(b.width,view_width),bottom=std::min(b.height,minimap_y);
     if(right>sidebar_x)for(int y=0;y<bottom;++y)

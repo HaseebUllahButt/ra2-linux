@@ -42,6 +42,7 @@ int main(int argc, char** argv) {
     assert(BattleHud::build_button_bounds(16).width==0);
     s.choices.resize(17,{"EXTRA","EXTRA",1,true,0});
     assert(hud.handle_click(808,556,s).kind==HudActionKind::None);
+    hud.handle_click(808,44,s); // Return to the first page.
     auto blank=frame(), b=blank;hud.draw(b,s);
     assert(same(blank,b,{0,0,804,768}));
     assert(!same(blank,b,{804,0,220,768}));
@@ -125,15 +126,15 @@ int main(int argc, char** argv) {
             }
             return hits;
         };
-        // Queue count: a badge with the total shows only when queued > 1.
-        // queued includes the active item, so 1 means no badge.
+        // Queue count: a badge with the total shows for each pending or active product.
+        // Changing only the count must refresh the cached panel.
         HudState q;
         q.choices={{"E1","GI",200,true,0,BuildCategory::Infantry,2}};
         auto one=frame(); hud.draw(one,q);
         assert(gold_hits(one,{r.x+88,r.y+44,16,12})>0);
         q.choices[0].queued=1;
         auto single=frame(); hud.draw(single,q);
-        assert(gold_hits(single,{r.x+88,r.y+44,16,12})==0);
+        assert(gold_hits(single,{r.x+88,r.y+40,16,16})>0);
         q.choices[0].queued=0;
         auto none=frame(); hud.draw(none,q);
         assert(gold_hits(none,{r.x+88,r.y+44,16,12})==0);
@@ -323,6 +324,22 @@ int main(int argc, char** argv) {
         assert(dark_mid>50 && dark_mid<=opaque_mid);
         originals.choices[0].progress=0;
         }
+    }
+    // Every eligible type remains reachable beyond the first sixteen cameos.
+    {
+        BattleHud pages;
+        HudState many;
+        for(int i=0;i<19;++i)many.choices.push_back({"TYPE"+std::to_string(i),"ITEM",100,true,0,BuildCategory::Buildings});
+        auto image=frame();pages.draw(image,many);
+        assert(pages.handle_click(809,61,many).type=="TYPE0");
+        pages.handle_click(1000,554,many);
+        pages.draw(image,many);
+        assert(pages.handle_click(809,61,many).type=="TYPE16");
+        pages.handle_click(809,554,many);
+        assert(pages.handle_click(809,61,many).type=="TYPE0");
+        pages.handle_click(1000,554,many);
+        many.choices.resize(1);pages.draw(image,many);
+        assert(pages.handle_click(809,61,many).type=="TYPE0");
     }
     std::cout<<"battle HUD tests passed\n";
 }
