@@ -774,15 +774,24 @@ std::optional<bool> legal(const w::Snapshot& s,const Catalog& c,const TypeFacts&
     return std::nullopt;
 }
 // BuildingClass::Unlimbo 0043D3A0 effects that production depends on.
-Outcome unlimbo_building(w::Snapshot& s,FactorySet& f,const Catalog& c,std::uint32_t id,CellXY origin) {
-    auto* b=entity_of(s,id); if (!b) return fail(Status::NeedsInput,"building missing");
+// The checks that unlimbo_building() makes before its first write. Each
+// returns the failure that unlimbo_building() returns.
+std::optional<Outcome> unlimbo_failure(const w::Snapshot& s,const Catalog& c,std::uint32_t id,CellXY origin) {
+    const auto* b=entity_of(s,id); if (!b) return fail(Status::NeedsInput,"building missing");
     const auto* t=facts_of(c,*b); if (!t) return fail(Status::NeedsInput,"building type missing");
     if (t->factory==Rtti::AircraftType || t->placement.to_overlay || t->wall)
         return fail(Status::Unsupported,"dock, wall and overlay building unlimbo is not recovered");
     const auto ok=legal(s,c,*t,origin);                                    // Can_Enter_Cell 004453B0.
     if (!ok) return fail(Status::NeedsInput,"placement cells unresolved");
     if (!*ok) return fail(Status::Rejected,"cannot deploy here");
-    auto* h=house_of(s,b->house_id); if (!h) return fail(Status::NeedsInput,"house missing");
+    if (!house_of(s,b->house_id)) return fail(Status::NeedsInput,"house missing");
+    return std::nullopt;
+}
+Outcome unlimbo_building(w::Snapshot& s,FactorySet& f,const Catalog& c,std::uint32_t id,CellXY origin) {
+    if (auto failure=unlimbo_failure(s,c,id,origin)) return *failure;
+    auto* b=entity_of(s,id);
+    const auto* t=facts_of(c,*b);
+    auto* h=house_of(s,b->house_id);
     for (const auto cell:footprint(origin,t->placement.foundation)) {       // Mark(PUT) 005D4160, Place_Down 0054AB70.
         const auto key=cell_key(cell); if (!key || !s.cells.count(*key)) continue;
         if (!link(s,*key,id,true)) return fail(Status::NeedsInput,"cell chain unresolved");
@@ -930,12 +939,19 @@ std::optional<bool> passes_proximity(const w::Snapshot& s,const FactorySet& f,co
     const auto [width,height]=kFoundationBounds[std::size_t(t->placement.foundation)];
     const int adj=t->adjacent+1;
     bool ok=false;
-    for (int x=cell.x-adj;x<cell.x-adj+width+2*adj;++x)
-        for (int y=cell.y-adj;y<cell.y-adj+height+2*adj;++y) {
+    // Each Cell either makes the answer unknown, which ends the scan, or
+    // can only set ok. So the visit order does not change the result. Read
+    // each row of the area with one ordered map walk instead of one cold
+    // map search per Cell.
+    const int left=cell.x-adj,right=cell.x-adj+width+2*adj,top=cell.y-adj,bottom=cell.y-adj+height+2*adj;
+    for (int y=std::max(top,0);y<std::min(bottom,512);++y) {
+        const int first=std::max(left,0),last=std::min(right,512);
+        if (first>=last) break;
+        const auto row=std::uint32_t(y)*512u;
+        for (auto it=s.cells.lower_bound(row+std::uint32_t(first));
+             it!=s.cells.end() && it->first<row+std::uint32_t(last);++it) {
+            const int x=int(it->first-row);
             if (x>=cell.x && x<cell.x+width && y>=cell.y && y<cell.y+height) continue;
-            const auto key=cell_key({std::int16_t(x),std::int16_t(y)}); if (!key) continue;
-            const auto it=s.cells.find(*key);
-            if (it==s.cells.end()) continue;                               // Fallback cell has no building.
             const auto chain=ground_chain(s,it->second); if (!chain) return std::nullopt;
             const w::Entity* building=nullptr;                             // 004717B0 first Building.
             for (const auto* e:*chain) if (e->kind==w::Kind::Structure) { building=e; break; }
@@ -946,6 +962,7 @@ std::optional<bool> passes_proximity(const w::Snapshot& s,const FactorySet& f,co
             if (!f.flags.build_off_ally) return std::nullopt;
             if (*f.flags.build_off_ally && bt->eligible_ally && owner->id!=h->id) return std::nullopt; // Alliance mask +5674 not modeled.
         }
+    }
     return ok;
 }
 
@@ -956,9 +973,27 @@ std::optional<bool> legal_placement(const w::Snapshot& s,const Catalog& c,
     return legal(s,c,*t,origin);
 }
 
+// The checks that place() makes before its first write, in its order. It
+// returns the failure that place() would return, or nothing when place()
+// reaches its first write. It does not change the world or the factories.
+std::optional<Outcome> place_failure(const w::Snapshot& s,const FactorySet& f,const Catalog& c,std::uint32_t house_id,
+                                     const std::string& type,CellXY cell) {
+    if (!runtime_ready(s)) return fail(Status::NeedsInput,"setup is not complete");
+    const auto* t=c.find(type); if (!t || t->rtti!=Rtti::BuildingType) return fail(Status::Rejected,"not a building type");
+    const FactoryState* factory=nullptr;
+    for (const auto& x:f.factories) if (x.house_id==house_id && x.slot==slot_of(*t)) { factory=&x; break; }
+    if (!factory || !factory->object || factory->progress!=54) return fail(Status::Rejected,"no completed building");
+    const auto* h=house_of(s,house_id); if (!h) return fail(Status::Rejected,"unknown house");
+    const auto builder=who_can_build(s,f,c,*t,*h,false,false);
+    if (!builder) return fail(Status::NeedsInput,"builder unresolved");
+    if (!*builder) return fail(Status::Rejected,"no builder");
+    return unlimbo_failure(s,c,factory->object,cell);
+}
+
 Outcome place(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint32_t house_id,
               const std::string& type,CellXY cell,std::uint64_t) {
-    if (!runtime_ready(snapshot)) return fail(Status::NeedsInput,"setup is not complete");
+    // A failed placement returns before any write; skip the Undo copy then.
+    if (auto failure=place_failure(snapshot,factories,c,house_id,type,cell)) return *failure;
     w::Undo undo(snapshot); auto& s=snapshot; auto f=factories; // Restores unless committed.
     const auto* t=c.find(type); if (!t || t->rtti!=Rtti::BuildingType) return fail(Status::Rejected,"not a building type");
     auto* factory=factory_in_slot(f,house_id,slot_of(*t));

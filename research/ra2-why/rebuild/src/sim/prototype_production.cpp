@@ -466,6 +466,20 @@ std::optional<bool> passes_proximity(const w::Snapshot& world,const FactorySet& 
 Outcome place(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,std::uint32_t house_id,
               const std::string& type,CellXY cell,std::uint64_t frame) {
     bool known_valid=false;
+    if (ready(world)) {
+        // Find a failure first without the transaction copy. These checks
+        // match the transaction below up to its first write, and that
+        // transaction would roll back such a failure exactly.
+        struct Progress {
+            w::Snapshot& world; w::SetupProgress saved;
+            ~Progress() { world.setup_progress=saved; }
+        } progress{world,world.setup_progress};
+        world.setup_progress=w::SetupProgress::Complete;
+        const auto proximity=ra2::sim::production::passes_proximity(world,factories,catalog,house_id,type,cell);
+        if (!proximity) return fail(Status::NeedsInput,"building proximity is unknown");
+        if (!*proximity) return fail(Status::Rejected,"building is too far from the base");
+        if (auto failure=ra2::sim::production::place_failure(world,factories,catalog,house_id,type,cell)) return *failure;
+    }
     return transaction(world,factories,[&](w::Snapshot& candidate,FactorySet& next) {
         const auto proximity=ra2::sim::production::passes_proximity(candidate,next,catalog,house_id,type,cell);
         if (!proximity) return fail(Status::NeedsInput,"building proximity is unknown");
