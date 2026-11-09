@@ -1025,7 +1025,7 @@ int run_prototype_battle(const BattleOptions& args) {
     if(!assets.rules().find_section(country)||assets.rules().read_string(country,"Side").empty())country="Americans";
     const auto enemy=assets.rules().read_string(country,"Side")=="GDI"?"Russians":"Americans";
     const int credits=std::clamp(args.setup.credits.value_or(10000),2500,10000);
-    const int count=std::clamp(args.setup.unit_count.value_or(2),1,12);
+    const int count=std::clamp(args.setup.unit_count.value_or(2),0,24);
     const int color=std::clamp(args.setup.color.value_or(0),0,7);
     // TODO-ORIGINAL: This first match supports one human and one computer,
     // Battle rules, two deterministic starting waypoints, and base factions.
@@ -1068,7 +1068,10 @@ int run_prototype_battle(const BattleOptions& args) {
     const auto terrain_image=terrain_job.get();
     Battle match(args,assets,std::move(battle->snapshot),window,scene,terrain_image,clock,files);
     loop::Hooks hooks;hooks.update=[&](loop::State& state){match.update(state);};
-    loop::GameLoop loop(match,match,clock,{},hooks);
+    loop::Config config;
+    // Base 0053FBD0 copies the saved speed directly to the 16 ms tick delay.
+    config.local_delay_ticks=std::uint32_t(std::clamp(args.setup.game_speed.value_or(2),0,6));
+    loop::GameLoop loop(match,match,clock,config,hooks);
     if(args.frames)loop.run(args.frames);else while(loop.state().running)loop.step();
     if(args.headless)match.verify(loop.state());
     match.report(loop.state().frame_counter);
