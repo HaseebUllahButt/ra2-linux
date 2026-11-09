@@ -167,6 +167,7 @@ public:
          audio_(files,rules_,player_,rules_.read_string(world_.houses.at(0).country,"Side")=="GDI"?"Allied":"Russian",
                 !args.headless,16*frame_delay_ticks(args)) {
         if(const auto labels=assets_.read_asset("RA2.CSF"))labels_.parse(labels->data(),labels->size());
+        movement_.use_rules(rules_);
         score_assets_=ui::ScoreAssets::load(files,labels_);
         score_.emplace(std::vector<std::pair<std::uint32_t,std::string>>{{player_,house(world_,player_).name},{enemy_,house(world_,enemy_).name}});
         help_visible_=!args_.autoplay;

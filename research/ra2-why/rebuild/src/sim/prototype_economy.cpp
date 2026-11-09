@@ -20,6 +20,7 @@ bool open(const sw::CellState& c) {
 }
 }
 PrototypeEconomy::PrototypeEconomy(const rules::IniFile& r):rules_(r) {
+    movement_.use_rules(rules_);
     const auto* overlays=r.find_section("OverlayTypes");
     const auto* types=r.find_section("Tiberiums");
     if(!overlays || !types) return;
