@@ -43,17 +43,26 @@ int main(int argc,char** argv) {
         assert(teleported==(std::string(type)=="CMIN"));
         assert(first==rules.read_integer(type,"Storage")*rules.read_integer(overlay==gem?"Cruentus":"Riparius","Value"));
     }
-    for(auto type:{"CMIN","HARV"}) for(int ore_y:{4,5}) {
+    // Row 7 puts the new field beyond the previous adjacent-only scan.
+    for(auto type:{"CMIN","HARV"}) for(int ore_y:{4,5,7}) {
         auto nearby=fixture(type,-1);
         nearby.cells[4*512+11].terrain->overlay_type_index=ore;
         sim::PrototypeEconomy economy(rules);
         economy.tick(nearby,0); // Choose the distant, initially sole field.
         nearby.cells[ore_y*512+4].terrain->overlay_type_index=ore;
-        for(unsigned frame=1;frame<100 && !economy.load(1);++frame) economy.tick(nearby,frame);
+        for(unsigned frame=1;frame<200 && !economy.load(1);++frame) economy.tick(nearby,frame);
         assert(economy.load(1)==1);
         assert(nearby.entities[0].cell->x==4 && nearby.entities[0].cell->y==ore_y);
         assert(nearby.cells[4*512+11].overlay_data_11e==11);
     }
+    // 00475DB0: data zero still contains one bail. Removal restores TMP land.
+    auto last_bail=fixture("CMIN",-1);
+    auto& last_cell=last_bail.cells.at(4*512+3);
+    last_cell.terrain->overlay_type_index=ore;last_cell.overlay_data_11e=0;
+    last_cell.terrain->tmp_terrain=9;last_cell.terrain->land_type=5;
+    sim::PrototypeEconomy depletion(rules);depletion.tick(last_bail,0);
+    assert(depletion.load(1)==1 && last_cell.overlay_data_11e==0);
+    assert(last_cell.terrain->overlay_type_index==-1 && last_cell.terrain->land_type==2);
     auto destroyed=fixture("HARV",105);destroyed.entities[0].resolved_hp=0;
     sim::PrototypeEconomy dead(rules);dead.tick(destroyed,0);assert(dead.load(1)==0);
     auto incomplete=fixture("CMIN",105);incomplete.setup_progress=sw::SetupProgress::Unknown;
@@ -83,6 +92,45 @@ int main(int argc,char** argv) {
         const auto& harvested=actual.cells.at(4*512+3);
         assert(harvested.overlay_data_11e==terrain.overlay_data[k]-1 || harvested.terrain->overlay_type_index==-1);
     }
+    // Preserve MP02T2 coordinates and every packed overlay, rather than
+    // transplanting a resource byte into the small movement fixture.
+    // Terrain is flat and clear here; this checks selection, not terrain pathing.
+    auto actual=fixture("CMIN",-1);actual.cells.clear();actual.cell_order->clear();
+    for(const auto& tile:terrain.tiles) {
+        const unsigned k=tile.y*512u+tile.x;
+        auto& c=actual.cells[k];c.allocated=true;c.heads=weapons::CellContentHeads{};
+        c.ground_occupancy_124=0;c.cell_flag_100=false;
+        c.terrain=sim::original_default_terrain_cell({tile.x,tile.y});
+        c.terrain->overlay_type_index=terrain.overlay[k]==255?-1:int(terrain.overlay[k]);
+        c.overlay_data_11e=terrain.overlay_data[k];actual.cell_order->push_back(k);
+    }
+    const int waypoint=map.read_integer("Waypoints","0",0);
+    const ra2map::Cell start{std::uint16_t(waypoint%1000),std::uint16_t(waypoint/1000)};
+    auto& miner=actual.entities[0];miner.cell=start;
+    miner.position=sim::Coord{start.x*256+128,start.y*256+128,0};
+    actual.cells.at(start.y*512u+start.x).heads->ground_head=1;
+    actual.cells.at(start.y*512u+start.x).ground_occupancy_124=32;
+    actual.entities[1].cell=ra2map::Cell{std::uint16_t(start.x-1),start.y};
+    int nearest=1000000;
+    for(const auto& [k,c]:actual.cells) if(c.terrain->overlay_type_index==ore || c.terrain->overlay_type_index==gem) {
+        int dx=int(k%512)-start.x,dy=int(k/512)-start.y;
+        nearest=std::min(nearest,dx*dx+dy*dy);
+    }
+    sim::PrototypeEconomy original_map(rules);
+    for(unsigned frame=0;frame<3000 && !original_map.load(1);++frame) original_map.tick(actual,frame);
+    assert(original_map.load(1)==1);
+    const auto reached=*actual.entities[0].cell;
+    const int dx=int(reached.x)-start.x,dy=int(reached.y)-start.y;
+    assert(dx*dx+dy*dy==nearest);
+    std::cout<<"MP02T2 start "<<start.x<<","<<start.y<<" first ore "<<reached.x<<","<<reached.y<<" squared distance "<<nearest<<'\n';
+    const unsigned harvested_key=reached.y*512u+reached.x;
+    const int packed_overlay=terrain.overlay[harvested_key];
+    for(unsigned frame=3000;frame<3400 && actual.cells.at(harvested_key).terrain->overlay_type_index!=-1;++frame)
+        original_map.tick(actual,frame);
+    assert(actual.cells.at(harvested_key).terrain->overlay_type_index==-1);
+    assert(terrain.overlay[harvested_key]==packed_overlay);
+    std::cout<<"MP02T2 cell "<<reached.x<<","<<reached.y<<" packed overlay "<<packed_overlay
+             <<" live overlay -1 after depletion; packed art input stays unchanged\n";
     // A reordered list proves that numeric INI keys do not define indexes.
     rules::IniFile reordered;
     reordered.parse("[OverlayTypes]\n88=GEM01\n77=OTHER\n44=TIB01\n[GEM01]\nTiberium=yes\n[TIB01]\nTiberium=yes\n[Tiberiums]\n4=Rich\n9=Poor\n[Rich]\nImage=2\nValue=70\n[Poor]\nImage=1\nValue=30\n");

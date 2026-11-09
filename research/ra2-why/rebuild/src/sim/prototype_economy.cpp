@@ -108,7 +108,28 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
                     nearby=cell;best_distance=d;
                 }
             }
-            if(nearby) movement_.issue(w,e.id,*nearby,original_rule_speed(rules_.read_integer(e.type,"Speed",4)));
+            if(nearby && movement_.issue(w,e.id,*nearby,original_rule_speed(rules_.read_integer(e.type,"Speed",4))).status==PrototypeMoveStatus::Complete) bag.target=nearby;
+        }
+        if(movement_.moving(e.id) && !bag.returning && bag.target && frame%15==0) {
+            // Ore can become available beyond the adjacent ring. Keep the route
+            // only while its destination remains the nearest reachable resource.
+            std::vector<std::uint32_t> closer;
+            const int limit=distance(*e.cell,*bag.target);
+            sw::walk_cells(std::as_const(w.cells),field_ahead,[&](const auto& item) {
+                if(resource(item.second)>=0 && open(item.second) &&
+                   distance(*e.cell,coord(item.first))<limit) closer.push_back(item.first);
+                return true;
+            });
+            std::sort(closer.begin(),closer.end(),[&](auto a,auto b) {
+                const int da=distance(*e.cell,coord(a)),db=distance(*e.cell,coord(b));
+                return da!=db?da<db:a<b;
+            });
+            for(auto k:closer) {
+                const auto target=coord(k);
+                if(movement_.issue(w,e.id,target,original_rule_speed(rules_.read_integer(e.type,"Speed",4))).status==PrototypeMoveStatus::Complete) {
+                    bag.target=target;break;
+                }
+            }
         }
         if(movement_.moving(e.id) || frame<bag.next) continue;
         sw::Entity* refinery=nullptr;int best=std::numeric_limits<int>::max();
@@ -146,8 +167,13 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
         if(current!=w.cells.end() && resource(current->second)>=0) {
             auto& c=current->second;int r=resource(c);
             ++bag.bails;bag.credits+=std::max(0,rules_.read_integer(resources_[r].section,"Value",0));
-            // TODO-ORIGINAL CellClass::Reduce_Tiberium: restore the underlying tile land and refresh resource art caches.
-            if(*c.overlay_data_11e==0) {c.terrain->overlay_type_index=-1;c.terrain->land_type=0;} else --*c.overlay_data_11e;
+            // 00475DB0 removes the overlay after its last (data + 1) bail.
+            // 00472540 restores tile land; scene redraw remains an integration task.
+            if(*c.overlay_data_11e==0) {
+                c.terrain->overlay_type_index=-1;c.overlay_data_11e=0;
+                c.terrain->land_type=c.terrain->tmp_terrain
+                    ? std::optional<int>(original_tmp_land_type(*c.terrain->tmp_terrain)) : std::nullopt;
+            } else --*c.overlay_data_11e;
             // TODO-ORIGINAL UnitClass::Harvesting: pickup/unload animation timing uses a simple frame delay.
             bag.next=frame+std::max(1,rules_.read_integer(e.type,"HarvestRate",rules_.read_integer("General","OreDumpRate",15)));
             continue;
@@ -159,7 +185,7 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
         });
         std::sort(fields.begin(),fields.end(),[&](auto a,auto b){int da=distance(*e.cell,coord(a)),db=distance(*e.cell,coord(b));return da!=db?da<db:a<b;});
         bool found=false;
-        for(auto k:fields) if(movement_.issue(w,e.id,coord(k),original_rule_speed(rules_.read_integer(e.type,"Speed",4))).status==PrototypeMoveStatus::Complete) {found=true;break;}
+        for(auto k:fields) if(movement_.issue(w,e.id,coord(k),original_rule_speed(rules_.read_integer(e.type,"Speed",4))).status==PrototypeMoveStatus::Complete) {bag.target=coord(k);found=true;break;}
         if(!found && bag.bails) bag.returning=true;
     }
     for(auto i=cargo_.begin();i!=cargo_.end();) if(!live.count(i->first)) {movement_.cancel(w,i->first);i=cargo_.erase(i);} else ++i;
