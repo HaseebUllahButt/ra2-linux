@@ -17,6 +17,14 @@ int main(int argc, char** argv) {
     map.parse(original_test_ini(argv[1],"MP02T2.MAP",true));
     if (argc==3) {
         const std::string request=argv[2];
+        if (request=="--amcv-vehicle-entry") {
+            rules.parse(original_test_ini(argv[1],"RULES.INI",true));
+            assert(map.key_count("VehicleTypes")==0);
+            const auto* entry=rules.find("VehicleTypes","1");
+            assert(entry && entry->key=="1" && entry->value=="AMCV");
+            std::cout<<entry->key<<'\t'<<entry->value<<'\n';
+            return std::cout?0:1;
+        }
         if (request=="--mission-rules") {
             rules.parse(original_test_ini(argv[1],"RULES.INI",true));
             int index=0;
