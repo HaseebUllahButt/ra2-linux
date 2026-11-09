@@ -19,6 +19,7 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
     src/sim/combat.cpp src/sim/damage_runtime.cpp src/sim/goal_runtime.cpp src/sim/unit_mark.cpp src/sim/live_cell_setup.cpp src/sim/unit_visibility.cpp src/sim/target.cpp src/sim/distance.cpp src/sim/floor.cpp src/sim/path.cpp src/sim/path_smoothing.cpp src/sim/cell_entry.cpp src/sim/coarse_category.cpp src/sim/resource_cell.cpp src/sim/regions.cpp src/sim/hierarchy.cpp src/sim/hierarchy_route.cpp src/sim/production.cpp src/sim/production_runtime.cpp \
     src/sim/world.cpp src/sim/world_init.cpp src/sim/cell_setup.cpp src/sim/drive.cpp src/sim/movement.cpp src/sim/movement_regions.cpp src/sim/component_lookup.cpp src/sim/goal_path.cpp src/sim/retry_edges.cpp src/sim/hierarchy_retry.cpp src/sim/local_reachability.cpp src/sim/search_memory.cpp src/sim/foot_path.cpp src/sim/nearest_cell.cpp src/sim/cell_projection.cpp src/sim/cell_fit.cpp src/sim/overlay_mark.cpp src/sim/replacement.cpp src/sim/build_time.cpp src/voxel/voxel.cpp
 NATIVE_SOURCES += src/app/battle.cpp src/app/battle_scene.cpp src/app/battle_orders.cpp src/app/battle_hud.cpp \
+    src/app/battle_audio.cpp src/audio/game_audio.cpp src/audio/audio.cpp src/audio/lookup.cpp \
     src/app/battle_effects.cpp src/app/battle_help.cpp src/app/battle_cursor.cpp src/ui/score_screen.cpp \
     src/sim/prototype_movement.cpp src/sim/prototype_ai.cpp src/sim/prototype_infantry.cpp \
     src/sim/prototype_victory.cpp src/sim/prototype_production.cpp src/sim/prototype_economy.cpp \
@@ -583,8 +584,10 @@ skirmish-check: native skirmish-tests
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --frames 3
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --autoplay --frames 12000
 
-skirmish-tests: build/prototype_movement_test build/battle_effects_test build/battle_queue_test build/battle_radar_test build/battle_radar_world_test build/battle_help_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test
+skirmish-tests: build/battle_audio_test build/prototype_movement_test build/battle_effects_test build/battle_queue_test build/battle_radar_test build/battle_radar_world_test build/battle_help_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test
 	build/prototype_movement_test
+	SDL_AUDIODRIVER=dummy build/battle_audio_test $(TEST_GAME_DIR)
+	SDL_AUDIODRIVER=ra2-unavailable build/battle_audio_test $(TEST_GAME_DIR) --missing
 	build/battle_effects_test $(TEST_GAME_DIR)
 	build/battle_queue_test
 	build/battle_radar_test $(TEST_GAME_DIR)
@@ -604,6 +607,9 @@ build/battle_queue_test: build/native/src/app/test_battle_queue.o
 
 build/battle_effects_test: build/native/src/app/test_battle_effects.o build/native/src/app/battle_effects.o $(FS_OBJECTS) $(GFX_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/battle_audio_test: build/native/src/app/test_battle_audio.o build/native/src/app/battle_audio.o build/native/src/app/platform.o build/native/src/audio/game_audio.o build/native/src/audio/audio.o build/native/src/audio/lookup.o build/native/src/rules/ini_file.o $(FS_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
 
 build/prototype_movement_test: build/native/src/sim/test_prototype_movement.o $(PROTOTYPE_TEST_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@

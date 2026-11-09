@@ -13,5 +13,5 @@ runner=()
 if command -v chrt >/dev/null && chrt --other 0 true 2>/dev/null; then
     runner=(chrt --other 0)
 fi
-RA2_BENCH=1 SDL_VIDEODRIVER=dummy "${runner[@]}" "$here/build/ra2-native" --game-dir "$game" --skirmish \
+RA2_BENCH=1 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy "${runner[@]}" "$here/build/ra2-native" --game-dir "$game" --skirmish \
     --autoplay --frames "$frames" 2>&1 | grep -E '^RA2_BENCH|^Native prototype' || true

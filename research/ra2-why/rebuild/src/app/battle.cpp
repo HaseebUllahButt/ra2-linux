@@ -6,6 +6,7 @@
 #include "battle_orders.h"
 #include "battle_scene.h"
 #include "battle_effects.h"
+#include "battle_audio.h"
 #include "scene.h"
 #include "terrain_inputs.h"
 #include "../session/world/setup.h"
@@ -38,6 +39,10 @@ namespace p=sim::production;
 namespace proto=p::prototype;
 using sim::skirmish::Order;
 using sim::skirmish::OrderKind;
+
+std::uint32_t frame_delay_ticks(const BattleOptions& args) {
+    return std::uint32_t(std::clamp(args.setup.game_speed.value_or(2),0,6));
+}
 
 const std::vector<std::string>& build_palette() {
     static const std::vector<std::string> palette={"GAPOWR","GAPILE","GAREFN","GAWEAP","GARADR","GAPILL",
@@ -106,6 +111,7 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     BattleHud hud_;
     BattleCursor cursor_;
     BattleEffects effects_;
+    BattleAudio audio_;
     CursorScope cursor_scope_;
     BattleHelp help_;
     ui::ScoreAssets score_assets_;
@@ -149,7 +155,9 @@ public:
          combat_(assets.rules(),assets.battle_rules(),assets.map_ini(),assets.art_ini(),
                  (args.game_directory/"game.exe").string()),economy_(rules_),ai_(rules_),
          window_(window),scene_(scene),terrain_(terrain),geometry_(render::MapGeometry::from_ini(assets.map_ini())),
-         clock_(clock),player_(world_.houses.at(0).id),enemy_(world_.houses.at(1).id),orders_(player_),cursor_(files),effects_(files) {
+         clock_(clock),player_(world_.houses.at(0).id),enemy_(world_.houses.at(1).id),orders_(player_),cursor_(files),effects_(files),
+         audio_(files,rules_,player_,rules_.read_string(world_.houses.at(0).country,"Side")=="GDI"?"Allied":"Russian",
+                !args.headless,16*frame_delay_ticks(args)) {
         if(const auto labels=assets_.read_asset("RA2.CSF"))labels_.parse(labels->data(),labels->size());
         score_assets_=ui::ScoreAssets::load(files,labels_);
         help_visible_=!args_.autoplay;
@@ -178,6 +186,8 @@ public:
         radar_style_=render::battle_radar_style(rules_);
         radar_style_.houses[player_]={70,255,90};radar_style_.houses[enemy_]={255,65,50};
         effects_.observe(world_,combat_.projectiles(),0,effect_project());
+        audio_.observe(world_,0);
+        if(!args_.headless&&!audio_.enabled())std::cerr<<"Combat audio unavailable: "<<audio_.failure()<<'\n';
         refresh_hud();
         std::vector<BuildChoice> icons;
         for(const auto& list:{&catalog_.buildings,&catalog_.units,&catalog_.infantry})
@@ -402,6 +412,7 @@ public:
             input(event);
         }
         state.paused=help_visible_||pause_panel_!=PausePanel::Closed;
+        audio_.service(state.paused||!state.window_active);
         if (quit_) state.running=false;
     }
     void test_click(int x,int y) {
@@ -831,6 +842,7 @@ public:
         }
         const auto fighting=combat_.tick(world_,frame);
         effects_.observe(world_,combat_.projectiles(),frame,effect_project());
+        audio_.observe(world_,frame);
         fired+=fighting.fired;impacts+=fighting.impacts;
         for(const auto& detail:fighting.unresolved)gaps_.insert(detail);
         std::set<std::uint32_t> approach;
@@ -1128,7 +1140,7 @@ int run_prototype_battle(const BattleOptions& args) {
     loop::Hooks hooks;hooks.update=[&](loop::State& state){match.update(state);};
     loop::Config config;
     // Base 0053FBD0 copies the saved speed directly to the 16 ms tick delay.
-    config.local_delay_ticks=std::uint32_t(std::clamp(args.setup.game_speed.value_or(2),0,6));
+    config.local_delay_ticks=frame_delay_ticks(args);
     loop::GameLoop loop(match,match,clock,config,hooks);
     if(args.frames)loop.run(args.frames);else while(loop.state().running)loop.step();
     if(args.headless)match.verify(loop.state());
