@@ -40,6 +40,7 @@ struct OpponentSlot {
 struct SkirmishSetup {
     // scenario_index is the preserved saved value, not the selected catalog index.
     std::optional<int> game_mode, scenario_index, game_speed, credits, unit_count;
+    int min_units=1, max_units=20;
     int min_credits=2500, max_credits=10000, credit_increment=100;
     std::optional<bool> short_game, super_weapons, build_off_ally, mcv_repacks, crates;
     std::optional<std::string> country, map_filename, map_archive;
@@ -83,7 +84,7 @@ std::vector<SkirmishMap> load_skirmish_maps(const fs::MixFileSystem& files,
                                              const ra2text::CsfFile& strings);
 // Original dialog 258. 0x006AE6E0 and 0x004E37D0 map player slots.
 struct SkirmishControls {
-    static constexpr std::uint32_t choose_map=1450, start=1559, credits=1297;
+    static constexpr std::uint32_t choose_map=1450, start=1559, credits=1297, speed=1321, units=1292;
     static constexpr std::uint32_t player_country=1697, player_color=1698;
     static constexpr std::array<std::uint32_t,7> opponents{1291,1294,1302,1306,1307,1308,1309};
     static constexpr std::array<std::uint32_t,7> countries{1296,1299,1310,1300,1311,1312,1313};
@@ -185,8 +186,8 @@ private:
     std::optional<Rect> map_list_bounds(std::uint32_t id) const;
     std::vector<std::size_t> visible_map_indices() const;
     std::vector<Button> checks() const;
-    std::optional<Rect> credit_bounds() const;
-    void move_credit(int x);
+    std::optional<Rect> slider_bounds(std::uint32_t id) const;
+    void move_slider(std::uint32_t id, int x);
     gfx::RgbaImage background_, map_background_, normal_, hover_, pressed_;
     gfx::RgbaImage popup_, popup_normal_, popup_hover_, popup_pressed_;
     gfx::RgbaImage check_on_, check_off_, arrow_normal_, arrow_pressed_, arrow_up_;
@@ -200,7 +201,7 @@ private:
     std::size_t mode_scroll_=0, map_scroll_=0;
     std::optional<std::uint32_t> held_map_list_;
     std::optional<std::size_t> held_map_row_;
-    bool credit_changed_ = false;
+    bool slider_changed_ = false;
     bool prototype_start_ = false;
     SkirmishSetup setup_;
     std::vector<SkirmishCountry> countries_;

@@ -283,6 +283,48 @@ int main(int argc,char** argv) {
     menu.pointer_move(credit_x+credit_width+100,credit_y+10);
     assert(menu.pointer_up(credit_x+credit_width+100,credit_y+10)==ui::Action::SetupChanged);
     assert(menu.setup().credits==menu.setup().max_credits);
+    for (const auto id : {ui::SkirmishControls::speed,ui::SkirmishControls::units}) {
+        const auto c=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
+                                 [id](const auto& c){return c.id==id;});
+        assert(c!=base_skirmish.controls.end());
+        const int x=(c->bounds.x*3+1)/2, y=(c->bounds.y*163+50)/100;
+        const int width=(c->bounds.width*3+1)/2+1;
+        menu.pointer_down(x+6,y+10);
+        menu.pointer_move(x-100,y);
+        menu.pointer_up(x-100,y);
+        assert(id==ui::SkirmishControls::speed ? menu.setup().game_speed==6 :
+                                               menu.setup().unit_count==menu.setup().min_units);
+        menu.enable_prototype_start(true);
+        const auto low=menu.setup();
+        menu.pointer_down(start_x,start_y);
+        assert(menu.pointer_up(start_x,start_y)==ui::Action::StartMatch);
+        assert(menu.setup().game_speed==low.game_speed && menu.setup().unit_count==low.unit_count);
+        menu.enable_prototype_start(false);
+        const auto left_image=menu.render();
+        menu.pointer_down(x+6,y+10);
+        menu.pointer_move(x+width+100,y+100);
+        assert(menu.pointer_up(x+width+100,y+100)==ui::Action::SetupChanged);
+        assert(id==ui::SkirmishControls::speed ? menu.setup().game_speed==0 :
+                                               menu.setup().unit_count==menu.setup().max_units);
+        const auto right_image=menu.render();
+        assert(right_image.pixels!=left_image.pixels);
+        const auto cap=ui::decode_pcx(*base.read_file("trofl.pcx"));
+        check_blit(right_image,cap,x,y-1);
+        // A click reaches the right end without a drag.
+        menu.pointer_down(x+6,y+10);
+        menu.pointer_up(x+6,y+10);
+        menu.pointer_down(x+width-51,y+10);
+        menu.pointer_up(x+width-51,y+10);
+        assert(id==ui::SkirmishControls::speed ? menu.setup().game_speed==0 :
+                                               menu.setup().unit_count==menu.setup().max_units);
+        menu.enable_prototype_start(true);
+        const auto chosen=menu.setup();
+        menu.pointer_down(start_x,start_y);
+        assert(menu.pointer_up(start_x,start_y)==ui::Action::StartMatch);
+        assert(menu.setup().game_speed==chosen.game_speed && menu.setup().unit_count==chosen.unit_count);
+        assert(menu.setup().credits==chosen.credits && menu.setup().map_filename==chosen.map_filename);
+        menu.enable_prototype_start(false);
+    }
     const auto previous_short_game=menu.setup().short_game; assert(previous_short_game);
     auto short_control=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
                                     [](const auto& c){return c.id==1358;});
@@ -350,6 +392,17 @@ int main(int argc,char** argv) {
     if (menu.setup().game_mode!=1) assert(menu.select_mode(1)==ui::Action::SetupChanged);
     assert(menu.select_map(0)==ui::Action::SetupChanged);
     assert(menu.setup().map_filename=="MP02T2.MAP" && menu.setup().scenario_index==saved_scenario);
+    const auto map_name_control=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
+                                            [](const auto& c){return c.id==1448;});
+    assert(map_name_control!=base_skirmish.controls.end());
+    const int name_width=(map_name_control->bounds.width*3+1)/2;
+    const int name_height=(map_name_control->bounds.height*163+50)/100;
+    gfx::RgbaImage expected_name{static_cast<std::uint16_t>(name_width),static_cast<std::uint16_t>(name_height),
+                                 std::vector<std::uint8_t>(name_width*name_height*4)};
+    ui::GameFont::parse(*base_font_bytes).draw_text(expected_name,base_maps[0].name,0,0,{255,255,0,255});
+    check_blit(menu.render(),expected_name,(map_name_control->bounds.x*3+1)/2,
+               (map_name_control->bounds.y*163+50)/100);
+
     assert(menu.select_map(0)==ui::Action::None);
     assert(menu.select_map(base_maps.size())==ui::Action::None);
     auto local=std::find_if(base_maps.begin(),base_maps.end(),[](const auto& map){
