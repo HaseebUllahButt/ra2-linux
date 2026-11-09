@@ -970,7 +970,13 @@ Outcome place(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::
 
 Outcome tick(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint64_t frame) {
     if (!runtime_ready(snapshot)) return fail(Status::NeedsInput,"setup is not complete");
-    auto s=snapshot; auto f=factories;
+    // This tick writes House records only. Edit the Snapshot in place and
+    // restore its Houses on failure instead of copying every Cell.
+    struct Restore {
+        w::Snapshot& world; std::vector<w::House> houses; bool keep=false;
+        ~Restore() { if (!keep) world.houses=std::move(houses); }
+    } restore{snapshot,snapshot.houses};
+    auto& s=snapshot; auto f=factories;
     // House::AI 004E41B4 -> Recalc_Power 004F2CC0 for skirmish sessions.
     for (auto& [id,dirty]:f.power_dirty) {
         if (!dirty) continue;
@@ -1004,7 +1010,7 @@ Outcome tick(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::u
         *h->cash-=installment; factory.balance-=installment;
         if (factory.progress==54) factory.suspended=true;
     }
-    snapshot=std::move(s); factories=std::move(f);
+    restore.keep=true; factories=std::move(f);
     return Outcome{Status::Done,{},{},{}};
 }
 }
