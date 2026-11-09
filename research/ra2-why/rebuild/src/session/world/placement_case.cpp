@@ -34,7 +34,7 @@ int main(int argc,char** argv) {
         cell.terrain->cell={static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(center_y)};
         cell.terrain->height_level=level;cell.terrain->ramp_index=0;cell.terrain->bridge=false;
         cell.terrain->overlay_type_index=-1;cell.terrain->land_type=land;cell.terrain->floor_world_height=level*104;
-        cell.unit_land_speed=speed;cell.land_track=speed;cell.usable=true;
+        cell.unit_land_speed=speed;cell.land_wheel=speed;cell.usable=true;
         cell.ground_occupancy_124=0;cell.cell_flag_100=false;
         cell.coarse_category=static_cast<std::uint8_t>(category);
         if (flag200>=0) cell.cell_flag_200=flag200!=0;

@@ -65,7 +65,7 @@ struct CellState {
     std::optional<weapons::CellContentHeads> heads;
     std::optional<sim::TerrainCell> terrain;
     std::optional<sim::CoarseOverlayState> overlay;
-    std::optional<float> land_track;
+    std::optional<float> land_wheel;
     std::optional<bool> usable;
     std::optional<std::uint8_t> coarse_category, neighbor_count;
     std::optional<std::uint8_t> cell_field_11d, coarse_cache_height, hierarchy_cache_height;
@@ -133,11 +133,11 @@ public:
         std::optional<std::int32_t> tube_vector_count, std::optional<std::int32_t> session_field_838);
     PlacementResult place_base_unit(std::uint32_t unit_id, StartPoint cell,
         std::uint8_t facing, const BaseUnitProfile& profile);
-    // Track values are indexed by the final LandType. Absent cells and tracks
+    // Wheel values are indexed by the final LandType. Absent cells and values
     // remain unknown. Only a complete result changes the staged snapshot.
     sim::CellSetupResult complete_pending_cell_setup(const sim::CellSetupStatic& guard,
         const sim::TheaterInputs& theater, std::uint8_t cliff,
-        const std::map<std::int32_t,float>& land_tracks);
+        const std::map<std::int32_t,float>& land_wheels);
     const Snapshot& snapshot() const noexcept { return snapshot_; }
 private:
     std::optional<std::uint32_t> next_id() const;

@@ -43,7 +43,7 @@ int main() {
     assert(validate(unknown_next) && incomplete_chain && !incomplete_chain->occupants);
     auto resolved=s;
     auto& cell=resolved.cells.at(69*512+55);
-    cell.usable=true; cell.land_track=1.0f; cell.terrain=sim::TerrainCell{};
+    cell.usable=true; cell.land_wheel=1.0f; cell.terrain=sim::TerrainCell{};
     cell.terrain->cell={55,69}; cell.terrain->overlay_type_index=-1; cell.terrain->land_type=0;
     const auto ready=coarse_inputs(resolved,69*512+55); assert(ready);
     assert(sim::original_coarse_category(*ready).category==0);
@@ -121,7 +121,7 @@ int main() {
         cell.terrain->height_level=0; cell.terrain->ramp_index=0;
         cell.terrain->bridge=false; cell.terrain->overlay_type_index=-1;
         cell.terrain->land_type=land; cell.terrain->floor_world_height=0;
-        cell.unit_land_speed=speed; cell.land_track=speed;
+        cell.unit_land_speed=speed; cell.land_wheel=speed;
         cell.ground_occupancy_124=0; cell.cell_flag_100=false;
         cell.usable=true; cell.coarse_category=static_cast<std::uint8_t>(category);
         cell.cell_flag_200=false; cell.cell_flag_40000=false;

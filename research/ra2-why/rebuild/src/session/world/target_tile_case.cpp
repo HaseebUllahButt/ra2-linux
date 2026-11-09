@@ -118,7 +118,7 @@ int main(int argc,char** argv) {
         target_cell.terrain->bridge=false; target_cell.cell_flag_100=false;
         target_cell.ground_occupancy_124=0; target_cell.cell_field_54=-1;
         target_cell.cell_field_58=-1; target_cell.tube_field_116=-1;
-        target_cell.unit_land_speed=1.0f; target_cell.land_track=1.0f;
+        target_cell.unit_land_speed=1.0f; target_cell.land_wheel=1.0f;
         target_cell.usable=true; target_cell.coarse_category=0;
         Stage prepared(std::move(supplied));
         assert(prepared.place_base_unit(*unit,{135,80},32,profile)==PlacementResult::Placed);

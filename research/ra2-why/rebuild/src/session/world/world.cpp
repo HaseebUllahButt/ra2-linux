@@ -255,7 +255,7 @@ PlacementResult Stage::place_base_unit(std::uint32_t unit_id, StartPoint point,
 }
 sim::CellSetupResult Stage::complete_pending_cell_setup(const sim::CellSetupStatic& guard,
     const sim::TheaterInputs& theater, std::uint8_t cliff,
-    const std::map<std::int32_t,float>& land_tracks) {
+    const std::map<std::int32_t,float>& land_wheels) {
     sim::CellSetupResult unresolved;
     unresolved.detail="pending allocated Cell setup is unresolved";
     if (!snapshot_.pending_cell_setup || !snapshot_.pending_setup_cell) return unresolved;
@@ -286,10 +286,10 @@ sim::CellSetupResult Stage::complete_pending_cell_setup(const sim::CellSetupStat
         if (!profile) return {};
         profile->overlay_index=terrain.overlay_type_index;
         profile->land_type=terrain.land_type;
-        profile->land_track.reset();
+        profile->land_wheel.reset();
         if (terrain.land_type) {
-            const auto track=land_tracks.find(*terrain.land_type);
-            if (track!=land_tracks.end()) profile->land_track=track->second;
+            const auto wheel=land_wheels.find(*terrain.land_type);
+            if (wheel!=land_wheels.end()) profile->land_wheel=wheel->second;
         }
         return profile;
     };
@@ -300,7 +300,7 @@ sim::CellSetupResult Stage::complete_pending_cell_setup(const sim::CellSetupStat
         return unresolved;
     }
     auto& cell=candidate.cells.at(key);
-    // Unit locomotor speed and coarse-category Track are separate lookups.
+    // Unit locomotor speed and coarse-category Wheel are separate lookups.
     // A changed or unknown LandType invalidates the former, not the latter.
     if (!cell.terrain->land_type || !result.state.terrain.land_type ||
         *cell.terrain->land_type!=*result.state.terrain.land_type)
@@ -312,10 +312,10 @@ sim::CellSetupResult Stage::complete_pending_cell_setup(const sim::CellSetupStat
     cell.coarse_category_writes=result.category->writes;
     cell.coarse_cache_height=*result.cache_height;
     cell.hierarchy_cache_height=*result.cache_height;
-    cell.land_track.reset();
+    cell.land_wheel.reset();
     if (cell.terrain->land_type) {
-        const auto track=land_tracks.find(*cell.terrain->land_type);
-        if (track!=land_tracks.end()) cell.land_track=track->second;
+        const auto wheel=land_wheels.find(*cell.terrain->land_type);
+        if (wheel!=land_wheels.end()) cell.land_wheel=wheel->second;
     }
     if (!validate(candidate)) {
         unresolved.detail="Cell setup produced an invalid snapshot";
@@ -392,7 +392,7 @@ std::optional<sim::CoarseCategoryInputs> coarse_inputs(const Snapshot& snapshot,
     const auto& state=found->second;
     input.usable=state.usable;
     input.overlay=state.overlay;
-    input.land_track=state.land_track;
+    input.land_wheel=state.land_wheel;
     input.session_field_1258=snapshot.session_field_838;
     if (state.terrain) {
         input.overlay_index=state.terrain->overlay_type_index;

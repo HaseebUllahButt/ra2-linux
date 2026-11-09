@@ -53,7 +53,7 @@ int main(int argc,char** argv) {
         assert(*actual.coarse_cache_height==*result.cache_height &&
                *actual.hierarchy_cache_height==*result.cache_height);
         assert(actual.terrain->bridge==fixture.state.terrain.bridge);
-        if (actual.terrain->land_type) assert(actual.land_track==tracks.at(*actual.terrain->land_type));
+        if (actual.terrain->land_type) assert(actual.land_wheel==tracks.at(*actual.terrain->land_type));
         assert(complete.random.table==snapshot.random.table && complete.random.first==snapshot.random.first &&
                complete.random.second==snapshot.random.second && complete.entities.size()==snapshot.entities.size());
         sim::CellSetupResult committed;
