@@ -7,8 +7,10 @@ using namespace ra2::sim;
 using namespace ra2::sim::test;
 void require(bool value,const char* text) { if (!value) throw std::runtime_error(text); }
 int main(int argc,char** argv) try {
-    if (argc>2 || (argc==2 && std::string(argv[1])!="--vectors")) throw std::runtime_error("expected optional --vectors");
-    const bool vectors=argc==2;
+    if (argc<2 || argc>3 || (argc==3 && std::string(argv[2])!="--vectors"))
+        throw std::runtime_error("usage: test_cell_fit RULES_INI [--vectors]");
+    const bool vectors=argc==3;
+    const auto rules=ra2::rules::IniFile::from_file(argv[1]);
     for (const auto edition:{DriveEdition::BaseRa2,DriveEdition::YurisRevenge}) {
         std::uint32_t total=2166136261u;
         for (unsigned seed=0;seed<4096;++seed) {
@@ -55,7 +57,6 @@ int main(int argc,char** argv) try {
     c=f.cell;c.bridge=true;c.ground_occupancy.reset();c.level.reset();
     r=original_cell_fit(q,c,cb);require(r.status==CellFitStatus::Complete && r.allowed==true,"bridge layer read ground occupancy or unused height");++checks;
     c.bridge_occupancy.reset();fail(q,c,cb,CellFitStatus::NeedsInput);
-    const auto rules=ra2::rules::IniFile::from_file("/path/to/user/ra2/analysis/extracted/config/rulesmd.ini");
     require(rules.read_string("Tiberium","Track")=="70%" && rules.read_string("Tiberium","Wheel")=="50%","real distinct Tiberium columns changed");++checks;
     CellFitFixture real(16,DriveEdition::YurisRevenge);
     require(real.table[46]==0x3f333333 && real.table[47]==0x3f000000 &&
