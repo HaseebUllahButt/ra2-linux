@@ -578,7 +578,7 @@ public:
         case 9: {
             const auto* e=find(world_,human_target_);require(e,"Human input: target vanished");
             const auto at=anchor(*e);require(at.has_value(),"Human input: target has no anchor");
-            require(state.frame_counter-human_wait_frame_<600,"Human input: camera did not reach enemy");
+            require(state.frame_counter-human_wait_frame_<1200,"Human input: camera did not reach enemy");
             if(at->x<40||at->x>760||at->y<40||at->y>720) {test_pan_to(*at);break;}
             test_pan_to({400,380});
             test_click(at->x,at->y);human_stage_=10;break;

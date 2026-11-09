@@ -13,7 +13,7 @@ public:
         const auto elapsed=headless?std::max<std::uint64_t>(16,now-last_):
             std::min<std::uint64_t>(100,now-last_);
         last_=now;
-        remainder_x_+=elapsed*400;remainder_y_+=elapsed*260;
+        remainder_x_+=elapsed*200;remainder_y_+=elapsed*130;
         const int x=std::clamp(horizontal,-1,1)*int(remainder_x_/1000);
         const int y=std::clamp(vertical,-1,1)*int(remainder_y_/1000);
         remainder_x_%=1000;remainder_y_%=1000;

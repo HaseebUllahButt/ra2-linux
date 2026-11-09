@@ -382,10 +382,13 @@ int main() try {
             const auto delta=scroll.step(now,1,1);x+=delta.first;y+=delta.second;
         }
         const unsigned duration=1000/interval*interval;
-        require(x==int(duration*400/1000) && y==int(duration*260/1000),"Camera speed depends on frame rate");
+        require(x==int(duration*200/1000) && y==int(duration*130/1000),"Camera speed depends on frame rate");
     }
+    CameraScroll held;int travel=0;
+    for(unsigned now=40;now<=800;now+=40)travel+=held.step(now,1,0).first;
+    require(travel==160,"An 800 ms arrow hold scrolls too far");
     CameraScroll scroll;
-    require(scroll.step(1000,2,-2)==std::make_pair(40,-26),"Camera pause cap or combined input is wrong");
+    require(scroll.step(1000,2,-2)==std::make_pair(20,-13),"Camera pause cap or combined input is wrong");
     scroll.reset(1000);
     require(scroll.step(1000,1,1)==std::make_pair(0,0),"Camera moves without elapsed time");
     selection();
