@@ -89,8 +89,10 @@ if [ "${2:-}" = "--original" ]; then
     ${PYTHON:-python3} original_unit_reader_205_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game" --connected-real-tokens
     ${PYTHON:-python3} original_unit_reader_205_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game" --connected-real-format
     ${PYTHON:-python3} original_unit_reader_205_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game" --connected-color-override
+    ${PYTHON:-python3} original_unit_reader_205_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game" --connected-real-scanner
     ${PYTHON:-python3} original_unit_dispatch_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game"
     ${PYTHON:-python3} original_mission_dispatch_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game"
+    ${PYTHON:-python3} original_mission_dispatch_check.py "$game/game.exe" "$build/unit_flags_case" "$build/real_map_case" "$game" --scanner
     ${PYTHON:-python3} original_placement_type_check.py "$game/game.exe" "$build/real_map_case" "$game" "$build/unit_flags_case"
     ${PYTHON:-python3} original_sight_rule_check.py "$game/game.exe" "$build/real_map_case" "$game"
     ${PYTHON:-python3} "$shared/sim/original_cell_setup_check.py" "$game/game.exe" --base --vectors > "$build/original-setup-vectors"

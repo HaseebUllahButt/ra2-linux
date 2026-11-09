@@ -13,9 +13,10 @@ import sys
 from unicorn import UC_HOOK_CODE
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EIP,UC_X86_REG_ESP
 
-if len(sys.argv)!=5:
-    raise SystemExit('usage: original_unit_dispatch_check.py game.exe unit_flags_case real_map_case game_dir')
-sys.argv=[sys.argv[0],*sys.argv[1:],'--connected-real-format']
+if len(sys.argv) not in (5,6) or (len(sys.argv)==6 and sys.argv[5]!='--scanner'):
+    raise SystemExit('usage: original_unit_dispatch_check.py game.exe unit_flags_case real_map_case game_dir [--scanner]')
+real_scanner=len(sys.argv)==6
+sys.argv=[sys.argv[0],*sys.argv[1:5],'--connected-real-scanner' if real_scanner else '--connected-real-format']
 loaded=runpy.run_path(os.path.join(os.path.dirname(__file__),'original_unit_reader_205_check.py'))
 g=loaded['trace_code'].__globals__
 m=g['m']
@@ -63,9 +64,9 @@ g['section_pending'].clear()
 for name in ('token_sources','token_returns','token_calls','token_cursor_checks',
              'token_checks','thread_requests','vhpscan_tokens','copy_results',
              'format_entries','format_results','color_entries','color_results',
-             'color_scan_results','armor_returns'):
+             'color_scan_results','armor_returns','scan_results'):
     g[name].clear()
-for name in ('token_pending','copy_pending','format_pending','color_pending'):
+for name in ('token_pending','copy_pending','format_pending','color_pending','scan_pending'):
     g[name].clear()
 g['vhpscan_in_reader'][0]=False
 m.cpu.reg_write(UC_X86_REG_ECX,0); m.cpu.reg_write(UC_X86_REG_ESP,0x103f000)
@@ -80,6 +81,7 @@ assert g['section_entries']==['AMCV'] and g['section_returns']==[g['section']] a
 assert len(g['token_checks'])==len(g['token_calls'])==29 and not g['token_pending']
 assert len(g['copy_results'])==96 and not g['copy_pending']
 assert len(g['format_results'])==8 and not g['format_pending']
+if real_scanner: assert len(g['scan_results'])==5 and not g['scan_pending']
 assert g['color_results']==[b'\0\0\0',b'\x80\x80\x80'] and not g['color_pending']
 assert g['armor_returns']==[5]
 assert not g['writes'] and m.cpu.mem_read(m.TYPE+0x205,1)==b'\x01'
