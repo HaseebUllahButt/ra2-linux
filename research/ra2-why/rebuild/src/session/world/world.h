@@ -86,6 +86,8 @@ struct Entity {
     std::optional<double> firepower_multiplier; // Base Techno +128.
     std::optional<double> veterancy; // Base Techno +118.
     std::optional<bool> veteran_firepower, elite_firepower, veteran_rof, elite_rof;
+    std::optional<std::uint16_t> turret_facing_raw;
+    std::optional<std::int32_t> burst_index;
 };
 struct CellState {
     std::optional<bool> allocated; // The original allocated Cell, not the fallback receiver.
