@@ -28,7 +28,9 @@ public:
     // world and all routes together. game_frame is supplied by the game loop.
     PrototypeMoveResult tick(session::world::Snapshot&,std::uint32_t game_frame);
 private:
-    struct Move { ra2map::Cell goal;int speed=0;std::vector<ra2map::Cell> path; };
+    // waited counts frames spent behind a moving Unit. stalled is true when
+    // the Unit did not move in its last tick.
+    struct Move { ra2map::Cell goal;int speed=0;std::vector<ra2map::Cell> path;int waited=0;bool stalled=false; };
     std::map<std::uint32_t,Move> moves_;
     std::optional<std::uint32_t> last_frame_;
 };
