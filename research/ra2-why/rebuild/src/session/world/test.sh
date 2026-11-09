@@ -36,4 +36,5 @@ if [ "${2:-}" = "--original" ]; then
     ${PYTHON:-python3} original_bridge_check.py "$game/game.exe" "$build/bridge_footprint_case"
     ${PYTHON:-python3} original_map_order_check.py "$game/game.exe"
     ${PYTHON:-python3} original_reset_order_check.py "$game/game.exe"
+    ${PYTHON:-python3} original_resize_check.py "$game/game.exe"
 fi
