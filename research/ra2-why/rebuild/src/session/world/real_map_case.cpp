@@ -5,7 +5,9 @@
 #include <cassert>
 #include <cstdlib>
 #include <iostream>
+#include <iomanip>
 #include <map>
+#include <sstream>
 
 // Check data used by the adapted x86 fixture. Runtime cell state is supplied
 // separately by the fixture; this does not reconstruct the full Battle world.
@@ -48,7 +50,25 @@ int main(int argc, char** argv) {
     assert(waypoint!=parsed.waypoints().end() && waypoint->cell.x==135 && waypoint->cell.y==80);
     const auto cells=original_test_cells(argv[1],"MP02T2.MAP",true);
     const auto cell=std::find_if(cells.begin(),cells.end(),[](const auto& item){return item.x==135 && item.y==80;});
-    assert(cell!=cells.end() && cell->raw==13 && cell->ramp==0 && cell->height==4 && cell->overlay==-1);
+    assert(cell!=cells.end() && cell->tile==131 && cell->resolved==131 && cell->raw==13 &&
+           cell->ramp==0 && cell->height==4 && cell->overlay==-1);
+    const auto catalog=original_test_catalog(argv[1],"MP02T2.MAP",true);
+    const auto range=std::find_if(catalog.ranges.begin(),catalog.ranges.end(),[&](const auto& item) {
+        return cell->resolved>=item.first && cell->resolved-item.first<item.count;
+    });
+    assert(range!=catalog.ranges.end());
+    std::ostringstream section,key;
+    section<<"TileSet"<<std::setw(4)<<std::setfill('0')<<std::distance(catalog.ranges.begin(),range);
+    key<<"Tile"<<std::setw(2)<<std::setfill('0')<<(cell->resolved-range->first+1)<<"Anim";
+    ra2::rules::IniFile theater; theater.parse(catalog.settings);
+    const auto set_name=theater.read_string(section.str(),"SetName");
+    assert(section.str()=="TileSet0013" && set_name=="LAT Grass, thick" && key.str()=="Tile01Anim");
+    const auto animation=theater.read_string(set_name,key.str(),"<none>");
+    const auto shadow=theater.read_string(section.str(),"ShadowCaster","<default>");
+    assert(animation=="<none>" && shadow=="<default>");
+    std::cout<<"MP02T2 waypoint 0 tile "<<cell->tile<<", resolved "<<cell->resolved
+             <<", set "<<section.str()<<" ("<<set_name<<"), "<<key.str()<<' '<<animation
+             <<", ShadowCaster "<<shadow<<'\n';
     assert(parsed.terrain().size()==206 && parsed.structures().size()==25 && parsed.units().size()==5);
     const auto& overlay=parsed.packed_terrain().overlay;
     if (!overlay.empty()) {
