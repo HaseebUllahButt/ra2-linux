@@ -31,7 +31,7 @@ public:
     SceneFrame render(const render::Bitmap& terrain, const sim::Snapshot& state,
                       render::Rectangle viewport);
     // Resolve initial art and fixed floor lookups before the first frame.
-    void prepare(const sim::Snapshot& state);
+    void prepare(const sim::Snapshot& state,const std::vector<std::string>& products={});
     actors::ScreenPoint map_anchor(const sim::Entity& entity) const;
     // The floor Cell nearest to a map pixel, by |dx|+2|dy| between the pixel
     // and the Cell's centre anchor, below 46. Ties pick the lowest packed key

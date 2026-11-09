@@ -37,6 +37,11 @@ namespace proto=p::prototype;
 using sim::skirmish::Order;
 using sim::skirmish::OrderKind;
 
+const std::vector<std::string>& build_palette() {
+    static const std::vector<std::string> palette={"GAPOWR","GAPILE","GAREFN","GAWEAP","GARADR","GAPILL",
+        "NAPOWR","NAHAND","NAREFN","NAWEAP","NARADR","NALASR","E1","E2","MTNK","HTNK"};
+    return palette;
+}
 bool live(const w::Entity& e) {
     return e.lifetime==w::Lifetime::Placed && e.resolved_hp.value_or(0)>0 && e.cell && e.position;
 }
@@ -765,8 +770,7 @@ public:
         const auto available=sim::tech::buildable_types(rules_,world_,player_);
         // TODO-ORIGINAL: A small build palette for the first base match.
         // The checked production adapter validates prerequisites and factories.
-        const std::vector<std::string> palette={"GAPOWR","GAPILE","GAREFN","GAWEAP","GARADR","GAPILL",
-            "NAPOWR","NAHAND","NAREFN","NAWEAP","NARADR","NALASR","E1","E2","MTNK","HTNK"};
+        const auto& palette=build_palette();
         for(const auto& type:palette) {
             const auto* facts=catalog_.find(type);if(!facts)continue;
             const auto gate=std::find_if(eligible.begin(),eligible.end(),[&](const auto& item){return item.first==type;});
@@ -984,7 +988,7 @@ int run_prototype_battle(const BattleOptions& args) {
     const auto rules=rules_job.get();
     Scene scene(files,assets.art_ini(),rules,geometry,cells,assets.map_ini().read_string("Map","Theater"),
         assets.map().terrain(),true);
-    scene.prepare(battle_scene_state(battle->snapshot,0));
+    scene.prepare(battle_scene_state(battle->snapshot,0),build_palette());
     Window window("Red Alert 2 native prototype: skirmish",1024,768,!args.headless);
     loop::SteadyClock real_clock;loop::SimulatedClock fast_clock;
     loop::Clock& clock=args.headless?static_cast<loop::Clock&>(fast_clock):static_cast<loop::Clock&>(real_clock);

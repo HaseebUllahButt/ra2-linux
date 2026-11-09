@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
             if(!expansion) {
                 app::Scene prepared(files,art,app::overlay_rules(rules,map),geometry,simulation.terrain(),
                     "TEMPERATE",map_objects.terrain());
-                prepared.prepare(simulation.snapshot());
+                prepared.prepare(simulation.snapshot(),{"GACNST","GAPOWR","GAPILE","GAREFN","E1","MTNK"});
                 const auto warmed=prepared.render(battlefield,simulation.snapshot(),
                     {0,0,battlefield.width,battlefield.height});
                 require(warmed.image.rgba==frame.image.rgba && warmed.drawn==frame.drawn && warmed.gaps==frame.gaps,

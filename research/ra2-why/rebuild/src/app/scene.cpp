@@ -221,24 +221,30 @@ std::optional<ra2map::Cell> Scene::pick_cell(std::int64_t map_x, std::int64_t ma
 
 VehicleArt& Scene::vehicle(const std::string& type) {
     auto found=vehicles_.find(type);
-    if(found==vehicles_.end())
+    if(found==vehicles_.end()) {
+        loop::profile::asset_event("vehicle",type.c_str());
         found=vehicles_.emplace(type,VehicleArt::load(files_,art_,rules_,type,prototype_)).first;
+    }
     return found->second;
 }
 Scene::Asset& Scene::actor(actors::Kind kind,const std::string& type) {
     const auto key=std::make_pair(kind,type);
     auto found=assets_.find(key);
-    if(found==assets_.end())
+    if(found==assets_.end()) {
+        loop::profile::asset_event("actor",type.c_str(),int(kind));
         found=assets_.emplace(key,Asset{actors::ActorArt::load(files_,art_,rules_,type,kind,theater_),{}}).first;
+    }
     return found->second;
 }
 const gfx::RgbaImage& Scene::image(Asset& asset,std::size_t frame,bool terrain) {
     auto found=asset.frames.find(frame);
-    if(found==asset.frames.end())
+    if(found==asset.frames.end()) {
+        loop::profile::asset_event("shp",asset.art.filename().c_str(),int(frame));
         found=asset.frames.emplace(frame,asset.art.draw_frame(frame,terrain?terrain_palette_:palette_)).first;
+    }
     return found->second;
 }
-void Scene::prepare(const sim::Snapshot& state) {
+void Scene::prepare(const sim::Snapshot& state,const std::vector<std::string>& products) {
     if(!pick_ready_)prepare_pick();
     if(!terrain_ready_)prepare_terrain(terrain_gaps_);
     for(const auto& entity:state.entities)if(!entity.dead)try {
@@ -256,10 +262,21 @@ void Scene::prepare(const sim::Snapshot& state) {
             image(asset,frame);
         }
     } catch(const std::exception&) { /* Render reports unsupported art at its original point. */ }
-    // Refineries release a free miner. Resolve its first pose before that event.
-    for(const auto& refinery:rules_.read_list("AI","BuildRefinery"))try {
-        const auto free_unit=rules_.read_string(refinery,"FreeUnit");
-        if(!free_unit.empty())vehicle(free_unit).draw(0,0);
+    const auto registered=[&](const char* list,const std::string& type) {
+        const auto* section=rules_.find_section(list);
+        return section&&std::any_of(section->entries.begin(),section->entries.end(),
+            [&](const auto& entry){return entry.value==type;});
+    };
+    for(const auto& type:products)try {
+        if(registered("BuildingTypes",type)) {
+            image(actor(actors::Kind::Building,type),0);
+            const auto free_unit=rules_.read_string(type,"FreeUnit");
+            if(!free_unit.empty())vehicle(free_unit).draw(0,0);
+        } else if(registered("InfantryTypes",type)) {
+            auto& asset=actor(actors::Kind::Infantry,type);
+            for(unsigned facing=0;facing<256;facing+=32)
+                image(asset,asset.art.frame_for_map("Ready",std::uint8_t(facing),0));
+        } else if(registered("VehicleTypes",type))vehicle(type).draw(0,0);
     } catch(const std::exception&) { /* Keep the normal render fallback. */ }
 }
 
