@@ -59,7 +59,9 @@ struct MapLogic {
     std::map<std::int32_t,ra2map::Cell> waypoints;
     std::map<std::uint32_t,std::string> cell_tags; // key is y*1000+x as in the file
     std::vector<std::string> house_names;          // [Houses] in map order
-    static MapLogic parse(const rules::IniFile& map);
+    // `ai` is the global AI.INI. Ids a map does not define (often ending -G)
+    // are read from it, as the original does.
+    static MapLogic parse(const rules::IniFile& map, const rules::IniFile* ai=nullptr);
     const TriggerDef* trigger(const std::string& id) const;
     const TeamTypeDef* team_type(const std::string& id) const;
     const TaskForceDef* task_force(const std::string& id) const;
@@ -106,7 +108,7 @@ class PrototypeTriggers {
 public:
     // difficulty: 0 easy, 1 normal, 2 hard. Triggers not set for it are off.
     PrototypeTriggers(const rules::IniFile& map, const rules::IniFile& rules,
-                      std::int32_t difficulty=1);
+                      std::int32_t difficulty=1, const rules::IniFile* ai=nullptr);
 
     // One call per game frame. Repeated frames do nothing.
     TickResult tick(const session::world::Snapshot&, std::int32_t frame);

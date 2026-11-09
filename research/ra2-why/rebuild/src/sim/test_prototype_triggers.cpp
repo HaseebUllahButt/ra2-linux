@@ -2,6 +2,7 @@
 #include "fs/mix_bootstrap.h"
 #include <algorithm>
 #include <iostream>
+#include <set>
 #include <stdexcept>
 
 namespace {
@@ -161,13 +162,22 @@ int main(int argc, char** argv) try {
         files.mount_overlays();
         // Movie archives may be missing; maps do not need them.
         try { files.mount_resources(); } catch (const std::exception&) {}
-        std::vector<std::shared_ptr<ra2::fs::MixArchive>> all = files.mixes();
-        for (auto& a : files.maps()) all.push_back(a);
+        // Scan each archive once: maps() overlaps mixes().
+        std::vector<std::shared_ptr<ra2::fs::MixArchive>> all;
+        for (auto& a : files.mixes()) all.push_back(a);
+        for (auto& a : files.maps())
+            if (std::find(all.begin(), all.end(), a) == all.end()) all.push_back(a);
+        IniFile ai;
+        if (auto bytes = files.read_file("AI.INI"))
+            ai.parse(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()));
+        require(ai.section_count() > 0, "AI.INI was not found");
+        std::set<std::uint32_t> seen_ids;
         std::map<std::int32_t,int> events, actions;
-        int maps = 0, with_triggers = 0, triggers = 0, bad_refs = 0;
+        int open_global = 0, maps = 0, with_triggers = 0, triggers = 0, bad_refs = 0;
         for (auto& a : all) for (auto& entry : a->entries()) {
             if (entry.size < 200 || entry.size > 3000000) continue;
             std::vector<std::uint8_t> bytes;
+            if (!seen_ids.insert(entry.id).second) continue;   // same map in two archives
             try { bytes = a->read(entry); } catch (...) { continue; }
             std::string text(bytes.begin(), bytes.end());
             if (text.find("[Basic]") == std::string::npos || text.find("[Map]") == std::string::npos) continue;
@@ -175,23 +185,27 @@ int main(int argc, char** argv) try {
             // Comment text in AI files can mention both map section names.
             if (!ini.find_section("Basic") || !ini.find_section("Map")) continue;
             ++maps;
-            auto logic = tr::MapLogic::parse(ini);
+            auto logic = tr::MapLogic::parse(ini, &ai);
             if (logic.triggers.empty()) continue;
             ++with_triggers; triggers += (int)logic.triggers.size();
             for (auto& [k, v] : tr::count_event_types(logic)) events[k] += v;
             for (auto& [k, v] : tr::count_action_types(logic)) actions[k] += v;
-            for (auto& tag : logic.tags) if (!logic.trigger(tag.trigger)) {
-                ++bad_refs;
-                std::cerr << a->name() << " entry=" << entry.id << " " << ini.read_string("Basic", "Name") << ": tag " << tag.id
-                          << " has missing trigger " << tag.trigger << '\n';
-            }
-            for (auto& tt : logic.team_types) if (!logic.script(tt.script) || !logic.task_force(tt.task_force)) {
-                ++bad_refs;
-                std::cerr << a->name() << " entry=" << entry.id << " " << ini.read_string("Basic", "Name") << ": team " << tt.id
-                          << " script=" << tt.script << " taskforce=" << tt.task_force << '\n';
+            for (auto& tag : logic.tags) if (!logic.trigger(tag.trigger)) ++bad_refs;
+            // An empty Script is allowed (the team only holds units). Anything else must resolve.
+            // Two shipped base-map teams refer to absent global definitions.
+            // The runtime rejects those teams when a caller tries to start them.
+            auto known_missing = [](const std::string& id) { return id == "0AC98490-G" || id == "07AA6900-G"; };
+            for (auto& tt : logic.team_types) {
+                bool script_ok = tt.script.empty() || logic.script(tt.script) || known_missing(tt.script);
+                bool force_ok = logic.task_force(tt.task_force) || known_missing(tt.task_force);
+                if (!script_ok || !force_ok) {
+                    ++bad_refs;
+                    std::cerr << "Unresolved team " << tt.id << " script '" << tt.script << "' taskforce '" << tt.task_force << "'\n";
+                } else if (!logic.script(tt.script) && !tt.script.empty()) ++open_global;
+                else if (!logic.task_force(tt.task_force)) ++open_global;
             }
             // Every parsed trigger must run a few frames without trouble.
-            tr::PrototypeTriggers run(ini, rules, 1);
+            tr::PrototypeTriggers run(ini, rules, 1, &ai);
             sw::Snapshot w;
             w.houses = {house(1, "Player House"), house(2, "BadGuy1 House")};
             for (int f = 0; f < 120; ++f) run.tick(w, f);
@@ -204,7 +218,7 @@ int main(int argc, char** argv) try {
             std::sort(v.rbegin(), v.rend());
             return v;
         };
-        std::cout << "Real maps: " << maps << " read, " << with_triggers << " with triggers, " << triggers << " triggers\n";
+        std::cout << "Real maps: " << maps << " read, " << with_triggers << " with triggers, " << triggers << " triggers, " << open_global << " teams point at -G ids missing from AI.INI\n";
         std::cout << "Top events (type:count):";
         for (std::size_t i = 0; i < std::min<std::size_t>(30, top(events).size()); ++i) std::cout << ' ' << top(events)[i].second << ':' << top(events)[i].first;
         std::cout << "\nTop actions (type:count):";

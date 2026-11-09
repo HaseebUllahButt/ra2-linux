@@ -69,8 +69,26 @@ std::int32_t ActionDef::number(int i) const {
 }
 
 // ---- Parsing ---------------------------------------------------------------
-MapLogic MapLogic::parse(const IniFile& ini) {
+MapLogic MapLogic::parse(const IniFile& ini, const IniFile* ai) {
     MapLogic m;
+    // Section lists: the map's own entries, then AI.INI entries not yet seen.
+    auto ids = [&](const char* list) {
+        std::vector<std::pair<std::string,const IniFile*>> out;
+        std::set<std::string> seen;
+        for (const IniFile* f : {&ini, ai}) {
+            if (!f) continue;
+            if (auto* sec = f->find_section(list))
+                for (const auto& e : sec->entries)
+                    if (seen.insert(e.value).second) out.emplace_back(e.value, f);
+        }
+        return out;
+    };
+    // The body of an id comes from the map, else from AI.INI.
+    auto src = [&](const std::string& id, const IniFile* home) -> const IniFile& {
+        if (ini.find_section(id)) return ini;
+        if (ai && ai->find_section(id)) return *ai;
+        return *home;
+    };
     // Houses: names in order, used for house index parameters.
     if (auto* sec = ini.find_section("Houses"))
         for (const auto& e : sec->entries) m.house_names.push_back(e.value);
@@ -137,13 +155,14 @@ MapLogic MapLogic::parse(const IniFile& ini) {
             m.tags.push_back(TagDef{e.key, f[1], f[2], to_int(f[0])});
         }
     }
-    if (auto* sec = ini.find_section("TaskForces")) {
-        for (const auto& e : sec->entries) {
+    {
+        for (const auto& [id, home] : ids("TaskForces")) {
+            const IniFile& s = src(id, home);
             TaskForceDef t;
-            t.id = e.value;
-            t.name = ini.read_string(t.id, "Name");
+            t.id = id;
+            t.name = s.read_string(t.id, "Name");
             for (std::size_t i = 0; i < 6; ++i) {
-                auto v = ini.read_string(t.id, std::to_string(i));
+                auto v = s.read_string(t.id, std::to_string(i));
                 if (v.empty()) continue;
                 auto f = split(v);
                 if (f.size() >= 2) t.members.emplace_back(to_int(f[0]), f[1]);
@@ -151,14 +170,15 @@ MapLogic MapLogic::parse(const IniFile& ini) {
             m.task_forces.push_back(std::move(t));
         }
     }
-    if (auto* sec = ini.find_section("ScriptTypes")) {
-        for (const auto& e : sec->entries) {
+    {
+        for (const auto& [id, home] : ids("ScriptTypes")) {
+            const IniFile& si = src(id, home);
             ScriptDef s;
-            s.id = e.value;
-            s.name = ini.read_string(s.id, "Name");
-            if (auto* body = ini.find_section(s.id)) {
+            s.id = id;
+            s.name = si.read_string(s.id, "Name");
+            if (auto* body = si.find_section(s.id)) {
                 for (std::size_t i = 0; i < 50; ++i) {
-                    const auto* line = ini.find(s.id, std::to_string(i));
+                    const auto* line = si.find(s.id, std::to_string(i));
                     if (!line) break;
                     auto f = split(line->value);
                     ScriptStep st;
@@ -171,10 +191,11 @@ MapLogic MapLogic::parse(const IniFile& ini) {
             m.scripts.push_back(std::move(s));
         }
     }
-    if (auto* sec = ini.find_section("TeamTypes")) {
-        for (const auto& e : sec->entries) {
+    {
+        for (const auto& [id, home] : ids("TeamTypes")) {
+            const IniFile& ini = src(id, home);   // shadows the map on purpose
             TeamTypeDef t;
-            t.id = e.value;
+            t.id = id;
             t.name = ini.read_string(t.id, "Name");
             t.house = ini.read_string(t.id, "House");
             t.script = ini.read_string(t.id, "Script");
@@ -246,8 +267,9 @@ struct PrototypeTriggers::Ctx {
     bool bypass_enabled = false;
 };
 
-PrototypeTriggers::PrototypeTriggers(const IniFile& map, const IniFile& rules, std::int32_t difficulty)
-    : logic_(MapLogic::parse(map)), rules_(rules), map_(map), difficulty_(difficulty) {
+PrototypeTriggers::PrototypeTriggers(const IniFile& map, const IniFile& rules, std::int32_t difficulty,
+                                   const IniFile* ai)
+    : logic_(MapLogic::parse(map, ai)), rules_(rules), map_(map), difficulty_(difficulty) {
     state_.resize(logic_.triggers.size());
     for (std::size_t i = 0; i < logic_.triggers.size(); ++i) {
         const auto& t = logic_.triggers[i];
