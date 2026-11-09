@@ -4,7 +4,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
+#include <array>
 #include <map>
+#include <thread>
 #include <limits>
 #include <set>
 #include <stdexcept>
@@ -485,25 +487,49 @@ bool validate(const Snapshot& snapshot) {
     // 1 is allocated, 2 is already listed.
     std::vector<std::uint8_t> allocated;
     if (snapshot.cell_order) allocated.assign(512u*512u,0);
-    for (const auto& item:snapshot.cells) {
-        const auto& cell=item.second;
-        if (!allocated.empty() && item.first<512u*512u && cell.allocated && *cell.allocated) allocated[item.first]=1;
-        if (cell.cell_flags_140) {
-            const auto same=[&](const std::optional<bool>& field,std::uint32_t bit) {
-                return !field || *field==bool(*cell.cell_flags_140 & bit);
-            };
-            if (!same(cell.cell_flag_80,0x80) || !same(cell.cell_flag_100,0x100) || !same(cell.cell_flag_200,0x200) ||
-                !same(cell.cell_flag_20000,0x20000) || !same(cell.cell_flag_40000,0x40000) ||
-                (cell.terrain && !same(cell.terrain->bridge,0x100))) return false;
+    // Each Cell check reads only its own Cell and the shared, unchanged
+    // Entity index, and writes only its own allocated flag. Split the Cell
+    // map into key ranges and check them on several threads.
+    const auto check_cells=[&](auto first,auto last) {
+        for (auto it=first;it!=last;++it) {
+            const auto& item=*it;
+            const auto& cell=item.second;
+            if (!allocated.empty() && item.first<512u*512u && cell.allocated && *cell.allocated) allocated[item.first]=1;
+            if (cell.cell_flags_140) {
+                const auto same=[&](const std::optional<bool>& field,std::uint32_t bit) {
+                    return !field || *field==bool(*cell.cell_flags_140 & bit);
+                };
+                if (!same(cell.cell_flag_80,0x80) || !same(cell.cell_flag_100,0x100) || !same(cell.cell_flag_200,0x200) ||
+                    !same(cell.cell_flag_20000,0x20000) || !same(cell.cell_flag_40000,0x40000) ||
+                    (cell.terrain && !same(cell.terrain->bridge,0x100))) return false;
+            }
+            if (cell.terrain && cell.cell_flag_100 && cell.terrain->bridge &&
+                *cell.cell_flag_100!=*cell.terrain->bridge) return false;
+            if (item.first>=512*512) return false;
+            if (item.second.terrain && (item.second.terrain->cell.x>=512 || item.second.terrain->cell.y>=512 ||
+                std::uint32_t(item.second.terrain->cell.y)*512+item.second.terrain->cell.x!=item.first)) return false;
+            if (item.second.heads)
+                for (const auto head:{item.second.heads->ground_head,item.second.heads->bridge_head})
+                    if (head && (!entities.count(head) || entities.at(head)->lifetime!=Lifetime::Placed)) return false;
         }
-        if (cell.terrain && cell.cell_flag_100 && cell.terrain->bridge &&
-            *cell.cell_flag_100!=*cell.terrain->bridge) return false;
-        if (item.first>=512*512) return false;
-        if (item.second.terrain && (item.second.terrain->cell.x>=512 || item.second.terrain->cell.y>=512 ||
-            std::uint32_t(item.second.terrain->cell.y)*512+item.second.terrain->cell.x!=item.first)) return false;
-        if (item.second.heads)
-            for (const auto head:{item.second.heads->ground_head,item.second.heads->bridge_head})
-                if (head && (!entities.count(head) || entities.at(head)->lifetime!=Lifetime::Placed)) return false;
+        return true;
+    };
+    constexpr std::size_t parts=4;
+    if (snapshot.cells.size()<4096) {
+        if (!check_cells(snapshot.cells.begin(),snapshot.cells.end())) return false;
+    } else {
+        std::array<std::map<std::uint32_t,CellState>::const_iterator,parts+1> bounds;
+        bounds[0]=snapshot.cells.begin(); bounds[parts]=snapshot.cells.end();
+        const auto low=snapshot.cells.begin()->first,high=snapshot.cells.rbegin()->first;
+        for (std::size_t i=1;i<parts;++i)
+            bounds[i]=snapshot.cells.lower_bound(low+std::uint32_t((std::uint64_t(high-low)*i)/parts));
+        std::array<bool,parts> ok{};
+        std::array<std::thread,parts-1> workers;
+        for (std::size_t i=1;i<parts;++i)
+            workers[i-1]=std::thread([&,i]{ ok[i]=check_cells(bounds[i],bounds[i+1]); });
+        ok[0]=check_cells(bounds[0],bounds[1]);
+        for (auto& worker:workers) worker.join();
+        for (const bool part:ok) if (!part) return false;
     }
     // A listed key at or above 512*512 cannot be an allocated Cell here: the
     // Cell loop above already rejects such a key in the Cell map.
