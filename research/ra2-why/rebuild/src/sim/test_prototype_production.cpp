@@ -29,6 +29,28 @@ void require_prototype(const w::Snapshot& world) {
     require(world.setup_progress==w::SetupProgress::PrototypeComplete && w::validate(world),
             "production changed the prototype phase or links");
 }
+void destroy_actor(w::Snapshot& world,std::uint32_t id) {
+    auto& item=actor(world,id);
+    require(item.next==0,"test actor has a nonempty shared link");
+    for (auto& [key,cell]:world.cells) {
+        (void)key;
+        if (!cell.heads) continue;
+        if (cell.heads->ground_head==id) {
+            cell.heads->ground_head=0;
+            if ((item.kind==w::Kind::Unit || item.kind==w::Kind::Infantry) && cell.ground_occupancy_124)
+                *cell.ground_occupancy_124&=~0x20u;
+        }
+        if (cell.heads->bridge_head==id) cell.heads->bridge_head=0;
+    }
+    item.lifetime=w::Lifetime::Destroyed; item.resolved_hp=0; item.active=false; item.in_limbo=true;
+    item.on_map=false; item.next=0; item.object_field_74=0; item.object_field_76=1;
+}
+
+int count_at(const std::optional<std::map<std::int32_t,std::int32_t>>& counts,std::int32_t index) {
+    require(counts.has_value(),"counter is unknown");
+    const auto item=counts->find(index);
+    return item==counts->end() ? 0 : item->second;
+}
 
 std::uint32_t build(w::Snapshot& world,p::FactorySet& factories,const p::Catalog& catalog,
                     std::uint32_t house,const std::string& type,std::uint64_t& frame,bool full_run,
@@ -159,6 +181,42 @@ int main(int argc,char** argv) try {
     std::uint64_t frame=0;
     done(proto::tick(world,factories,catalog,frame),"initial power tick");
 
+    // A queued building must not keep the House alive after its last yard dies.
+    {
+        auto lost=world;
+        auto lost_factories=factories;
+        const auto before_cash=*lost.houses[0].cash;
+        const auto started=proto::begin_production(lost,lost_factories,catalog,player,"GAPOWR",frame);
+        done(started,"queue plant before yard loss");
+        require(started.entity.has_value(),"queued plant is missing");
+        auto* pending=factory(lost_factories,*started.entity);
+        require(pending,"queued plant factory is missing");
+        const auto paid_frame=frame+pending->interval;
+        done(proto::tick(lost,lost_factories,catalog,paid_frame),"pay one plant stage");
+        require(*lost.houses[0].cash<before_cash,"plant stage did not debit cash");
+        std::vector<std::uint32_t> victims;
+        for (const auto& item:lost.entities)
+            if (item.house_id==player && item.lifetime==w::Lifetime::Placed) victims.push_back(item.id);
+        for (const auto id:victims) destroy_actor(lost,id);
+        const auto random_before_abandon=lost.random;
+        done(proto::tick(lost,lost_factories,catalog,paid_frame+1),"abandon after yard loss");
+        require(actor(lost,*started.entity).lifetime==w::Lifetime::Destroyed &&
+                !factory(lost_factories,*started.entity) && !lost_factories.buildings.count(*allied.entity) &&
+                !lost_factories.buildings.count(*started.entity),"yard loss kept its queued building");
+        require(*lost.houses[0].cash==before_cash && lost.houses[0].unit_count==0 &&
+                count_at(lost.houses[0].buildings_owned_5420,catalog.find("GAPOWR")->heap_index)==0 &&
+                count_at(lost.houses[0].buildings_active_5460,catalog.find("GACNST")->heap_index)==0 &&
+                lost_factories.house_factory_counts.at(player)[3]==0,
+                "yard loss kept stale money or counters");
+        require(lost.random.table==random_before_abandon.table && lost.random.first==random_before_abandon.first &&
+                lost.random.second==random_before_abandon.second,"abandon changed the shared random state");
+        require(std::none_of(lost.entities.begin(),lost.entities.end(),[&](const auto& item){
+            return item.house_id==player && item.lifetime!=w::Lifetime::Destroyed &&
+                (item.kind==w::Kind::Unit || item.kind==w::Kind::Infantry || item.kind==w::Kind::Structure);
+        }),"queued building still prevents defeat");
+        require_prototype(lost);
+    }
+
     const auto cash=*world.houses[0].cash;
     build(world,factories,catalog,player,"GAPOWR",frame,true);
     require(*world.houses[0].cash==cash-catalog.find("GAPOWR")->cost,"plant cost differs");
@@ -168,6 +226,60 @@ int main(int argc,char** argv) try {
     build(world,factories,catalog,player,"GAPILE",frame,false);
     place_building(world,factories,catalog,player,"GAPILE",frame,base);
     done(proto::tick(world,factories,catalog,++frame),"barracks power update");
+    // A completed soldier must be abandoned when the last barracks is lost.
+    {
+        auto lost=world;
+        auto lost_factories=factories;
+        const auto started=proto::begin_production(lost,lost_factories,catalog,player,"E1",frame);
+        done(started,"queue infantry before barracks loss");
+        require(started.entity.has_value(),"queued infantry is missing");
+        auto* pending=factory(lost_factories,*started.entity);
+        require(pending,"queued infantry factory is missing");
+        const auto cash=*lost.houses[0].cash;
+        *lost.houses[0].cash-=catalog.find("E1")->cost;
+        pending->progress=54; pending->balance=0; pending->suspended=true;
+        const auto barracks=std::find_if(lost.entities.begin(),lost.entities.end(),[&](const auto& item){
+            return item.house_id==player && item.type=="GAPILE" && item.lifetime==w::Lifetime::Placed;
+        });
+        require(barracks!=lost.entities.end(),"barracks is missing");
+        const auto barracks_id=barracks->id;
+        destroy_actor(lost,barracks_id);
+        done(proto::tick(lost,lost_factories,catalog,frame+1),"abandon after barracks loss");
+        require(actor(lost,*started.entity).lifetime==w::Lifetime::Destroyed &&
+                !factory(lost_factories,*started.entity) && !lost_factories.buildings.count(barracks_id) &&
+                *lost.houses[0].cash==cash &&
+                count_at(lost.houses[0].infantry_owned_5440,catalog.find("E1")->heap_index)==0 &&
+                count_at(lost.houses[0].buildings_active_5460,catalog.find("GAPILE")->heap_index)==0 &&
+                lost_factories.house_factory_counts.at(player)[1]==0,
+                "barracks loss kept a product, money, or stale counters");
+        require_prototype(lost);
+    }
+    // A remaining barracks keeps the same queued product after one is lost.
+    {
+        auto surviving=world;
+        auto surviving_factories=factories;
+        auto local_frame=frame;
+        const auto extra=build(surviving,surviving_factories,catalog,player,"GAPILE",local_frame,false);
+        place_building(surviving,surviving_factories,catalog,player,"GAPILE",local_frame,base);
+        done(proto::tick(surviving,surviving_factories,catalog,++local_frame),"second barracks power update");
+        const auto started=proto::begin_production(surviving,surviving_factories,catalog,player,"E1",local_frame);
+        done(started,"queue infantry with two barracks");
+        require(started.entity.has_value(),"second barracks product is missing");
+        const auto cash=*surviving.houses[0].cash;
+        destroy_actor(surviving,extra);
+        done(proto::tick(surviving,surviving_factories,catalog,local_frame),"continue after one barracks loss");
+        auto* pending=factory(surviving_factories,*started.entity);
+        require(pending && actor(surviving,*started.entity).lifetime==w::Lifetime::Created &&
+                *surviving.houses[0].cash==cash && surviving_factories.house_factory_counts.at(player)[1]==1,
+                "surviving barracks did not retain the queued infantry");
+        pending->progress=53;
+        local_frame=std::max(local_frame+1,pending->timer_start+std::uint64_t(pending->interval));
+        done(proto::tick(surviving,surviving_factories,catalog,local_frame),"finish at surviving barracks");
+        require(!factory(surviving_factories,*started.entity) &&
+                actor(surviving,*started.entity).lifetime==w::Lifetime::Placed,
+                "queued infantry did not leave the surviving barracks");
+        require_prototype(surviving);
+    }
     const auto infantry=build(world,factories,catalog,player,"E1",frame,false,true);
     require(!factory(factories,infantry),"completed infantry stayed in its factory");
     require(actor(world,infantry).kind==w::Kind::Infantry && actor(world,infantry).active==true &&

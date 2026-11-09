@@ -67,20 +67,140 @@ bool activate(w::Snapshot& world,w::Entity& item) {
 }
 
 const w::Entity* choose_factory(const w::Snapshot& world,const FactorySet& factories,const Catalog& catalog,
-                                std::uint32_t owner,Rtti wanted) {
+                                std::uint32_t owner,Rtti wanted,bool naval=false) {
     const w::Entity* fallback=nullptr;
     for (const auto& object:world.creation_order) {
         if (object.kind!=w::CreatedKind::Entity) continue;
         const auto* building=entity(world,object.id);
         if (!building || building->kind!=w::Kind::Structure || building->house_id!=owner ||
-            building->lifetime!=w::Lifetime::Placed || !building->cell || building->object_field_76!=0) continue;
+            building->lifetime!=w::Lifetime::Placed || !building->cell || building->object_field_76!=0 ||
+            building->active==false || building->in_limbo==true ||
+            (building->resolved_hp && *building->resolved_hp<=0)) continue;
         const auto* type=catalog.find(building->type);
         const auto state=factories.buildings.find(building->id);
-        if (!type || type->factory!=wanted || state==factories.buildings.end()) continue;
+        if (!type || type->factory!=wanted || state==factories.buildings.end() ||
+            (wanted==Rtti::UnitType && type->placement.naval!=naval)) continue;
         if (state->second.primary) return building;
         fallback=building;
     }
     return fallback;
+}
+
+std::optional<Rtti> product_kind(std::int32_t slot) {
+    switch (slot) {
+    case 0: return Rtti::AircraftType;
+    case 1: return Rtti::InfantryType;
+    case 2: case 3: return Rtti::UnitType;
+    case 4: case 5: return Rtti::BuildingType;
+    default: return {};
+    }
+}
+
+// TODO-ORIGINAL: restore the original Building destruction, FactoryClass
+// cancellation, refund, and House tracking callbacks in their actual order.
+Outcome cleanup_destroyed(w::Snapshot& world,FactorySet& factories,const Catalog& catalog) {
+    std::set<std::uint32_t> affected;
+    for (auto it=factories.buildings.begin();it!=factories.buildings.end();) {
+        const auto* building=entity(world,it->first);
+        if (!building) return fail(Status::NeedsInput,"tracked building is missing");
+        if (building->lifetime!=w::Lifetime::Destroyed) { ++it; continue; }
+        affected.insert(building->house_id);
+        it=factories.buildings.erase(it);
+    }
+    for (const auto id:affected) {
+        auto* owner=house(world,id);
+        if (!owner) return fail(Status::NeedsInput,"destroyed building House is missing");
+        if (owner->role!=w::HouseRole::Player) continue;
+        std::map<std::int32_t,std::int32_t> active,owned,units,infantry,aircraft,unit_types,placed_units;
+        std::int32_t unit_count=0;
+        std::array<std::int32_t,6> counts{};
+        for (const auto& item:world.entities) {
+            if (item.house_id!=id || item.kind==w::Kind::Terrain || item.lifetime==w::Lifetime::Destroyed) continue;
+            if (item.lifetime==w::Lifetime::Placed && (item.active==false || item.in_limbo==true ||
+                (item.resolved_hp && *item.resolved_hp<=0))) continue;
+            const auto* type=catalog.find(item.type);
+            if (!type) return fail(Status::NeedsInput,"surviving actor type is missing");
+            if (item.kind==w::Kind::Unit) {
+                if (item.excluded_from_house_tracking==true) continue;
+                ++units[type->heap_index]; ++unit_types[type->heap_index]; ++unit_count;
+                if (item.lifetime==w::Lifetime::Placed) ++placed_units[type->heap_index];
+                continue;
+            }
+            if (item.kind==w::Kind::Infantry) { ++infantry[type->heap_index]; continue; }
+            if (item.kind==w::Kind::Aircraft) { ++aircraft[type->heap_index]; continue; }
+            if (item.kind!=w::Kind::Structure || type->rtti!=Rtti::BuildingType)
+                return fail(Status::NeedsInput,"surviving building type is missing");
+            ++owned[type->heap_index];
+            if (item.lifetime==w::Lifetime::Created) continue;
+            ++active[type->heap_index];
+            if (!type->factory) continue;
+            switch (*type->factory) {
+            case Rtti::AircraftType: ++counts[0]; break;
+            case Rtti::InfantryType: ++counts[1]; break;
+            case Rtti::UnitType: ++counts[type->placement.naval ? 4 : 2]; break;
+            case Rtti::BuildingType: ++counts[3]; break;
+            default: break;
+            }
+        }
+        owner->buildings_active_5460=std::move(active);
+        owner->buildings_owned_5420=std::move(owned);
+        owner->units_owned_5430=std::move(units); owner->infantry_owned_5440=std::move(infantry);
+        owner->aircraft_owned_5450=std::move(aircraft); owner->unit_type_counts=std::move(unit_types);
+        owner->placed_unit_counts=std::move(placed_units); owner->unit_count=unit_count;
+        factories.house_factory_counts[id]=counts;
+        factories.power_blackout_idle.try_emplace(id,true);
+        factories.power_dirty[id]=true;
+    }
+    return {Status::Done,{},{},{}};
+}
+
+void decrement(std::optional<std::map<std::int32_t,std::int32_t>>& counts,std::int32_t index) {
+    if (!counts) return;
+    const auto item=counts->find(index);
+    if (item!=counts->end() && item->second>0) --item->second;
+}
+
+Outcome abandon_orphans(w::Snapshot& world,FactorySet& factories,const Catalog& catalog) {
+    for (auto& factory:factories.factories) {
+        if (!factory.object) continue;
+        const auto wanted=product_kind(factory.slot);
+        if (!wanted) return fail(Status::NeedsInput,"factory slot is unknown");
+        if (choose_factory(world,factories,catalog,factory.house_id,*wanted,factory.slot==3)) continue;
+        auto* item=entity(world,factory.object);
+        auto* owner=house(world,factory.house_id);
+        const auto* type=catalog.find(factory.object_type);
+        if (!item || !owner || !type || item->house_id!=factory.house_id || item->type!=factory.object_type)
+            return fail(Status::NeedsInput,"orphaned factory product is invalid");
+        if (item->lifetime==w::Lifetime::Created) {
+            // Prototype refund follows the older Factory::Abandon shape. The
+            // exact base-game cost and destruction callbacks remain unresolved.
+            if (owner->cash && type->cost>=0 && factory.balance>=0) {
+                const auto paid=std::max<std::int64_t>(0,std::int64_t(type->cost)-factory.balance);
+                *owner->cash=static_cast<std::int32_t>(std::min<std::int64_t>(
+                    std::numeric_limits<std::int32_t>::max(),std::int64_t(*owner->cash)+paid));
+            }
+            switch (item->kind) {
+            case w::Kind::Structure:
+                decrement(owner->buildings_owned_5420,type->heap_index);
+                factories.buildings.erase(item->id);
+                break;
+            case w::Kind::Unit:
+                decrement(owner->units_owned_5430,type->heap_index);
+                decrement(owner->unit_type_counts,type->heap_index);
+                if (owner->unit_count && *owner->unit_count>0) --*owner->unit_count;
+                break;
+            case w::Kind::Infantry: decrement(owner->infantry_owned_5440,type->heap_index); break;
+            case w::Kind::Aircraft: decrement(owner->aircraft_owned_5450,type->heap_index); break;
+            default: return fail(Status::NeedsInput,"factory product kind is invalid");
+            }
+            item->lifetime=w::Lifetime::Destroyed; item->resolved_hp=0;
+            item->active=false; item->in_limbo=true; item->on_map=false; item->next=0;
+            item->object_field_74=0; item->object_field_76=1; item->target_id=0;
+        }
+        factory.object=0; factory.object_type.clear(); factory.progress=0;
+        factory.interval=0; factory.balance=0; factory.suspended=true;
+    }
+    return {Status::Done,{},{},{}};
 }
 
 // TODO-ORIGINAL: replace this free-cell search with Building::Exit_Object,
@@ -237,7 +357,8 @@ Outcome initialize(w::Snapshot& world,FactorySet& factories,const Catalog& catal
     }
     for (auto& item:candidate.entities) {
         if (item.kind!=w::Kind::Structure || item.lifetime!=w::Lifetime::Placed) continue;
-        if (!catalog.find(item.type)) continue;
+        const auto* owner=house(candidate,item.house_id);
+        if (!owner || owner->role!=w::HouseRole::Player || !catalog.find(item.type)) continue;
         next.buildings.try_emplace(item.id,BuildingState{});
     }
     if (!w::validate(candidate)) return fail(Status::NeedsInput,"prototype links are invalid");
@@ -323,15 +444,22 @@ Outcome tick(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,std
     if (!ready(world)) return fail(Status::NeedsInput,"prototype setup is not complete");
     bool needed=false,waiting_for_exit=false;
     for (const auto& item:factories.power_dirty) if (item.second) { needed=true; break; }
+    for (const auto& tracked:factories.buildings) {
+        const auto* building=entity(world,tracked.first);
+        if (!building) return fail(Status::NeedsInput,"tracked building is missing");
+        if (building->lifetime==w::Lifetime::Destroyed) { needed=true; break; }
+    }
     for (const auto& factory:factories.factories) {
         if (!factory.object) continue;
+        const auto wanted=product_kind(factory.slot);
+        if (!wanted) return fail(Status::NeedsInput,"factory slot is unknown");
+        if (!choose_factory(world,factories,catalog,factory.house_id,*wanted,factory.slot==3)) needed=true;
         if (factory.progress==54 && (factory.slot==1 || factory.slot==2)) {
             const auto* item=entity(world,factory.object);
             const auto expected=factory.slot==1 ? w::Kind::Infantry : w::Kind::Unit;
             if (!item || item->kind!=expected || item->lifetime!=w::Lifetime::Created ||
                 item->house_id!=factory.house_id) return fail(Status::NeedsInput,"completed factory object is invalid");
-            const auto wanted=factory.slot==1 ? Rtti::InfantryType : Rtti::UnitType;
-            const auto* building=choose_factory(world,factories,catalog,factory.house_id,wanted);
+            const auto* building=choose_factory(world,factories,catalog,factory.house_id,*wanted);
             if (building && exit_cell(world,catalog,*building)) needed=true;
             else waiting_for_exit=true;
         }
@@ -340,6 +468,10 @@ Outcome tick(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,std
     }
     if (!needed) return {Status::Done,waiting_for_exit ? "waiting for a clear factory exit" : "",{}, {}};
     return transaction(world,factories,[&](w::Snapshot& candidate,FactorySet& next) {
+        auto cleanup=cleanup_destroyed(candidate,next,catalog);
+        if (cleanup.status!=Status::Done) return cleanup;
+        cleanup=abandon_orphans(candidate,next,catalog);
+        if (cleanup.status!=Status::Done) return cleanup;
         auto result=ra2::sim::production::tick(candidate,next,catalog,frame);
         if (result.status!=Status::Done) return result;
         return discharge(candidate,next,catalog);
