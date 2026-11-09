@@ -662,6 +662,7 @@ public:
             if(victory_.settled()) {
                 require(show_score_&&score_image_,"Human input: result screen is missing");
                 checkpoint(state,"08-result");test_key(SDLK_TAB);human_camera_=camera_x_;
+                human_wait_frame_=state.frame_counter;
                 window_.inject_for_test({InputKind::Key,0,0,camera_x_>0?SDLK_LEFT:SDLK_RIGHT,true});
                 human_stage_=12;
             } else if(state.frame_counter%90==0&&!orders_.selected_ids().empty()) {
@@ -681,7 +682,8 @@ public:
             }
             break;
         case 12:
-            require(camera_x_!=human_camera_,"Human input: camera stopped after game over");
+            require(state.frame_counter-human_wait_frame_<30,"Human input: camera stopped after game over");
+            if(camera_x_==human_camera_)break;
             window_.inject_for_test({InputKind::Key,0,0,SDLK_LEFT,false});
             window_.inject_for_test({InputKind::Key,0,0,SDLK_RIGHT,false});
             checkpoint(state,"09-camera-after-result");test_key(SDLK_ESCAPE);human_stage_=13;break;

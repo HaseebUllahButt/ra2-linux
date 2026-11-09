@@ -372,25 +372,45 @@ void event_edges() {
             f.send(key('x')).empty(),"Unrelated input issued orders");
     f.selected({30});
 }
+void camera_scroll() {
+    // QA4: short arrow holds must move the view only a little.
+    const auto hold=[](unsigned interval,unsigned duration,int h,int v,bool headless=false) {
+        CameraScroll scroll;scroll.reset(0);int x=0,y=0;
+        for(unsigned now=interval;now<=duration;now+=interval) {
+            const auto delta=scroll.step(now,h,v,headless);x+=delta.first;y+=delta.second;
+        }
+        return std::make_pair(x,y);
+    };
+    require(hold(16,304,-1,0).first>=-25 && hold(16,304,-1,0).first<=-10,"A 300 ms arrow hold is not gentle");
+    require(hold(16,496,-1,0).first>=-45 && hold(16,496,-1,0).first<=-25,"A 500 ms arrow hold is not gentle");
+    require(hold(16,1008,1,0).first<=120,"A one second arrow hold scrolls too far");
+    require(hold(16,4000,1,0).first>=600,"A long arrow hold never reaches full speed");
+    // The same hold travels the same distance at every frame rate and game speed.
+    for(const unsigned duration:{300u,500u,800u,2000u,3000u}) {
+        const auto expected=std::make_pair(int(CameraScroll::travel(duration)),int(CameraScroll::travel_vertical(duration)));
+        for(const unsigned interval:{1u,4u,10u,20u,50u,100u})
+            require(hold(interval,duration,1,1)==expected,"Camera speed depends on frame rate");
+        require(hold(20,duration,1,1,true)==expected,"Headless camera speed differs from play");
+    }
+    // A stall or pause never jumps the view.
+    CameraScroll stall;stall.reset(0);
+    require(stall.step(5000,1,0).first==int(CameraScroll::travel(100)),"Camera pause cap is wrong");
+    CameraScroll scroll;scroll.reset(1000);
+    require(scroll.step(1000,1,1)==std::make_pair(0,0),"Camera moves without elapsed time");
+    require(scroll.step(1100,2,-2).first>0 && scroll.step(1200,2,-2).second<0,"Combined input is wrong");
+    // Release and reverse restart the slow start.
+    CameraScroll turn;turn.reset(0);int far=0;
+    for(unsigned now=20;now<=2000;now+=20)far+=turn.step(now,1,0).first;
+    require(far==int(CameraScroll::travel(2000)),"Held travel is wrong");
+    require(turn.step(2020,0,0).first==0,"Camera moves after release");
+    int back=0;for(unsigned now=2040;now<=2540;now+=20)back+=turn.step(now,-1,0).first;
+    require(back==-int(CameraScroll::travel(520)),"Reverse kept the old speed");
+}
+
 } // namespace
 
 int main() try {
-    // Holding arrows for one second moves the same distance at each frame rate.
-    for(const unsigned interval:{1u,4u,16u,40u,100u}) {
-        CameraScroll scroll;int x=0,y=0;
-        for(unsigned now=interval;now<=1000;now+=interval) {
-            const auto delta=scroll.step(now,1,1);x+=delta.first;y+=delta.second;
-        }
-        const unsigned duration=1000/interval*interval;
-        require(x==int(duration*200/1000) && y==int(duration*130/1000),"Camera speed depends on frame rate");
-    }
-    CameraScroll held;int travel=0;
-    for(unsigned now=40;now<=800;now+=40)travel+=held.step(now,1,0).first;
-    require(travel==160,"An 800 ms arrow hold scrolls too far");
-    CameraScroll scroll;
-    require(scroll.step(1000,2,-2)==std::make_pair(20,-13),"Camera pause cap or combined input is wrong");
-    scroll.reset(1000);
-    require(scroll.step(1000,1,1)==std::make_pair(0,0),"Camera moves without elapsed time");
+    camera_scroll();
     selection();
     battlefield_bounds();
     move_attack_stop();
