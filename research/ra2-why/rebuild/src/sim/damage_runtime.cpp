@@ -2,6 +2,8 @@
 #include "../loop/profile.h"
 #include <map>
 #include <set>
+#include <cstdio>
+#include <cstdlib>
 
 namespace ra2::sim {
 WorldCollisionResult base_world_projectile_collision(
@@ -624,6 +626,35 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
         } catch (const std::exception& e) {report.unresolved.push_back(e.what());}
     }
     projectiles_=std::move(flying);
+    // Acquire only for idle actors. Explicit attack and move orders keep priority.
+    // TODO-ORIGINAL: Recover the full guard scan and threat scoring.
+    for (auto& source : world.entities) {
+        if (!prototype_alive(&source) || orders_.count(source.id) ||
+            source.target_id.value_or(0) || source.locomotor_moving.value_or(false) ||
+            !source.mission || (*source.mission!=0 && *source.mission!=5 && *source.mission!=11)) continue;
+        const auto weapon=prototype_weapon(base_,map_,art_,source);
+        if (!weapon) continue;
+        const auto* owner=prototype_house(world,source.house_id);
+        if (!owner || owner->country=="Neutral" || owner->country=="Special") continue;
+        if (prototype_bool(base_,map_,source.type,"Powered") &&
+            owner->power_output.value_or(0)<owner->power_drain.value_or(0)) continue;
+        const session::world::Entity* nearest=nullptr;
+        int best=weapon->range+1;
+        for (const auto& target : world.entities) {
+            const auto* house=prototype_house(world,target.house_id);
+            if (!house || house->country=="Neutral" || house->country=="Special" ||
+                (owner->alliance_mask_5674 && house->original_index && *house->original_index>=0 && *house->original_index<32 &&
+                 (*owner->alliance_mask_5674 & (1u<<*house->original_index))) ||
+                !can_attack(world,source.id,target.id) ||
+                !prototype_bool(base_,map_,target.type,"LegalTarget",true) ||
+                prototype_bool(base_,map_,target.type,"Immune")) continue;
+            const int range=distance_.between(*source.position,*target.position);
+            if (range<=weapon->range && (range<best || (range==best && nearest && target.id<nearest->id))) {
+                best=range; nearest=&target;
+            }
+        }
+        if (nearest) { orders_[source.id]=nearest->id; source.target_id=nearest->id; }
+    }
     for (auto it=orders_.begin();it!=orders_.end();) {
         auto* source=prototype_find(world,it->first);auto* target=prototype_find(world,it->second);
         if (!prototype_alive(source) || !prototype_alive(target)) {
@@ -690,6 +721,11 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             const int delay=weapons::base_single_shot_unit_delay(reload,rng);
             source->weapon_timer_start_frame=static_cast<int>(frame);source->weapon_timer_duration=delay;
             world.random=rng.state();++report.fired;
+            if (std::getenv("RA2_COMBAT_TRACE"))
+                std::fprintf(stderr,"combat frame=%llu source=%u type=%s weapon=%s range=%d distance=%d target=%u target_type=%s hp=%d reload=%d\n",
+                    static_cast<unsigned long long>(frame),source->id,source->type.c_str(),weapon->name.c_str(),
+                    weapon->range,d,target->id,target->type.c_str(),target->resolved_hp.value_or(0),delay);
+
             if (weapon->arcing && source->kind==session::world::Kind::Unit) projectiles_.push_back(std::move(shot));
             else {
                 // TODO-ORIGINAL: Small-arms and other non-Cannon projectiles
