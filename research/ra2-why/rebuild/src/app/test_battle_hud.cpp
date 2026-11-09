@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
     assert(hud.handle_click(916,44,s).kind==HudActionKind::None);
     assert(hud.handle_click(r.x,r.y,s).kind==HudActionKind::None);
     hud.handle_click(808,44,s);
-s.can_deploy=true;
+    s.can_deploy=true;
     assert(hud.handle_click(808,117,s).kind==HudActionKind::None);
     assert(hud.handle_click(808,560,s).kind==HudActionKind::Deploy);
     assert(hud.handle_click(808,600,s).kind==HudActionKind::None);
@@ -175,12 +175,13 @@ s.can_deploy=true;
         assert(edge_hits>0); // SELECTED UNITS header, dim edge color
         // Active tab: gold frame and dim gold fill; inactive stays plain.
         HudState t; t.choices={{"E1","GI",200,true,0,BuildCategory::Infantry}};
-        hud.handle_click(808+42,44,t); // INF tab
+        hud.handle_click(808+42,44,t); // BLD tab
         auto tf=frame(); hud.draw(tf,t);
         auto i=(37*1024+852)*4;
         assert(tf.rgba[i]==255&&tf.rgba[i+1]==214&&tf.rgba[i+2]==64); // gold frame
         auto j=(45*1024+855)*4;
         assert(tf.rgba[j]==58&&tf.rgba[j+1]==50&&tf.rgba[j+2]==18);   // dim gold fill
+        hud.handle_click(808,44,t); // Restore All for the independent checks below.
     }
     // Status fits on two short rows; long text wraps, short text stays
     // on one row. Rows sit clear of the selected list and the minimap.
