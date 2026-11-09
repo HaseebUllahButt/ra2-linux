@@ -35,7 +35,7 @@ struct BuildChoice {
     bool enabled = false; // False dims the entry and rejects clicks.
     int progress = 0;     // 0..1000 production clock, 1000 means ready.
     BuildCategory category = BuildCategory::All;
-    int queued = 0;       // Items waiting after the current one. A count of 2+ shows on the cameo.
+    int queued = 0;       // Queue length including the active item. 2+ shows a count badge.
 };
 
 // Everything the sidebar needs for one draw pass.
