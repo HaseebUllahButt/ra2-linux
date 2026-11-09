@@ -60,6 +60,9 @@ public:
     std::size_t trigger_count() const noexcept { return triggers_.size(); }
     std::optional<double> trigger_weight(const std::string& id) const;
     std::vector<TeamView> teams() const;
+    // Base 004EF890 base plan, in build order. An empty name is a defense
+    // node that 004F1190 has not resolved yet.
+    const std::vector<std::string>& base_plan() const noexcept { return plan_; }
 
     // Parsed AI.INI records. Public so tests can check the base data.
     struct TaskForce { std::string id; std::vector<std::pair<std::int32_t, std::string>> members; };
@@ -93,6 +96,8 @@ private:
     void fill_teams(Context&, std::vector<skirmish::Order>* build_orders);
     void run_teams(Context&, std::vector<skirmish::Order>&);
     void finish(Team&);
+    void make_plan(const Context&);
+    std::string plan_build(const Context&);
     bool condition(const Context&, const Trigger&) const;
     std::uint32_t random(std::uint32_t low, std::uint32_t high);
 
@@ -108,6 +113,7 @@ private:
     // Base House +53BC: the last seen construction yard Cell. It stays when
     // the yard dies, as the original does not clear it.
     std::map<std::uint32_t, ra2map::Cell> base_centres_;
+    std::vector<std::string> plan_; // House +55F8 base nodes, by type name
     std::optional<std::int32_t> last_frame_;
     std::uint32_t computer_house_ = 0, player_house_ = 0, seed_ = 1;
     std::int64_t next_build_ = 0, next_attack_ = 0, next_team_ = 0;
