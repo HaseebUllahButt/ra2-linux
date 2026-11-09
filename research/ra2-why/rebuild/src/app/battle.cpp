@@ -1117,7 +1117,9 @@ int run_prototype_battle(const BattleOptions& args) {
     const auto rules=rules_job.get();
     Scene scene(files,assets.art_ini(),rules,geometry,cells,assets.map_ini().read_string("Map","Theater"),
         assets.map().terrain(),true);
-    scene.prepare(battle_scene_state(battle->snapshot,0),build_palette());
+    auto products=build_palette();
+    products.emplace_back("DRON"); // AI teams can request this outside the small human palette.
+    scene.prepare(battle_scene_state(battle->snapshot,0),products);
     Window window("Red Alert 2 native prototype: skirmish",1024,768,!args.headless);
     loop::SteadyClock real_clock;loop::SimulatedClock fast_clock;
     loop::Clock& clock=args.headless?static_cast<loop::Clock&>(fast_clock):static_cast<loop::Clock&>(real_clock);
