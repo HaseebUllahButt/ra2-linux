@@ -6,8 +6,9 @@ constructor, coordinate setter, resize suffix, and early Cell pass execute.
 INI, allocation, Cell parent/registration, lighting lookups, category cache,
 and region builders are supplied. Object and lighting vectors are empty.
 The default tile index is supplied. An optional source adds decoded MP02T2
-tile records with supplied stream and tile-index services. Overlay processing
-and later Battle phases remain outside the check.
+tiles and the four recognised Overlay root branches. Stream, type identity,
+eligibility, and map lookup are supplied. Full Overlay processing and later
+Battle phases remain outside the check.
 """
 import struct
 import subprocess
@@ -193,3 +194,53 @@ if tile_source:
         assert m.cpu.mem_read(cell+0x122,1)==b'\0' and m.cpu.mem_read(cell+0x124,1)==b'\0'
     assert count==len(expected)==19900 and target_index in expected
     print(f'base x86 reads {len(expected)} MP02T2 packed tiles and preserves tested fields in 19900 cells')
+
+    # Replay only the four recognised Overlay root indexes from the real map.
+    # Registry identity, parent eligibility and Cell lookup are supplied.
+    # Other Overlay types and later map phases are not executed here.
+    overlay=subprocess.check_output([emitter,game,'--overlay-bytes'])
+    assert len(overlay)==512*512
+    directions=((0,-1),(1,-1),(1,0),(1,1),(0,1),(-1,1),(-1,0),(-1,-1))
+    for index,(dx,dy) in enumerate(directions):
+        m.cpu.mem_write(0x851a70+index*4,struct.pack('<hh',dx,dy))
+    def lookup_cell():
+        x,y=struct.unpack('<hh',m.cpu.mem_read(m.argument(0),4))
+        cell=m.read(vector+(y*512+x)*4) if 0<=x<512 and 0<=y<512 else 0
+        m.cpu.reg_write(UC_X86_REG_EAX,cell or 0xa6f9f8)
+    m.bind(0x548070,4,lookup_cell)
+    m.bind(0x5d4160,4,m.ret(1))
+    m.bind(0x631570,4,m.ret(0))
+    m.word(m.FOOT,m.VT)
+    m.word(m.FOOT+0x98,m.TYPE)
+    point=0x100c800
+    m.virtual(0x1a0,4,m.ret(point))
+    reached=set()
+    roots=0
+    for index,kind in enumerate(overlay):
+        if kind not in (24,25,237,238):
+            continue
+        root=m.read(vector+index*4)
+        if not root:
+            continue
+        x,y=index%512,index//512
+        direction=0 if kind in (24,237) else 6
+        dx,dy=directions[direction]
+        for distance in (0,1,2,-1):
+            nx,ny=x+dx*distance,y+dy*distance
+            if 0<=nx<512 and 0<=ny<512 and m.read(vector+(ny*512+nx)*4):
+                reached.add(ny*512+nx)
+        m.word(point,x|(y<<16))
+        m.word(m.TYPE+0x264,kind)
+        m.cpu.reg_write(UC_X86_REG_ECX,m.FOOT)
+        m.cpu.reg_write(UC_X86_REG_ESP,0x103f000)
+        m.cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,1))
+        m.cpu.emu_start(0x5da970,0x5daa31,count=100000)
+        assert m.cpu.reg_read(UC_X86_REG_EIP)==0x5daa31
+        roots+=1
+    assert roots>0
+    for index in range(262144):
+        cell=m.read(vector+index*4)
+        if cell:
+            assert bool(m.read(cell+0x140)&0x100)==(index in reached)
+    assert target_index not in reached
+    print(f'base x86 replays {roots} recognised MP02T2 bridge roots; none reaches waypoint 0')
