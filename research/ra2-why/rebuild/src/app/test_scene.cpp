@@ -157,6 +157,39 @@ int main(int argc, char** argv) {
             }
             require(tree_checked > 100, "Original tree pixel check was empty");
             if (!expansion) {
+                // Terror Drone: base SHP vehicle, Turret=no, eight facings.
+                // Resting frame is StartStandFrame 48 plus direction 3.
+                auto drone = building;
+                drone.kind = sim::Kind::Unit; drone.type = "DRON"; drone.facing = 64;
+                drone.turret_facing = 64;
+                drone.position = sim::Coord{80*256+128,96*256+128,0};
+                state.entities = {drone};
+                const auto drone_output = fixture.render(empty, state, view);
+                if (!drone_output.gaps.empty()) throw std::runtime_error(drone_output.gaps.front());
+                require(drone_output.drawn == 1, "Original SHP vehicle did not reach the native scene");
+                const auto drone_frames = actors::shp_vehicle_frames(rules, art, "DRON");
+                require(drone_frames.start_stand == 48 && drone_frames.facings == 8 &&
+                        actors::shp_vehicle_frame(drone_frames, 64, false, 0) == 51,
+                        "Original SHP vehicle frame layout changed");
+                const auto drone_art = actors::ActorArt::load(files, art, rules, "DRON", actors::Kind::Vehicle);
+                const auto drone_pixels = drone_art.draw_frame(51, palette);
+                const auto drone_origin = drone_art.main_canvas_origin(fixture.map_anchor(drone));
+                std::size_t drone_checked = 0;
+                for (int y = 0; y < drone_pixels.height; ++y) for (int x = 0; x < drone_pixels.width; ++x) {
+                    const auto source = (std::size_t(y)*drone_pixels.width+x)*4;
+                    if (!drone_pixels.pixels[source+3]) continue;
+                    const int dx = int(drone_origin.x)-view.x+x, dy = int(drone_origin.y)-view.y+y;
+                    require(dx>=0 && dy>=0 && dx<500 && dy<400, "Original SHP vehicle fixture was clipped");
+                    const auto target = (std::size_t(dy)*500+dx)*4;
+                    require(std::equal(drone_pixels.pixels.begin()+source, drone_pixels.pixels.begin()+source+4,
+                        drone_output.image.rgba.begin()+target), "SHP vehicle frame, palette, or center changed");
+                    ++drone_checked;
+                }
+                require(drone_checked > 50, "Original SHP vehicle pixel check was empty");
+                drone.moving = true; state.entities = {drone};
+                const auto strict_moving = fixture.render(empty, state, view);
+                require(strict_moving.drawn == 0 && strict_moving.gaps.size() == 1,
+                        "Unrecovered SHP walk counter was invented");
                 auto tank = building;
                 tank.kind = sim::Kind::Unit; tank.type = "HTNK"; tank.facing = 64;
                 tank.turret_facing = 64;

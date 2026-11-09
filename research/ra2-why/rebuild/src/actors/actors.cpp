@@ -33,6 +33,52 @@ unsigned infantry_direction(std::uint8_t map_facing) noexcept {
                                              3,3,2,2,2,2,1,1,1,1,0,0,0,0,7,7};
     return facing[((unsigned(map_facing) / 4 + 1) / 2) & 31];
 }
+ShpVehicleFrames shp_vehicle_frames(const rules::IniFile& rules, const rules::IniFile& art,
+                                    std::string_view type) {
+    const auto image = rules.read_string(type, "Image", type);
+    ShpVehicleFrames f{};
+    // WalkFrames and FiringFrames are stored in signed bytes.
+    f.walk_frames = static_cast<std::int8_t>(art.read_integer(image, "WalkFrames", 12));
+    f.firing_frames = static_cast<std::int8_t>(art.read_integer(image, "FiringFrames", 0));
+    f.standing_frames = art.read_integer(image, "StandingFrames", f.firing_frames > 0 ? 1 : 0);
+    // Facings defaults to 1 when the type has neither firing frames nor a
+    // turret. TechnoType ReadINI 006DC024 stores Turret at +0xAAB.
+    const bool turret = rules.read_bool(type, "Turret", false);
+    f.facings = art.read_integer(image, "Facings", f.firing_frames == 0 && !turret ? 1 : 8);
+    const int default_walk = 0;
+    const int default_stand = f.standing_frames == 0 ? default_walk : f.walk_frames*f.facings;
+    f.start_walk = art.read_integer(image, "StartWalkFrame", default_walk);
+    f.start_stand = art.read_integer(image, "StartStandFrame", default_stand);
+    const int default_firing = f.firing_frames == 0 ? default_stand :
+        (f.walk_frames+f.standing_frames)*f.facings;
+    f.start_firing = art.read_integer(image, "StartFiringFrame", default_firing);
+    return f;
+}
+unsigned shp_vehicle_direction(std::uint8_t map_facing, int facings) noexcept {
+    // 007005D3..00700604: (((raw >> 12) + 1) >> 1) + 1, masked to 0..7.
+    // The disguise check at vtable +0xC0 (byte +0x170) also selects 0.
+    if (facings != 8) return 0;
+    const unsigned raw = unsigned(map_facing) << 8;
+    return ((((raw >> 12) + 1) >> 1) + 1) & 7;
+}
+std::size_t shp_vehicle_frame(const ShpVehicleFrames& f, std::uint8_t map_facing,
+                              bool moving, unsigned walk_counter) {
+    const int direction = int(shp_vehicle_direction(map_facing, f.facings));
+    long long frame;
+    if (moving) {
+        // 007006C2..007006E3: counter +0x430 modulo WalkFrames.
+        if (f.walk_frames <= 0) throw std::runtime_error("SHP vehicle has no walk frames");
+        frame = f.start_walk + (long long)f.walk_frames*direction + walk_counter % unsigned(f.walk_frames);
+    } else if (f.standing_frames == 0) {
+        // 0070069F..007006B3: resting units without stand frames use the
+        // first walk frame of their direction.
+        frame = f.start_walk + (long long)f.walk_frames*direction;
+    } else {
+        frame = f.start_stand + (long long)f.standing_frames*direction;
+    }
+    if (frame < 0) throw std::runtime_error("SHP vehicle frame is negative");
+    return std::size_t(frame);
+}
 int projected_height(std::int32_t z) noexcept {
     // 0x006D1830 and 0x006D18C0 initialize the diagonal and 60-degree
     // angle. 0x006D1BB0 uses the engine's square-root and sine tables.
@@ -129,7 +175,8 @@ ActorArt ActorArt::load(const fs::MixFileSystem& files, const rules::IniFile& ar
     if (!rules.find_section(type) && kind != Kind::Effect) {
         // 0x00672660 registers BuildingTypes even without a type section.
         const char* registry = kind == Kind::Building ? "BuildingTypes" :
-                               kind == Kind::Infantry ? "InfantryTypes" : "TerrainTypes";
+                               kind == Kind::Infantry ? "InfantryTypes" :
+                               kind == Kind::Vehicle ? "VehicleTypes" : "TerrainTypes";
         bool found = false;
         if (const auto* section = rules.find_section(registry))
             for (const auto& entry : section->entries) if (entry.value == type) { found = true; break; }

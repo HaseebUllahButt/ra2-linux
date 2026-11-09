@@ -36,6 +36,30 @@ int main(int argc, char** argv) {
     rules::IniFile default_tree_rules;
     default_tree_rules.parse("[A]\n");
     assert(actors::terrain_initial_frame(default_tree_rules,"A")==0);
+    // Base UnitType SHP layout (0070A600, 0070ACEF..0070AF9C) and the
+    // SHP unit draw direction and frame choice (007005B0).
+    rules::IniFile shp_rules, shp_art;
+    shp_rules.parse("[DRON]\n[PLAIN]\n[TUR]\nTurret=yes\n[SET]\nImage=SETART\n");
+    shp_art.parse("[DRON]\nWalkFrames=6\nFiringFrames=4\n[SETART]\nWalkFrames=3\nFacings=8\n"
+                  "StartWalkFrame=5\nStartStandFrame=40\n");
+    const auto dron=actors::shp_vehicle_frames(shp_rules,shp_art,"DRON");
+    assert(dron.facings==8 && dron.walk_frames==6 && dron.firing_frames==4 && dron.standing_frames==1);
+    assert(dron.start_walk==0 && dron.start_stand==48 && dron.start_firing==56);
+    const auto plain=actors::shp_vehicle_frames(shp_rules,shp_art,"PLAIN");
+    assert(plain.facings==1 && plain.walk_frames==12 && plain.standing_frames==0);
+    assert(plain.start_walk==0 && plain.start_stand==0 && plain.start_firing==0);
+    assert(actors::shp_vehicle_frames(shp_rules,shp_art,"TUR").facings==8);
+    const auto set=actors::shp_vehicle_frames(shp_rules,shp_art,"SET");
+    // Missing starts derive from defaults, not from the explicit StartWalkFrame.
+    assert(set.start_walk==5 && set.start_stand==40 && set.start_firing==0);
+    assert(actors::shp_vehicle_direction(0,8)==1 && actors::shp_vehicle_direction(8,8)==1);
+    assert(actors::shp_vehicle_direction(16,8)==2 && actors::shp_vehicle_direction(64,8)==3);
+    assert(actors::shp_vehicle_direction(224,8)==0 && actors::shp_vehicle_direction(240,8)==1);
+    assert(actors::shp_vehicle_direction(64,1)==0);
+    assert(actors::shp_vehicle_frame(dron,0,false,0)==49);
+    assert(actors::shp_vehicle_frame(dron,64,false,0)==51);
+    assert(actors::shp_vehicle_frame(dron,0,true,7)==7);
+    assert(actors::shp_vehicle_frame(set,0,false,0)==5+3);
     auto center=actors::building_center({2,3},3,2,60);
     assert(center.x==896 && center.y==1024 && center.z==60);
     auto screen=actors::project_world(center,15,{10,20});

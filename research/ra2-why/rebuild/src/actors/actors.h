@@ -10,7 +10,7 @@
 #include <string_view>
 
 namespace ra2::actors {
-enum class Kind { Infantry, Building, Effect, Terrain };
+enum class Kind { Infantry, Building, Effect, Terrain, Vehicle };
 // Basic locomotion state; action, death, deployment, and combat states are separate.
 // water means the original water-capable, water-cell, non-airborne branch applies.
 enum class InfantryMotion { Standing, Walking };
@@ -42,6 +42,22 @@ WorldPosition building_center(ra2map::Cell cell, unsigned foundation_width,
                               unsigned foundation_height, std::int32_t world_z);
 // Converts the map facing byte to the original infantry SHP direction.
 unsigned infantry_direction(std::uint8_t map_facing) noexcept;
+// Base UnitType SHP frame layout. Constructor 0070A600 sets Facings 8,
+// WalkFrames 12 and the start frames to -1; ReadINI 0070ACEF..0070AF9C
+// reads the frame keys from the art section and derives missing starts.
+struct ShpVehicleFrames {
+    int facings, walk_frames, firing_frames, standing_frames;
+    int start_walk, start_stand, start_firing;
+};
+ShpVehicleFrames shp_vehicle_frames(const rules::IniFile& rules, const rules::IniFile& art,
+                                    std::string_view type);
+// Base SHP unit draw 007005B0: eight-facing types use the high byte of the
+// current body facing; other facing counts always use direction 0.
+unsigned shp_vehicle_direction(std::uint8_t map_facing, int facings) noexcept;
+// Stand frame of a resting unit, or a walk frame while the locomotor moves.
+// Firing, death and idle-animation frames are separate states.
+std::size_t shp_vehicle_frame(const ShpVehicleFrames& frames, std::uint8_t map_facing,
+                              bool moving, unsigned walk_counter);
 struct Sequence { int first, count, stride; std::string fixed_facing; int delay; };
 class ActorArt {
 public:
