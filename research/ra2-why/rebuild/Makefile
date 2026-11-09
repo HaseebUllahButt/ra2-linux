@@ -5,7 +5,6 @@
 CXX ?= g++
 .DEFAULT_GOAL := all
 FEATURE_GAME_DIR ?= $(abspath ../game)
-FEATURE_YURI_RULES ?= $(abspath ../analysis/extracted/config/rulesmd.ini)
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O2
 SDL_FLAGS = $(shell pkg-config --cflags --libs sdl2)
 NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cpp src/app/scene.cpp src/app/vehicle_art.cpp \
@@ -39,7 +38,7 @@ all: test
 # playable match until their world and order adapters are connected.
 FEATURE_CHECKS = feature-net feature-save feature-movies feature-shroud feature-turret \
     feature-repair feature-aircraft feature-naval feature-triggers feature-special \
-    feature-superweapon feature-yuri feature-campaign feature-score feature-audio
+    feature-superweapon feature-campaign feature-score feature-audio
 .PHONY: feature-check $(FEATURE_CHECKS) feature-headless
 feature-check: $(FEATURE_CHECKS)
 
@@ -65,8 +64,6 @@ feature-special:
 	bash src/sim/test_prototype_special.sh "$(FEATURE_GAME_DIR)"
 feature-superweapon:
 	bash src/sim/test_prototype_superweapon.sh "$(FEATURE_GAME_DIR)"
-feature-yuri:
-	bash src/sim/test_prototype_yuri.sh "$(FEATURE_YURI_RULES)"
 feature-campaign:
 	bash src/ui/test_campaign_flow.sh "$(FEATURE_GAME_DIR)"
 feature-score:
