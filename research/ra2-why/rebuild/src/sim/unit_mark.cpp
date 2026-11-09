@@ -22,22 +22,35 @@ UnitMarkResult original_unit_mark(World& world,std::uint32_t id,int mode,const U
     if (!actor->object_field_74 || !actor->object_field_75 || !actor->object_field_76 || !actor->techno_field_370)
         return missing("Object mark bytes or Techno byte are unresolved");
     if (*actor->object_field_76) return {UnitMarkStatus::Complete,false,{}};
-    if (!cb.object_pre_mark) return missing("Object pre-mark effects are unresolved");
     try {
-        const auto before=cb.object_pre_mark(staged,id,mode);
-        if (!before || !*before) return missing("Object pre-mark effects are unresolved");
+        if (cb.object_pre_mark) {
+            const auto before=cb.object_pre_mark(staged,id,mode);
+            if (!before || !*before) return missing("Object pre-mark effects are unresolved");
+        } else {
+            // 005D4160 calls 0040DC20, then the Unit +2A0, +38 and +1A0
+            // getters. For an ordinary Unit these read Type, House and position;
+            // their results are discarded and none writes world state.
+            const auto house=std::find_if(staged.houses.begin(),staged.houses.end(),
+                [&](const auto& h){return h.id==actor->house_id;});
+            if (!actor->original_type_index || !actor->category || actor->category->runtime_type!=1 ||
+                house==staged.houses.end() || !actor->position || !actor->cell || actor->position->x<0 || actor->position->y<0 ||
+                actor->position->x/256!=actor->cell->x || actor->position->y/256!=actor->cell->y)
+                return missing("Object pre-mark Unit getters are unresolved");
+        }
         actor=unit(staged,id);
-        if (!actor || !actor->object_field_74 || !actor->techno_field_370) return missing("Object mark state changed to unknown");
+        if (!actor || !actor->object_field_74 || !actor->object_field_75 || !actor->techno_field_370) return missing("Object mark state changed to unknown");
         const bool adding=mode!=0;
         if (adding==(*actor->object_field_74!=0)) {
             // Parent Object mark returns false after its pre-mark effects.
             world=std::move(staged);return {UnitMarkStatus::Complete,false,{}};
         }
         *actor->object_field_74=adding?1:0;
-        if (adding) {
-            if (!cb.refresh_after_mark) return missing("Object mark refresh is unresolved");
+        if (adding && !*actor->object_field_75) {
+            // Unit virtual +12C is 005D36E0. It sets +75 before 004E09A0(0).
+            *actor->object_field_75=1;
+            if (!cb.refresh_after_mark) return missing("Object refresh virtual is unresolved");
             const auto refreshed=cb.refresh_after_mark(staged,id);
-            if (!refreshed || !*refreshed) return missing("Object mark refresh is unresolved");
+            if (!refreshed || !*refreshed) return missing("Object refresh virtual is unresolved");
             actor=unit(staged,id);
             if (!actor || !actor->techno_field_370) return missing("Techno byte changed to unknown");
         }

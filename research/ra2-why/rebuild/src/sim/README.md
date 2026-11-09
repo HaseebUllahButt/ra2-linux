@@ -1328,9 +1328,11 @@ hierarchy, regular search, and retained path memory. Unit mark-out and mark-in
 use the original ordered links and full 32-bit occupancy fields. The checked
 `original_live_cell_setup` binding runs the recovered Cell setup body against
 current ordered occupants. It needs explicit theater, tile guards, allocation,
-and land-wheel inputs. `original_unit_insertion_visibility` handles the checked
-flat projection and its first visibility test. Other visibility and Object
-effects require explicit callbacks. Search and marking use private state. Missing callbacks leave the published snapshot
+and land-wheel inputs. It rejects fallback lookups because their global
+coordinate writes are not in Snapshot. `original_unit_insertion_visibility` handles the checked
+flat projection and both original visibility tests. It keeps Cell +12C bit 8
+separate from Cell +140 bit 2. The Unit reveal virtual and Object refresh effects
+require explicit callbacks. Ordinary Unit pre-mark getters run natively. Search and marking use private state. Missing callbacks leave the published snapshot
 unchanged. Paths needing unrecovered retarget, failure, or local reachability
 inputs remain unsupported or unresolved.
 
@@ -1338,8 +1340,10 @@ inputs remain unsupported or unresolved.
 flat, empty-cell drive when all original side-effect callbacks are supplied.
 It uses base 004A0BC0 to reserve the next Cell, then applies the recovered
 Foot +5A0 and +5A1 transitions. Each `begin()` or `tick()` stages the caller's
-shared Snapshot and movement state, and commits both only on success. It
-rejects external changes to the active Unit or watched Cells. Arrival requires
+shared Snapshot and movement state, and commits both only on success. Only one
+Unit can move at a time. Each runtime tick advances its private frame once;
+the shared game clock remains future integration work. It rejects external
+changes to the active Unit or watched Cells. Arrival requires
 a resolved completion callback. Bridge, turning, dynamic collision, and
 mission effects remain open.
 No application or `Simulation` command is connected to this staging API.
@@ -1349,7 +1353,7 @@ link operations, ordered drive position calls, and a 23-frame occupancy replay.
 It connects the recovered live Cell setup binding. Its world, tile metadata,
 and unresolved Object effects are synthetic. `test_live_cell_setup.sh`
 checks 512 Cell setup bindings against the recovered body. The visibility test
-checks its first projection branch and rejects unresolved callbacks. `test_goal_runtime_real.sh` loads the real
+checks both projection branches and rejects unresolved callbacks. `test_goal_runtime_real.sh` loads the real
 MP02T2 packed map and verifies that its unfinished phase cannot enter the
 runtime. The optional Unicorn scripts `original_unit_mark_check.py`,
 `original_drive_position_check.py`, `original_drive_occupancy_check.py`, and
@@ -1357,3 +1361,26 @@ runtime. The optional Unicorn scripts `original_unit_mark_check.py`,
 execute the corresponding base `game.exe` bodies with explicit fixture
 adapters. The occupancy check proves that the Unit and its reserved Cell can
 occupy different cells during a frame. It does not complete real scenario setup.
+
+## Playable prototype movement
+
+`prototype_movement.h` is a separate playable path for
+`SetupProgress::PrototypeComplete`. It does not enter the checked original
+runtime. It uses deterministic grid routing, simple position interpolation, and
+prototype obstacle and nearby-goal rules. These are marked `TODO-ORIGINAL`.
+The caller supplies each Unit's speed and one shared game frame.
+
+`issue(world, id, goal, speed)` queues a Unit or Infantry move. A later order
+replaces the route only when the new route succeeds. `tick(world, frame)`
+updates all queued actors on one private Snapshot and publishes it atomically.
+It preserves ground Cell links, full occupancy words, and all RNG state. It
+returns moved, arrived, and blocked IDs. It keeps Unit positions, hull facing,
+collision positions, and movement activity in the shared Snapshot. The
+prototype uses Unit occupancy for Infantry until original subcell behavior is
+connected. It rejects unresolved required Cell state and unsupported bridges.
+
+`test_prototype_movement.sh` checks group routing, obstacles, replay, and
+atomic rejection. `test_prototype_movement_real.sh` builds the separate Battle
+prototype from installed MP02T2 assets and replays two installed starting
+Units. The Battle setup and movement use documented prototype assumptions;
+they are not a claim of original RA2 behavior.

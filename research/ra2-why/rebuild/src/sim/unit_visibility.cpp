@@ -2,6 +2,38 @@
 #include <algorithm>
 #include <exception>
 namespace ra2::sim {
+namespace {
+std::optional<std::uint32_t> projected_flags(const session::world::Snapshot& world,int x,int y,const UnitVisibilityInputs& in) {
+    if (!in.allocated || in.allocated->size()!=512u*512u || x<0 || y<0 || x>=512 || y>=512) return {};
+    const auto index=std::uint32_t(y)*512+std::uint32_t(x);
+    if (!(*in.allocated)[index]) return {};
+    const auto found=world.cells.find(index);
+    if (found==world.cells.end() || !found->second.allocated || !*found->second.allocated) return {};
+    return found->second.cell_flags_140;
+}
+}
+std::optional<bool> original_secondary_unit_visibility(const session::world::Snapshot& world,Coord point,const UnitVisibilityInputs& in) {
+    if (!in.global_mode || !in.projection_divisor || *in.projection_divisor<=0 || point.x<0 || point.y<0 || point.z<0) return {};
+    if (*in.global_mode) {
+        if (!in.local_house_flag_13d) return {};
+        if (*in.local_house_flag_13d) {
+            if (!in.global_flag_a3d548) return {};
+            if (*in.global_flag_a3d548) return false;
+        }
+    }
+    const int height=point.z / *in.projection_divisor;
+    const int offset=height/2+(height&1);
+    int x=point.x/256-offset,y=point.y/256-offset;
+    auto flags=projected_flags(world,x,y,in);
+    if (!flags) return {};
+    if (*flags&0x2u) return false;
+    if (height&1) {
+        flags=projected_flags(world,++x,++y,in);
+        if (!flags) return {};
+        if (*flags&0x2u) return false;
+    }
+    return true;
+}
 UnitVisibilityResult original_unit_insertion_visibility(session::world::Snapshot& world,std::uint32_t id,
     std::uint32_t key,const UnitVisibilityInputs& in) {
     UnitVisibilityResult result;
@@ -43,9 +75,8 @@ UnitVisibilityResult original_unit_insertion_visibility(session::world::Snapshot
     try {
         bool can_skip=visible;
         if (!visible) {
-            if (!in.secondary) { result.detail="secondary Cell visibility body is unresolved";return result; }
             const Coord center{int(key%512)*256+128,int(key/512)*256+128,*terrain.floor_world_height};
-            const auto second=in.secondary(staged,center);
+            const auto second=in.secondary?in.secondary(staged,center):original_secondary_unit_visibility(staged,center,in);
             if (!second) { result.detail="secondary Cell visibility is unresolved";return result; }
             can_skip=*second;
         }

@@ -19,12 +19,12 @@ struct Fixture {
     LiveCellSetupInputs cell_setup;
     UnitVisibilityInputs visibility;
     Fixture() {
-        world.geometry=session::PlacementGeometry{64,65,{0,0,64,65}};
+        world.geometry=session::PlacementGeometry{32,50,{0,0,32,50}};
         world.tube_vector_count=0; world.random=Random(42).state();world.setup_progress=sw::SetupProgress::Complete;
-        world.cell_order=std::vector<std::uint32_t>{};for (const auto c:original_map_cell_order(64,65)) world.cell_order->push_back(key(c));
-        sw::House house; house.id=1; house.name="Player";house.country="America";world.houses.push_back(house);
+        world.cell_order=std::vector<std::uint32_t>{};for (const auto c:original_map_cell_order(32,50)) world.cell_order->push_back(key(c));
+        sw::House house; house.id=1; house.name="Player";house.country="America";house.constructor_complete=true;world.houses.push_back(house);
         sw::Entity unit; unit.id=2;unit.house_id=1;unit.type="HTNK";unit.lifetime=sw::Lifetime::Placed;
-        unit.next=0;unit.cell=ra2map::Cell{54,69};unit.position=ground_cell_center(54,69);unit.layer=sw::Layer::Ground;
+        unit.next=0;unit.constructor_complete=true;unit.original_type_index=0;unit.cell=ra2map::Cell{54,69};unit.position=ground_cell_center(54,69);unit.layer=sw::Layer::Ground;
         unit.on_map=true;unit.unit_field_7d=1;unit.foot_field_5a1=0;unit.object_field_74=1;unit.object_field_75=1;unit.object_field_76=0;unit.techno_field_370=0;unit.hull_facing=128;unit.hull_facing_raw=32768;unit.resolved_hp=400;unit.maximum_hp=400;unit.occupancy_tracking=true;
         sw::BaseUnitProfile profile;
         profile.restricted_land=-1;profile.movement_mode=-1;profile.placement_mode=2;profile.speed_type=1;
@@ -34,10 +34,10 @@ struct Fixture {
         CoarseOccupantState category;category.runtime_type=1;unit.category=category;
         world.entities.push_back(unit);world.creation_order={{sw::CreatedKind::House,1},{sw::CreatedKind::Entity,2}};
         setup.allocated.resize(512*512);setup.frame=11;setup.components.transitions=std::vector<ComponentTransition>{};
-        constexpr unsigned stride=130;
+        constexpr unsigned stride=83;
         setup.hierarchy_cells.resize(stride*stride);
         for (auto& c:setup.hierarchy_cells) c={{7,0},false};
-        for (const auto point:original_map_cell_order(64,65)) {
+        for (const auto point:original_map_cell_order(32,50)) {
             const int x=point.x,y=point.y;const bool inside=x>=50 && x<=58 && y>=65 && y<=73;
             const auto index=key(point);setup.allocated[index]=true;
             auto& c=world.cells[index];c.allocated=true;c.heads=weapons::CellContentHeads{};
@@ -65,8 +65,6 @@ struct Fixture {
         // are not evidence for complete original marking or movement callbacks.
         cb.finish=[](sw::Snapshot&,std::uint32_t)->std::optional<bool>{return true;};
         cb.mark.bridge_height=416;
-        cb.mark.object_pre_mark=[](sw::Snapshot&,std::uint32_t,int)->std::optional<bool>{return true;};
-        cb.mark.refresh_after_mark=[](sw::Snapshot&,std::uint32_t)->std::optional<bool>{return true;};
         visibility.projection_divisor=104;visibility.global_mode=false;visibility.allocated=&setup.allocated;
         cb.mark.insertion_visibility=[this](sw::Snapshot& world,std::uint32_t id,std::uint32_t cell)->std::optional<bool>{
             const auto result=original_unit_insertion_visibility(world,id,cell,visibility);
@@ -78,14 +76,17 @@ struct Fixture {
             if (index!=0) return {};
             return TileMetadata{0,0,subtile==0};
         };
-        cell_setup.theater=&theater;cell_setup.cliff=0;cell_setup.allocated=&setup.allocated;cell_setup.land_wheels[0]=1;
+        cell_setup.theater=&theater;cell_setup.cliff=0;cell_setup.allocated=&setup.allocated;
+        cell_setup.fallback=original_default_terrain_cell({0,0});cell_setup.land_wheels[0]=1;
         cell_setup.guard=[](std::uint32_t,std::uint32_t tile)->std::optional<CellSetupStatic>{
             if (tile!=0) return {};
             CellSetupStatic g;g.receiver_tile_index=0;g.animation_index=-1;g.shadow_enabled=false;g.bounds_height=30;return g;
         };
         cb.mark.cell_setup=[this](sw::Snapshot& world,std::uint32_t key)->std::optional<bool>{
             const auto result=original_live_cell_setup(world,key,cell_setup);
-            if (result.status!=CellSetupStatus::Complete) return {};
+            if (result.status!=CellSetupStatus::Complete) {
+                std::cerr<<"Cell setup "<<key<<": "<<result.detail<<'\n';return {};
+            }
             return true;
         };
 
@@ -93,7 +94,51 @@ struct Fixture {
 };
 }
 int main(int argc,char** argv) try {
-    if (argc!=2) throw std::runtime_error("usage: test_goal_runtime game.exe");
+    if (argc!=2 && !(argc==3 && std::string(argv[2])=="--vectors"))
+        throw std::runtime_error("usage: test_goal_runtime game.exe [--vectors]");
+    if (argc==3) {
+        constexpr int dx[]={0,1,1,1,0,-1,-1,-1},dy[]={-1,-1,0,1,1,1,0,-1};
+        struct Golden { unsigned direction;int speed;unsigned frames;std::uint32_t hash; };
+        static constexpr Golden goldens[]={
+#include "drive_occupancy_golden.inc"
+        };
+        std::uint32_t hash=2166136261u;unsigned checks=0;std::size_t case_index=0;
+        for (unsigned direction=0;direction<8;++direction) for (int speed:{1,7,15,30,255}) {
+            std::uint32_t case_hash=2166136261u;unsigned case_frames=0;
+            Fixture fixture;auto world=fixture.world;fixture.actor.speed=speed;fixture.setup.types.at(2).speed=speed;
+            world.entities[0].hull_facing=static_cast<int>(direction*32);
+            world.entities[0].hull_facing_raw=static_cast<std::uint16_t>(direction*8192);
+            const auto imported=GoalRuntime::import(world,fixture.setup,argv[1]);
+            require(imported.first!=nullptr,"direction fixture import failed");
+            const ra2map::Cell goal{static_cast<std::uint16_t>(54+2*dx[direction]),static_cast<std::uint16_t>(69+2*dy[direction])};
+            const auto plan=imported.first->begin(world,2,goal,fixture.actor,fixture.cb);
+            if (plan.status!=GoalRuntimeStatus::Complete) std::cerr<<"direction "<<direction<<": "<<plan.detail<<'\n';
+            require(plan.status==GoalRuntimeStatus::Complete && plan.directions==std::vector<unsigned>({direction,direction}),"direction search differs");
+            for (unsigned frame=1;frame<1000;++frame) {
+                const auto tick=imported.first->tick(world,2,fixture.cb);
+                if (tick.status!=GoalRuntimeStatus::Complete) std::cerr<<"direction "<<direction<<" frame "<<frame<<": "<<tick.detail<<'\n';
+                require(tick.status==GoalRuntimeStatus::Complete,"direction drive failed");
+                const auto mix=[&](std::uint32_t n){hash=(hash^n)*16777619u;case_hash=(case_hash^n)*16777619u;};
+                const auto& e=world.entities[0];
+                for (auto n:{direction,static_cast<unsigned>(speed),frame,static_cast<unsigned>(e.position->x),static_cast<unsigned>(e.position->y),unsigned(*e.occupancy_tracking)}) mix(n);
+                for (int i=0;i<3;++i) {
+                    const auto& cell=world.cells.at(key({static_cast<std::uint16_t>(54+i*dx[direction]),static_cast<std::uint16_t>(69+i*dy[direction])}));
+                    mix(cell.heads->ground_head==2);mix(*cell.ground_occupancy_124);
+                }
+                ++checks;++case_frames;if (!imported.first->moving(2)) break;
+                require(frame!=999,"direction drive did not finish");
+            }
+            const auto expected=goldens[case_index++];
+            if (case_frames!=expected.frames || case_hash!=expected.hash)
+                std::cerr<<"direction "<<direction<<" speed "<<speed<<" frames "<<case_frames<<" hash "<<std::hex<<case_hash
+                         <<" expected "<<expected.frames<<" "<<expected.hash<<std::dec<<'\n';
+            require(expected.direction==direction && expected.speed==speed && case_frames==expected.frames && case_hash==expected.hash,
+                    "original drive case differs");
+        }
+        if (checks!=3932 || hash!=0x413d4d59u) std::cerr<<"native vector frames="<<checks<<" hash="<<std::hex<<hash<<std::dec<<'\n';
+        require(checks==3932 && hash==0x413d4d59u,"original occupancy vectors differ");
+        std::cout<<checks<<" original frames across eight directions and five speeds match\n";return 0;
+    }
     Fixture f;
     auto incomplete=f.world;incomplete.setup_progress=sw::SetupProgress::PackedMapRead;
     auto phase=GoalRuntime::import(incomplete,f.setup,argv[1]);
@@ -101,6 +146,9 @@ int main(int argc,char** argv) try {
     auto bad=f.world;bad.cells.at(key({54,70})).cell_flag_100.reset();
     auto rejected=GoalRuntime::import(bad,f.setup,argv[1]);
     require(!rejected.first && rejected.second.status==GoalRuntimeStatus::NeedsInput,"unknown bridge was accepted");
+    bad=f.world;bad.cells.at(key({54,70})).cell_field_12c.reset();
+    rejected=GoalRuntime::import(bad,f.setup,argv[1]);
+    require(!rejected.first && rejected.second.status==GoalRuntimeStatus::NeedsInput,"unknown Cell visibility was accepted");
     bad=f.world;bad.cells.at(key({54,70})).neighbor_count.reset();
     rejected=GoalRuntime::import(bad,f.setup,argv[1]);
     require(!rejected.first && rejected.second.status==GoalRuntimeStatus::NeedsInput,"unknown hierarchy byte was accepted");
@@ -130,6 +178,19 @@ int main(int argc,char** argv) try {
     require(mark_in.status==UnitMarkStatus::Complete && mark_in.value && marked.entities[0].object_field_74==1 &&
             marked.cells.at(key({54,69})).heads->ground_head==2 && marked.entities[0].next==3 && marked.entities[1].next==0 &&
             marked.cells.at(key({54,69})).ground_occupancy_124==0xa5a50020u,"original Unit mark-in differs");
+    auto refresh_world=f.world;refresh_world.entities[0].object_field_75=0;
+    auto refresh_callbacks=f.cb.mark;
+    require(original_unit_mark(refresh_world,2,0,refresh_callbacks).status==UnitMarkStatus::Complete,"mark-out before refresh failed");
+    const auto refresh_before=refresh_world;
+    require(original_unit_mark(refresh_world,2,1,refresh_callbacks).status==UnitMarkStatus::NeedsInput &&
+            refresh_world.entities[0].object_field_75==0 && refresh_world.entities[0].object_field_74==0 &&
+            refresh_world.random.table==refresh_before.random.table,"unknown Object refresh published partial changes");
+    bool refreshed=false;
+    refresh_callbacks.refresh_after_mark=[&](sw::Snapshot& s,std::uint32_t)->std::optional<bool>{
+        refreshed=s.entities[0].object_field_75==1;return true;
+    };
+    require(original_unit_mark(refresh_world,2,1,refresh_callbacks).status==UnitMarkStatus::Complete && refreshed,
+            "Object refresh byte was not written before the callback");
     auto one=GoalRuntime::import(f.world,f.setup,argv[1]);auto two=GoalRuntime::import(f.world,f.setup,argv[1]);
     if (!one.first) std::cerr<<one.second.detail<<"\n";
     require(one.first && two.first,"complete fixture import failed");
@@ -156,6 +217,15 @@ int main(int argc,char** argv) try {
     auto damaged=world_one;damaged.entities[0].resolved_hp=399;
     require(one.first->tick(damaged,2,f.cb).status==GoalRuntimeStatus::Unsupported && damaged.entities[0].resolved_hp==399,
             "external health change was accepted or overwritten");
+    auto linked=world_one;sw::Entity foreign;foreign.id=3;foreign.kind=sw::Kind::Terrain;foreign.type="TREE";
+    foreign.lifetime=sw::Lifetime::Placed;foreign.constructor_complete=true;foreign.on_map=true;foreign.cell=ra2map::Cell{50,65};
+    foreign.position=ground_cell_center(50,65);foreign.layer=sw::Layer::Ground;foreign.next=2;
+    linked.entities.push_back(foreign);linked.creation_order.push_back({sw::CreatedKind::Entity,3});
+    require(one.first->tick(linked,2,f.cb).status==GoalRuntimeStatus::Unsupported && linked.entities.back().next==2,
+            "external shared link was accepted or overwritten");
+    auto changed_hierarchy=world_one;changed_hierarchy.cells.at(key({50,65})).coarse_category=6;
+    require(one.first->tick(changed_hierarchy,2,f.cb).status==GoalRuntimeStatus::NeedsInput &&
+            changed_hierarchy.cells.at(key({50,65})).coarse_category==6,"stale hierarchy was accepted or overwritten");
     auto failing=f.cb;failing.mark.cell_setup=[](sw::Snapshot& s,std::uint32_t)->std::optional<bool>{s.random.table[1]^=456;return {};};
     const auto prior=world_one;const auto prior_motion=one.first->state().motion.at(2);
     require(one.first->tick(world_one,2,failing).status==GoalRuntimeStatus::NeedsInput,"unknown Cell setup during movement was accepted");

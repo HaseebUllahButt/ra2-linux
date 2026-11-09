@@ -33,6 +33,19 @@ int main() try {
                 second_calls==unsigned(!visible) && seen_calls==unsigned(call_seen),"visibility projection or original branch order differs");
         ++checks;
     }
+    for (int h=0;h<4;++h) for (unsigned a:{0u,2u}) for (unsigned b:{0u,2u})
+        for (int mode=0;mode<2;++mode) for (int house=0;house<2;++house) for (int gate=0;gate<2;++gate) {
+            sw::Snapshot world;std::vector<bool> allocation(512*512);
+            const int off=h/2+(h&1),x=20-off,y=20-off;
+            auto& first=world.cells[key(x,y)];first.allocated=true;first.cell_flags_140=a;allocation[key(x,y)]=true;
+            if (h&1) {auto& next=world.cells[key(x+1,y+1)];next.allocated=true;next.cell_flags_140=b;allocation[key(x+1,y+1)]=true;}
+            UnitVisibilityInputs in;in.allocated=&allocation;in.projection_divisor=104;in.global_mode=bool(mode);
+            in.local_house_flag_13d=bool(house);in.global_flag_a3d548=bool(gate);
+            const bool expected=!(mode && house && gate) && a==0 && (!(h&1) || b==0);
+            require(original_secondary_unit_visibility(world,{20*256+128,20*256+128,h*104},in)==expected,
+                    "secondary original visibility differs");
+            ++checks;
+        }
     sw::Snapshot partial;partial.random=Random(91).state();UnitVisibilityInputs missing;
     const auto before=partial.random;
     require(original_unit_insertion_visibility(partial,2,key(20,20),missing).status==UnitVisibilityStatus::NeedsInput &&

@@ -30,12 +30,17 @@ int main() try {
             allocation[index]=true;
         }
         LiveCellSetupInputs input;input.theater=&f.theater;input.cliff=f.cliff;input.allocated=&allocation;
+        input.fallback=original_default_terrain_cell({0,0});
         input.guard=[&](std::uint32_t,std::uint32_t tile)->std::optional<CellSetupStatic>{
             if (tile!=*f.guard.receiver_tile_index) return {};
             return f.guard;
         };
         for (int land=0;land<32;++land) input.land_wheels[land]=(seed+land)%3?1.0f:0.0f;
         const auto before=world.random;
+        auto missing_allocation=allocation;missing_allocation[key({20,19})]=false;
+        auto fallback_input=input;fallback_input.allocated=&missing_allocation;
+        require(original_live_cell_setup(world,key(f.state.terrain.cell),fallback_input).status==CellSetupStatus::NeedsInput,
+                "unrepresented fallback coordinate write was accepted");
         auto missing=input;missing.guard={};
         require(original_live_cell_setup(world,key(f.state.terrain.cell),missing).status==CellSetupStatus::NeedsInput,
                 "unresolved TileType guard was accepted");
@@ -51,5 +56,18 @@ int main() try {
                 world.random.first==before.first && world.random.second==before.second,
                 "live Cell setup did not preserve ordered links, output, or RNG");
     }
-    std::cout<<"512 checked Cell setup bindings match the recovered body; unresolved input is atomic\n";
+    sw::Snapshot alias_world;std::vector<bool> allocation(512*512);
+    auto& alias=alias_world.cells[511];alias.allocated=true;alias.terrain=original_default_terrain_cell({511,0});allocation[511]=true;
+    const auto aliased=original_live_cell_neighbor(alias_world,allocation,original_default_terrain_cell({0,0}),{0xffff,1});
+    require(aliased && aliased->allocated && aliased->terrain.cell.x==511 && aliased->terrain.cell.y==0,
+            "signed (-1,1) did not alias Cell (511,0)");
+    const auto negative=original_live_cell_neighbor(alias_world,allocation,original_default_terrain_cell({0,0}),{0xffff,0});
+    require(negative && !negative->allocated,"signed (-1,0) did not use the known fallback");
+    alias_world.cells.erase(511);
+    require(!original_live_cell_neighbor(alias_world,allocation,original_default_terrain_cell({0,0}),{0xffff,1}),"unknown aliased Cell was treated as fallback");
+    allocation[511]=false;
+    require(!original_live_cell_neighbor(alias_world,allocation,{}, {0xffff,1}),"unknown fallback metadata was accepted");
+    const auto null_alias=original_live_cell_neighbor(alias_world,allocation,original_default_terrain_cell({0,0}),{0xffff,1});
+    require(null_alias && !null_alias->allocated,"known null alias did not use fallback");
+    std::cout<<"512 checked Cell setup bindings, signed aliases, and atomic rejection passed\n";
 } catch(const std::exception& error) { std::cerr<<error.what()<<'\n';return 1; }

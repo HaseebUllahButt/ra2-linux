@@ -34,6 +34,16 @@ Entity* entity(World& world,std::uint32_t id) {
     const auto it=std::find_if(world.entities.begin(),world.entities.end(),[&](const Entity& e){return e.id==id;});
     return it==world.entities.end()?nullptr:&*it;
 }
+bool isolated_unit_link(const World& world,const Entity& actor) {
+    if (!actor.cell || !actor.next || *actor.next!=0 || actor.cell->x>=512 || actor.cell->y>=512) return false;
+    const auto own=key(*actor.cell);const auto cell=world.cells.find(own);
+    if (cell==world.cells.end() || !cell->second.heads || cell->second.heads->ground_head!=actor.id || cell->second.heads->bridge_head==actor.id)
+        return false;
+    for (const auto& item:world.cells) if (item.first!=own && item.second.heads &&
+        (item.second.heads->ground_head==actor.id || item.second.heads->bridge_head==actor.id)) return false;
+    for (const auto& other:world.entities) if (other.id!=actor.id && other.next && *other.next==actor.id) return false;
+    return true;
+}
 std::optional<std::string> check_world(const World& world,const GoalRuntimeSetup& setup) {
     if (world.edition!=session::world::Edition::Base) return "only base RA2 setup is supported";
     if (world.pending_cell_setup || world.pending_setup_cell) return "Cell setup is unfinished";
@@ -75,12 +85,16 @@ std::optional<std::string> check_world(const World& world,const GoalRuntimeSetup
         if (*t.height_level < -128 || *t.height_level > 127 || *t.ramp_index<0 || *t.ramp_index>19)
             return "Cell height or ramp exceeds the recovered domain";
     }
+    for (const auto& house:world.houses) if (!house.constructor_complete) return "House construction is unfinished";
     for (const auto& e:world.entities) if (e.lifetime==session::world::Lifetime::Placed) {
+        if (!e.constructor_complete) return "placed object construction is unfinished";
         if (!e.next || !e.position || !e.cell || !e.layer || !e.on_map) return "placed object state or ordered link is unresolved";
         if (e.kind==session::world::Kind::Unit) {
-            if (!e.base_profile || !e.hull_facing || !e.occupancy_tracking || !e.resolved_hp ||
+            if (!e.base_profile || !e.hull_facing || !e.hull_facing_raw || !e.occupancy_tracking || !e.resolved_hp ||
+                !e.maximum_hp || !e.original_type_index || !e.category || !e.category->runtime_type ||
                 !e.object_field_74 || !e.object_field_75 || !e.object_field_76 || !e.techno_field_370 || !e.unit_field_7d || !e.foot_field_5a1)
                 return "placed Unit runtime fields are unresolved";
+            if (*e.category->runtime_type!=1) return "Unit runtime type is not the original Unit kind";
             const auto& p=*e.base_profile;
             if (!p.restricted_land || !p.movement_mode || !p.placement_mode || !p.speed_type || !p.level_height ||
                 !p.leptons_per_sight_increase || !p.type_flag_aa0 || !p.unit_flag_32c || !p.linked_team ||
@@ -168,6 +182,9 @@ GoalRuntimeResult GoalRuntime::begin(World& world,std::uint32_t id,ra2map::Cell 
         return unsupported("damaged or dead Unit drive is not recovered");
     if (!source_entity->on_map || !source_entity->layer || *source_entity->layer!=session::world::Layer::Ground ||
         !source_entity->cell || !source_entity->position || !source_entity->hull_facing) return missing("actor ground placement is unresolved");
+    if (source_entity->cell->x>=512 || source_entity->cell->y>=512 || !state_.allocated[key(*source_entity->cell)])
+        return unsupported("actor Cell is outside the allocated map array");
+    if (!isolated_unit_link(world,*source_entity)) return unsupported("Unit ordered Cell link is not isolated");
     if (!cb.can_queue || !cb.enter) return missing("original queue or entry callback is unresolved");
     if (!source_entity->unit_field_7d || !*source_entity->unit_field_7d || !source_entity->base_profile ||
         !source_entity->base_profile->type_flag_aa0 || *source_entity->base_profile->type_flag_aa0)
@@ -345,12 +362,12 @@ GoalRuntimeResult GoalRuntime::tick(World& world,std::uint32_t id,const GoalRunt
     if (!current || !current->position || !same(*current->position,active->second.segment.current) ||
         !current->hull_facing || *current->hull_facing!=static_cast<int>(active->second.segment.facing) ||
         !current->hull_facing_raw || *current->hull_facing_raw!=active->second.segment.facing*256u ||
-        !current->unit_field_7d || !*current->unit_field_7d || !current->resolved_hp || *current->resolved_hp!=active->second.health || !current->maximum_hp ||
+        !current->next || *current->next!=0 || !current->unit_field_7d || !*current->unit_field_7d || !current->resolved_hp || *current->resolved_hp!=active->second.health || !current->maximum_hp ||
         *current->maximum_hp!=active->second.health || !current->occupancy_tracking ||
         *current->occupancy_tracking!=active->second.tracking || !current->object_field_74 ||
         *current->object_field_74!=active->second.mark || !current->object_field_75 ||
         *current->object_field_75!=active->second.refresh || !current->foot_field_5a1 ||
-        *current->foot_field_5a1!=active->second.foot_5a1)
+        *current->foot_field_5a1!=active->second.foot_5a1 || !isolated_unit_link(world,*current))
         return unsupported("another action changed the active Unit drive state");
     for (const auto& watched:active->second.watched_cells) {
         const auto found=world.cells.find(watched.first);
@@ -428,8 +445,11 @@ GoalRuntimeResult GoalRuntime::tick(World& world,std::uint32_t id,const GoalRunt
         } catch(const std::exception& e) { return unsupported(e.what()); }
     }
     const auto* actor=entity(candidate,id);
-    if (!actor || !actor->unit_field_7d || !*actor->unit_field_7d || !actor->position || !same(*actor->position,segment.current) || !actor->hull_facing || *actor->hull_facing!=static_cast<int>(segment.facing))
-        return missing("drive actor position or facing is unresolved");
+    if (!actor || !isolated_unit_link(candidate,*actor) || !actor->unit_field_7d || !*actor->unit_field_7d || !actor->position ||
+        !same(*actor->position,segment.current) || !actor->hull_facing || *actor->hull_facing!=static_cast<int>(segment.facing) ||
+        !actor->hull_facing_raw || *actor->hull_facing_raw!=segment.facing*256u || !actor->resolved_hp ||
+        *actor->resolved_hp!=active->second.health || !actor->maximum_hp || *actor->maximum_hp!=active->second.health)
+        return missing("drive Unit position, facing, or health changed unexpectedly");
     for (std::size_t i=0;i<segment.motion.path.size();++i) setup.foot.at(id).words[i]=segment.motion.path[i];
     setup.motion.at(id)=segment.motion;++*setup.frame;
     if (const auto error=check_world(candidate,setup)) return missing(*error);

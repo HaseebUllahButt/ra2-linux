@@ -42,4 +42,14 @@ for mode,head,object_next,other_next,occupancy,marked in (
             cpu.mem_read(m.FOOT+0x74,1)[0])==(head,object_next,other_next,occupancy,marked)
     assert len(fixture['setup_calls'])==previous+1 and fixture['setup_calls'][-1]==cell
     assert bytes(cpu.mem_read(scenario+0x218,1012))==before
+refresh_calls=[]
+def refresh(): refresh_calls.append(cpu.mem_read(m.FOOT+0x75,1)[0])
+m.bind(0x4e09a0,4,refresh);cpu.mem_write(m.FOOT+0x75,b'\x00')
+for mode in (0,1):
+    cpu.reg_write(UC_X86_REG_ECX,m.FOOT);cpu.reg_write(UC_X86_REG_ESP,0x103f000)
+    cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,mode))
+    cpu.emu_start(0x4c2e60,0x103e000,count=100000)
+    assert cpu.reg_read(UC_X86_REG_EIP)==0x103e000
+assert refresh_calls==[1] and cpu.mem_read(m.FOOT+0x75,1)==b'\x01',refresh_calls
+assert bytes(cpu.mem_read(scenario+0x218,1012))==before
 print('base original Unit mark-out/in preserves ordered links, full occupancy words, and random state')

@@ -12,9 +12,11 @@ struct UnitMarkResult {
 };
 struct UnitMarkCallbacks {
     std::optional<int> bridge_height;
-    // Resolved bodies in original call order. Return true only when the whole
-    // named body completed. All callbacks operate on the private snapshot.
+    // Optional override for Object pre-mark. The built-in ordinary Unit path
+    // uses the original read-only getters when this is absent.
     std::function<std::optional<bool>(session::world::Snapshot&,std::uint32_t,int)> object_pre_mark;
+    // Base 004E09A0(0), reached only when Object +75 changes from zero to one.
+    // Return true only when the complete body ran on the private Snapshot.
     std::function<std::optional<bool>(session::world::Snapshot&,std::uint32_t)> refresh_after_mark;
     std::function<std::optional<bool>(session::world::Snapshot&,std::uint32_t)> techno_dirty;
     std::function<std::optional<bool>(session::world::Snapshot&,std::uint32_t,std::uint32_t)> insertion_visibility;
