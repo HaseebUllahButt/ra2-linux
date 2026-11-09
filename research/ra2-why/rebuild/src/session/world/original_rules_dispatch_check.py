@@ -8,8 +8,8 @@ This is not a complete rules load or Battle setup.
 
 With --vehicle, the original VehicleTypes loop reads the installed AMCV entry
 through a supplied one-entry enumeration and searches a supplied Unit registry.
-With --vehicle-create, the registry starts empty. Original AMCV construction
-and five collection constructors run with supplied allocation, base object,
+With --vehicle-create, the registry starts empty. Original AMCV construction,
+base object, and five collection constructors run with supplied allocation,
 remaining collection, and runtime services.
 """
 import os
@@ -41,6 +41,7 @@ vehicle_keys=[]; vehicle_lookups=[]; vehicle_copies=[]
 vehicle_allocations=[]; vehicle_constructors=[]; constructor_writes=[]
 other_allocations=[]
 type_parent_calls=[]
+type_base_returns=[]
 vehicle_ini,vehicle_cache,vehicle_section,vehicle_array=0x14e0000,0x14e0100,0x14e0200,0x14e0300
 vehicle_node,vehicle_value,vehicle_key=0x14e0400,0x14e0500,0x14e0600
 
@@ -72,10 +73,6 @@ def supplied_vehicle_allocation():
         assert size<0x10000, (size,vehicle_lookups,other_allocations,hex(m.read(m.cpu.reg_read(UC_X86_REG_ESP))))
         g['techno']['allocate']()
 
-def supplied_base_object():
-    assert create_vehicle
-    m.cpu.reg_write(UC_X86_REG_EAX,m.cpu.reg_read(UC_X86_REG_ECX))
-
 def supplied_post():
     assert m.cpu.reg_read(UC_X86_REG_ECX)==rules and m.argument(0)==ini
     post_flags.append(m.argument(1)); events.append(0x64dd90)
@@ -105,6 +102,13 @@ def trace(cpu,address,size,user):
     if create_vehicle and address in (0x410580,0x40ff10) and vehicle_lookups==['entry']:
         assert cpu.reg_read(UC_X86_REG_ECX)==m.TYPE
         type_parent_calls.append(address)
+    if create_vehicle and address==0x41058e and vehicle_lookups==['entry']:
+        assert cpu.reg_read(UC_X86_REG_EAX)==m.TYPE
+        assert m.read(m.TYPE+0x10)==0xffffffff
+        assert m.read(m.TYPE+0x18)==m.read(m.TYPE+0x1c)==0
+        assert bytes(cpu.mem_read(m.TYPE+0x20,1))==b'\0'
+        assert bytes(cpu.mem_read(m.TYPE+0x14,1))==bytes([fill & 0xf8])
+        type_base_returns.append(address)
     if real_vehicle and address==0x643a89:
         assert cpu.reg_read(UC_X86_REG_EAX)==m.TYPE
         if create_vehicle:
@@ -130,7 +134,8 @@ if create_vehicle:
     for address in (0x46d020,0x50b860,0x454ad0,0x4f89a0,0x654960):
         m.cpu.mem_write(address,bytes(g['hash_cpu'].mem_read(address,3)))
         m.callbacks.pop(address,None); m.cpu.ctl_remove_cache(address,address+3)
-    m.bind(0x40ff10,0,supplied_base_object); m.cpu.ctl_remove_cache(0x40ff10,0x40ff13)
+    m.cpu.mem_write(0x40ff10,bytes(g['hash_cpu'].mem_read(0x40ff10,3)))
+    m.callbacks.pop(0x40ff10,None); m.cpu.ctl_remove_cache(0x40ff10,0x40ff13)
 m.bind(0x6e8ff0,0,supplied_ini_finalize)
 m.bind(0x64dd90,8,supplied_post)
 m.cpu.hook_add(UC_HOOK_CODE,trace)
@@ -181,6 +186,7 @@ for session,expected_flag,fill in cases:
     vehicle_allocations.clear(); vehicle_constructors.clear(); constructor_writes.clear()
     other_allocations.clear()
     type_parent_calls.clear()
+    type_base_returns.clear()
     if real_vehicle: m.word(vehicle_section+0x3c,0)
     g['vhpscan_in_reader'][0]=False; g['mode']=3; g['active'][0]=not real_vehicle
     m.cpu.reg_write(UC_X86_REG_ECX,rules); m.cpu.reg_write(UC_X86_REG_ESP,0x103f000)
@@ -200,6 +206,7 @@ for session,expected_flag,fill in cases:
             assert vehicle_allocations==[0xc10] and vehicle_constructors==[0x70a600]
             assert other_allocations==[5144,12,816,40,816,816,816,816,40,40,736,40,736,40,40]
             assert type_parent_calls==[0x410580,0x40ff10]
+            assert type_base_returns==[0x41058e]
             assert constructor_writes==[(m.TYPE+0x205,1,1)]
             assert m.signed(m.TYPE+0xb90)==0
             assert m.read(0xa40938)==1 and m.read(0x14c2100)==m.TYPE
