@@ -391,6 +391,42 @@ int main(int argc,char** argv) try {
         require_in_front(busy,catalog,player,"GAWEAP",actor(busy,second));
         require(actor(busy,second).cell->x!=actor(busy,tank).cell->x || actor(busy,second).cell->y!=actor(busy,tank).cell->y,"second tank stacked on the first");
     }
+    {
+        // With every front Cell blocked, the tank waits in the factory. It
+        // never falls back to a Cell behind the building art.
+        auto blocked=world; auto blocked_factories=factories; auto local=frame;
+        const auto* weap=catalog.find("GAWEAP");
+        int front=-1;
+        for (const auto& item:blocked.entities)
+            if (item.house_id==player && item.type=="GAWEAP" && item.lifetime==w::Lifetime::Placed && item.cell)
+                for (const auto& offset:p::original_foundation_cells(weap->placement.foundation))
+                    front=std::max(front,int(item.cell->x)+offset.x+int(item.cell->y)+offset.y);
+        require(front>=0,"war factory is missing");
+        std::vector<std::pair<std::uint32_t,std::uint32_t>> saved;
+        for (auto& item:blocked.cells) {
+            const int x=int(item.first%512),y=int(item.first/512);
+            if (x+y>front && item.second.ground_occupancy_124) {
+                saved.push_back({item.first,*item.second.ground_occupancy_124});
+                *item.second.ground_occupancy_124|=0x20;
+            }
+        }
+        const auto started=proto::begin_production(blocked,blocked_factories,catalog,player,"MTNK",local);
+        done(started,"begin tank with a blocked front");
+        auto* pending=factory(blocked_factories,*started.entity);
+        require(pending,"blocked tank factory is missing");
+        pending->progress=53;
+        local=std::max(local+1,pending->timer_start+std::uint64_t(pending->timer_duration));
+        const auto waiting=proto::tick(blocked,blocked_factories,catalog,local);
+        done(waiting,"tick with a blocked front");
+        require(factory(blocked_factories,*started.entity) && actor(blocked,*started.entity).lifetime==w::Lifetime::Created &&
+                waiting.detail=="waiting for a clear factory exit",
+                "tank left the factory with every front Cell blocked");
+        for (const auto& item:saved) blocked.cells.at(item.first).ground_occupancy_124=item.second;
+        done(proto::tick(blocked,blocked_factories,catalog,++local),"tick with a clear front");
+        require(!factory(blocked_factories,*started.entity),"tank did not leave after the front cleared");
+        require_in_front(blocked,catalog,player,"GAWEAP",actor(blocked,*started.entity));
+        require_prototype(blocked);
+    }
     // Low power slows production that is already running. Recalc_Power
     // 004F2CC0 calls 004B9EB0, which gives each factory a new stage rate.
     // The running stage keeps its timer; the next stage uses the new rate.

@@ -215,11 +215,12 @@ Outcome abandon_orphans(w::Snapshot& world,FactorySet& factories,const Catalog& 
 // subcell handling. The original product leaves through the door and drives
 // or walks out; this prototype places it at once on a clear Cell.
 // A building's art rises toward the top of the screen, so a Cell north or
-// west of the footprint is drawn under the roof. Try the Cells in front of
-// the building first: larger x+y is lower on the screen. On a tie, the
-// larger x is to the right, the War Factory door side. Only Cells at the
-// floor height of the building's own Cell count, so a product never lands
-// on a cliff or ramp next to the base.
+// west of the footprint is drawn under the roof. Only Cells in front of the
+// building count: their x+y is larger than every footprint Cell's, so they
+// are lower on the screen. When all of them are blocked, the product waits.
+// Larger x+y goes first; on a tie, the larger x (the War Factory door side).
+// A Cell must be flat (ramp 0) at the height level of the building's own
+// Cell, so a product never lands on a cliff or a ramp.
 std::optional<ra2map::Cell> exit_cell(const w::Snapshot& world,const Catalog& catalog,const w::Entity& building) {
     if (!building.cell) return {};
     const auto* type=catalog.find(building.type);
@@ -228,7 +229,8 @@ std::optional<ra2map::Cell> exit_cell(const w::Snapshot& world,const Catalog& ca
     if (footprint.empty()) return {};
     const auto origin=world.cells.find(std::uint32_t(building.cell->y)*512+building.cell->x);
     if (origin==world.cells.end() || !origin->second.terrain || !origin->second.terrain->floor_world_height) return {};
-    const auto floor=*origin->second.terrain->floor_world_height;
+    if (!origin->second.terrain->height_level) return {};
+    const auto level=*origin->second.terrain->height_level;
     int left=building.cell->x,right=left,top=building.cell->y,bottom=top;
     for (const auto& offset:footprint) {
         left=std::min(left,int(building.cell->x)+offset.x);
@@ -236,12 +238,13 @@ std::optional<ra2map::Cell> exit_cell(const w::Snapshot& world,const Catalog& ca
         top=std::min(top,int(building.cell->y)+offset.y);
         bottom=std::max(bottom,int(building.cell->y)+offset.y);
     }
+    const int front=right+bottom; // Largest x+y of the footprint box.
     std::vector<std::pair<int,int>> ring;
     for (int radius=1;radius<=16;++radius) {
         ring.clear();
         for (int y=top-radius;y<=bottom+radius;++y) for (int x=left-radius;x<=right+radius;++x) {
             if (x!=left-radius && x!=right+radius && y!=top-radius && y!=bottom+radius) continue;
-            if (x<0 || y<0 || x>=512 || y>=512) continue;
+            if (x<0 || y<0 || x>=512 || y>=512 || x+y<=front) continue;
             ring.push_back({x,y});
         }
         std::sort(ring.begin(),ring.end(),[](const auto& a,const auto& b) {
@@ -254,7 +257,8 @@ std::optional<ra2map::Cell> exit_cell(const w::Snapshot& world,const Catalog& ca
             const auto& cell=it->second;
             if (cell.allocated!=true || !cell.heads || cell.heads->ground_head || cell.heads->bridge_head ||
                 !cell.ground_occupancy_124 || *cell.ground_occupancy_124 || !cell.terrain ||
-                !cell.terrain->floor_world_height || *cell.terrain->floor_world_height!=floor ||
+                !cell.terrain->floor_world_height || cell.terrain->height_level!=level ||
+                cell.terrain->ramp_index!=0 ||
                 !cell.terrain->land_type ||
                 *cell.terrain->land_type==2 || *cell.terrain->land_type==3 ||
                 cell.terrain->overlay_type_index!= -1 || cell.terrain->bridge!=false ||
