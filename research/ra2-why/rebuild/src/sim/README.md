@@ -874,3 +874,52 @@ Both editions match 512 complete callback traces, permission states, and returne
 The same checks pass with address and undefined-behavior sanitizers.
 The native hierarchy and regular-search primitives still need a checked world adapter for this controller.
 Retry decision bodies at 0042A590/0042CCD0 and their local reachability helpers remain separate recovery work.
+
+## Ordered Overlay placement dispatch
+
+`overlay_mark.h` ports the resolved Overlay mark dispatcher at base 005DA970 and expansion 005FC570.
+These missing entries were recovered with `SimDecompileAt.java` in read-only Ghidra projects.
+`dispatch_original_overlay_mark(mode, environment, callbacks)` returns the original boolean outcome or an explicit gap.
+Its callbacks must resolve the current actor type, root cell, existing overlay flag, and each reached effect.
+Empty fields and missing effect bodies return NeedsInput. They do not mean false or success.
+Effects execute in order. An unresolved later effect does not undo earlier effects.
+Use a private staged world before publishing changes.
+
+The dispatcher calls parent Object mark before checking modes 1 and 3.
+It rejects ramps above four except for original type index 178.
+Bridge roots 24, 25, 237, and 238 call their setters before land, wall, or clearance checks.
+The branch preserves veinhole neighbor order, crate dispatch, land-nine writes, and wall failure disposal.
+Walls update map zones, the optional import frame, and eight neighbor counters before final setup.
+Ordinary placement preserves the three clearance argument sets and the existing-overlay blocking check.
+Resource and type-byte writes retain their original order.
+A failed clearance can still finish and return true without writing an overlay.
+The code rechecks the placement global after clearance and the type byte after resource updates.
+Final setup runs before the object flag writes and disposal.
+
+Bridge approach indexes 122..125 and 233..236 return Unsupported.
+Their geometry and shared RNG writes remain separate recovery work.
+CreateAnimation delegates the complete original branch to the caller.
+No animation, bridge setter, parent mark, placement query, or setup body is invented by this dispatcher.
+This API does not prove fresh-map bridge flags or enable live movement.
+
+Important called bodies, base / expansion:
+
+- Parent mark: 005D4160 / 005F5850.
+- Bridge setters: 004732D0 and 00473700 / 0047E040 and 0047E470.
+- Veinhole query: 00710A60 / 0074D670.
+- Crate creation: 0047AD00 / 00485AF0.
+- Wall query and update: 004718B0 and 00475960 / 0047C620 and 00480630.
+- Zone updates: 0054FC60 and 00566340 / 0056D5A0 and 00584550.
+- Neighbor lookup: 00476AC0 / 00481810.
+- Clearance: 00478760 / 004834A0, with final arguments (-1,0,-1,1).
+- Resource update: 00476BA0 / 004818E0.
+- Cell setup: 00472540 / 0047D2B0, with argument -1.
+
+`original_overlay_mark_check.py executable [--base] --vectors` runs 4,096 original cases per edition.
+Compare every line with `test_overlay_mark.sh --vectors`.
+Both editions and native code preserve aggregate hash 6D535F32.
+The vectors compare ordered effects, direct cell writes, neighbor byte wrap, object flags, and return values.
+Callbacks change the placement global and resource type byte in selected cases.
+Allocation returns null. The animation path then uses a supplied no-owner query.
+The test supplies called bodies and map lookup. It proves dispatcher control, not those called bodies.
+`test_overlay_mark.sh` also checks eight unsupported approach indexes and two missing-input cases.
