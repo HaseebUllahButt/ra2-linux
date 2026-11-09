@@ -928,6 +928,11 @@ public:
 
 int run_prototype_battle(const BattleOptions& args) {
     auto assets=w::BaseBattleAssets::load(args.game_directory,args.map);
+    // Merge the rules while the world is set up. Both only read the loaded
+    // rules; overlay_rules keeps the result for the Battle's own request.
+    auto rules_job=std::async(std::launch::async,[&]{
+        return overlay_rules(overlay_rules(assets.rules(),assets.battle_rules()),assets.map_ini());
+    });
     w::PrototypeBattleSetup setup;
     const auto* country_registry=assets.rules().find_section("Countries");
     if(!country_registry||country_registry->entries.empty())throw std::runtime_error("Base countries are missing");
@@ -968,7 +973,7 @@ int run_prototype_battle(const BattleOptions& args) {
     files.bootstrap(fs::GameVariant::RedAlert2);files.mount_overlays();files.mount_resources();
     auto scene_art=render::TheaterArt::load(files,assets.map_ini().read_string("Map","Theater"));
     (void)scene_art;
-    const auto rules=overlay_rules(overlay_rules(assets.rules(),assets.battle_rules()),assets.map_ini());
+    const auto rules=rules_job.get();
     Scene scene(files,assets.art_ini(),rules,geometry,cells,assets.map_ini().read_string("Map","Theater"),
         assets.map().terrain(),true);
     Window window("Red Alert 2 native prototype: skirmish",1024,768,!args.headless);
