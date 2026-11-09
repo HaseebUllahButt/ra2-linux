@@ -447,6 +447,8 @@ std::optional<PrototypeBattle> prototype_battle(BaseBattleAssets& assets,
         entity.hull_facing=facing&255; entity.hull_facing_raw=static_cast<std::uint16_t>((facing&255)<<8);
         entity.turret_facing=facing&255; entity.turret_facing_raw=entity.hull_facing_raw;
         entity.on_map=true; entity.active=true; entity.in_limbo=false; entity.collision_eligible=true;
+        // TODO-ORIGINAL: run each object's full unlimbo and mark callbacks.
+        entity.object_field_74=1; entity.object_field_75=1; entity.object_field_76=0;
         entity.collision_virtual_position=entity.position; entity.has_trigger=false; entity.target_id=0;
         entity.constructor_complete=true; entity.locomotor_moving=false; entity.mission=0;
         entity.burst_index=0; entity.weapon_timer_start_frame=-1; entity.weapon_timer_duration=0;
@@ -502,7 +504,9 @@ std::optional<PrototypeBattle> prototype_battle(BaseBattleAssets& assets,
                                   std::any_of(placed_mcvs.begin(),placed_mcvs.end(),near))) continue;
                 if (unit.mcv) {
                     bool clear=true;
-                    for (int fy=-1;fy<=1 && clear;++fy) for (int fx=-1;fx<=1 && clear;++fx) {
+                    // TODO-ORIGINAL: both installed construction yards use a
+                    // 4x4 foundation at one Cell northwest of the MCV.
+                    for (int fy=-1;fy<=2 && clear;++fy) for (int fx=-1;fx<=2 && clear;++fx) {
                         const int nx=x+fx,ny=y+fy;
                         if (nx<0 || ny<0 || nx>=512 || ny>=512) { clear=false; break; }
                         const auto neighbor=world.cells.find(std::uint32_t(ny)*512+nx);

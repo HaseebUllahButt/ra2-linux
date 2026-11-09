@@ -220,8 +220,9 @@ int main(int argc,char** argv) {
         }
         for (const auto& entity:world.entities) if (entity.type=="AMCV" || entity.type=="SMCV") {
             if (entity.house_id!=world.houses[0].id && entity.house_id!=world.houses[1].id) continue;
-            assert(entity.cell && entity.hull_facing==128 && entity.hull_facing_raw==0x8000);
-            for (int dy=-1;dy<=1;++dy) for (int dx=-1;dx<=1;++dx) {
+            assert(entity.cell && entity.hull_facing==128 && entity.hull_facing_raw==0x8000 &&
+                   entity.object_field_74==1 && entity.object_field_75==1 && entity.object_field_76==0);
+            for (int dy=-1;dy<=2;++dy) for (int dx=-1;dx<=2;++dx) {
                 if (!dx && !dy) continue;
                 const auto key=std::uint32_t(int(entity.cell->y)+dy)*512+int(entity.cell->x)+dx;
                 const auto& cell=world.cells.at(key);
