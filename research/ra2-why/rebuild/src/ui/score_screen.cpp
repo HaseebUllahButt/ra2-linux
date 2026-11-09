@@ -152,7 +152,8 @@ gfx::RgbaImage draw_score_screen(const ScoreAssets& a, const ScoreScreen& s) {
     }
     // Kill matrix: row = killer, column = victim.
     y += lh;
-    text(img, f, a.kills, left, y, kGold);
+    text(img, f, a.kills + " (row attacks column)", left, y, kGold);
+    y += lh;
     const int mx = ox + 160, step = 60;
     for (std::size_t v = 0; v < s.houses.size(); ++v)
         text_right(img, f, s.houses[v].name.substr(0, 6), mx + int(v + 1) * step, y, s.houses[v].color);

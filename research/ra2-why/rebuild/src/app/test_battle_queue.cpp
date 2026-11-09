@@ -18,27 +18,24 @@ int main() {
     require(cameo_click(true,false,false,false,false,false)==Click::None);
     require(cameo_click(false,true,false,false,false,true)==Click::Queue);
     require(cameo_click(false,false,false,false,false,false)==Click::Begin);
-    for(int i=0;i<4;++i)require(queue.add(1,"E1",1));
-    require(!queue.add(1,"E1",1)); // Active product counts toward five.
-    require(queue.add(1,"ENGINEER",0));
-    require(queue.add(2,"MTNK",0)); // Other factories keep their own order.
-    require(queue.count("E1")==4 && queue.count("MTNK")==1);
-    require(queue.cancel(1,"E1") && queue.count("E1")==3);
+    // The active product and every type share one factory limit of 30.
+    for(int i=0;i<29;++i)require(queue.add(1,"E1",1));
+    require(!queue.add(1,"ENGINEER",1));
+    require(queue.count("E1")==29);
+    require(queue.add(2,"MTNK",0));
+    require(queue.cancel(1,"E1") && queue.count("E1")==28);
+    require(queue.add(1,"ENGINEER",1));
+    require(!queue.add(1,"E1",1));
     require(!queue.cancel(2,"E1") && queue.slots().at(2).front()=="MTNK");
-    for(int i=0;i<3;++i){require(queue.slots().at(1).front()=="E1");queue.pop(1);}
-    require(queue.slots().at(1).front()=="ENGINEER");
-    queue.pop(1);
-    require(queue.slots().at(1).empty() && queue.slots().at(2).size()==1);
-    // A rejected sixth request must not stop the five accepted requests.
+    for(int i=0;i<28;++i) {require(queue.slots().at(1).front()=="E1");queue.pop(1);}
+    require(queue.slots().at(1).front()=="ENGINEER");queue.pop(1);
+    require(queue.slots().at(1).empty() && queue.count("MTNK")==1);
     ra2::app::BattleBuildQueue full;
-    for(int i=0;i<5;++i)require(full.add(1,"E1",0));
-    require(!full.add(1,"E1",0));
-    require(full.add(1,"ENGINEER",0));
-    for(int i=5;i>0;--i) {
-        require(full.count("E1")==i && full.slots().at(1).front()=="E1");
-        full.pop(1);
+    for(int i=0;i<30;++i)require(full.add(1,"E1",0));
+    require(!full.add(1,"E1",0) && !full.add(1,"ENGINEER",0));
+    for(int remaining=30;remaining>0;--remaining) {
+        require(full.count("E1")==remaining && full.slots().at(1).front()=="E1");full.pop(1);
     }
-    require(full.slots().at(1).front()=="ENGINEER");
-    require(full.add(1,"E1",0)); // Capacity returns after completion.
-    std::cout<<"Battle queue checks passed: five per type, factory order, pending cancellation.\n";
+    require(full.add(1,"ENGINEER",0));
+    std::cout<<"Battle queue checks passed: thirty per factory, active item, FIFO and cancellation.\n";
 }

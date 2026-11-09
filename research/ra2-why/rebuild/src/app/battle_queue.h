@@ -10,9 +10,9 @@ namespace ra2::app {
 class BattleBuildQueue {
     std::map<int,std::deque<std::string>> slots_;
 public:
-    bool add(int slot,const std::string& type,int active_count) {
+    bool add(int slot,const std::string& type,int active_in_slot) {
         auto& line=slots_[slot];
-        if(active_count+std::count(line.begin(),line.end(),type)>=5)return false;
+        if(line.size()+std::size_t(std::max(0,active_in_slot))>=30)return false;
         line.push_back(type);return true;
     }
     int count(const std::string& type) const {

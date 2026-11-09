@@ -584,7 +584,7 @@ skirmish-check: native skirmish-tests
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --frames 3
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --autoplay --frames 12000
 
-skirmish-tests: build/resource_render_test build/battle_status_test build/battle_formation_test build/prototype_economy_test build/battle_audio_test build/prototype_movement_test build/battle_effects_test build/battle_queue_test build/battle_radar_test build/battle_radar_world_test build/battle_help_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test
+skirmish-tests: build/battle_score_test build/resource_render_test build/battle_status_test build/battle_formation_test build/prototype_economy_test build/battle_audio_test build/prototype_movement_test build/battle_effects_test build/battle_queue_test build/battle_radar_test build/battle_radar_world_test build/battle_help_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test
 	build/resource_render_test $(TEST_GAME_DIR)
 	build/battle_status_test
 	build/battle_formation_test
@@ -594,6 +594,7 @@ skirmish-tests: build/resource_render_test build/battle_status_test build/battle
 	SDL_AUDIODRIVER=ra2-unavailable build/battle_audio_test $(TEST_GAME_DIR) --missing
 	build/battle_effects_test $(TEST_GAME_DIR)
 	build/battle_queue_test
+	build/battle_score_test
 	build/battle_radar_test $(TEST_GAME_DIR)
 	build/battle_radar_world_test $(TEST_GAME_DIR)
 	build/battle_help_test
@@ -796,3 +797,6 @@ sim-resource-cell: build/sim_resource_cell_test
 
 build/sim_resource_cell_test: build/native/src/sim/test_resource_cell.o build/native/src/sim/resource_cell.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/battle_score_test: build/native/src/app/test_battle_score.o $(filter-out build/native/src/app/%.o,$(NATIVE_OBJECTS))
+	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -o $@

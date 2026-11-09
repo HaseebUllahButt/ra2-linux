@@ -7,6 +7,7 @@
 #include "house_color.h"
 #include "battle_hud.h"
 #include "battle_queue.h"
+#include "battle_score.h"
 #include "battle_help.h"
 #include "battle_cursor.h"
 #include "battle_orders.h"
@@ -116,6 +117,7 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     CursorScope cursor_scope_;
     BattleHelp help_;
     ui::ScoreAssets score_assets_;
+    std::optional<BattleScore> score_;
     std::optional<gfx::RgbaImage> score_image_;
     HudState hud_state_;
     render::Bitmap frame_;
@@ -166,6 +168,7 @@ public:
                 !args.headless,16*frame_delay_ticks(args)) {
         if(const auto labels=assets_.read_asset("RA2.CSF"))labels_.parse(labels->data(),labels->size());
         score_assets_=ui::ScoreAssets::load(files,labels_);
+        score_.emplace(std::vector<std::pair<std::uint32_t,std::string>>{{player_,house(world_,player_).name},{enemy_,house(world_,enemy_).name}});
         help_visible_=!args_.autoplay;
         status("Select MCV. D deploys.");
         camera_scroll_.reset(clock_.now_ms());
@@ -270,6 +273,11 @@ public:
     int active_count(const std::string& type) const {
         return int(std::count_if(factories_.factories.begin(),factories_.factories.end(),[&](const auto& f){
             return f.house_id==player_ && f.object && f.object_type==type;
+        }));
+    }
+    int active_slot_count(int slot) const {
+        return int(std::count_if(factories_.factories.begin(),factories_.factories.end(),[&](const auto& factory) {
+            return factory.house_id==player_ && factory.slot==slot && factory.object;
         }));
     }
     void refresh_power_damage() {
@@ -398,9 +406,9 @@ public:
                         status("Place "+name(placement_)+". Esc cancels.");
                         break;
                     case CameoClick::Queue:
-                        if(build_queue_.add(factory_slot(*type),action.type,active_count(action.type)))
+                        if(build_queue_.add(factory_slot(*type),action.type,active_slot_count(factory_slot(*type))))
                             status("Queued "+name(action.type)+".");
-                        else status("Queue full: five per type.");
+                        else status("Queue full: thirty per factory.");
                         break;
                     case CameoClick::Begin:
                         queue({OrderKind::Build,player_,0,0,action.type,{}});
@@ -433,6 +441,7 @@ public:
             input(event);
         }
         state.paused=help_visible_||pause_panel_!=PausePanel::Closed;
+        score_->clock(clock_.now_ms(),!state.paused&&state.window_active&&!victory_.settled());
         audio_.service(state.paused||!state.window_active);
         if (quit_) state.running=false;
     }
@@ -860,7 +869,10 @@ public:
         move_destinations_.clear();
         for(const auto& order:commands)execute(order,frame);
         if(frame%15==0){auto_place(enemy_,frame);if(args_.autoplay)auto_place(player_,frame);}
+        std::map<std::uint32_t,int> cash_before;
+        for(const auto& h:world_.houses)cash_before[h.id]=h.cash.value_or(0);
         economy_.tick(world_,frame);
+        for(const auto& h:world_.houses)score_->harvest(h.id,cash_before[h.id],h.cash.value_or(0));
         const auto motion=movement_.tick(world_,frame);
         moved+=motion.moved.size();
         for(const auto id:motion.blocked)movement_.cancel(world_,id);
@@ -875,6 +887,7 @@ public:
         if(motion.status!=sim::PrototypeMoveStatus::Complete)gaps_.insert(motion.detail);
         // Combat owns idle guard acquisition and uses each weapon's range.
         const auto fighting=combat_.tick(world_,frame);
+        score_->combat(fighting.events);
         effects_.observe(world_,combat_.projectiles(),frame,effect_project(),&fighting.events,&rules_);
         for(const auto& event:fighting.events) {
             const auto* type=catalog_.find(event.target_type);
@@ -920,22 +933,15 @@ public:
         if(victory_.settled()) {
             status_.set(result_name(victory_.result)+". Press Esc to return.",clock_.now_ms(),true);
             show_score_=true;
-            ui::ScoreScreen score;score.player_won=victory_.result==sim::Victory::PlayerWon;
-            score.seconds=frame/30;
-            // TODO-ORIGINAL: infer prototype totals from retained objects.
-            // Original kill attribution and harvested-credit totals remain separate.
-            for(const auto id:{player_,enemy_}) {
-                ui::ScoreHouse row;row.name=house(world_,id).name;
-                row.kills_of.assign(2,0);row.losses_to.assign(2,0);
+            score_->clock(clock_.now_ms(),false);
+            auto score=score_->finish(victory_.result==sim::Victory::PlayerWon);
+            for(std::size_t i=0;i<score.houses.size();++i) {
+                const auto id=i==0?player_:enemy_;
                 for(const auto& e:world_.entities)if(e.house_id==id) {
-                    if(e.kind==w::Kind::Structure)++row.buildings_built;else if(e.kind!=w::Kind::Terrain)++row.units_built;
-                    if(e.lifetime==w::Lifetime::Destroyed && rules_.read_string(e.type,"DeploysInto").empty())
-                        ++row.losses_to[id==player_?1:0];
+                    if(e.kind==w::Kind::Structure)++score.houses[i].buildings_built;
+                    else if(e.kind!=w::Kind::Terrain)++score.houses[i].units_built;
                 }
-                score.houses.push_back(std::move(row));
             }
-            score.houses[0].kills_of[1]=score.houses[1].losses_to[0];
-            score.houses[1].kills_of[0]=score.houses[0].losses_to[1];
             score_assets_.continue_text="Esc: Main Menu / Click: View Battlefield / Tab: Score";
             score_image_=ui::draw_score_screen(score_assets_,score);
             window_.title("Red Alert 2 native prototype: "+status_.text(clock_.now_ms()));
