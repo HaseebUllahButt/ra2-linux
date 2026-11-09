@@ -25,6 +25,17 @@ int main(int argc, char** argv) {
     rules::IniFile sort_rules;
     sort_rules.parse("[GateType]\nImage=GateArt\nGate=yes\nTurretAnimIsVoxel=yes\n");
     assert(actors::building_y_sort(draw_position,sort_rules,"GateType")==1296);
+    // TerrainType ReadINI: missing or -1 Strength becomes Rules TreeStrength,
+    // whose constructor default is 25. Health below 2 selects frame 1.
+    rules::IniFile tree_rules;
+    tree_rules.parse("[General]\nTreeStrength=1\n[A]\n[B]\nStrength=-1\n[C]\nStrength=200\n[D]\nStrength=1\n");
+    assert(actors::terrain_initial_frame(tree_rules,"A")==1);
+    assert(actors::terrain_initial_frame(tree_rules,"B")==1);
+    assert(actors::terrain_initial_frame(tree_rules,"C")==0);
+    assert(actors::terrain_initial_frame(tree_rules,"D")==1);
+    rules::IniFile default_tree_rules;
+    default_tree_rules.parse("[A]\n");
+    assert(actors::terrain_initial_frame(default_tree_rules,"A")==0);
     auto center=actors::building_center({2,3},3,2,60);
     assert(center.x==896 && center.y==1024 && center.z==60);
     auto screen=actors::project_world(center,15,{10,20});

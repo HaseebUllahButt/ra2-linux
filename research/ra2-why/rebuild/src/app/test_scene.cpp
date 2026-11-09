@@ -132,7 +132,10 @@ int main(int argc, char** argv) {
             state.entities[0].kind = sim::Kind::Unit;
             const auto unsupported = fixture.render(empty, state, view);
             require(unsupported.drawn == 0 && unsupported.gaps.size() == 1, "Unresolved vehicle draw was invented");
-            require(actors::terrain_initial_frame(rules, "TREE01") == 1,
+            // TREE01 has no Strength; ReadINI gives it Rules TreeStrength.
+            require(!rules.find("TREE01", "Strength") &&
+                    rules.read_integer("General", "TreeStrength", 0) >= 2 &&
+                    actors::terrain_initial_frame(rules, "TREE01") == 0,
                     "Original initial terrain health selected the wrong frame");
             app::Scene tree_scene(files, art, rules, geometry, {flat}, "TEMPERATE", {{flat.cell, "TREE01"}});
             const auto tree_output = tree_scene.render(empty, {}, view);
@@ -140,7 +143,7 @@ int main(int argc, char** argv) {
             const auto iso = files.read_file("ISOTEM.PAL");
             require(iso.has_value(), "Original terrain object palette is missing");
             const auto tree_art = actors::ActorArt::load(files, art, rules, "TREE01", actors::Kind::Terrain);
-            const auto tree_pixels = tree_art.draw_frame(1, gfx::Palette::from_bytes(*iso));
+            const auto tree_pixels = tree_art.draw_frame(0, gfx::Palette::from_bytes(*iso));
             const int tree_left = 250 - tree_pixels.width / 2, tree_top = 215 - tree_pixels.height / 2;
             std::size_t tree_checked = 0;
             for (int y = 0; y < tree_pixels.height; ++y) for (int x = 0; x < tree_pixels.width; ++x) {
