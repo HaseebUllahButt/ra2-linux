@@ -392,14 +392,6 @@ bool validate(const Snapshot& snapshot) {
         snapshot.setup_progress!=SetupProgress::OverlayDataRead &&
         snapshot.setup_progress!=SetupProgress::ReadyForInitialUnits &&
         snapshot.setup_progress!=SetupProgress::PrototypeComplete) return false;
-    if (snapshot.cell_order) {
-        std::set<std::uint32_t> seen;
-        for (const auto key:*snapshot.cell_order) {
-            const auto found=snapshot.cells.find(key);
-            if (found==snapshot.cells.end() || !found->second.allocated || !*found->second.allocated ||
-                !seen.insert(key).second) return false;
-        }
-    }
     if (snapshot.pending_setup_cell && (!snapshot.pending_cell_setup ||
         *snapshot.pending_setup_cell>=512u*512u || !snapshot.cells.count(*snapshot.pending_setup_cell))) return false;
     try { (void)sim::Random(snapshot.random); } catch (...) { return false; }
@@ -448,8 +440,14 @@ bool validate(const Snapshot& snapshot) {
         }
         complete.insert(chain.begin(),chain.end());
     }
+    // Every check is a pure test, so their order does not change the result.
+    // The Cell order check below reads one flag per packed Cell:
+    // 1 is allocated, 2 is already listed.
+    std::vector<std::uint8_t> allocated;
+    if (snapshot.cell_order) allocated.assign(512u*512u,0);
     for (const auto& item:snapshot.cells) {
         const auto& cell=item.second;
+        if (!allocated.empty() && item.first<512u*512u && cell.allocated && *cell.allocated) allocated[item.first]=1;
         if (cell.cell_flags_140) {
             const auto same=[&](const std::optional<bool>& field,std::uint32_t bit) {
                 return !field || *field==bool(*cell.cell_flags_140 & bit);
@@ -467,6 +465,13 @@ bool validate(const Snapshot& snapshot) {
             for (const auto head:{item.second.heads->ground_head,item.second.heads->bridge_head})
                 if (head && (!entities.count(head) || entities.at(head)->lifetime!=Lifetime::Placed)) return false;
     }
+    // A listed key at or above 512*512 cannot be an allocated Cell here: the
+    // Cell loop above already rejects such a key in the Cell map.
+    if (snapshot.cell_order)
+        for (const auto key:*snapshot.cell_order) {
+            if (key>=512u*512u || allocated[key]!=1) return false;
+            allocated[key]=2;
+        }
     return true;
 }
 std::optional<sim::CoarseCategoryInputs> coarse_inputs(const Snapshot& snapshot, std::uint32_t cell) {
