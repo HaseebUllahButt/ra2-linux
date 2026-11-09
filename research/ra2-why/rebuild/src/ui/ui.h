@@ -163,6 +163,7 @@ public:
         if(enabled&&!prototype_start_)setup_.opponents[0].opponent=Opponent::Easy;
         prototype_start_=enabled;
     }
+    void return_from_match() noexcept;
     gfx::RgbaImage render() const;
     void pointer_move(int x, int y);
     void pointer_down(int x, int y);

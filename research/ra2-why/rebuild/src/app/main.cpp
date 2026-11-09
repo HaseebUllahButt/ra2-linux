@@ -237,6 +237,9 @@ int run_menu(const Options& args, ra2::fs::MixFileSystem& files) {
         // Keep only the match visible while it owns input and focus.
         window.set_visible(false);
         ra2::app::run_prototype_battle(battle);
+        menu.return_from_match();
+        if(args.human_input_check && menu.page()!=ra2::ui::Page::Main)
+            throw std::runtime_error("Human input: match did not return to main menu");
         if(!args.headless)window.set_visible(true);
         if(args.human_input_check) {
             loop.state().frame_counter=0;

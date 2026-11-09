@@ -40,6 +40,7 @@ struct BuildChoice {
 enum class BuildingTool { None, Repair, Sell };
 
 struct HudState {
+    std::uint64_t clock_ms = 0; // Monotonic draw clock; radar uses 16 ms ticks.
     int cash = 0;
     int power_output = 0; // Power produced.
     int power_drain = 0;  // Power consumed.
@@ -130,6 +131,8 @@ public:
 private:
     mutable int active_tab_ = 0;
     mutable int top_row_ = 0;
+    mutable bool radar_online_ = false;
+    mutable std::optional<std::uint64_t> radar_tick_;
     mutable int radar_frame_ = 0;  // 0 eagle .. 32 open radar.
     mutable bool panel_valid_ = false;
     mutable int panel_tab_ = -1, panel_row_ = -1;

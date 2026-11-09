@@ -557,6 +557,12 @@ Action Menu::pointer_up(int x, int y) {
     if (result == Action::PageChanged) hovered_.reset();
     return result;
 }
+void Menu::return_from_match() noexcept {
+    navigation_=MenuNavigation{};
+    confirming_exit_=choosing_map_=held_map_scroll_=slider_changed_=false;
+    pending_mode_.reset();pending_map_.reset();held_map_list_.reset();held_map_row_.reset();
+    hovered_.reset();held_.reset();open_dropdown_.reset();held_dropdown_.reset();held_dropdown_item_.reset();
+}
 Action Menu::key_down(Key key) noexcept {
     // 0x005D4D50 routes dialog keys through IsDialogMessageA; Escape sends
     // IDCANCEL (2), which 0x005D3711 maps to the cancel result.

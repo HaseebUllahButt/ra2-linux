@@ -544,6 +544,14 @@ int main(int argc,char** argv) {
     fails([&]{ui::draw_shell_background(files,640,480);});
     auto damaged=*title;damaged.resize(140); fails([&]{ui::decode_pcx(damaged);});
     damaged=*title;damaged[0]=0;fails([&]{ui::decode_pcx(damaged);});
+    // Leaving a match resets navigation, but keeps the player's setup.
+    ui::Menu returned=ui::Menu::load(base,base_exe,base_strings);
+    returned.pointer_down(650,200);returned.pointer_up(650,200);
+    returned.pointer_down(650,284);returned.pointer_up(650,284);
+    assert(returned.page()==ui::Page::Skirmish);
+    const auto saved_country=returned.setup().country;
+    returned.return_from_match();
+    assert(returned.page()==ui::Page::Main && returned.setup().country==saved_country);
     auto broken=exe;broken.resize(128);fails([&]{ui::load_dialog(broken,ui::Page::Main,strings);});
     std::cout<<"original dialogs, labels, hit bounds, title PCX and shell background passed\n";
 }
