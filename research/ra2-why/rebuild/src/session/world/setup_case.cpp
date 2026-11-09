@@ -6,7 +6,8 @@
 using namespace ra2;
 using namespace ra2::session::world;
 int main(int argc,char** argv) {
-    if (argc!=2 && !(argc==3 && (std::string(argv[2])=="--cells" || std::string(argv[2])=="--starts"))) return 2;
+    if (argc!=2 && !(argc==3 && (std::string(argv[2])=="--cells" || std::string(argv[2])=="--starts" ||
+                                 std::string(argv[2])=="--overlay-data" || std::string(argv[2])=="--overlay-data-cells"))) return 2;
     if (argc==3 && std::string(argv[2])=="--starts") {
         int x,y;
         while (std::cin>>x>>y) {
@@ -22,6 +23,11 @@ int main(int argc,char** argv) {
     assert(assets.rules().key_count("VehicleTypes")==55);
     assert(assets.art_ini().key_count("MCV")>0);
     assert(assets.geometry().width==100 && assets.geometry().height==100);
+    if (argc==3 && std::string(argv[2])=="--overlay-data") {
+        const auto& bytes=assets.map().packed_terrain().overlay_data;
+        std::cout.write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));
+        return std::cout?0:1;
+    }
     const auto& points=assets.map().waypoints();
     const auto point=std::find_if(points.begin(),points.end(),[](const auto& p){return p.index==0;});
     assert(point!=points.end() && point->cell.x==135 && point->cell.y==80);
@@ -51,6 +57,25 @@ int main(int argc,char** argv) {
     const auto partial=packed_map_snapshot(*loaded,sim::Random(42).state());
     assert(partial && partial->setup_progress==SetupProgress::PackedMapRead && partial->cell_order &&
            partial->cell_order->size()==19900 && partial->entities.empty());
+    auto overlay_fixture=*partial;
+    assert(!apply_base_overlay_data(overlay_fixture,assets));
+    assert(overlay_fixture.setup_progress==SetupProgress::PackedMapRead);
+    // Prior Overlay object results are supplied here, not reconstructed.
+    overlay_fixture.setup_progress=SetupProgress::OverlayObjectsRead;
+    assert(apply_base_overlay_data(overlay_fixture,assets));
+    assert(overlay_fixture.setup_progress==SetupProgress::OverlayDataRead &&
+           overlay_fixture.random.table==partial->random.table && overlay_fixture.random.first==partial->random.first &&
+           overlay_fixture.random.second==partial->random.second);
+    const auto& raw_data=assets.map().packed_terrain().overlay_data;
+    for (const auto& cell:overlay_fixture.cells) {
+        if (raw_data.empty()) assert(!cell.second.overlay_data_11e);
+        else assert(cell.second.overlay_data_11e==raw_data.at(cell.first));
+    }
+    if (argc==3 && std::string(argv[2])=="--overlay-data-cells") {
+        for (const auto& cell:overlay_fixture.cells)
+            std::cout<<cell.first<<' '<<(cell.second.overlay_data_11e?int(*cell.second.overlay_data_11e):-1)<<'\n';
+        return 0;
+    }
     const auto& target=loaded->cells.at(80u*512+135);
     assert(target.terrain && target.terrain->resolved_tile_index==131 && target.terrain->height_level==4);
     assert(target.terrain->bridge==false && !target.terrain->overlay_type_index && !target.terrain->land_type);
@@ -86,6 +111,8 @@ int main(int argc,char** argv) {
         c.cell_field_54=-1; c.cell_field_58=-1; c.tube_field_116=-1;
         assert(stage.install_base_cells(assets.geometry(),std::move(fixture),0,{}));
         auto world=stage.snapshot();
+        // The missing prior phases are supplied only for this placement fixture.
+        world.setup_progress=SetupProgress::ReadyForInitialUnits;
         sim::TheaterInputs theater; theater.theater_name=assets.theater().theater_name();
         theater.settings=assets.theater().settings();
         for (const auto& set:assets.theater().tile_sets()) theater.tile_sets.push_back({set.first,set.count});

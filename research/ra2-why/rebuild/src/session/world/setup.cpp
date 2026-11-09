@@ -105,7 +105,7 @@ std::optional<PackedMapState> read_base_packed_map(const BaseBattleAssets& asset
         // The constructor proves only byte +124 is zero. The upper three
         // bytes of the occupancy word are not resolved at this boundary.
         // The reader's proven state precedes any Overlay and object loaders.
-        state.cell_flag_100=false;
+        state.cell_flag_80=false; state.cell_flag_100=false;
         sim::TerrainCell terrain;
         terrain.cell=input.cell;
         terrain.tile_index=input.packed_tile ? *input.packed_tile : *default_live_tile;
@@ -139,6 +139,32 @@ std::optional<Snapshot> packed_map_snapshot(const PackedMapState& map,const sim:
 }
 
 
+
+bool apply_base_overlay_data(Snapshot& world,const BaseBattleAssets& assets) {
+    if (world.setup_progress!=SetupProgress::OverlayObjectsRead || world.pending_cell_setup ||
+        !world.geometry || !world.cell_order || !validate(world)) return false;
+    const auto& geom=assets.geometry();
+    if (world.geometry->width!=geom.width || world.geometry->height!=geom.height ||
+        world.cell_order->size()!=assets.cells_in_original_order().size()) return false;
+    const auto& data=assets.map().packed_terrain().overlay_data;
+    if (!data.empty() && data.size()!=512u*512u) return false;
+    auto result=world;
+    for (std::size_t i=0;i<assets.cells_in_original_order().size();++i) {
+        const auto& input=assets.cells_in_original_order()[i];
+        const auto key=std::uint32_t(input.cell.y)*512+input.cell.x;
+        if ((*world.cell_order)[i]!=key) return false;
+        auto found=result.cells.find(key);
+        if (found==result.cells.end() || found->second.allocated!=true) return false;
+        // The original scan visits all 512*512 bytes in row order, but only
+        // allocated diamond cells receive writes. Each is written once.
+        if (!data.empty()) found->second.overlay_data_11e=data[key];
+    }
+    result.setup_progress=SetupProgress::OverlayDataRead;
+    if (!validate(result)) return false;
+    world=std::move(result);
+    return true;
+}
+
 sim::Coord battle_start_position(StartPoint point) noexcept {
     return {int(point.x)*256+128,int(point.y)*256+128,0};
 }
@@ -146,7 +172,7 @@ sim::Coord battle_start_position(StartPoint point) noexcept {
 std::optional<DirectBaseUnitResult> place_direct_base_unit(Snapshot& world,
     const InitialBaseUnitInput& input,const sim::CellSetupStatic& cell_setup,
     const sim::TheaterInputs& theater,std::uint8_t cliff,const std::map<std::int32_t,float>& wheels) {
-    if (world.setup_progress==SetupProgress::PackedMapRead || input.start.x<0 || input.start.y<0 ||
+    if (world.setup_progress!=SetupProgress::ReadyForInitialUnits || input.start.x<0 || input.start.y<0 ||
         input.start.x>=512 || input.start.y>=512) return {};
     const auto key=std::uint32_t(input.start.y)*512+input.start.x;
     const auto cell=world.cells.find(key);
@@ -175,7 +201,7 @@ std::optional<StartPoint> search_blocked_base_unit(Snapshot& world,std::uint32_t
     StartPoint origin,PlacementBounds bounds,const BaseUnitProfile& profile,
     const sim::CellSetupStatic& cell_setup,const sim::TheaterInputs& theater,std::uint8_t cliff,
     const std::map<std::int32_t,float>& wheels) {
-    if (world.setup_progress==SetupProgress::PackedMapRead || !world.geometry || !validate(world)) return {};
+    if (world.setup_progress!=SetupProgress::ReadyForInitialUnits || !world.geometry || !validate(world)) return {};
     auto candidate=world;
     try {
         sim::Random random(candidate.random);

@@ -55,6 +55,10 @@ std::optional<PackedMapState> read_base_packed_map(const BaseBattleAssets&,
 // Builds a partial owning snapshot at the same boundary. The RNG must be the
 // actual state at this boundary. Complete scenario setup is still required.
 std::optional<Snapshot> packed_map_snapshot(const PackedMapState&,const sim::RandomState&);
+// Apply the separate OverlayDataPack scan after real Overlay object loading.
+// The input must already be at OverlayObjectsRead; this does not resolve the
+// preceding Overlay eligibility, object placement, or bridge phases.
+bool apply_base_overlay_data(Snapshot&,const BaseBattleAssets&);
 
 // Base 005B7C74 writes the selected signed Cell center with world Z zero.
 sim::Coord battle_start_position(StartPoint) noexcept;

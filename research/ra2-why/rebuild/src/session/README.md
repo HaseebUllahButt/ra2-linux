@@ -190,3 +190,11 @@ between houses and does not supply a complete House phase RNG state.
 with base x86. The optional world resize check compares 19,900 MP02T2 cells
 at the packed-map boundary. `original_real_map_check.py` also compares direct
 placement at the real Battle start Z, with explicitly supplied runtime state.
+
+The base Battle House post-unit step adds only a positive unused budget, then
+clears the building, aircraft, infantry, and vehicle counter arrays in that
+order. `Stage::finish_battle_house` implements this atomic slice. It requires
+known cash and all four arrays. The original x86 comparison checks 64 cases.
+The separate OverlayDataPack scan is implemented after the Overlay object
+phase. It matches the original x86 writes for all 19,900 MP02T2 cells. The
+preceding Overlay object phase is still required and is not marked complete.

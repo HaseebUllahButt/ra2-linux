@@ -35,7 +35,7 @@ if len(sys.argv)==5:
     native_lines=subprocess.check_output([native,'0','4','0','0'],text=True,env=zero_z).splitlines()
     original_fields=[line for line in lines if line.startswith('RUNTIME_FIELDS ')]
     native_fields=[line for line in native_lines if line.startswith('RUNTIME_FIELDS ')]
-    assert original_fields==native_fields==['RUNTIME_FIELDS 0 1 0','RUNTIME_FIELDS 1 0 0']
+    assert original_fields==native_fields==['RUNTIME_FIELDS 0 0 1 0 1 0 1 0','RUNTIME_FIELDS 1 1 0 0 1 0 1 0']
     native_zero=[line for line in native_lines if not line.startswith('RUNTIME_FIELDS ')]
     assert len(original_zero)==2 and original_zero==native_zero
     assert original_zero[1].split()[7:11]==['0','0','0','0']

@@ -9,7 +9,7 @@ trap 'rm -rf "$build"' EXIT
 common=(world.cpp ../session.cpp ../map_geometry.cpp ../placement_terrain.cpp
     "$shared"/sim/{random,distance,coarse_category,cell_setup,replacement,world,floor}.cpp
     "$shared/rules/ini_file.cpp" "$shared/weapons/occupant_order.cpp")
-for test in test_snapshot house_case constructor_case placement_case cell_setup_case; do
+for test in test_snapshot house_case constructor_case placement_case cell_setup_case house_updates_case; do
     ${CXX:-c++} -std=c++17 -O0 -Wall -Wextra -Werror ${SESSION_WORLD_TEST_FLAGS:-} -I "$shared" -I "$shared/app" \
         "${common[@]}" "$test.cpp" -o "$build/$test"
 done
@@ -39,6 +39,7 @@ ${CXX:-c++} -std=c++17 -O2 -Wall -Wextra -Werror -I "$shared" -I "$shared/app" -
     "$shared/rules/ini_file.cpp" "$shared/map/map_file.cpp" "$shared/pack/map_pack.cpp" -ldl -o "$build/setup_case"
 "$build/setup_case" "$game"
 "$build/test_snapshot"
+"$build/house_updates_case" > /dev/null
 "$build/cell_setup_case"
 "$build/cell_occupancy_case" > /dev/null
 "$build/bridge_footprint_case" > /dev/null
@@ -58,6 +59,8 @@ if [ "${2:-}" = "--original" ]; then
     export PYTHONPATH="$shared/sim${PYTHONPATH:+:$PYTHONPATH}"
     ${PYTHON:-python3} original_base_local_check.py "$game/game.exe" "$build/geometry_cases"
     ${PYTHON:-python3} original_house_check.py "$game/game.exe" "$build/house_case"
+    ${PYTHON:-python3} original_house_updates_check.py "$game/game.exe" "$build/house_updates_case"
+    ${PYTHON:-python3} original_overlay_data_check.py "$game/game.exe" "$build/setup_case" "$game"
     ${PYTHON:-python3} original_battle_start_check.py "$game/game.exe" "$build/setup_case"
     ${PYTHON:-python3} original_constructor_check.py "$game/game.exe" "$build/constructor_case"
     ${PYTHON:-python3} original_joint_check.py "$game/game.exe" "$build/constructor_case"

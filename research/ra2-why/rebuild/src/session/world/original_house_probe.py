@@ -57,6 +57,11 @@ state=bytes(cpu.mem_read(scenario+0x218,1012))
 indexes=struct.unpack_from('<II',state,4);table=struct.unpack_from('<250I',state,12)
 print('RESULT',house_draw[0],m.read(house+0x124),m.read(house+0x24c),m.read(house_type+0xc0),palette,
       m.read(house+0x228),m.read(house+0x1a78),*indexes,*table)
+if '--updates' in sys.argv:
+    for offset in (0x54a0,0x54d0,0x54c0,0x54b0):
+        target=house+offset
+        vtable=m.read(target)
+        print('UPDATE_VTABLE',hex(offset),hex(vtable),hex(m.read(vtable+12)),m.read(target+8))
 if '--aux' in sys.argv:
     cpu.mem_map(0x2500000,0x40000)
     for index,name in enumerate(('Neutral','Special')):
@@ -102,6 +107,6 @@ if '--unit' in sys.argv:
     dynamic_count=m.read(dynamic+4*type_index) if dynamic else 0
     fixed_count=m.read(house+0x1278+4*type_index)
     if '--runtime-fields' in sys.argv:
-        print('CONSTRUCTOR_FIELDS',*(cpu.mem_read(m.FOOT+offset,1)[0] for offset in (0x74,0x76,0x370)))
+        print('CONSTRUCTOR_FIELDS',*(cpu.mem_read(m.FOOT+offset,1)[0] for offset in (0x74,0x75,0x76,0x370,0x7d,0x1b8,0x5a0,0x5a1)))
     print('UNIT_RESULT',low,m.read(m.FOOT+0x30),on_map,m.read(m.FOOT+0x6c),hull,turret,cpu.mem_read(m.FOOT+0x5a0,1)[0],
           m.read(house+0x228),dynamic_count,fixed_count,*indexes,*table)

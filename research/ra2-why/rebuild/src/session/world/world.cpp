@@ -108,7 +108,8 @@ std::optional<std::uint32_t> Stage::create_unit(std::uint32_t house_id, std::str
     unit.constructor_random=constructor_random;
     unit.next=0; unit.on_map=false; unit.hull_facing=0; unit.turret_facing=0;
     // Fresh Unit constructor values checked against the base executable.
-    unit.object_field_74=0; unit.object_field_76=1; unit.techno_field_370=0;
+    unit.object_field_74=0; unit.object_field_75=0; unit.object_field_76=1;
+    unit.techno_field_370=0; unit.unit_field_7d=1; unit.techno_field_1b8=0; unit.foot_field_5a1=0;
     unit.occupancy_tracking=true; // Foot constructor 004C2B6E.
     unit.category.emplace();
     unit.category->runtime_type=1; // Unit virtual +2C, base 0070A2D0.
@@ -175,7 +176,9 @@ PlacementResult Stage::place_base_unit_at(std::uint32_t unit_id, StartPoint poin
     if (unit==candidate.entities.end() || unit->kind!=Kind::Unit || unit->lifetime!=Lifetime::Created ||
         !unit->resolved_hp || !unit->original_type_index || !unit->next || *unit->next!=0 ||
         !unit->occupancy_tracking || !*unit->occupancy_tracking ||
-        unit->object_field_74!=0 || unit->object_field_76!=1 || unit->techno_field_370!=0)
+        unit->object_field_74!=0 || unit->object_field_75!=0 || unit->object_field_76!=1 ||
+        unit->techno_field_370!=0 || unit->unit_field_7d!=1 || unit->techno_field_1b8!=0 ||
+        unit->foot_field_5a1!=0)
         return PlacementResult::Unresolved;
     auto house=candidate.houses.end();
     for (auto it=candidate.houses.begin();it!=candidate.houses.end();++it)
@@ -247,7 +250,7 @@ PlacementResult Stage::place_base_unit_at(std::uint32_t unit_id, StartPoint poin
         auto& value=*candidate.cells.at(neighbor).neighbor_count;
         value=static_cast<std::uint8_t>(value+1); // Foot 004C5F6A, byte wrap.
     }
-    unit->object_field_74=1; unit->object_field_76=0;
+    unit->object_field_74=1; unit->object_field_75=1; unit->object_field_76=0;
     unit->cell=ra2map::Cell{static_cast<std::uint16_t>(point.x),static_cast<std::uint16_t>(point.y)};
     unit->position=sim::Coord{int(point.x)*256+128,int(point.y)*256+128,world_z};
     unit->layer=Layer::Ground; unit->lifetime=Lifetime::Placed;
@@ -263,6 +266,7 @@ PlacementResult Stage::place_base_unit_at(std::uint32_t unit_id, StartPoint poin
     cell->second.coarse_category.reset();
     // Cell setup can write +140 bits; do not retain a stale full word.
     cell->second.cell_flags_140.reset();
+    cell->second.cell_flag_80.reset();
     cell->second.coarse_category_writes.reset();
     cell->second.coarse_cache_height.reset();
     cell->second.hierarchy_cache_height.reset();
@@ -343,10 +347,49 @@ sim::CellSetupResult Stage::complete_pending_cell_setup(const sim::CellSetupStat
     snapshot_=std::move(candidate);
     return result;
 }
+
+bool Stage::finish_battle_house_updates(std::uint32_t house_id) {
+    if (snapshot_.pending_cell_setup) return false;
+    auto candidate=snapshot_;
+    for (auto& house:candidate.houses) if (house.id==house_id) {
+        if (!house.buildings_ever_54a0 || !house.aircraft_ever_54d0 ||
+            !house.infantry_ever_54c0 || !house.units_ever_54b0) return false;
+        house.buildings_ever_54a0->clear(); house.aircraft_ever_54d0->clear();
+        house.infantry_ever_54c0->clear(); house.units_ever_54b0->clear();
+        snapshot_=std::move(candidate);
+        return true;
+    }
+    return false;
+}
+
+
+bool Stage::finish_battle_house(std::uint32_t house_id,std::int32_t remaining_budget) {
+    if (snapshot_.pending_cell_setup) return false;
+    auto candidate=snapshot_;
+    bool found=false;
+    for (auto& house:candidate.houses) if (house.id==house_id) {
+        if (!house.cash) return false;
+        if (remaining_budget>0) {
+            const auto cash=std::int64_t(*house.cash)+remaining_budget;
+            if (cash>std::numeric_limits<std::int32_t>::max()) return false;
+            house.cash=static_cast<std::int32_t>(cash);
+        }
+        found=true;
+        break;
+    }
+    if (!found) return false;
+    Stage working(std::move(candidate));
+    if (!working.finish_battle_house_updates(house_id)) return false;
+    snapshot_=working.snapshot();
+    return true;
+}
+
 bool validate(const Snapshot& snapshot) {
     if (snapshot.edition!=Edition::Base && snapshot.edition!=Edition::Yuri) return false;
     if (snapshot.setup_progress!=SetupProgress::Unknown && snapshot.setup_progress!=SetupProgress::PackedMapRead &&
-        snapshot.setup_progress!=SetupProgress::Complete) return false;
+        snapshot.setup_progress!=SetupProgress::Complete && snapshot.setup_progress!=SetupProgress::OverlayObjectsRead &&
+        snapshot.setup_progress!=SetupProgress::OverlayDataRead &&
+        snapshot.setup_progress!=SetupProgress::ReadyForInitialUnits) return false;
     if (snapshot.cell_order) {
         std::set<std::uint32_t> seen;
         for (const auto key:*snapshot.cell_order) {
@@ -409,7 +452,7 @@ bool validate(const Snapshot& snapshot) {
             const auto same=[&](const std::optional<bool>& field,std::uint32_t bit) {
                 return !field || *field==bool(*cell.cell_flags_140 & bit);
             };
-            if (!same(cell.cell_flag_100,0x100) || !same(cell.cell_flag_200,0x200) ||
+            if (!same(cell.cell_flag_80,0x80) || !same(cell.cell_flag_100,0x100) || !same(cell.cell_flag_200,0x200) ||
                 !same(cell.cell_flag_20000,0x20000) || !same(cell.cell_flag_40000,0x40000) ||
                 (cell.terrain && !same(cell.terrain->bridge,0x100))) return false;
         }

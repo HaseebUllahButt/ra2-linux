@@ -65,8 +65,9 @@ int main(int argc,char** argv) {
         const auto& s=stage.snapshot();const auto& u=s.entities.at(0);const auto& h=s.houses.at(0);
         const auto count=h.placed_unit_counts->find(0);
         if (std::getenv("RA2_RUNTIME_FIELDS"))
-            std::cout<<"RUNTIME_FIELDS "<<int(*u.object_field_74)<<' '<<int(*u.object_field_76)<<' '
-                     <<int(*u.techno_field_370)<<'\n';
+            std::cout<<"RUNTIME_FIELDS "<<int(*u.object_field_74)<<' '<<int(*u.object_field_75)<<' '
+                     <<int(*u.object_field_76)<<' '<<int(*u.techno_field_370)<<' '<<int(*u.unit_field_7d)<<' '
+                     <<int(*u.techno_field_1b8)<<' '<<int(*u.occupancy_tracking)<<' '<<int(*u.foot_field_5a1)<<'\n';
         std::cout<<(result==PlacementResult::Placed?1:0)<<' '<<int(*u.on_map)<<' '
                  <<s.cells.at(point.y*512+point.x).heads->ground_head<<' '
                  <<int(*s.cells.at(point.y*512+point.x).ground_occupancy_124)<<' '

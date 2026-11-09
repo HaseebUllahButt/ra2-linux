@@ -18,7 +18,7 @@ enum class Layer { Ground, Bridge };
 enum class CreatedKind { House, Entity };
 enum class HouseRole { Player, Neutral, Special };
 // Only a completed original scenario may enter the live runtime.
-enum class SetupProgress { Unknown, PackedMapRead, Complete };
+enum class SetupProgress { Unknown, PackedMapRead, Complete, OverlayObjectsRead, OverlayDataRead, ReadyForInitialUnits };
 struct CreatedObject { CreatedKind kind; std::uint32_t id; };
 struct House {
     std::uint32_t id=0;
@@ -40,6 +40,7 @@ struct House {
     std::optional<std::map<std::int32_t,std::int32_t>> buildings_active_5460, buildings_owned_5420,
         buildings_ever_54a0, units_owned_5430, units_ever_54b0, infantry_owned_5440,
         infantry_ever_54c0, aircraft_owned_5450, aircraft_ever_54d0;
+    std::optional<double> firepower_multiplier; // Base House +D0.
 };
 struct BaseUnitProfile {
     std::optional<std::int32_t> restricted_land, movement_mode, placement_mode, speed_type, level_height;
@@ -61,7 +62,7 @@ struct Entity {
     std::optional<bool> excluded_from_house_tracking;
     std::optional<std::uint16_t> constructor_random; // Base Techno +320.
     std::optional<bool> on_map;
-    std::optional<bool> occupancy_tracking; // Base Foot +5A0.
+    std::optional<bool> occupancy_tracking; // Base Foot +5A0; movement can change it.
     std::optional<std::int32_t> timer_length;
     std::optional<bool> timer_active;
     std::optional<std::uint8_t> height_byte;
@@ -81,7 +82,10 @@ struct Entity {
     std::optional<std::uint16_t> hull_facing_raw;
     std::optional<bool> locomotor_moving;
     std::optional<std::int32_t> mission;
-    std::optional<std::uint8_t> unit_field_7d;
+    std::optional<std::uint8_t> unit_field_7d, techno_field_1b8, foot_field_5a1, object_field_75;
+    std::optional<double> firepower_multiplier; // Base Techno +128.
+    std::optional<double> veterancy; // Base Techno +118.
+    std::optional<bool> veteran_firepower, elite_firepower, veteran_rof, elite_rof;
 };
 struct CellState {
     std::optional<bool> allocated; // The original allocated Cell, not the fallback receiver.
@@ -133,6 +137,7 @@ struct Snapshot {
     // Original map iteration order, expressed as y*512+x. Empty means unknown.
     std::optional<std::vector<std::uint32_t>> cell_order;
     std::optional<double> veteran_reload_multiplier; // Base Rules +5B0.
+    std::optional<double> veteran_firepower_multiplier; // Base Rules +590.
 };
 enum class PlacementResult { Placed, Blocked, Unresolved };
 // Checks every head and shared next chain. Invalid and cyclic snapshots fail.
@@ -177,6 +182,8 @@ public:
     // Base Battle 005B7F01 clears four per-house type counter arrays.
     // Unknown arrays block the update and leave the snapshot unchanged.
     bool finish_battle_house_updates(std::uint32_t house_id);
+    // Add a positive unused budget, then clear the four arrays atomically.
+    bool finish_battle_house(std::uint32_t house_id,std::int32_t remaining_budget);
     const Snapshot& snapshot() const noexcept { return snapshot_; }
 private:
     std::optional<std::uint32_t> next_id() const;
