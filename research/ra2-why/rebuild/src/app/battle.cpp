@@ -10,6 +10,7 @@
 #include "battle_hud.h"
 #include "battle_building_tools.h"
 #include "battle_shroud.h"
+#include "battle_home.h"
 #include "battle_queue.h"
 #include "battle_score.h"
 #include "battle_fallout.h"
@@ -482,7 +483,7 @@ public:
             }
             if(input.pressed && input.key==SDLK_TAB && victory_.settled()) {show_score_=!show_score_;return;}
             if (!options_.visible() && input.pressed && input.key==SDLK_h) {
-                for (const auto& e:world_.entities) if (live(e)&&e.house_id==player_) {center(e);break;}
+                if (const auto* base=home_building(world_,player_,rules_)) center(*base);
             }
         }
         if(options_.visible()) {
