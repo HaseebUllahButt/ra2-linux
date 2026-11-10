@@ -1,5 +1,6 @@
 #pragma once
 #include "../rules/ini_file.h"
+#include "distance.h"
 #include "../session/world/world.h"
 #include <array>
 #include <cstdint>
@@ -20,6 +21,11 @@ struct PrototypeMoveResult {
     std::vector<std::uint32_t> moved,arrived,blocked;
     // Infantry killed this frame by a crushing vehicle (base 00705160).
     std::vector<std::uint32_t> crushed;
+};
+// Which search answered routes. Tests read this to prove the original
+// kernel ran and the legacy search did not.
+struct PrototypeRouteTrace {
+    std::uint64_t kernel_routes=0,kernel_no_path=0,legacy_routes=0;
 };
 // Rules values for one object type. Defaults are the original constructor
 // values; from_rules() reads the type's RULES.INI section.
@@ -49,8 +55,14 @@ public:
     // object. Without rules, vehicles use the drive model with Track, ROT 0,
     // no acceleration, no crushing and a ground multiplier of one.
     void use_rules(const rules::IniFile&);
+    // Value-owned original distance table for the recovered ground path
+    // kernel. A copy is stored, so the caller's table need not outlive this
+    // object. Without it, routes use the conservative prototype search.
+    void use_original_path(const OriginalDistance& distance) { original_path_distance_=distance; }
     PrototypeMoveProfile profile(const session::world::Entity&) const;
     const PrototypeMoveGlobals& globals() const { return globals_; }
+    // Route trace counters since this object was created.
+    const PrototypeRouteTrace& route_trace() const { return trace_; }
     // Speed is the original rule speed (Type +5A0, original_rule_speed()).
     // Drive vehicles spend it on track samples; other Units move that many
     // world units per frame. Commands do not change world.
@@ -87,5 +99,7 @@ private:
     const rules::IniFile* rules_=nullptr;
     PrototypeMoveGlobals globals_;
     mutable std::map<std::string,PrototypeMoveProfile> profiles_;
+    std::optional<OriginalDistance> original_path_distance_;
+    PrototypeRouteTrace trace_;
 };
 }

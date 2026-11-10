@@ -137,7 +137,7 @@ build/sim_test: build/native/src/sim/test_main.o $(SIM_OBJECTS) $(MAP_OBJECTS)
 sim-movement-scenes: build/sim_movement_scenes_test
 	build/sim_movement_scenes_test
 
-build/sim_movement_scenes_test: build/native/src/sim/test_movement_scenes.o build/native/src/sim/prototype_movement.o build/native/src/sim/prototype_shroud.o build/native/src/sim/drive.o build/native/src/sim/distance.o build/native/src/sim/random.o build/native/src/sim/world.o build/native/src/sim/ground.o build/native/src/weapons/occupant_order.o build/native/src/app/battle_shroud.o build/native/src/rules/ini_file.o
+build/sim_movement_scenes_test: build/native/src/sim/test_movement_scenes.o build/native/src/sim/prototype_movement.o build/native/src/sim/path.o build/native/src/sim/path_smoothing.o build/native/src/sim/cell_entry.o build/native/src/sim/prototype_shroud.o build/native/src/sim/drive.o build/native/src/sim/distance.o build/native/src/sim/random.o build/native/src/sim/world.o build/native/src/sim/ground.o build/native/src/weapons/occupant_order.o build/native/src/app/battle_shroud.o build/native/src/rules/ini_file.o
 	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
 
 sim-move: build/sim_move_test

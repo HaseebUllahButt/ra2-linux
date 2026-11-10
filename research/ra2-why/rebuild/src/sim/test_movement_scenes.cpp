@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -45,7 +46,7 @@ sw::Snapshot field(int width,int height) {
     world.creation_order.push_back({sw::CreatedKind::House,1});
     for (int y=1;y<=height;++y) for (int x=1;x<=width;++x) {
         auto& c=world.cells[key(x,y)];c.allocated=true;c.heads=weapons::CellContentHeads{};
-        c.ground_occupancy_124=0;c.cell_flag_100=false;c.terrain=original_default_terrain_cell({static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)});
+        c.ground_occupancy_124=0;c.cell_flag_100=false;c.cell_flag_40000=false;c.terrain=original_default_terrain_cell({static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)});
         world.cell_order->push_back(key(x,y));
     }
     return world;
@@ -135,6 +136,12 @@ void check_subcells(const sw::Snapshot& world,const PrototypeMovement& movement)
 // Steady displacement after warmup: the largest cells-per-frame rate over
 // any window of the run, so start, stop and turning stay out of it. The
 // distance is straight-line, so diagonal paths measure the same rate.
+// In original mode each scene must be routed by the kernel, and the
+// legacy search must not answer.
+void check_kernel_ran(const PrototypeRouteTrace& before,const PrototypeRouteTrace& after) {
+    require(after.kernel_routes>before.kernel_routes,"the original kernel did not route the scene");
+    require(after.legacy_routes==before.legacy_routes,"the legacy search answered in original mode");
+}
 double steady_cells_per_frame(const std::vector<std::pair<int,int>>& positions,unsigned window,bool axis_only=false) {
     double best=0.0;
     for (std::size_t i=window;i<positions.size();++i) {
@@ -147,14 +154,22 @@ double steady_cells_per_frame(const std::vector<std::pair<int,int>>& positions,u
 }
 }
 
-int main() try {
+int main(int argc,char** argv) try {
+    if (argc>2) { std::cerr<<"usage: test_movement_scenes [game.exe]\n"; return 2; }
     const auto rules=test_rules();
+    // With a game.exe argument the scenes run through the original path
+    // kernel (use_original_path). Without one they keep the legacy search.
+    // Flat known fixtures: every Cell resolves Cell +40000 as clear.
+    std::optional<sim::OriginalDistance> distance;
+    if (argc==2) distance=sim::OriginalDistance::from_executable(argv[1]);
 
     // Scene 1: one tank (MTNK) across 20 Cells of open ground.
     // Measured (REFERENCE.md): Grizzly steady 0.105 cells/frame; 11 Cells
     // took 5.06 s total including start, stop and one turn.
     {
         auto world=field(32,12);PrototypeMovement movement;movement.use_rules(rules);
+        if (distance) movement.use_original_path(*distance);
+        const auto trace0=movement.route_trace();
         put(world,901,"MTNK",sw::Kind::Unit,5,6,300);
         const auto speed=movement.profile(unit(world,901)).speed;
         require(movement.issue(world,901,{25,6},speed).status==PrototypeMoveStatus::Complete,"tank order refused");
@@ -172,12 +187,15 @@ int main() try {
         require(frames && frames<=400,"tank did not cross open ground in 400 frames");
         require(std::abs(error)<0.05,"steady tank speed off the measured 0.105 cells/frame");
         require(same_cell(*unit(world,901).cell,{25,6}),"tank missed its goal");
+        if (distance) check_kernel_ran(trace0,movement.route_trace());
     }
 
     // Scene 2: 8 tanks (MTNK) through a 2-cell gap, each with a distinct
     // goal. Measured steady rate per tank: 0.105 cells/frame (Grizzly).
     {
         auto world=field(40,20);PrototypeMovement movement;movement.use_rules(rules);
+        if (distance) movement.use_original_path(*distance);
+        const auto trace0=movement.route_trace();
         for (int y=1;y<=20;++y) if (y!=9 && y!=10) world.cells.at(key(11,y)).ground_occupancy_124=1;
         const ra2map::Cell goals[8]={{20,2},{20,4},{20,6},{20,8},{20,12},{20,14},{20,16},{20,18}};
         for (unsigned i=0;i<8;++i) put(world,910+i,"MTNK",sw::Kind::Unit,static_cast<int>(2+i/4),static_cast<int>(2+i%4*5)+2,300);
@@ -200,6 +218,7 @@ int main() try {
         require(worst_error<0.10,"a queued tank lost too much steady speed against the measured 0.105");
         for (unsigned i=0;i<8;++i) require(same_cell(*unit(world,910+i).cell,goals[i]),"a tank missed its distinct goal");
         check_no_overlap(world);
+        if (distance) check_kernel_ran(trace0,movement.route_trace());
     }
 
     // Scene 3: an infantry squad (E1 and E2) with distinct subcells.
@@ -208,6 +227,8 @@ int main() try {
     // (noisy), about 0.036 cells per game frame.
     {
         auto world=field(32,12);PrototypeMovement movement;movement.use_rules(rules);
+        if (distance) movement.use_original_path(*distance);
+        const auto trace0=movement.route_trace();
         soldier(world,930,"E1",5,6,2);soldier(world,931,"E1",5,6,3);soldier(world,932,"E2",5,6,4);
         soldier(world,933,"E1",5,7,2);soldier(world,934,"E2",5,7,3);soldier(world,935,"E2",5,7,4);
         const ra2map::Cell goals[6]={{20,2},{20,4},{20,6},{20,8},{20,10},{20,12}};
@@ -237,6 +258,7 @@ int main() try {
         require(e2_error<0.15,"E2 steady speed off the noisy measured 0.036 cells/frame");
         for (unsigned i=0;i<6;++i) require(same_cell(*unit(world,930+i).cell,goals[i]),"a soldier missed its goal");
         check_subcells(world,movement);
+        if (distance) check_kernel_ran(trace0,movement.route_trace());
     }
 
     std::cout<<"movement scenes ok\n";
