@@ -144,6 +144,8 @@ void check_money_math(const IniFile& rules, const IniFile& art) {
     // Base 0x006DAEC0 clamps the step cost to a minimum of 1 credit:
     // TINY is 10 / (1000 / 8) = 0 before the percent, so the clamp decides.
     require(sell.repair_cost_per_step("TINY") == 1, "Repair step cost minimum clamp changed");
+    // A zero Cost divides safely and still clamps to 1.
+    require(sell.repair_cost_per_step("FREE") == 1, "Zero cost repair step clamp changed");
     require(sell.refund_amount("WORKS") == 1000, "War factory refund changed");
     require(sell.refund_amount("CHEAP") == 250, "Cheap building refund changed");
     const sw::House allied = house(1, "AlliedCountry", 0);

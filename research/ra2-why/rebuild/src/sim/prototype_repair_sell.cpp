@@ -170,11 +170,12 @@ std::int32_t PrototypeRepairSell::repair_cost_per_step(const std::string& type) 
     // Cost (virtual +0xAC) divided by (Strength / RepairStep), times
     // RepairPercent (RulesClass +0x1338), truncated, with a minimum of 1.
     // Slot +0xB4 is 0x006DAF10, which returns RepairStep (RulesClass
-    // +0x1334). TODO-ORIGINAL: this guard returns 0 for a type without Cost
-    // or Strength; the original would divide by zero instead.
+    // +0x1334). A zero Cost divides safely and still clamps to 1.
+    // TODO-ORIGINAL: this guard returns 0 for a type without Strength or
+    // with a zero divisor; the original would divide by zero instead.
     const auto cost = rules_.read_integer(type, "Cost", 0);
     const auto strength = rules_.read_integer(type, "Strength", 0);
-    if (cost <= 0 || strength <= 0) return 0;
+    if (strength <= 0) return 0;
     const auto divisor = strength / limits_.repair_step;
     if (divisor <= 0) return 0;
     const auto value = static_cast<std::int32_t>(
@@ -201,9 +202,11 @@ std::int32_t PrototypeRepairSell::survivor_count(const session::world::House& ho
     // divided by the side divisor, clamped to 1..5, zero refund included.
     // Only a side value of 1 picks the Soviet divisor; every other value
     // picks the Allied one. A zero divisor returns 0. TODO-ORIGINAL: the
-    // original gates on BuildingClass +0x5B0 and House +0xAD9 and doubles
-    // the divisor for a captured building (+0x5B3); this keeps the Crewed
-    // rules check as its gate and does not model capture.
+    // original gates on BuildingClass +0x5B0 and a BuildingTypeClass byte
+    // at +0xAD9 (read through the building's type pointer at +0x418, so
+    // likely Crewed) and doubles the divisor for a captured building
+    // (+0x5B3); this keeps the Crewed rules check as its gate and does not
+    // model capture.
     if (!rules_.read_bool(type, "Crewed")) return 0;
     const auto side = house_side(house, rules_);
     if (!side) return 0;
@@ -369,13 +372,12 @@ PrototypeRepairSell::SellResult PrototypeRepairSell::sell(World& world, std::uin
 
 PrototypeRepairSell::RepairTick PrototypeRepairSell::tick(World& world, std::uint32_t game_frame) {
     RepairTick result;
-    // Original interval: RepairRate minutes as frames, at least one. The
-    // base step path in FUN_0044B9B0 divides the shared frame DAT_00A40D2C
-    // by an interval and runs a step on a zero remainder. The interval
-    // comes from FUN_0077F110, whose conversion to minutes is not
-    // recovered; RepairRate minutes times 900 is a stand-in. The parser
-    // FUN_00647F40 stores RepairRate at RulesClass +0x1348 and RepairStep
-    // at +0x1334.
+    // Original interval, recovered from game.exe 0x0044BBA1: the shared
+    // frame DAT_00A40D2C divided by trunc(RepairRate * 900.0), the 900.0
+    // constant read from 0x0079B608, and a step runs only on a zero
+    // remainder. The parser FUN_00647F40 stores RepairRate at RulesClass
+    // +0x1348. TODO-ORIGINAL: this max(1, ...) guard replaces the
+    // original's divide-by-zero on a zero interval.
     const auto interval = static_cast<std::uint32_t>(std::max(1,
         static_cast<std::int32_t>(limits_.repair_rate_minutes * limits_.ticks_per_minute)));
     if (last_frame_) {

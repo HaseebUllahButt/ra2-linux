@@ -42,9 +42,10 @@ public:
     // Credits for one repair step of the building type. Recovered from
     // game.exe: TechnoTypeClass vtable 0x007AD080, slot +0xB0 = 0x006DAEC0
     // is Cost / (Strength / RepairStep) times RepairPercent, truncated,
-    // with a minimum of 1. Slot +0xB4 = 0x006DAF10 returns RepairStep.
-    // Zero when the type has no usable Cost or Strength (the original
-    // would divide by zero instead).
+    // with a minimum of 1; a zero Cost divides safely and still clamps to
+    // 1. Slot +0xB4 = 0x006DAF10 returns RepairStep. Zero when the type has
+    // no Strength or a zero divisor (the original would divide by zero
+    // instead).
     std::int32_t repair_cost_per_step(const std::string& type) const;
 
     // Credits paid back for selling one of the type: Cost * RefundPercent,
@@ -59,9 +60,11 @@ public:
     // 1..5, zero refund included. Only a side value of 1 picks the Soviet
     // divisor (RulesClass +0x1164); every other value picks the Allied one
     // (+0x1160). A zero divisor returns 0. TODO-ORIGINAL: the original
-    // gates on BuildingClass +0x5B0 and House +0xAD9 and doubles the
-    // divisor for a captured building (+0x5B3); this keeps the Crewed
-    // rules check as its gate and does not model capture.
+    // gates on BuildingClass +0x5B0 and a BuildingTypeClass byte at +0xAD9
+    // (read through the building's type pointer at +0x418, so likely
+    // Crewed) and doubles the divisor for a captured building (+0x5B3);
+    // this keeps the Crewed rules check as its gate and does not model
+    // capture.
     std::int32_t survivor_count(const session::world::House& house, const std::string& type) const;
 
     // Infantry type of the sold building's crew. TODO-ORIGINAL: the base
