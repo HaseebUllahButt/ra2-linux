@@ -36,6 +36,22 @@ bool sight_source(const Entity& entity) {
         entity.cell.has_value() && entity.on_map.value_or(true);
 }
 
+// SpySat eligibility, from MapClass grant/loss checks in FUN_004F2FC0
+// (BuildingType +1345 SpySat flag): the building must be alive (+74), not in
+// limbo (+76), and its current mission must not be 0x13 (construction).
+// resolved_hp>0 stands in for the +74 alive check when present. Reveal runs
+// through 0055A120; losing the last satellite reshrouds through 00559F10.
+// This path has no power test: a powered-down satellite still grants the
+// full map view. TODO: the snapshot has no queued mission field, so the
+// queued-mission half of the base check is unresolved.
+bool satellite_eligible(const Entity& entity) {
+    if (entity.resolved_hp && *entity.resolved_hp <= 0) return false;
+    if (entity.active && !*entity.active) return false;
+    if (entity.in_limbo && *entity.in_limbo) return false;
+    if (entity.mission && *entity.mission == 0x13) return false;
+    return true;
+}
+
 bool map_neutral(const session::world::House& house) {
     return house.role && (*house.role == HouseRole::Neutral || *house.role == HouseRole::Special);
 }
@@ -115,11 +131,10 @@ void PrototypeShroud::tick(const session::world::Snapshot& world,
     // Every snapshot house gets a map, so queries never depend on tick order.
     for (const auto& house : world.houses) map_for(house.id);
 
-    // Spy satellite: a live SpySat=yes building sees the whole map. Losing
-    // the last one reshrouds the whole map first, then normal sight rebuilds
-    // the view. TODO-ORIGINAL: the old notes name Yuri's Revenge addresses
-    // 00508F60, 0050BD10 and 00577AB0; the base SpySat loss path and power
-    // state are not recovered.
+    // Spy satellite: an eligible SpySat=yes building sees the whole map
+    // (FUN_004F2FC0). Losing the last eligible one reshrouds the whole map
+    // through 00559F10, then normal sight rebuilds the view; the grant
+    // reveals through 0055A120.
     std::map<std::uint32_t, bool> satellite_now;
     for (const auto& house : world.houses) {
         bool active = false;
@@ -127,7 +142,7 @@ void PrototypeShroud::tick(const session::world::Snapshot& world,
             if (entity.house_id != house.id || entity.kind != session::world::Kind::Structure ||
                 !sight_source(entity))
                 continue;
-            if (rules.read_bool(entity.type, "SpySat")) {
+            if (rules.read_bool(entity.type, "SpySat") && satellite_eligible(entity)) {
                 active = true;
                 break;
             }
