@@ -166,27 +166,31 @@ PrototypeRepairSell::PrototypeRepairSell(const rules::IniFile& base_rules,
     : rules_(base_rules), art_(art_rules), limits_(PrototypeRepairSellRules::load(base_rules)) {}
 
 std::int32_t PrototypeRepairSell::repair_cost_per_step(const std::string& type) const {
-    // TODO-ORIGINAL: the TechnoTypeClass::Repair_Cost rounding (type virtual
-    // +0xB0, read by the base step path in FUN_0044B9B0) was not recovered.
-    // The export has no TechnoTypeClass vtable, so the virtual target stays
-    // unknown.
-    // This is the visible RA1 shape with the base percent value: Cost /
-    // (Strength / RepairStep) is integer division first, then the percent
-    // multiply truncates. Zero cost repairs for free, like an original
-    // truncated zero.
+    // Recovered from game.exe: the TechnoTypeClass vtable is 0x007AD080
+    // (RTTI .?AVTechnoTypeClass@@); BuildingTypeClass 0x0079D1F8 inherits
+    // the same slots. Slot +0xB0 is 0x006DAEC0, the per-step repair cost:
+    // Cost (virtual +0xAC) divided by (Strength / RepairStep), times
+    // RepairPercent (RulesClass +0x1338), truncated, with a minimum of 1.
+    // Slot +0xB4 is 0x006DAF10, which returns RepairStep (RulesClass
+    // +0x1334). TODO-ORIGINAL: this guard returns 0 for a type without Cost
+    // or Strength; the original would divide by zero instead.
     const auto cost = rules_.read_integer(type, "Cost", 0);
     const auto strength = rules_.read_integer(type, "Strength", 0);
     if (cost <= 0 || strength <= 0) return 0;
     const auto divisor = strength / limits_.repair_step;
     if (divisor <= 0) return 0;
-    return static_cast<std::int32_t>(static_cast<double>(cost / divisor) * limits_.repair_percent);
+    const auto value = static_cast<std::int32_t>(
+        static_cast<double>(cost / divisor) * limits_.repair_percent);
+    return value < 1 ? 1 : value;
 }
 
 std::int32_t PrototypeRepairSell::refund_amount(const std::string& type) const {
-    // RA1 TechnoClass::Refund_Amount shape: Cost times RefundPercent for a
-    // human house, truncated. The house CostBias is not modeled.
-    // Base game.exe AircraftClass::GetRefund 0x006D5850 reads the refund
-    // through the same type virtual at vtable +0xB8.
+    // Recovered from game.exe: the refund virtual is TechnoTypeClass vtable
+    // 0x007AD080 slot +0xB8 = 0x006DAD80. It multiplies the Cost (virtual
+    // +0xAC) by RefundPercent (RulesClass +0x13A0) and truncates. Its extra
+    // arguments can force the full price and apply a house factor.
+    // TODO-ORIGINAL: the house factor and full-price argument are not
+    // modeled; this is the plain human-house shape.
     const auto cost = rules_.read_integer(type, "Cost", 0);
     if (cost <= 0) return 0;
     return static_cast<std::int32_t>(static_cast<double>(cost) * limits_.refund_percent);

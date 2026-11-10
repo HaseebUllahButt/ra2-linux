@@ -28,7 +28,7 @@ struct PrototypeRepairSellRules {
     static PrototypeRepairSellRules load(const rules::IniFile& rules);
 };
 
-// Player building repair and sell for prototype worlds. One instance serves
+// Human-player building repair and sell for prototype worlds. One instance serves
 // one match. Repair state lives here, not in the world; a rebuilt helper
 // forgets which buildings were repairing, like the movement prototype.
 // TODO-ORIGINAL: no deconstruction animation or timer (RA2 BuildingClass::
@@ -42,19 +42,18 @@ public:
     explicit PrototypeRepairSell(const rules::IniFile& base_rules,
         const rules::IniFile* art_rules = nullptr);
 
-    // Credits for one repair step of the building type. The base step path
-    // in FUN_0044B9B0 reads the per-step cost from the type virtual at
-    // vtable +0xB0 and the per-step health from +0xB4; those virtual bodies
-    // are not recovered, so this keeps the RA1 shape (TechnoTypeClass::
-    // Repair_Cost): Cost / (Strength / RepairStep) times RepairPercent,
-    // truncated. Zero when the type has no usable Cost or Strength, which
-    // repairs for free like an original truncated zero.
+    // Credits for one repair step of the building type. Recovered from
+    // game.exe: TechnoTypeClass vtable 0x007AD080, slot +0xB0 = 0x006DAEC0
+    // is Cost / (Strength / RepairStep) times RepairPercent, truncated,
+    // with a minimum of 1. Slot +0xB4 = 0x006DAF10 returns RepairStep.
+    // Zero when the type has no usable Cost or Strength (the original
+    // would divide by zero instead).
     std::int32_t repair_cost_per_step(const std::string& type) const;
 
     // Credits paid back for selling one of the type: Cost * RefundPercent,
-    // truncated. Base game.exe AircraftClass::GetRefund 0x006D5850 calls the
-    // same type virtual at vtable +0xB8; its body was not recovered, so this
-    // keeps the RA1 TechnoClass::Refund_Amount shape. Zero without Cost.
+    // truncated. Recovered from game.exe: TechnoTypeClass vtable 0x007AD080
+    // slot +0xB8 = 0x006DAD80; its extra arguments can force the full price
+    // and apply a house factor, which are not modeled. Zero without Cost.
     std::int32_t refund_amount(const std::string& type) const;
 
     // Crew size when selling. TODO-ORIGINAL: no deterministic base sell

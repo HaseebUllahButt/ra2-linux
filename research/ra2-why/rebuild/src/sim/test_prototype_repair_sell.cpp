@@ -37,6 +37,7 @@ IniFile synthetic_rules() {
         "[CHEAP]\nCost=500\nStrength=400\nCrewed=yes\n"
         "[BARE]\nCost=2000\nStrength=1000\nCrewed=no\n"
         "[PRICY]\nCost=6000\nStrength=1000\nCrewed=yes\n"
+        "[TINY]\nCost=10\nStrength=1000\nCrewed=no\n"
         "[E1]\nStrength=125\n"
         "[E2]\nStrength=100\n");
     return rules;
@@ -140,6 +141,9 @@ void check_money_math(const IniFile& rules, const IniFile& art) {
     // RA1 shape: Cost / (Strength / RepairStep) * RepairPercent, truncated.
     require(sell.repair_cost_per_step("WORKS") == 2, "War factory repair step cost changed");
     require(sell.repair_cost_per_step("CHEAP") == 1, "Cheap building repair step cost changed");
+    // Base 0x006DAEC0 clamps the step cost to a minimum of 1 credit:
+    // TINY is 10 / (1000 / 8) = 0 before the percent, so the clamp decides.
+    require(sell.repair_cost_per_step("TINY") == 1, "Repair step cost minimum clamp changed");
     require(sell.refund_amount("WORKS") == 1000, "War factory refund changed");
     require(sell.refund_amount("CHEAP") == 250, "Cheap building refund changed");
     const sw::House allied = house(1, "AlliedCountry", 0);
