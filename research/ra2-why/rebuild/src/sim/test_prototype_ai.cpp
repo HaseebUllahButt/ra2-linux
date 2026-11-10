@@ -295,7 +295,11 @@ void check_base_teams(const IniFile& installed_rules, const IniFile& ai, const F
     std::vector<std::uint32_t> factories;
     for (const auto& order : first) {
         if (order.kind != OrderKind::Build || listed(rules, "BuildingTypes", order.type)) continue;
-        require(std::find(wanted.begin(), wanted.end(), order.type) != wanted.end(),
+        // Base 004E9C90: the refinery has no harvester, so the war factory
+        // makes one before any team member.
+        require(std::find(wanted.begin(), wanted.end(), order.type) != wanted.end() ||
+            (rules.read_bool(order.type, "Harvester") && factories.empty() &&
+             rules.read_string(world.entities[4].type, "Factory") == "UnitType" && order.entity == world.entities[4].id),
             "Computer built a unit no forming team asked for");
         const auto owners = IniFile::split_list(rules.read_string(order.type, "Owner"));
         require(std::find(owners.begin(), owners.end(), faction.country) != owners.end(),
@@ -634,6 +638,188 @@ void check_base_plan() {
     }
 }
 
+// A small base for the 004E9660 / 004E9C90 checks. Plan: YARD, POWER,
+// BARR, REF, WORK, DOCK, LAB, SUPER, PLAIN (Easy, no defense nodes).
+IniFile base_rules(const std::string& extra = {}) {
+    return parse(
+        "[General]\nPrerequisitePower=POWER\nPrerequisiteProc=REF\nHarvestersPerRefinery=2\nHarvesterUnit=MINER\n"
+        "GDIPowerPlant=POWER\nNodRegularPower=POWER\n" + extra +
+        "[Sides]\nAllies=Local\nSoviets=Enemy\n"
+        "[BuildingTypes]\n0=YARD\n1=POWER\n2=BARR\n3=REF\n4=WORK\n5=DOCK\n6=LAB\n7=SUPER\n8=PLAIN\n"
+        "[VehicleTypes]\n0=MINER\n"
+        "[AI]\nBuildConst=YARD\nBuildPower=POWER\nBuildRefinery=REF\nBuildBarracks=BARR\nBuildWeapons=WORK\n"
+        "[YARD]\nConstructionYard=yes\nFactory=BuildingType\nOwner=Local\nAIBuildThis=yes\nTechLevel=-1\nCost=3000\n"
+        "[POWER]\nPower=100\nOwner=Local\nTechLevel=1\nCost=600\n"
+        "[BARR]\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=500\nPrerequisite=POWER\nPower=-10\n"
+        "[REF]\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=2000\nPrerequisite=POWER\nPower=-10\n"
+        "[WORK]\nFactory=UnitType\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=2000\nPrerequisite=PROC,BARR\nPower=-10\n"
+        "[DOCK]\nNaval=yes\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=1000\nPrerequisite=WORK\nPower=-10\n"
+        "[LAB]\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=1500\nPrerequisite=WORK\nPower=-10\n"
+        "[SUPER]\nSuperWeapon=SWA\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=2500\nPrerequisite=LAB\nPower=-10\n"
+        "[PLAIN]\nSuperWeapon=SWB\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=2500\nPrerequisite=LAB\nPower=-10\n"
+        "[SWA]\nDisableableFromShell=yes\n[SWB]\nDisableableFromShell=no\n"
+        "[MINER]\nHarvester=yes\nOwner=Local\nTechLevel=1\nCost=1400\nPrerequisite=WORK\n");
+}
+
+IniFile base_ai() {
+    return parse("[TaskForces]\n0=TF\n[TF]\n0=1,GI\n[TeamTypes]\n0=T\n[T]\nTaskForce=TF\n"
+        "[AITriggerTypes]\nTR=Attack,T,<all>,0,-1,<none>,0,50,1,100,1,0,0,0,<none>,1,1,1\n");
+}
+
+sw::Snapshot base_world(const IniFile& rules) {
+    sw::Snapshot world;
+    world.houses = {house(computer, "Local", false), house(player, "Enemy", true)};
+    world.houses[0].cash = 1000000;
+    world.entities = {actor(rules, 1, computer, "YARD", sw::Kind::Structure, {10,10}),
+                      actor(rules, 90, player, "YARD", sw::Kind::Structure, {40,40})};
+    return world;
+}
+
+std::vector<std::string> building_orders(const IniFile& rules, const std::vector<Order>& orders) {
+    std::vector<std::string> result;
+    for (const auto& order : orders)
+        if (order.kind == OrderKind::Build && listed(rules, "BuildingTypes", order.type)) result.push_back(order.type);
+    return result;
+}
+
+// Base 004E9660 removes a Naval node while House +138 is clear; 0044B480
+// clears +138 when Exit_Object (00440520) finds no place for a finished
+// Naval building. No new building is chosen while one is in the factory
+// (+553C is -1 only after Exit_Object or 004B97C0).
+void check_naval_placement_failure() {
+    const auto rules = base_rules();
+    const auto ai = base_ai();
+    auto world = base_world(rules);
+    PrototypeAI policy(rules, &ai);
+    std::vector<std::string> built;
+    std::uint32_t id = 2;
+    std::int32_t frame = 0;
+    int docks = 0;
+    for (; frame < 90 * 40; frame += 90) {
+        const auto orders = building_orders(rules, policy.tick(world, computer, player, frame));
+        if (!orders.empty() && orders[0] == "DOCK") {
+            ++docks;
+            // The product waits in the factory: a Created structure.
+            auto product = actor(rules, id++, computer, "DOCK", sw::Kind::Structure, {0, 0});
+            product.lifetime = sw::Lifetime::Created;
+            world.entities.push_back(product);
+            require(building_orders(rules, policy.tick(world, computer, player, frame + 90)).empty(),
+                "Computer chose a new building while one was in the factory");
+            frame += 90;
+            // The app found no water place: it abandons the product and reports it.
+            world.entities.back().lifetime = sw::Lifetime::Destroyed;
+            world.entities.back().resolved_hp = 0;
+            policy.placement_failed(player, "DOCK");
+            require(policy.naval_allowed(), "Placement failure of another house cleared the naval flag");
+            policy.placement_failed(computer, "DOCK");
+            continue;
+        }
+        for (const auto& type : orders) {
+            world.entities.push_back(actor(rules, id, computer, type, sw::Kind::Structure,
+                {static_cast<std::uint16_t>(12 + id), 10}));
+            ++id;
+            built.push_back(type);
+        }
+    }
+    const auto& plan = policy.base_plan();
+    require(docks == 1 && !policy.naval_allowed(), "Computer did not drop the naval yard after its placement failed");
+    require(std::find(plan.begin(), plan.end(), "DOCK") == plan.end() &&
+        std::find(built.begin(), built.end(), "LAB") != built.end() &&
+        std::find(built.begin(), built.end(), "PLAIN") != built.end(),
+        "Base plan stopped at the naval yard that could not be placed");
+    policy.reset();
+    require(policy.naval_allowed(), "A new match did not set House +138 again (004E18C0)");
+}
+
+// Base 004EF890 and 004EF600: with the Super Weapons option (00A3D2C3)
+// off, a building whose SuperWeapon is DisableableFromShell is left out.
+void check_super_weapon_option() {
+    const auto rules = base_rules();
+    const auto ai = base_ai();
+    for (const bool allowed : {true, false}) {
+        auto world = base_world(rules);
+        PrototypeAI policy(rules, &ai);
+        require(policy.super_weapons(), "Super Weapons option is not on by default");
+        policy.set_super_weapons(allowed);
+        policy.tick(world, computer, player, 0);
+        const auto& plan = policy.base_plan();
+        const bool super = std::find(plan.begin(), plan.end(), "SUPER") != plan.end();
+        const bool plain = std::find(plan.begin(), plan.end(), "PLAIN") != plan.end();
+        require(super == allowed && plain, "Base plan ignored the Super Weapons option");
+    }
+}
+
+// Base 004E9660 chooses the next node without a money test; the factory
+// pays it in stages (004B9300). 004E9C90 keeps the money test for units.
+void check_building_without_cash() {
+    const auto rules = base_rules();
+    const auto ai = base_ai();
+    auto world = base_world(rules);
+    world.houses[0].cash = 0;
+    PrototypeAI policy(rules, &ai);
+    const auto orders = building_orders(rules, policy.tick(world, computer, player, 0));
+    require(orders.size() == 1 && orders[0] == "POWER", "Computer waited for the full building cost");
+}
+
+// Base 004E9660: a node that drains more than the free power gets a power
+// node in front of it (GDIPowerPlant for side 0). 004F1190 failure removes
+// a defense node.
+void check_power_and_defense_nodes() {
+    const auto rules = base_rules();
+    const auto ai = base_ai();
+    auto world = base_world(rules);
+    world.entities.push_back(actor(rules, 2, computer, "POWER", sw::Kind::Structure, {14, 10}));
+    world.houses[0].power_output = 100;
+    world.houses[0].power_drain = 95;
+    PrototypeAI policy(rules, &ai);
+    require(building_orders(rules, policy.tick(world, computer, player, 0)).empty() &&
+        policy.base_plan().size() > 3 && policy.base_plan()[2] == "POWER" && policy.base_plan()[3] == "BARR",
+        "Low power did not put a power node in front of the next node");
+    const auto orders = building_orders(rules, policy.tick(world, computer, player, 90));
+    require(orders.size() == 1 && orders[0] == "POWER", "Computer did not build the inserted power node");
+
+    // One defense node, and no base defense type: the node is removed.
+    const auto defended = base_rules("AlliedBaseDefenseCounts=1,1,1\n");
+    auto base = base_world(defended);
+    PrototypeAI guard(defended, &ai);
+    std::vector<std::string> built;
+    std::uint32_t id = 2;
+    for (std::int32_t frame = 0; frame < 90 * 30; frame += 90)
+        for (const auto& type : building_orders(defended, guard.tick(base, computer, player, frame))) {
+            base.entities.push_back(actor(defended, id, computer, type, sw::Kind::Structure,
+                {static_cast<std::uint16_t>(12 + id), 10}));
+            ++id;
+            built.push_back(type);
+        }
+    const auto& plan = guard.base_plan();
+    require(std::find(plan.begin(), plan.end(), std::string{}) == plan.end() &&
+        std::find(built.begin(), built.end(), "PLAIN") != built.end(),
+        "An unresolved defense node stopped the base plan");
+}
+
+// Base 004E9C90: the war factory makes the first owned HarvesterUnit while
+// the house has fewer than HarvestersPerRefinery per refinery.
+void check_harvester_ratio() {
+    const auto rules = base_rules();
+    const auto ai = base_ai();
+    for (const int miners : {1, 2}) {
+        auto world = base_world(rules);
+        std::uint32_t id = 2;
+        for (const auto* type : {"POWER", "BARR", "REF", "WORK"})
+            world.entities.push_back(actor(rules, id++, computer, type, sw::Kind::Structure,
+                {static_cast<std::uint16_t>(12 + id), 10}));
+        for (int i = 0; i < miners; ++i)
+            world.entities.push_back(actor(rules, id++, computer, "MINER", sw::Kind::Unit, {20, 20}));
+        world.houses[0].cash = 0;
+        PrototypeAI policy(rules, &ai);
+        const auto orders = policy.tick(world, computer, player, 0);
+        const bool harvester = std::any_of(orders.begin(), orders.end(), [](const Order& order) {
+            return order.kind == OrderKind::Build && order.type == "MINER" && order.entity == 5;
+        });
+        require(harvester == (miners == 1), "War factory did not keep two harvesters per refinery");
+    }
+}
+
 // Base 004EF890 with the installed rules: both sides, every difficulty.
 void check_installed_base_plan(const IniFile& rules, const IniFile& ai, const Faction& allied, const Faction& soviet) {
     for (const auto* faction : {&allied, &soviet})
@@ -885,6 +1071,11 @@ int main(int argc, char** argv) try {
     check_first_team_timer();
     check_base_plan();
     check_installed_base_plan(rules, ai, allied, soviet);
+    check_naval_placement_failure();
+    check_super_weapon_option();
+    check_building_without_cash();
+    check_power_and_defense_nodes();
+    check_harvester_ratio();
     check_enemy_power_triggers();
     check_defense_cap_release();
     check_team_policy();
