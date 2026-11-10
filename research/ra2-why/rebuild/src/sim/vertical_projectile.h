@@ -10,8 +10,9 @@
 // downward payload starts (FUN_00463C50, valid code 00463D55..00463E75 that
 // the export wrongly omitted as unreachable) at target.z + the carrier
 // projectile's DetonationAltitude with initial downward speed: the constant
-// at 0079D578 is -1.0 (verified in .data: 00 00 00 00 00 00 F0 BF).
-#include <cstdlib>
+// at 0079D578 is -1.0 (verified in .rdata: 00 00 00 00 00 00 F0 BF).
+#include <algorithm>
+#include <cmath>
 
 namespace ra2::sim {
 
@@ -25,17 +26,18 @@ struct VerticalProjectileFlags {
     bool at_or_below_floor = false;  // z <= floor (ground reached).
 };
 
-// One game frame of vertical movement. Speed works in whole leptons per
-// frame: acceleration/2 uses integer division, matching the original.
+// One game frame of vertical movement. Speed keeps its fractional part; only
+// the slowdown term acceleration/2 uses integer division, matching the
+// original.
 inline VerticalProjectileFlags step_vertical_projectile(
     VerticalProjectileState& state, int max_speed, int acceleration,
     int floor, int ceiling) {
-    int speed = std::abs(static_cast<int>(state.velocity));
+    double speed = std::abs(state.velocity);
     if (speed < max_speed) {
-        speed = speed + acceleration < max_speed ? speed + acceleration : max_speed;
+        speed = std::min<double>(max_speed, speed + acceleration);
     } else if (speed > max_speed) {
         const auto slowdown = acceleration / 2; // Integer division.
-        speed = slowdown < speed ? speed - slowdown : 0;
+        speed = slowdown < speed ? speed - slowdown : 0.0;
     }
     state.velocity = state.velocity < 0 ? -speed : speed;
     state.z += static_cast<int>(state.velocity); // Truncate toward zero.

@@ -626,6 +626,11 @@ void check_vertical_projectile() {
     require(zero.velocity == -0.0 || zero.velocity == 0.0,
         "Slowdown did not stop at zero speed");
     (void)flags;
+    // Fractional speed is preserved; only the position step truncates.
+    ra2::sim::VerticalProjectileState frac{0, 1.75};
+    flags = ra2::sim::step_vertical_projectile(frac, 10, 1, 0, 30000);
+    require(frac.velocity == 2.75 && frac.z == 2,
+        "Fractional speed lost (expected velocity 2.75, z 2)");
 }
 
 void check_spy_plane() {
