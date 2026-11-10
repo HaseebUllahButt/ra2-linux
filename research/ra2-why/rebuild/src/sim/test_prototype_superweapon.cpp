@@ -297,7 +297,22 @@ void check_nuke(const IniFile& rules, const std::string& exe) {
     for (int frame = 0; frame < 9000; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
     const auto report = supers.fire(world, 102, "MultiSpecial", {50, 50}, 9000);
     require(report.fired, "Nuke launch rejected");
-    require(report.destroyed == 1 && report.damaged == 2,
+    // The missile is in flight: nothing is hit at the click (base 1.006
+    // FUN_0069D850 case 0 spawns a falling missile instead of detonating).
+    require(report.destroyed == 0 && report.damaged == 0 && world.entities[1].resolved_hp == 400,
+        "Nuke damaged the target at click time instead of on missile impact");
+    require(supers.frames_left(102, "MultiSpecial") == 9000,
+        "Nuke launch did not restart its charge while the missile flies");
+    // The missile lands 20000 leptons above the target at speed 0x600: 14 frames.
+    int tick_damaged = 0, tick_destroyed = 0, nukes = 0;
+    for (int frame = 9001; frame <= 9014; ++frame) {
+        const auto impact = supers.tick(world, static_cast<std::uint64_t>(frame));
+        tick_damaged += impact.damaged;
+        tick_destroyed += impact.destroyed;
+        nukes += impact.nukes;
+    }
+    require(nukes == 1, "Nuke missile did not land exactly once");
+    require(tick_destroyed == 1 && tick_damaged == 2,
         "Nuke blast did not hit the center and the 5 cell ring");
     require(world.entities[1].lifetime == sw::Lifetime::Destroyed &&
         world.entities[1].resolved_hp == 0, "Center tank survived the nuke");
@@ -305,8 +320,10 @@ void check_nuke(const IniFile& rules, const std::string& exe) {
         "Nuke falloff at 5 cells did not match the original damage math");
     require(world.entities[3].resolved_hp == 400, "Nuke reached beyond its 10 cell spread");
     require(chain_ok(world), "Nuke deaths broke the Cell chains");
+    // The recharge clock runs while the missile flies: 14 charge frames passed.
     require(!supers.ready(102, "MultiSpecial") &&
-        supers.frames_left(102, "MultiSpecial") == 9000, "Nuke did not restart its charge");
+        supers.frames_left(102, "MultiSpecial") == 9000 - 14,
+        "Nuke did not restart its charge");
     // The same launch replays identically.
     auto replay = make_world();
     place(replay, 1, 102, "NAMISL", sw::Kind::Structure, {10, 10}, 1000);
@@ -317,7 +334,13 @@ void check_nuke(const IniFile& rules, const std::string& exe) {
     again.update_grants(replay);
     for (int frame = 0; frame < 9000; ++frame) again.tick(replay, static_cast<std::uint64_t>(frame));
     const auto second = again.fire(replay, 102, "MultiSpecial", {50, 50}, 9000);
-    require(second.damaged == report.damaged && second.destroyed == report.destroyed &&
+    int replay_damaged = 0, replay_destroyed = 0;
+    for (int frame = 9001; frame <= 9014; ++frame) {
+        const auto impact = again.tick(replay, static_cast<std::uint64_t>(frame));
+        replay_damaged += impact.damaged;
+        replay_destroyed += impact.destroyed;
+    }
+    require(second.fired && replay_damaged == tick_damaged && replay_destroyed == tick_destroyed &&
         replay.entities[2].resolved_hp == world.entities[2].resolved_hp,
         "Nuke replay differed");
 }
@@ -329,12 +352,17 @@ void check_iron_curtain(const IniFile& rules, const std::string& exe) {
     place(world, 3, 102, "E1", sw::Kind::Infantry, {50, 50}, 125);
     place(world, 4, 101, "HTNK", sw::Kind::Unit, {52, 50}, 400);
     place(world, 5, 102, "NAMISL", sw::Kind::Structure, {11, 10}, 1000);
+    place(world, 6, 102, "HTNK", sw::Kind::Unit, {51, 50}, 400);
     PrototypeSuperweapons supers(rules, exe);
     supers.update_grants(world);
     for (int frame = 0; frame < 4500; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
     const auto report = supers.fire(world, 102, "IronCurtainSpecial", {50, 50}, 4500);
     require(report.fired && report.shielded == 1 && report.destroyed == 1,
         "Iron Curtain did not shield the tank and kill the infantry");
+    // The curtain covers the clicked object only: a neighbour one cell away
+    // stays unshielded (old code shielded everything inside Range).
+    require(!supers.invulnerable(6, 4500),
+        "Iron Curtain shielded a tank on the neighbouring Cell");
     require(supers.invulnerable(2, 4500) && supers.invulnerable(2, 5249) &&
         !supers.invulnerable(2, 5250), "Iron Curtain duration did not match 750 frames");
     require(!supers.invulnerable(4, 4500), "Iron Curtain shielded an enemy tank");
@@ -345,6 +373,7 @@ void check_iron_curtain(const IniFile& rules, const std::string& exe) {
     for (int frame = 13400; frame < 13500; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
     const auto nuke = supers.fire(world, 102, "MultiSpecial", {50, 50}, 13500);
     require(nuke.fired, "Second nuke was not charged");
+    for (int frame = 13501; frame <= 13514; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
     require(world.entities[1].lifetime == sw::Lifetime::Placed &&
         world.entities[1].resolved_hp == 400, "Nuke hurt a curtained tank");
     require(chain_ok(world), "Iron Curtain deaths broke the Cell chains");
@@ -363,18 +392,23 @@ void check_chrono(const IniFile& rules, const std::string& exe) {
     const auto early = supers.fire(world, 102, "ChronoWarpSpecial", {50, 50}, 0);
     require(!early.fired && !early.notes.empty(), "Chrono Warp fired without an armed sphere");
     for (int frame = 0; frame < 6300; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
-    const auto arm = supers.fire(world, 102, "ChronoSphereSpecial", {55, 50}, 6300);
+    // Source click first: the sphere click marks the block of objects to warp.
+    const auto arm = supers.fire(world, 102, "ChronoSphereSpecial", {50, 50}, 6300);
     require(arm.fired, "ChronoSphere launch rejected");
     require(supers.ready(102, "ChronoSphereSpecial"),
         "Arming the ChronoSphere consumed its charge");
-    const auto warp = supers.fire(world, 102, "ChronoWarpSpecial", {51, 50}, 6301);
-    require(warp.fired && warp.teleported == 3, "Chrono Warp did not move the 3x3 block");
+    // Destination click second: the warp click is where the block lands.
+    const auto warp = supers.fire(world, 102, "ChronoWarpSpecial", {55, 50}, 6301);
+    require(warp.fired && warp.teleported == 2, "Chrono Warp did not move the 3x3 block");
     const auto& moved = world.entities[1];
-    require(moved.cell && moved.cell->x == 54 && moved.cell->y == 50 &&
-        moved.position && moved.position->x == 54 * 256 + 128,
-        "Warped tank did not land on the armed destination");
-    require(world.entities[3].cell && world.entities[3].cell->x == 56 &&
-        world.entities[3].cell->y == 50, "Enemy tank did not warp with the block");
+    require(moved.cell && moved.cell->x == 55 && moved.cell->y == 50 &&
+        moved.position && moved.position->x == 55 * 256 + 128,
+        "Warped tank did not land on the destination click");
+    require(world.entities[2].cell && world.entities[2].cell->x == 56 &&
+        world.entities[2].cell->y == 50, "Second tank did not warp with the block");
+    // The enemy tank outside the source block stays put.
+    require(world.entities[3].cell && world.entities[3].cell->x == 52 &&
+        world.entities[3].cell->y == 50, "Chrono Warp moved an object outside the source block");
     require(chain_ok(world), "Chrono Warp broke the Cell chains");
     require(chain_length(world, {50, 50}) == 0 && chain_length(world, {55, 50}) == 1,
         "Warped tanks did not move between Cell chains");
@@ -383,7 +417,8 @@ void check_chrono(const IniFile& rules, const std::string& exe) {
         "Chrono Sphere did not restart its charge after the warp");
     const auto repeat = supers.fire(world, 102, "ChronoWarpSpecial", {50, 50}, 6302);
     require(!repeat.fired, "Chrono Warp fired twice on one charge");
-    // A blocked landing Cell leaves the object in place.
+    // A blocked landing Cell leaves the object in place. Source click on the
+    // tank, destination click on the occupied Cell.
     auto blocked = make_world();
     place(blocked, 1, 102, "GACSPH", sw::Kind::Structure, {10, 10}, 1000);
     place(blocked, 2, 102, "HTNK", sw::Kind::Unit, {50, 50}, 400);
@@ -392,8 +427,8 @@ void check_chrono(const IniFile& rules, const std::string& exe) {
     blocked_supers.update_grants(blocked);
     for (int frame = 0; frame < 6300; ++frame)
         blocked_supers.tick(blocked, static_cast<std::uint64_t>(frame));
-    (void)blocked_supers.fire(blocked, 102, "ChronoSphereSpecial", {55, 50}, 6300);
-    const auto blocked_warp = blocked_supers.fire(blocked, 102, "ChronoWarpSpecial", {50, 50}, 6301);
+    (void)blocked_supers.fire(blocked, 102, "ChronoSphereSpecial", {50, 50}, 6300);
+    const auto blocked_warp = blocked_supers.fire(blocked, 102, "ChronoWarpSpecial", {55, 50}, 6301);
     require(blocked_warp.fired && blocked_warp.teleported == 0 &&
         blocked.entities[1].cell && blocked.entities[1].cell->x == 50,
         "Warp moved a tank onto an occupied Cell");

@@ -533,6 +533,33 @@ SuperTickReport PrototypeSuperweapons::tick(session::world::Snapshot& world, std
             }
         }
     }
+    // A nuke in flight lands when its missile arrives (FUN_0069D850 case 0
+    // spawns the bullet; the blast follows on a later frame).
+    if (nuke_ && frame >= nuke_->impact) {
+        const auto target = nuke_->target;
+        nuke_.reset();
+        auto weapon = blast_weapon(rules_, "NukePayload");
+        if (!weapon) {
+            // The hardcoded payload first; a WeaponType= override second.
+            for (const auto& type : types_)
+                if (type.kind == SuperKind::Nuke && !type.weapon.empty()) {
+                    weapon = blast_weapon(rules_, type.weapon);
+                    if (weapon) break;
+                }
+        }
+        if (weapon) {
+            auto epicenter = cell_center(target);
+            epicenter.z = floor_z(world, target);
+            const auto blast = detonate(world, epicenter, *weapon, rules_, distance_.get(),
+                invulnerable_, frame);
+            report.damaged = blast.damaged;
+            report.destroyed = blast.destroyed;
+            report.nukes = 1;
+            for (const auto& missing : blast.missing) report.notes.push_back(missing);
+        } else {
+            report.notes.push_back("nuke payload weapon is unavailable");
+        }
+    }
     // Lightning storm strikes, one game frame at a time.
     if (!storm_ || !storm_->active) return report;
     const auto deferment = rules_.read_integer("General", "LightningDeferment", 250);
@@ -551,8 +578,8 @@ SuperTickReport PrototypeSuperweapons::tick(session::world::Snapshot& world, std
         return report;
     }
     if (frame < striking) return report;
-    // TODO-ORIGINAL: the original storm strike path is LightningStorm::Strike
-    // 0053A140 and Strike2 0053A300 with its own RNG draw pattern.
+    // TODO-ORIGINAL: the base 1.006 storm strike path was not exported; this
+    // prototype keeps its own RNG draw pattern.
     const auto bolt = [&](ra2map::Cell cell) {
         if (!in_map(cell)) return;
         const auto result = detonate(world, cell_center(cell), *weapon, rules_, distance_.get(),
@@ -568,7 +595,7 @@ SuperTickReport PrototypeSuperweapons::tick(session::world::Snapshot& world, std
         Random rng(world.random);
         const auto half = spread / 2;
         for (int attempt = 0; attempt < 3; ++attempt) {
-            // FUN_0053A6C0 draws both offsets, then checks the separation.
+            // The original draws both offsets, then checks the separation.
             const auto dx = rng.ranged(-half, half);
             const auto dy = rng.ranged(-half, half);
             const auto x = int(storm_->target.x) + dx;
@@ -635,18 +662,21 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
             report.notes.push_back("no armed ChronoSphere for this house");
             return report;
         }
-        // TODO-ORIGINAL: the original warp pattern table DAT_00B0C038 is
-        // runtime data; this prototype uses the 3x3 block around the click.
+        // The second click is the DESTINATION; the source block is the armed
+        // ChronoSphere cell (base 1.006 FUN_0069D850 case 4 reads +0x4A as the
+        // source block and the click as the landing area). This prototype uses
+        // the 3x3 block around the source.
+        const auto source = armed->second;
+        const auto destination = target;
         std::vector<ra2map::Cell> pattern;
         for (int dy = -1; dy <= 1; ++dy)
             for (int dx = -1; dx <= 1; ++dx) {
-                const int x = int(target.x) + dx, y = int(target.y) + dy;
+                const int x = int(source.x) + dx, y = int(source.y) + dy;
                 if (x < 0 || y < 0 || x >= 512 || y >= 512) continue;
                 pattern.push_back({static_cast<std::uint16_t>(x), static_cast<std::uint16_t>(y)});
             }
-        const auto destination = armed->second;
-        for (const auto& source : pattern) {
-            const auto found = world.cells.find(cell_key(source));
+        for (const auto& from : pattern) {
+            const auto found = world.cells.find(cell_key(from));
             if (found == world.cells.end() || !found->second.heads) continue;
             std::vector<std::uint32_t> occupants;
             for (auto id = found->second.heads->ground_head; id;) {
@@ -655,8 +685,8 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
                 occupants.push_back(id);
                 id = *object->next;
             }
-            const int dx = int(source.x) - int(target.x);
-            const int dy = int(source.y) - int(target.y);
+            const int dx = int(from.x) - int(source.x);
+            const int dy = int(from.y) - int(source.y);
             const int landing_x = int(destination.x) + dx;
             const int landing_y = int(destination.y) + dy;
             if (landing_x < 0 || landing_y < 0 || landing_x >= 512 || landing_y >= 512) continue;
@@ -708,22 +738,17 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
     const auto slot = index_.at(lower(type->id));
     switch (type->kind) {
         case SuperKind::Nuke: {
-            // The MultiMissile handler detonates the hardcoded NukePayload
-            // weapon at the impact Cell; the carrier weapon carries no damage.
-            auto weapon = blast_weapon(rules_, "NukePayload");
-            if (!weapon && !type->weapon.empty()) weapon = blast_weapon(rules_, type->weapon);
-            if (!weapon) {
-                report.notes.push_back("nuke payload weapon is unavailable");
-                return report;
-            }
-            auto epicenter = cell_center(target);
-            epicenter.z = floor_z(world, target);
-            const auto blast = detonate(world, epicenter, *weapon, rules_, distance_.get(),
-                invulnerable_, frame);
-            report.damaged = blast.damaged;
-            report.destroyed = blast.destroyed;
-            for (const auto& missing : blast.missing) report.notes.push_back(missing);
-            report.notes.push_back("TODO-ORIGINAL: missile flight and silo anim skipped");
+            // Base 1.006 FUN_0069D850 case 0 (MultiMissile) does not detonate at
+            // the click: it spawns a missile bullet (BulletTypeClass::CreateBullet
+            // 00643990 via FUN_00438B80) 20000 leptons above the target, falling at
+            // bullet speed 0x600 = 1536 leptons per frame. The blast lands only
+            // when the missile arrives, so the impact is deferred.
+            constexpr int kFallLeptons = 20000;
+            constexpr int kMissileSpeed = 0x600;
+            const auto delay = (kFallLeptons + kMissileSpeed - 1) / kMissileSpeed;
+            if (nuke_) report.notes.push_back("earlier nuke missile replaced while in flight");
+            nuke_ = PendingNuke{frame + static_cast<std::uint64_t>(delay), target};
+            report.notes.push_back("nuke missile in flight");
             break;
         }
         case SuperKind::LightningStorm: {
@@ -735,17 +760,15 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
             break;
         }
         case SuperKind::IronCurtain: {
-            // TODO-ORIGINAL: the original shields one clicked object
-            // (base 006B26D0); this prototype shields the objects in Range.
+            // The curtain covers the clicked object only, not a Range area.
+            // Duration comes from [CombatDamage] IronCurtainDuration, read by
+            // the base 1.006 rules parse at FUN_00646C60 (offset +0xCA4).
             const auto duration = rules_.read_integer("CombatDamage", "IronCurtainDuration", 750);
-            const int reach = static_cast<int>(type->range_cells);
             for (auto& entity : world.entities) {
                 if (!alive(&entity) || entity.house_id != house || !entity.cell) continue;
-                const auto distance = std::max(std::abs(int(entity.cell->x) - int(target.x)),
-                    std::abs(int(entity.cell->y) - int(target.y)));
-                if (distance > reach) continue;
+                if (entity.cell->x != target.x || entity.cell->y != target.y) continue;
                 if (entity.kind == w::Kind::Infantry) {
-                    // TODO-ORIGINAL: InfantryClass::IronCurtain kills infantry.
+                    // TODO-ORIGINAL: the original Iron Curtain kills infantry.
                     if (unlink_entity(world, entity)) {
                         entity.resolved_hp = 0;
                         entity.active = false;
@@ -758,6 +781,7 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
                     }
                     continue;
                 }
+                if (entity.kind != w::Kind::Unit && entity.kind != w::Kind::Structure) continue;
                 auto& until = invulnerable_[entity.id];
                 until = std::max(until, frame + static_cast<std::uint64_t>(duration));
                 ++report.shielded;
@@ -765,7 +789,10 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
             break;
         }
         case SuperKind::ChronoSphere:
-            // Arm only; the destination is stored for the ChronoWarp click.
+            // First click of the pair: this stores the SOURCE cell, the block of
+            // objects to warp (base 1.006 FUN_0069D850 case 3 stores the clicked
+            // coordinate at SuperClass+0x4A). The ChronoWarp click then gives the
+            // destination (FUN_004E68D0 copies +0x4A from the PreDependent).
             armed_[house] = target;
             break;
         case SuperKind::ParaDrop:

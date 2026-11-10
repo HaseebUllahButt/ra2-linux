@@ -10,9 +10,9 @@
 
 namespace ra2::sim {
 
-// Original SuperWeaponType values. Order and names follow the engine table
-// parsed by SuperWeaponTypeClass::LoadFromINI (gamemd 006CE570) and the
-// Phobos-YRpp SuperWeaponType enum.
+// Original SuperWeaponType values. Order and names follow the basegame
+// RA2 1.006 super weapon table (see SuperWeaponTypeClass::FindFirstOfAction,
+// export 0069F7E0) and the charge rules of RA1 SUPER.CPP SuperClass.
 enum class SuperKind {
     Invalid = -1,
     Nuke = 0,
@@ -53,8 +53,9 @@ SuperKind superweapon_kind(std::string_view type_name);
 // section. Keyed by section name in [SuperWeaponTypes] order-independent form.
 std::map<std::string, std::vector<std::string>> superweapon_grants(const rules::IniFile& rules);
 
-// Original SuperClass charge state (rebuild of 006CB560 Grant, 006CB7B0 Lose,
-// 006CB4D0 SetOnHold and the 006CC080 recharge tick).
+// Original SuperClass charge state. Grant and the recharge tick follow RA1
+// SUPER.CPP Enable/Recharge/AI; Lose is export 0069CF40 and SetOnHold is
+// export 0069CC60 (base RA2 game.exe 1.006).
 struct SuperweaponState {
     bool present = false;   // IsPresent: granted by an owned building.
     bool ready = false;     // IsReady: charge timer finished.
@@ -72,9 +73,11 @@ struct SuperLaunchReport {
     std::vector<std::string> notes;
 };
 
-// What one charging frame did: lightning storm strikes and their damage.
+// What one charging frame did: lightning storm strikes and their damage, plus
+// a landed delayed nuke impact.
 struct SuperTickReport {
     int damaged = 0, destroyed = 0;
+    int nukes = 0; // Nuke impacts that landed this frame.
     std::vector<std::string> notes;
 };
 
@@ -129,6 +132,11 @@ private:
     std::map<std::uint32_t, std::map<std::string, SuperweaponState>> houses_;
     std::map<std::uint32_t, std::uint64_t> invulnerable_;
     std::map<std::uint32_t, ra2map::Cell> armed_;
+    struct PendingNuke {
+        std::uint64_t impact = 0; // Frame the missile lands.
+        ra2map::Cell target{};
+    };
+    std::optional<PendingNuke> nuke_; // Missile in flight.
     std::optional<Storm> storm_;
     std::vector<ra2map::Cell> bolts_; // Recent storm bolts for separation.
     std::unique_ptr<class OriginalDistance> distance_;
