@@ -174,6 +174,7 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     std::string superweapon_selected_;
     std::optional<ra2map::Cell> chrono_source_;
     std::map<std::string,bool> superweapon_was_ready_;
+    std::map<std::pair<std::uint32_t,std::string>,bool> superweapon_was_present_;
     BattleHud hud_;
     BattleCursor cursor_;
     BattleEffects effects_;
@@ -459,15 +460,24 @@ public:
         for(const auto& type:superweapon_types_)if(type.id==section)return &type;
         return nullptr;
     }
-    // EVA speech for a charged weapon and a launch warning. The player hears
-    // the ready line once per charge; a nuke or storm launch plays the
-    // warning line (the original plays it for enemy launches).
+    // EVA speech. The player hears the ready line once per charge of an
+    // own weapon, the detected warning once per new enemy weapon, and the
+    // launch line when a nuke or storm fires. Own and allied grants never
+    // announce the detected warning.
     void superweapon_audio() {
         for(const auto& type:superweapon_types_) {
             const bool ready=superweapons_->ready(player_,type.id);
             if(ready&&!superweapon_was_ready_[type.id])
                 audio_.speak(superweapon_ready_speech(type.kind));
             superweapon_was_ready_[type.id]=ready;
+            if(type.kind==sim::SuperKind::Invalid)continue;
+            for(const auto id:enemies_) {
+                const auto* state=superweapons_->state(id,type.id);
+                const bool present=state&&state->present;
+                auto& was=superweapon_was_present_[{id,type.id}];
+                if(present&&!was)audio_.speak(superweapon_detected_speech(type.kind));
+                was=present;
+            }
         }
     }
     bool fire_superweapon(const std::string& section,ra2map::Cell cell) {

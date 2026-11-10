@@ -119,24 +119,50 @@ inline std::set<std::string> superweapons_blocked_by_option(
     return blocked;
 }
 
-// EVA.INI speech for a charged weapon and for a launch warning. Unknown
-// names are dropped by the audio mixer, so a missing line stays silent.
+// EVA.INI speech, from the stock base EVA.INI sections. Unknown names are
+// dropped by the audio mixer, so a missing line stays silent.
+//
+// A charged own weapon announces Ready. A fired weapon announces the
+// launch line: the nuke was launched, a lightning storm was created.
+// EVA_WeatherDeviceReady is the weather device DETECTED warning, not the
+// charged line, so it belongs to the detected mapping only.
 inline std::string superweapon_ready_speech(sim::SuperKind kind) {
     switch (kind) {
     case sim::SuperKind::Nuke: return "EVA_NuclearMissileReady";
-    case sim::SuperKind::LightningStorm: return "EVA_WeatherControlDeviceReady";
+    case sim::SuperKind::LightningStorm: return "EVA_LightningStormReady";
     case sim::SuperKind::IronCurtain: return "EVA_IronCurtainReady";
     case sim::SuperKind::ChronoSphere: return "EVA_ChronosphereReady";
-    case sim::SuperKind::PsychicDominator: return "EVA_PsychicDominatorReady";
     default: return {};
     }
 }
 inline std::string superweapon_launch_speech(sim::SuperKind kind) {
     switch (kind) {
-    case sim::SuperKind::Nuke: return "EVA_NuclearMissileLaunchDetected";
-    case sim::SuperKind::LightningStorm: return "EVA_WeatherControlDeviceLaunchDetected";
+    case sim::SuperKind::Nuke: return "EVA_NuclearMissileLaunched";
+    case sim::SuperKind::LightningStorm: return "EVA_LightningStormCreated";
     default: return {};
     }
+}
+// An enemy house received a weapon: the detected warning. Own and allied
+// grants stay silent; the caller checks the house before speaking.
+inline std::string superweapon_detected_speech(sim::SuperKind kind) {
+    switch (kind) {
+    case sim::SuperKind::Nuke: return "EVA_NuclearSiloDetected";
+    case sim::SuperKind::LightningStorm: return "EVA_WeatherDeviceReady";
+    case sim::SuperKind::IronCurtain: return "EVA_IronCurtainDetected";
+    case sim::SuperKind::ChronoSphere: return "EVA_ChronosphereDetected";
+    default: return {};
+    }
+}
+
+// Every EVA.INI section the super weapon speech uses, for the audio
+// preload. Verified stock base sections only.
+inline std::vector<const char*> superweapon_speech_sections() {
+    return {"EVA_NuclearSiloDetected", "EVA_NuclearMissileLaunched",
+        "EVA_NuclearMissileReady", "EVA_IronCurtainDetected",
+        "EVA_IronCurtainActivated", "EVA_IronCurtainReady",
+        "EVA_ChronosphereDetected", "EVA_ChronosphereActivated",
+        "EVA_ChronosphereReady", "EVA_WeatherDeviceReady",
+        "EVA_LightningStormCreated", "EVA_LightningStormReady"};
 }
 
 // Sidebar cameo entry for one granted weapon (battle_hud.h BuildChoice).

@@ -1,4 +1,5 @@
 #include "battle_audio.h"
+#include "battle_superweapons.h"
 #include <algorithm>
 #include <cctype>
 #include <set>
@@ -53,12 +54,10 @@ BattleAudio::BattleAudio(const fs::MixFileSystem& files,const rules::IniFile& ru
         }
         const auto speech=lower(eva_.read_string("EVA_UnitLost",side));
         if(!speech.empty())names.insert(speech+".wav");
-        // Super weapon speech (base 006CBCA0 announces a charged weapon and
-        // 00752700 plays a launch warning). Cache every line EVA.INI has.
-        for(const char* section:{"EVA_NuclearMissileReady",
-            "EVA_NuclearMissileLaunchDetected","EVA_WeatherControlDeviceReady",
-            "EVA_WeatherControlDeviceLaunchDetected","EVA_IronCurtainReady",
-            "EVA_ChronosphereReady","EVA_PsychicDominatorReady"}) {
+        // Super weapon speech: every stock base EVA.INI section the battle
+        // maps (see battle_superweapons.h). Cache each line the file has
+        // for this side, so a mapped name never misses its sample.
+        for(const auto* section:superweapon_speech_sections()) {
             const auto line=lower(eva_.read_string(section,side));
             if(!line.empty())names.insert(line+".wav");
         }

@@ -65,14 +65,33 @@ int main() try {
     require(types.size() == 3, "three super weapon types expected");
 
     // Speech names follow the EVA.INI sections of the original game.
+    // Speech names follow the stock base EVA.INI sections.
     require(ra2::app::superweapon_ready_speech(SuperKind::Nuke) == "EVA_NuclearMissileReady",
         "nuke ready speech");
     require(ra2::app::superweapon_ready_speech(SuperKind::LightningStorm) ==
-        "EVA_WeatherControlDeviceReady", "storm ready speech");
+        "EVA_LightningStormReady", "storm ready speech");
     require(ra2::app::superweapon_launch_speech(SuperKind::Nuke) ==
-        "EVA_NuclearMissileLaunchDetected", "nuke launch speech");
-    require(ra2::app::superweapon_launch_speech(SuperKind::IronCurtain).empty(),
-        "iron curtain has no launch warning");
+        "EVA_NuclearMissileLaunched", "nuke launch speech");
+    require(ra2::app::superweapon_launch_speech(SuperKind::LightningStorm) ==
+        "EVA_LightningStormCreated", "storm launch speech");
+    require(ra2::app::superweapon_launch_speech(SuperKind::IronCurtain).empty() &&
+        ra2::app::superweapon_launch_speech(SuperKind::ChronoSphere).empty() &&
+        ra2::app::superweapon_launch_speech(SuperKind::ChronoWarp).empty(),
+        "the chrono pair never announces a launch line");
+    require(ra2::app::superweapon_detected_speech(SuperKind::Nuke) ==
+        "EVA_NuclearSiloDetected", "nuke detected speech");
+    require(ra2::app::superweapon_detected_speech(SuperKind::LightningStorm) ==
+        "EVA_WeatherDeviceReady", "storm detected speech is the weather device warning");
+    require(ra2::app::superweapon_detected_speech(SuperKind::IronCurtain) ==
+        "EVA_IronCurtainDetected" &&
+        ra2::app::superweapon_detected_speech(SuperKind::ChronoSphere) ==
+        "EVA_ChronosphereDetected", "iron curtain and chrono detected speech");
+    require(ra2::app::superweapon_ready_speech(SuperKind::PsychicDominator).empty() &&
+        ra2::app::superweapon_detected_speech(SuperKind::PsychicDominator).empty(),
+        "no YR psychic dominator speech");
+    for (const auto* section : ra2::app::superweapon_speech_sections())
+        require(std::string(section).find("PsychicDominator") == std::string::npos,
+            "no psychic dominator preload");
 
     // The Super Weapons option gate: every granting building must have
     // DisableableFromShell=yes (House::Can_Build 004E3832).
