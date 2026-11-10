@@ -287,6 +287,7 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
             std::sort(ring.begin(),ring.end(),[&](auto a,auto b){return distance(*e.cell,a)!=distance(*e.cell,b)?distance(*e.cell,a)<distance(*e.cell,b):a.y!=b.y?a.y<b.y:a.x<b.x;});
             bool done=false;
             for(int pass=0;pass<2&&!done;++pass) for(std::size_t ri=0;ri<ring.size()&&!done;++ri) {
+                if(movement_.moving(e.id)) break; // the first issued route stands
                 int x=int(ring[ri].x),y=int(ring[ri].y);
                 ra2map::Cell target{std::uint16_t(x),std::uint16_t(y)};auto i=w.cells.find(key(target));
                 if(i==w.cells.end()) continue;
