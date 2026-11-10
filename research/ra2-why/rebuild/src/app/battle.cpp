@@ -466,6 +466,8 @@ public:
                 std::cout<<"Super weapon fired: "<<section<<" at "<<int(cell.x)<<','<<int(cell.y)
                     <<" damaged="<<report.damaged<<" destroyed="<<report.destroyed<<'\n';
         } else status("Cannot fire "+name(section)+".");
+        if(!report.revealed.empty())
+            gaps_.insert("Spy plane reveal cells are not applied: BattleShroud has no explore-cells hook (SpySat buildings already reveal through PrototypeShroud)");
         for(const auto& note:report.notes)gaps_.insert(note);
     }
     // Sidebar pick and target clicks. Returns true when the input belonged
