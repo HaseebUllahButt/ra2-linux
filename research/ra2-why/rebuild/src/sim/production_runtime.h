@@ -183,6 +183,7 @@ struct Catalog {
     std::optional<std::array<std::array<float,8>,12>> land_speed;
     std::vector<std::int32_t> shipyards;  // [General] Shipyard, Rules +790, heap indexes.
     std::vector<bool> overlay_wall;       // [OverlayTypes] order: Wall (OverlayType +278).
+    std::vector<std::string> overlay_names; // [OverlayTypes] order; the Cell overlay index is the position.
     std::int32_t naval_yard_adjacency=20; // Rules +C00 AINavalYardAdjacency, constructor 00640B80.
     double build_speed=0;                 // Rules +13B0.
     float minimum_low_power=0, maximum_low_power=0, low_power_penalty=0, multiple_factory=0;

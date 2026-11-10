@@ -872,6 +872,30 @@ int main(int argc,char** argv) try {
     require_in_front(world,catalog,enemy,"NAWEAP",actor(world,enemy_tank));
     require_in_front(world,catalog,enemy,"NAHAND",actor(world,enemy_infantry));
     require_prototype(world);
+    // A wall: the finished product places through prototype::place, writes
+    // its wall overlay on the Cell and retires the temporary building; the
+    // factory product clears. No live Structure stays on the map.
+    {
+        const auto* facts=catalog.find("GAWALL");
+        require(facts && facts->wall,"GAWALL is a wall type");
+        int overlay=-1;
+        for (std::size_t i=0;i<catalog.overlay_names.size();++i) if (catalog.overlay_names[i]=="GAWALL") overlay=int(i);
+        require(overlay>=0,"GAWALL has no overlay entry");
+        build(world,factories,catalog,player,"GAWALL",frame,false);
+        const auto origin=place_building(world,factories,catalog,player,"GAWALL",frame,base);
+        const auto& cell=world.cells.at(std::uint32_t(origin.y)*512+std::uint32_t(origin.x));
+        require(cell.terrain && cell.terrain->overlay_type_index && *cell.terrain->overlay_type_index==overlay,
+            "wall overlay did not survive placement");
+        require(cell.wall_owner && *cell.wall_owner==int(player),"wall owner missing after placement");
+        for (const auto& e:world.entities)
+            require(!(e.type=="GAWALL" && e.kind==w::Kind::Structure && e.lifetime==w::Lifetime::Placed),
+                "a wall left a live Structure on the map");
+        const auto* wall_factory=[&]{ for (const auto& x:factories.factories) if (x.house_id==player && x.slot==5) return &x; return (const p::FactoryState*)nullptr; }();
+        require(wall_factory && !wall_factory->object && wall_factory->object_type.empty() &&
+            wall_factory->progress==0 && wall_factory->suspended,"wall product did not clear from the factory");
+        require_prototype(world);
+        std::cout<<"GAWALL placed as an overlay at ("<<origin.x<<","<<origin.y<<") with the factory cleared\n";
+    }
     std::cout<<"MP02T2 prototype deploys both Houses and produces infantry and a tank\n";
     return 0;
 } catch (const std::exception& error) {

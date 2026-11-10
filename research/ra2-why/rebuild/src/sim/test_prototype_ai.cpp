@@ -764,7 +764,7 @@ std::string base_rules_text(const std::string& extra = {}) {
         "[General]\nPrerequisitePower=POWER\nPrerequisiteProc=REF\nHarvestersPerRefinery=2\nHarvesterUnit=MINER\n"
         "GDIPowerPlant=POWER\nNodRegularPower=POWER\n" + extra +
         "[Sides]\nAllies=Local\nSoviets=Enemy\n"
-        "[BuildingTypes]\n0=YARD\n1=POWER\n2=BARR\n3=REF\n4=WORK\n5=DOCK\n6=LAB\n7=SUPER\n8=PLAIN\n"
+        "[BuildingTypes]\n0=YARD\n1=POWER\n2=BARR\n3=REF\n4=WORK\n5=DOCK\n6=LAB\n7=SUPER\n8=PLAIN\n9=WALL\n10=WALL2\n"
         "[VehicleTypes]\n0=MINER\n"
         "[AI]\nBuildConst=YARD\nBuildPower=POWER\nBuildRefinery=REF\nBuildBarracks=BARR\nBuildWeapons=WORK\n"
         "[YARD]\nConstructionYard=yes\nFactory=BuildingType\nOwner=Local\nAIBuildThis=yes\nTechLevel=-1\nCost=3000\n"
@@ -945,6 +945,48 @@ void check_power_and_defense_nodes() {
         "An unresolved defense node stopped the base plan");
 }
 
+// The wall ring uses the real ART.INI foundation of the protected
+// building, under its Image name when it has one. Rules Foundation is only
+// the fallback for test fixtures without art.
+void check_wall_art_foundation() {
+    auto text = base_rules_text("AlliedBaseDefenseCounts=1,1,1\nAIPickWallDefensePercent=100,100,100\n");
+    const std::string yard = "[YARD]\nConstructionYard=yes\n";
+    const auto at = text.find(yard);
+    require(at != std::string::npos, "test rules lost the YARD section");
+    text.replace(at, yard.size(), yard + "ProtectWithWall=yes\n");
+    text += "[WALL2]\nWall=yes\nOwner=Local\nCost=100\nTechLevel=1\nAIBasePlanningSide=0\n";
+    text.replace(text.find("[AI]\n"), 5, "[AI]\nConcreteWalls=WALL2\n");
+    text.replace(text.find("[BuildingTypes]\n"), 15, "[BuildingTypes]\n9=WALL2\n");
+    // The 4x4 foundation exists only in art; the rules fallback would make
+    // the yard 1x1 and put wall pieces inside its true footprint.
+    const auto art = parse("[YARD]\nFoundation=4x4\n");
+    const auto rules = parse(text);
+    const auto ai = base_ai();
+    auto world = base_world(rules);
+    PrototypeAI policy(rules, &ai, PrototypeAI::Difficulty::Easy, &art);
+    std::uint32_t id = 2;
+    std::vector<std::pair<int, int>> walls;
+    for (std::int32_t frame = 0; frame < 90 * 40; frame += 90)
+        for (const auto& type : building_orders(rules, policy.tick(world, computer, player, frame))) {
+            const auto request = policy.wall_request();
+            if (rules.read_bool(type, "Wall")) {
+                require(request && request->type == type,
+                    "A wall order came without the planned wall Cell");
+
+                walls.push_back({request->cell.x, request->cell.y});
+            }
+            const ra2map::Cell place = request ? request->cell
+                : ra2map::Cell{static_cast<std::uint16_t>(20 + id), 30};
+            world.entities.push_back(actor(rules, id, computer, type, sw::Kind::Structure, place));
+            ++id;
+        }
+    // YARD at (10,10), 4x4: the ring is the border of (9,9)-(14,14), 20 cells.
+    require(walls.size() == 20, "The art foundation did not size the wall ring");
+    for (const auto& [x, y] : walls)
+        require(x >= 9 && x <= 14 && y >= 9 && y <= 14 && (x == 9 || x == 14 || y == 9 || y == 14),
+            "A wall piece stands inside or far outside the true 4x4 foundation");
+}
+
 // Base 004E9660 and 004F5D30: below AIPickWallDefensePercent the defense
 // node becomes a ring of wall nodes around the last built ProtectWithWall
 // building before it. The ring goes right after that building's node.
@@ -954,7 +996,8 @@ void check_wall_pick() {
     const auto at = text.find(yard);
     require(at != std::string::npos, "test rules lost the YARD section");
     text.replace(at, yard.size(), yard + "ProtectWithWall=yes\nFoundation=2x2\n");
-    text += "[WALL]\nWall=yes\nAIBasePlanningSide=1\n[WALL2]\nWall=yes\nAIBasePlanningSide=0\n";
+    text += "[WALL]\nWall=yes\nOwner=Local\nCost=100\nTechLevel=1\nAIBasePlanningSide=1\n"
+        "[WALL2]\nWall=yes\nOwner=Local\nCost=100\nTechLevel=1\nAIBasePlanningSide=0\n";
     text.replace(text.find("[AI]\n"), 5, "[AI]\nConcreteWalls=WALL,WALL2\n");
     const auto rules = parse(text);
     const auto ai = base_ai();
@@ -964,8 +1007,13 @@ void check_wall_pick() {
     std::uint32_t id = 2;
     for (std::int32_t frame = 0; frame < 90 * 30; frame += 90)
         for (const auto& type : building_orders(rules, policy.tick(world, computer, player, frame))) {
-            world.entities.push_back(actor(rules, id, computer, type, sw::Kind::Structure,
-                {static_cast<std::uint16_t>(12 + id), 10}));
+            const bool wall = rules.read_bool(type, "Wall");
+            const auto request = policy.wall_request();
+            require(!wall || (request && request->type == type),
+                "A wall order came without the planned wall Cell");
+            const ra2map::Cell place = wall && request ? request->cell
+                : ra2map::Cell{static_cast<std::uint16_t>(12 + id), 10};
+            world.entities.push_back(actor(rules, id, computer, type, sw::Kind::Structure, place));
             ++id;
             built.push_back(type);
         }
@@ -973,7 +1021,7 @@ void check_wall_pick() {
     const auto cells = policy.base_plan_cells();
     require(std::find(plan.begin(), plan.end(), std::string{}) == plan.end() &&
         std::find(built.begin(), built.end(), "PLAIN") != built.end() &&
-        std::find(built.begin(), built.end(), "WALL2") == built.end(),
+        std::count(built.begin(), built.end(), "WALL2") == 12,
         "The wall pick did not replace the defense node, or the plan stopped");
     // YARD at (10, 10), 2x2: 12 wall Cells from (9, 9) to (12, 12), after node 0.
     require(plan.size() > 13 && plan[0] == "YARD" && !cells[0] && plan[13] != "WALL2",
@@ -1452,6 +1500,7 @@ int main(int argc, char** argv) try {
     run_check("check_first_team_timer", [&] { check_first_team_timer(); });
     run_check("check_base_plan", [&] { check_base_plan(); });
     run_check("check_wall_pick", [&] { check_wall_pick(); });
+    run_check("check_wall_art_foundation", [&] { check_wall_art_foundation(); });
     run_check("check_installed_base_plan", [&] { check_installed_base_plan(rules, ai, allied, soviet); });
     run_check("check_naval_placement_failure", [&] { check_naval_placement_failure(); });
     run_check("check_naval_tech_level_minus_one", [&] { check_naval_tech_level_minus_one(); });
