@@ -205,6 +205,8 @@ private:
     std::vector<PrototypeCombatProjectile> projectiles_;
     // Original Unit +2F8 turret FacingClass. The world keeps only the shown
     // raw facing; a different shown facing restarts this state from it.
+    // A Unit without a turret never rotates here: the 00704DF0 gate reads
+    // the unrotated +2E0 hull facing (FUN_006FB890 turretless branch).
     struct TurretAim { std::uint16_t current, direction; };
     struct TurretState { BaseFacing facing; std::uint16_t written=0; };
     std::map<std::uint32_t,TurretState> turrets_;
@@ -212,6 +214,6 @@ private:
     // Flight mission fire permission. Empty means every placed source fires.
     std::function<bool(const session::world::Entity&)> fire_gate_;
     std::optional<TurretAim> turret_aim(session::world::Entity& source,
-        const session::world::Entity& target,bool omni_fire,std::int32_t frame);
+        const session::world::Entity& target,std::int32_t frame);
 };
 }

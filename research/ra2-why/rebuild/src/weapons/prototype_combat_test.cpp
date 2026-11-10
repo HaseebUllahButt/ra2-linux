@@ -4,6 +4,7 @@
 #include <app/battle_fallout.h>
 #include <app/battle_score.h>
 #include <app/battle_effects.h>
+#include <weapons/muzzle.h>
 #include <weapons/detonation.h>
 #include <weapons/fire_timer.h>
 #include <array>
@@ -614,6 +615,132 @@ void turret_turn_test(const rules::IniFile& rules,const rules::IniFile& art,cons
     sim::PrototypeCombatRuntime aligned(rules,map,art,exe);
     check(aligned.attack(ready,1,2) && aligned.tick(ready,0).fired==1,"aligned turret waited");
 }
+// Hull fire gate for a Unit without a turret (FUN_006FB890 turretless
+// branch, 006FB92F..006FB989): the 00704DF0 gate reads the unrotated +2E0
+// hull facing. The hull never turns toward the target here.
+void turretless_hull_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+    rules::IniFile mode;mode.parse("[DRON]\nROT=5\n");
+    // An aligned hull fires on the order frame and keeps its facing.
+    auto w=make_world("DRON","E1",world::Kind::Unit,world::Kind::Infantry,300,100);
+    // DroneJump range is 1.83 cells: put the target one cell east.
+    w.entities[1].position=sim::Coord{51*256+128,50*256+128,0};
+    w.entities[1].cell=ra2map::Cell{51,50};
+    w.entities[0].hull_facing_raw=16384;
+    sim::PrototypeCombatRuntime combat(rules,mode,art,exe);
+    check(combat.attack(w,1,2),"turretless attack rejected");
+    const auto first=combat.tick(w,0);
+    check(first.fired==1,"aligned stationary hull did not fire");
+    check(w.entities[0].hull_facing_raw==16384,"stationary hull turned toward the target");
+    // A misaligned stationary hull is blocked and stays put.
+    auto idle=make_world("DRON","E1",world::Kind::Unit,world::Kind::Infantry,300,100);
+    idle.entities[1].position=sim::Coord{51*256+128,50*256+128,0};
+    idle.entities[1].cell=ra2map::Cell{51,50};
+    idle.entities[0].hull_facing_raw=8192;
+    sim::PrototypeCombatRuntime still(rules,mode,art,exe);
+    check(still.attack(idle,1,2),"misaligned attack rejected");
+    const auto blocked=still.tick(idle,0);
+    check(blocked.fired==0,"misaligned stationary hull fired");
+    check(idle.entities[0].hull_facing_raw==8192,"guessed hull turn reintroduced");
+    // A moving turretless hull keeps its drive facing and must not turn.
+    auto moving=make_world("DRON","E1",world::Kind::Unit,world::Kind::Infantry,300,100);
+    moving.entities[1].position=sim::Coord{51*256+128,50*256+128,0};
+    moving.entities[1].cell=ra2map::Cell{51,50};
+    moving.entities[0].locomotor_moving=true;moving.entities[0].hull_facing_raw=16384;
+    sim::PrototypeCombatRuntime drive(rules,mode,art,exe);
+    check(drive.attack(moving,1,2),"moving attack rejected");
+    auto mr=drive.tick(moving,0);
+    check(mr.fired==1,"aligned moving hull did not fire");
+    check(moving.entities[0].hull_facing_raw==16384,"moving hull turned toward the target");
+    // A misaligned moving hull is blocked by the 00704DF0 facing gate.
+    auto moving_sideways=make_world("DRON","E1",world::Kind::Unit,world::Kind::Infantry,300,100);
+    moving_sideways.entities[1].position=sim::Coord{51*256+128,50*256+128,0};
+    moving_sideways.entities[1].cell=ra2map::Cell{51,50};
+    moving_sideways.entities[0].locomotor_moving=true;moving_sideways.entities[0].hull_facing_raw=8192;
+    sim::PrototypeCombatRuntime gate(rules,mode,art,exe);
+    check(gate.attack(moving_sideways,1,2) && gate.tick(moving_sideways,0).fired==0,"misaligned moving hull fired");
+    check(moving_sideways.entities[0].hull_facing_raw==8192,"moving hull turned toward the target");
+    // A TurretSpins turret never aims (FUN_006FB890 spinning branch). The
+    // 00704DF0 gate still reads its present facing, and each tick advances
+    // the quantized facing by 8 of the 32 steps (006FB9B1..006FB9CB).
+    auto spin=make_world("DRON","MTNK",world::Kind::Unit,world::Kind::Unit,300,400);
+    spin.entities[1].position=sim::Coord{51*256+128,50*256+128,0};
+    spin.entities[1].cell=ra2map::Cell{51,50};
+    spin.entities[0].turret_facing_raw=0;
+    rules::IniFile spinmode;spinmode.parse("[DRON]\nTurret=yes\nTurretSpins=yes\n");
+    sim::PrototypeCombatRuntime spinner(rules,spinmode,art,exe);
+    check(spinner.attack(spin,1,2),"spinning attack rejected");
+    check(spinner.tick(spin,0).fired==0,"spinning turret ignored the gate");
+    check(spin.entities[0].turret_facing_raw==2048,"spinning turret did not advance by 8 steps");
+    // An OmniFire weapon (+107) skips the 00704DF0 facing gate.
+    auto omni=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400);
+    omni.entities[1].position=sim::Coord{51*256+128,50*256+128,0};
+    omni.entities[1].cell=ra2map::Cell{51,50};
+    omni.entities[0].turret_facing_raw=0;
+    rules::IniFile omnimode;omnimode.parse("[120mm]\nOmniFire=yes\n");
+    sim::PrototypeCombatRuntime omni_fire(rules,omnimode,art,exe);
+    check(omni_fire.attack(omni,1,2) && omni_fire.tick(omni,0).fired==1,
+          "OmniFire weapon obeyed the facing gate");
+    // A spinning OmniFire turret still advances by 8 steps every tick
+    // (006FB9B1..006FB9CB): OmniFire skips only the fire restriction, not
+    // the 006FB890 aim update.
+    auto spin_omni=make_world("DRON","E1",world::Kind::Unit,world::Kind::Infantry,300,100);
+    spin_omni.entities[1].position=sim::Coord{51*256+128,50*256+128,0};
+    spin_omni.entities[1].cell=ra2map::Cell{51,50};
+    spin_omni.entities[0].turret_facing_raw=0;
+    rules::IniFile spin_omni_mode;
+    spin_omni_mode.parse("[DRON]\nTurret=yes\nTurretSpins=yes\n[DroneJump]\nOmniFire=yes\n");
+    sim::PrototypeCombatRuntime spin_omni_fire(rules,spin_omni_mode,art,exe);
+    check(spin_omni_fire.attack(spin_omni,1,2),"spinning OmniFire attack rejected");
+    const auto spin_omni_tick=spin_omni_fire.tick(spin_omni,0);
+    check(spin_omni_tick.fired==1,"spinning OmniFire weapon obeyed the gate");
+    check(spin_omni_tick.unresolved.empty(),"spinning OmniFire tick unresolved");
+    check(spin_omni.entities[0].turret_facing_raw==2048,
+          "spinning OmniFire turret did not advance by 8 steps");
+    // Art LargeVisceroid (+BB1) and SmallVisceroid (+BB0) skip the fire
+    // facing restriction only; the 006FB890 spin update still runs.
+    for (const char* flag : {"LargeVisceroid","SmallVisceroid"}) {
+        rules::IniFile visceroid_mode;
+        visceroid_mode.parse("[DRON]\nTurret=yes\nTurretSpins=yes\n");
+        rules::IniFile visceroid_art;
+        visceroid_art.parse(std::string("[DRON]\n")+flag+"=yes\n");
+        auto visc=make_world("DRON","E1",world::Kind::Unit,world::Kind::Infantry,300,100);
+        visc.entities[1].position=sim::Coord{51*256+128,50*256+128,0};
+        visc.entities[1].cell=ra2map::Cell{51,50};
+        visc.entities[0].turret_facing_raw=0;
+        sim::PrototypeCombatRuntime visceroid(rules,visceroid_mode,visceroid_art,exe);
+        check(visceroid.attack(visc,1,2),"visceroid attack rejected");
+        const auto visceroid_tick=visceroid.tick(visc,0);
+        check(visceroid_tick.fired==1,"visceroid gate did not skip the facing check");
+        check(visceroid_tick.unresolved.empty(),"visceroid tick unresolved");
+        check(visc.entities[0].turret_facing_raw==2048,
+              "visceroid turret did not advance by 8 steps");
+    }
+    // An arcing Unit weapon (HTNK 120mm, Cannon Arcing=true) reaches the
+    // muzzle path; the non-arcing DroneJump never did. A nonzero art Image
+    // TurretOffset (UnitType +63C, read at 006DD9C7/CC from the art loader
+    // INI 0x8397F0) must produce the exact 006C1830 muzzle coordinates.
+    rules::IniFile offart;offart.parse("[HTNK]\nTurretOffset=100\n");
+    sim::PrototypeCombatRuntime offset(rules,mode,offart,exe);
+    auto fresh=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400);
+    fresh.entities[1].position=sim::Coord{51*256+128,50*256+128,0};
+    fresh.entities[1].cell=ra2map::Cell{51,50};
+    fresh.entities[0].turret_facing_raw=16384;
+    check(offset.attack(fresh,1,2),"offset attack rejected");
+    const auto offset_tick=offset.tick(fresh,0);
+    check(offset_tick.fired==1,"offset fire");
+    check(offset_tick.unresolved.empty(),"offset tick unresolved");
+    check(offset.projectiles().size()==1,"arcing shot did not become a projectile");
+    // Same inputs as the tick: stored position, hull 0, aligned turret
+    // 16384, no art PrimaryFireFLH (so 0,0,0), TurretOffset=100, burst 0.
+    const auto expected=weapons::base_flat_unit_muzzle({sim::Coord{50*256+128,50*256+128,0},
+        0,16384,{0,0,0},100,0,true});
+    check(expected.has_value(),"reference muzzle unresolved");
+    const auto& got=offset.projectiles().front().flight.arc.position;
+    check(expected && got[0]==expected->x && got[1]==expected->y &&
+          got[2]==expected->z,
+          "projectile did not start at the 006C1830 muzzle coordinates");
+}
+}
 // Base 006C9C00 burst branch and the 006CB2D9..006CB2F3 burst count.
 void burst_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
     const auto shots=[&](const char* text,std::vector<unsigned>& frames,std::vector<int>& indices) {
@@ -698,7 +825,7 @@ void structure_test(const rules::IniFile& rules,const rules::IniFile& art,const 
     check(killed==1 && w.entities[1].lifetime==world::Lifetime::Destroyed &&
           w.cells.at(50*512+54).heads->ground_head==3,"structure did not die cleanly");
 }
-}
+
 int main(int argc,char** argv) {
     try {
         if (argc!=2) throw std::runtime_error("usage: prototype_combat_test GAME_DIR");
@@ -723,6 +850,7 @@ int main(int argc,char** argv) {
         cyclic_link_test(rules,art,std::string(argv[1])+"/game.exe");
         structure_test(rules,art,std::string(argv[1])+"/game.exe");
         turret_turn_test(rules,art,std::string(argv[1])+"/game.exe");
+        turretless_hull_test(rules,art,std::string(argv[1])+"/game.exe");
         burst_test(rules,art,std::string(argv[1])+"/game.exe");
         oracle_duel_test(rules,art,std::string(argv[1])+"/game.exe");
         overlay_and_range_test(rules,art,std::string(argv[1])+"/game.exe");

@@ -646,22 +646,48 @@ bool PrototypeCombatRuntime::can_attack(const session::world::Snapshot& world,
     return verse && std::isfinite(*verse) && *verse>0;
 }
 std::optional<PrototypeCombatRuntime::TurretAim> PrototypeCombatRuntime::turret_aim(
-    session::world::Entity& source,const session::world::Entity& target,bool omni_fire,std::int32_t frame) {
-    // Base 006FB890 turret branch for UnitType +AAB Turret. OmniFire (+107)
-    // weapons leave the turret alone. TODO-ORIGINAL: TurretSpins, locked
-    // turrets, hull aim for Units without a turret, and the idle return to
-    // the hull or move destination (006FB98E) are not reproduced here.
-    if (source.kind!=session::world::Kind::Unit || omni_fire || !source.position || !target.position ||
-        !prototype_bool(base_,map_,source.type,"Turret") ||
-        prototype_bool(base_,map_,source.type,"TurretSpins")) return {};
+    session::world::Entity& source,const session::world::Entity& target,std::int32_t frame) {
+    // Base 006FB890 Unit aim update. It runs every frame for a Unit with a
+    // target, independent of the 00704DF0 fire gate: the OmniFire (+107)
+    // skip and the UnitType +BB1/+BB0 skips live in the fire gate only and
+    // never suppress this update. The gate reads the Unit +2F8 turret
+    // FacingClass when the type +AAB Turret byte is set and the +2E0 hull
+    // FacingClass otherwise, and compares it with the 005D2730 target
+    // direction every frame.
+    // TODO-ORIGINAL: locked turrets and the idle return to the hull or move
+    // destination (006FB98E) are not reproduced here.
+    if (source.kind!=session::world::Kind::Unit ||
+        !source.position || !target.position) return {};
     const auto dx=static_cast<long long>(target.position->x)-source.position->x;
     const auto dy=static_cast<long long>(target.position->y)-source.position->y;
     if (std::abs(dx)>100000 || std::abs(dy)>100000 || (!dx && !dy)) return {};
     // Base 005D2730 GetTargetDirection uses the same atan2 arithmetic.
     const auto direction=angles_.heading(static_cast<int>(dx),static_cast<int>(dy));
-    // Base 006FA5AD: the turret ROT is the Techno type ROT (+638).
-    const auto rot=base_facing_rot(prototype_int(base_,map_,source.type,"ROT").value_or(0));
+    if (!prototype_bool(base_,map_,source.type,"Turret")) {
+        // FUN_006fb890 turretless branch (006FB92F..006FB989): the gate reads
+        // the unrotated +2E0 hull FacingClass. The original re-issues
+        // Set_Desired(direction) only when the hull Current already equals
+        // the target direction, so driving and aim rotation stay with the
+        // locomotor and no rotation state is needed here.
+        const auto hull=source.hull_facing_raw.value_or(0);
+        return TurretAim{hull,direction};
+    }
+    // Turret aim. Base 006FA5AD: the turret ROT is the Techno type ROT
+    // (+638). A TurretSpins turret never aims; FUN_006fb890 instead advances
+    // its quantized facing by 8 raw steps each tick through Set_Current.
+    const auto spins=prototype_bool(base_,map_,source.type,"TurretSpins");
     const auto shown=source.turret_facing_raw.value_or(source.hull_facing_raw.value_or(0));
+    if (spins) {
+        // FUN_006FB9B1..006FB9CB spinning branch: round the raw facing to the
+        // 0-255 facing byte (shr 7, inc, shr 1), add 8 (one of the 32 facing
+        // steps) and scale back with shl 8 through Set_Current (004B8B10).
+        const auto q=static_cast<std::uint16_t>(((shown>>7)+1)/2&0xff)+8;
+        const auto spun=static_cast<std::uint16_t>(q*0x100);
+        source.turret_facing_raw=spun;
+        return TurretAim{spun,direction};
+    }
+    // Base 006FA5AD: Set_Desired(direction) on the +2F8 FacingClass.
+    const auto rot=base_facing_rot(prototype_int(base_,map_,source.type,"ROT").value_or(0));
     auto state=turrets_.find(source.id);
     if (state==turrets_.end() || state->second.facing.rot!=rot || state->second.written!=shown) {
         TurretState fresh;fresh.facing.rot=rot;base_facing_set_current(fresh.facing,shown,frame);
@@ -674,6 +700,7 @@ std::optional<PrototypeCombatRuntime::TurretAim> PrototypeCombatRuntime::turret_
     source.turret_facing_raw=current;source.turret_facing=static_cast<int>(current>>8);
     return TurretAim{current,direction};
 }
+
 bool PrototypeCombatRuntime::attack(session::world::Snapshot& world,std::uint32_t source_id,std::uint32_t target_id) {
     if (!can_attack(world,source_id,target_id)) return false;
     auto* source=prototype_find(world,source_id);
@@ -990,9 +1017,12 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
                     report.unresolved.push_back("weapon or target armor is unresolved");
                 source->target_id=0;it=orders_.erase(it);continue;
             }
-            // Base 006FB890: a turreted Unit with a target turns its turret
-            // toward that target every frame, also while out of range.
-            const auto aim=turret_aim(*source,*target,weapon->omni_fire,static_cast<std::int32_t>(frame));
+            // Base 006FB890: a turreted Unit with a target updates its
+            // turret toward that target every frame, also while out of
+            // range. A Unit without a turret keeps its hull facing here:
+            // the original re-issues Set_Desired only on the hull branch
+            // and leaves drive rotation to the locomotor.
+            const auto aim=turret_aim(*source,*target,static_cast<std::int32_t>(frame));
             // AircraftClass::IsCloseEnoughToAttack (006C5070) delegates to
             // weapon eligibility. Flight missions use ground separation here,
             // so a bomber can reach a ground target below its cruise height.
@@ -1006,9 +1036,21 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             const weapons::FireTimer timer{source->weapon_timer_start_frame.value_or(-1),
                                            source->weapon_timer_duration.value_or(0)};
             if (!weapons::base_fire_timer_ready(timer,static_cast<int>(frame))) {++it;continue;}
-            // Base 00704DF0..00704E8E: FIRE_FACING until the turret is close
-            // enough. OmniFire weapons skip the check.
-            if (aim && !weapon->omni_fire &&
+            // Base 00704DF0..00704E8E: FIRE_FACING until the aiming facing is
+            // close enough. That facing is the turret for a turreted Unit and
+            // the hull for a Unit without one, as in RA1 UnitClass::Can_Fire.
+            // The gate skips OmniFire (+107) weapons and UnitType +BB1/+BB0;
+            // the art loader sets those flags at 0070AD93 and 0070AD79 from
+            // the Image section keys LargeVisceroid and SmallVisceroid, and
+            // the type constructor 0070A67F clears both by default. The
+            // skips restrict firing only; the 006FB890 aim update above
+            // still runs.
+            const auto gate_image=prototype_string(base_,map_,source->type,"Image");
+            const auto gate_image_name=gate_image.empty()?source->type:gate_image;
+            const bool facing_skip=weapon->omni_fire ||
+                art_.read_bool(gate_image_name,"LargeVisceroid",false) ||
+                art_.read_bool(gate_image_name,"SmallVisceroid",false);
+            if (aim && !facing_skip &&
                 !base_unit_facing_ready(aim->current,aim->direction,weapon->projectile_rot)) {++it;continue;}
             const auto* house=prototype_house(world,source->house_id);
             // Veteran and elite rank now feeds the shot: the FIREPOWER
@@ -1033,11 +1075,16 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
                 // The muzzle uses the present turret facing, which can still
                 // be up to the fire tolerance away from the target.
                 const auto turret=aim?aim->current:angles_.heading(static_cast<int>(dx),static_cast<int>(dy));
-                // TODO-ORIGINAL: Resolve unknown hull facing and turret offset.
+                // UnitType +63C TurretOffset, loaded by the art loader at
+                // 0x6DD9BB from the unit Image section of art.ini. The muzzle
+                // transform translates the fire FLH by it.
+                const auto image=prototype_string(base_,map_,source->type,"Image").empty()
+                    ?source->type:prototype_string(base_,map_,source->type,"Image");
+                const int turret_offset=art_.read_integer(image,"TurretOffset",0);
                 const auto fallback_hull=(static_cast<std::uint32_t>(source->hull_facing.value_or(0))&255u)<<8;
                 const auto hull=source->hull_facing_raw.value_or(static_cast<std::uint16_t>(fallback_hull));
                 const auto muzzle=weapons::base_flat_unit_muzzle({*source->position,hull,turret,
-                    weapon->fire_flh,0,source->burst_index.value_or(0),true});
+                    weapon->fire_flh,turret_offset,source->burst_index.value_or(0),true});
                 if (!muzzle) {report.unresolved.push_back("Unit muzzle is unresolved");++it;continue;}
                 const auto delta_x=static_cast<long long>(target->position->x)-muzzle->x;
                 const auto delta_y=static_cast<long long>(target->position->y)-muzzle->y;

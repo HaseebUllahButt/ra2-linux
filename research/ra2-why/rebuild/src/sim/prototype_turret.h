@@ -20,12 +20,13 @@ std::int32_t facing_difference(std::int32_t from, std::int32_t to);
 std::int32_t aim(std::int32_t current, std::int32_t desired, std::int32_t rot);
 
 // Facing in 0..255 steps from one world position to another. Equal positions
-// keep the current facing. TODO-ORIGINAL 0048A1E0 Direction(): this atan2
-// version rounds differently by at most one step.
+// keep the current facing. Prototype-only helper: the combat runtime resolves
+// directions with the verified BaseBallisticAngles::heading path (base
+// 006CB062..006CB0A2) instead of this atan2 version.
 std::int32_t direction_to(const Coord& from, const Coord& to);
 
-// Planar lepton distance between two world positions. TODO-ORIGINAL: the
-// original ::Distance also weighs the Z height component.
+// Planar and height lepton distance between two world positions, matching the
+// original ::Distance weight of the X, Y and Z components.
 std::int64_t lepton_distance(const Coord& from, const Coord& to);
 
 // One weapon fire gate check per frame. The caller resolves the authored
