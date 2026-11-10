@@ -74,10 +74,12 @@ int main() try {
         "EVA_NuclearMissileLaunched", "nuke launch speech");
     require(ra2::app::superweapon_launch_speech(SuperKind::LightningStorm) ==
         "EVA_LightningStormCreated", "storm launch speech");
-    require(ra2::app::superweapon_launch_speech(SuperKind::IronCurtain).empty() &&
-        ra2::app::superweapon_launch_speech(SuperKind::ChronoSphere).empty() &&
-        ra2::app::superweapon_launch_speech(SuperKind::ChronoWarp).empty(),
-        "the chrono pair never announces a launch line");
+    require(ra2::app::superweapon_launch_speech(SuperKind::IronCurtain) ==
+        "EVA_IronCurtainActivated", "iron curtain activation speech");
+    require(ra2::app::superweapon_launch_speech(SuperKind::ChronoSphere) ==
+        "EVA_ChronosphereActivated", "chrono activation speech");
+    require(ra2::app::superweapon_launch_speech(SuperKind::ChronoWarp).empty(),
+        "the warp half of the chrono pair stays silent");
     require(ra2::app::superweapon_detected_speech(SuperKind::Nuke) ==
         "EVA_NuclearSiloDetected", "nuke detected speech");
     require(ra2::app::superweapon_detected_speech(SuperKind::LightningStorm) ==

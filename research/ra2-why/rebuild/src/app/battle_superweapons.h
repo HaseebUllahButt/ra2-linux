@@ -139,6 +139,11 @@ inline std::string superweapon_launch_speech(sim::SuperKind kind) {
     switch (kind) {
     case sim::SuperKind::Nuke: return "EVA_NuclearMissileLaunched";
     case sim::SuperKind::LightningStorm: return "EVA_LightningStormCreated";
+    // The activation lines fire when the player uses the weapon. The
+    // ChronoWarp half of the pair stays silent, so one activation
+    // announces once.
+    case sim::SuperKind::IronCurtain: return "EVA_IronCurtainActivated";
+    case sim::SuperKind::ChronoSphere: return "EVA_ChronosphereActivated";
     default: return {};
     }
 }
@@ -163,6 +168,10 @@ inline std::vector<const char*> superweapon_speech_sections() {
         "EVA_ChronosphereDetected", "EVA_ChronosphereActivated",
         "EVA_ChronosphereReady", "EVA_WeatherDeviceReady",
         "EVA_LightningStormCreated", "EVA_LightningStormReady"};
+}
+// The sections the launch mapping names, for the activation tests.
+inline std::vector<const char*> superweapon_activation_sections() {
+    return {"EVA_IronCurtainActivated", "EVA_ChronosphereActivated"};
 }
 
 // Sidebar cameo entry for one granted weapon (battle_hud.h BuildChoice).

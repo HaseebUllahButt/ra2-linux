@@ -148,6 +148,8 @@ int main(int argc,char** argv) {
             speak_pcm("EVA_NuclearMissileLaunched");
             speak_pcm("EVA_LightningStormReady");
             speak_pcm("EVA_LightningStormCreated");
+            for (const auto* section : app::superweapon_activation_sections())
+                speak_pcm(section);
         }
         config.speech_side="Allied";
     }
