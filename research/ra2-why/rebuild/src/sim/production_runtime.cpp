@@ -834,7 +834,19 @@ std::optional<Outcome> unlimbo_failure(const w::Snapshot& s,const Catalog& c,std
         return fail(Status::Unsupported,"dock, wall and overlay building unlimbo is not recovered");
     const auto ok=legal(s,c,*t,origin);                                    // Can_Enter_Cell 004453B0.
     if (!ok) return fail(Status::NeedsInput,"placement cells unresolved");
-    if (!*ok) return fail(Status::Rejected,"cannot deploy here");
+    if (!*ok) {
+        // A ground unit or soldier in the footprint names its own failure.
+        for (const auto cell:footprint(origin,t->placement.foundation)) {
+            const auto key=cell_key(cell); if (!key) continue;
+            const auto it=s.cells.find(*key);
+            if (it==s.cells.end() || !it->second.heads) continue;
+            if (const auto chain=ground_chain(s,it->second))
+                for (const auto* e:*chain)
+                    if (e && (e->kind==w::Kind::Unit || e->kind==w::Kind::Infantry))
+                        return fail(Status::Rejected,"building space is occupied by a unit");
+        }
+        return fail(Status::Rejected,"cannot deploy here");
+    }
     if (!house_of(s,b->house_id)) return fail(Status::NeedsInput,"house missing");
     return std::nullopt;
 }
@@ -1290,7 +1302,12 @@ std::optional<std::vector<std::pair<CellXY,Placement>>> placement_cells(const w:
 // reaches its first write. It does not change the world or the factories.
 std::optional<Outcome> place_failure(const w::Snapshot& s,const FactorySet& f,const Catalog& c,std::uint32_t house_id,
                                      const std::string& type,CellXY cell) {
-    if (!runtime_ready(s)) return fail(Status::NeedsInput,"setup is not complete");
+    // Read-only click preflight: a prototype world may ask for click checks
+    // before its first write. The mutating place() below still needs Complete.
+    if (s.pending_cell_setup || !s.geometry ||
+        (s.setup_progress!=w::SetupProgress::Complete &&
+         s.setup_progress!=w::SetupProgress::PrototypeComplete))
+        return fail(Status::NeedsInput,"setup is not complete");
     const auto* t=c.find(type); if (!t || t->rtti!=Rtti::BuildingType) return fail(Status::Rejected,"not a building type");
     const FactoryState* factory=nullptr;
     for (const auto& x:f.factories) if (x.house_id==house_id && x.slot==slot_of(*t)) { factory=&x; break; }
@@ -1305,6 +1322,9 @@ std::optional<Outcome> place_failure(const w::Snapshot& s,const FactorySet& f,co
 Outcome place(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint32_t house_id,
               const std::string& type,CellXY cell,std::uint64_t) {
     // A failed placement returns before any write; skip the Undo copy then.
+    // Mutating place always needs the Complete phase, even though the
+    // read-only preflight above also accepts PrototypeComplete.
+    if (!runtime_ready(snapshot)) return fail(Status::NeedsInput,"setup is not complete");
     if (auto failure=place_failure(snapshot,factories,c,house_id,type,cell)) return *failure;
     w::Undo undo(snapshot); auto& s=snapshot; auto f=factories; // Restores unless committed.
     const auto* t=c.find(type); if (!t || t->rtti!=Rtti::BuildingType) return fail(Status::Rejected,"not a building type");

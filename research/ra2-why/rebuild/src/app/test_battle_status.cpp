@@ -15,6 +15,13 @@ int main() {
     for(auto code:{Status::Rejected,Status::NeedsInput,Status::Unsupported})
         assert(production_status(code,"Building placed.","Can't build here.")=="Can't build here.");
     assert(production_status(Status::Done,"Building placed.","Can't build here.")=="Building placed.");
+    assert(placement_status(Status::Rejected,"building space is occupied by a unit",
+        "Building placed.","Can't build here.")=="Move units away from the building space.");
+    assert(placement_status(Status::Rejected,"cannot deploy here",
+        "Building placed.","Can't build here.")=="Can't build here.");
+    assert(placement_status(Status::Rejected,"building is too far from the base",
+        "Building placed.","Can't build here.")=="Can't build here.");
+    assert(placement_status(Status::Done,"","Building placed.","Can't build here.")=="Building placed.");
     ra2::sim::PrototypeCombatEvent hit;
     hit.kind=ra2::sim::PrototypeCombatEventKind::Damage;hit.target_house=1;
     hit.hp_before=1000;hit.hp_after=950;

@@ -240,6 +240,29 @@ std::optional<ra2map::Cell> exit_cell(const w::Snapshot& world,const Catalog& ca
     return {};
 }
 
+// The click checks of place(), read-only. place_failure reads a Complete or
+// PrototypeComplete world, so this runs on the caller's Snapshot with no
+// copy. Returns the failure that the click would return, or nothing when
+// the click passes.
+// global marks a rejection of the whole click (proximity, no ready product,
+// missing builder) as opposed to a per-Cell occupancy rejection, where the
+// original 004718B0 Can_Enter_Cell check blocks only the occupied Cells.
+struct ClickCheck { std::optional<Outcome> failure; bool global; };
+ClickCheck click_failure(const w::Snapshot& world,const FactorySet& factories,const Catalog& catalog,
+                         std::uint32_t house_id,const std::string& type,CellXY cell) {
+    if (!ready(world)) return {fail(Status::NeedsInput,"prototype setup is not complete"),true};
+    const auto proximity=ra2::sim::production::passes_proximity(world,factories,catalog,house_id,type,cell);
+    if (!proximity) return {fail(Status::NeedsInput,"building proximity is unknown"),true};
+    if (!*proximity) return {fail(Status::Rejected,"building is too far from the base"),true};
+    auto failure=ra2::sim::production::place_failure(world,factories,catalog,house_id,type,cell);
+    // place_failure checks the product, House and builder before the Cell
+    // checks of unlimbo_failure; only its occupancy rejections are per-Cell.
+    const bool per_cell=failure && failure->status==Status::Rejected &&
+        (failure->detail=="cannot deploy here" ||
+         failure->detail=="building space is occupied by a unit");
+    return {std::move(failure),!per_cell};
+}
+
 bool place_exit_actor(w::Snapshot& world,w::Entity& item,ra2map::Cell cell) {
     const auto found=world.cells.find(std::uint32_t(cell.y)*512+cell.x);
     if (found==world.cells.end() || !found->second.heads || !found->second.ground_occupancy_124 ||
@@ -506,10 +529,19 @@ std::optional<PlacementCursor> placement_cursor(const w::Snapshot& world,const F
     PlacementCursor cursor;
     cursor.origin=*origin;
     cursor.proximity=prototype::passes_proximity(world,factories,catalog,house_id,type,*origin);
-    cursor.legal=ra2::sim::production::legal_placement(world,catalog,type,*origin);
+    // The cursor uses the exact read-only click checks of place(). A global
+    // rejection turns every Cell red; a 004718B0 occupancy rejection keeps
+    // the per-Cell blockers. An unknown check leaves every Cell unknown.
+    const auto click=click_failure(world,factories,catalog,house_id,type,*origin);
+    if (click.failure && click.failure->status==Status::NeedsInput) cursor.legal=std::nullopt;
+    else if (click.failure) cursor.legal=false;
+    else cursor.legal=ra2::sim::production::legal_placement(world,catalog,type,*origin);
+    const bool global_red=click.failure && click.failure->status==Status::Rejected && click.global;
+    const bool global_unknown=click.failure && click.failure->status==Status::NeedsInput;
     for (const auto& [cell,state]:*cells) {
         std::optional<bool> legal_cell;
-        if (cursor.proximity==false || state==Placement::Illegal) legal_cell=false;
+        if (global_red || cursor.proximity==false || state==Placement::Illegal) legal_cell=false;
+        else if (global_unknown) legal_cell=std::nullopt;   // Unknown stays unknown.
         else if (cursor.proximity==true && state==Placement::Legal) legal_cell=true;
         cursor.cells.push_back({cell,legal_cell});
     }
@@ -519,20 +551,11 @@ std::optional<PlacementCursor> placement_cursor(const w::Snapshot& world,const F
 Outcome place(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,std::uint32_t house_id,
               const std::string& type,CellXY cell,std::uint64_t frame) {
     bool known_valid=false;
-    if (ready(world)) {
-        // Find a failure first without the transaction copy. These checks
-        // match the transaction below up to its first write, and that
-        // transaction would roll back such a failure exactly.
-        struct Progress {
-            w::Snapshot& world; w::SetupProgress saved;
-            ~Progress() { world.setup_progress=saved; }
-        } progress{world,world.setup_progress};
-        world.setup_progress=w::SetupProgress::Complete;
-        const auto proximity=ra2::sim::production::passes_proximity(world,factories,catalog,house_id,type,cell);
-        if (!proximity) return fail(Status::NeedsInput,"building proximity is unknown");
-        if (!*proximity) return fail(Status::Rejected,"building is too far from the base");
-        if (auto failure=ra2::sim::production::place_failure(world,factories,catalog,house_id,type,cell)) return *failure;
-    }
+    // Find a failure first, with the same read-only click checks that the
+    // placement cursor shows. The read-only checks match the transaction
+    // below up to its first write, and that transaction would roll back
+    // such a failure exactly.
+    if (auto failure=click_failure(world,factories,catalog,house_id,type,cell).failure) return *failure;
     // The transaction runs only for a ready world, so the check above has
     // passed proximity on the same world and factories; nothing changes
     // them before the callback except the Undo copy and the Complete marker

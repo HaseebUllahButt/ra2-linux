@@ -10,6 +10,7 @@
 #include "battle_hud.h"
 #include "battle_building_tools.h"
 #include "battle_shroud.h"
+#include "battle_home.h"
 #include "battle_queue.h"
 #include "battle_score.h"
 #include "battle_fallout.h"
@@ -492,7 +493,7 @@ public:
             }
             if(input.pressed && input.key==SDLK_TAB && victory_.settled()) {show_score_=!show_score_;return;}
             if (!options_.visible() && input.pressed && input.key==SDLK_h) {
-                for (const auto& e:world_.entities) if (live(e)&&e.house_id==player_) {center(e);break;}
+                if (const auto* base=home_building(world_,player_,rules_)) center(*base);
             }
         }
         if(options_.visible()) {
@@ -1005,7 +1006,9 @@ public:
             if (outcome.status==p::Status::Done && order.house==player_) {
                 placement_.clear();orders_.set_placement_active(false);
             }
-            if(order.house==player_)note(outcome,"Building placed.","Can't build here.");
+            // Keep note(): the gap list must track every unknown detail.
+            if(order.house==player_)note(outcome,"Building placed.",
+                placement_status(outcome.status,outcome.detail,"Building placed.","Can't build here."));
             break;
         }
         }
