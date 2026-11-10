@@ -36,6 +36,7 @@ bool held_by_friends(const sw::Snapshot& w,const sw::CellState& c,std::uint32_t 
 PrototypeEconomy::PrototypeEconomy(const rules::IniFile& r):rules_(r) {
     movement_.use_rules(rules_);
     purifier_bonus_=r.read_double("General","PurifierBonus",0.25);
+    stall_frames_=5*std::max(1,r.read_integer("General","BlockagePathDelay",60));
     const auto* overlays=r.find_section("OverlayTypes");
     const auto* types=r.find_section("Tiberiums");
     if(!overlays || !types) return;
@@ -180,7 +181,20 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
                 }
             }
         }
-        if(movement_.moving(e.id)) { bag.loading=false;continue; }
+        if(movement_.moving(e.id)) {
+            bag.loading=false;
+            if(!bag.progress || bag.progress->x!=e.cell->x || bag.progress->y!=e.cell->y) { bag.progress=*e.cell;bag.progress_frame=frame; }
+            else if(frame-bag.progress_frame>=std::uint32_t(stall_frames_)) {
+                // MP02T2, Brutal computer: a miner with 36 bails waited one
+                // cell from its next ore cell from frame 22657 to the end.
+                movement_.cancel(w,e.id);
+                bag.progress.reset();
+                if(bag.total>0) bag.returning=true; else bag.avoid=bag.target;
+                bag.next=frame+1;
+            }
+            continue;
+        }
+        bag.progress.reset();
         if(frame<bag.next) continue;
         sw::Entity* refinery=nullptr;int best=std::numeric_limits<int>::max();
         for(auto& b:w.entities) if(alive(b) && b.kind==sw::Kind::Structure && b.house_id==e.house_id && (b.type=="GAREFN" || b.type=="NAREFN")) {
@@ -260,7 +274,11 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
         });
         std::sort(fields.begin(),fields.end(),[&](auto a,auto b){int da=distance(*e.cell,coord(a)),db=distance(*e.cell,coord(b));return da!=db?da<db:a<b;});
         bool found=false;
-        for(auto k:fields) if(movement_.issue(w,e.id,coord(k),original_rule_speed(rules_.read_integer(e.type,"Speed",4))).status==PrototypeMoveStatus::Complete) {bag.target=coord(k);found=true;break;}
+        for(auto k:fields) {
+            if(bag.avoid && bag.avoid->x==coord(k).x && bag.avoid->y==coord(k).y) continue;
+            if(movement_.issue(w,e.id,coord(k),original_rule_speed(rules_.read_integer(e.type,"Speed",4))).status==PrototypeMoveStatus::Complete) {bag.target=coord(k);found=true;break;}
+        }
+        bag.avoid.reset();
         if(!found && bag.total) bag.returning=true;
     }
     for(auto i=cargo_.begin();i!=cargo_.end();) if(!live.count(i->first)) {movement_.cancel(w,i->first);i=cargo_.erase(i);} else ++i;

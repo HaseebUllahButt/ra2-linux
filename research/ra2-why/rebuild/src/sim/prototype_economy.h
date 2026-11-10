@@ -22,7 +22,14 @@ public:
     static int virtual_purifiers(const rules::IniFile& rules, int original_difficulty);
 private:
     // Bails per resource index. Docked unloading gives one resource at a time.
-    struct Cargo { std::vector<int> bails; int total=0; std::uint32_t next=0; bool returning=false, loading=false, docked=false; std::optional<ra2map::Cell> target; };
+    struct Cargo {
+        std::vector<int> bails; int total=0; std::uint32_t next=0; bool returning=false, loading=false, docked=false;
+        std::optional<ra2map::Cell> target;
+        // Watchdog for a route that makes no progress: the last cell seen
+        // while moving, the frame it was first seen, and an ore cell to skip
+        // in the next search.
+        std::optional<ra2map::Cell> progress, avoid; std::uint32_t progress_frame=0;
+    };
     struct Resource { std::string section; int first_overlay=-1; int growth=1, interval=1, value=0; };
     std::vector<Resource> resources_;
     // Live OverlayType index to resource index, or -1. The first resource
@@ -40,6 +47,11 @@ private:
     // Frames per bail (9 animation steps of General HarvesterLoadRate) and
     // frames per docked resource unload (General HarvesterDumpRate minutes).
     int load_frames_=18, dump_frames_=15;
+    // A moving miner that stays on one cell this long gives up its route
+    // (five times General BlockagePathDelay).
+    // TODO-ORIGINAL: the original harvest mission re-plans through the Foot
+    // path retry states; this is a simple time limit.
+    int stall_frames_=300;
     int resource(const session::world::CellState&) const;
 };
 }
