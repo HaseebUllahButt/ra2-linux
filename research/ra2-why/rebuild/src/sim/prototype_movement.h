@@ -72,6 +72,8 @@ public:
     // drive finishes its current track.
     void cancel(session::world::Snapshot&,std::uint32_t unit);
     bool moving(std::uint32_t unit) const { return moves_.count(unit)!=0; }
+    // Read-only view of the pending route goal (nullopt when not moving).
+    std::optional<ra2map::Cell> goal(std::uint32_t unit) const { auto it=moves_.find(unit); return it==moves_.end()?std::nullopt:std::optional<ra2map::Cell>{it->second.goal}; }
     std::size_t active_count() const { return moves_.size(); }
     // Apply all pending moves in ID order to one private world. Publish the
     // world and all routes together. game_frame is supplied by the game loop.
