@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
+#include <iostream>
 #include <limits>
 #include <map>
 #include <string_view>
@@ -98,14 +100,17 @@ bool prerequisite(const IniFile& rules, const Actors& buildings, const std::stri
     return owns(buildings, name);
 }
 
+// No cash means no money test: the original pays a building in stages
+// while it is made (004B9300), and 004E9660 picks the next base node
+// without a money test. 004E9C90 tests Available_Money >= cost for units.
 bool buildable(const IniFile& rules, const WorldHouse& house, const Actors& actors,
-               const Actors& buildings, const std::string& type, std::int64_t cash) {
+               const Actors& buildings, const std::string& type, std::optional<std::int64_t> cash) {
     const auto cost = rules.read_integer(type, "Cost", -1);
     const auto tech = rules.read_integer(type, "TechLevel", -1);
     // TODO-ORIGINAL: This is a conservative policy filter, not House::Can_Build.
     // The production runtime remains responsible for the final legality check.
     // Prototype games use level ten when the house has no resolved tech level.
-    if (cost <= 0 || cost > cash || tech < 0 || tech > house.tech_level.value_or(10) ||
+    if (cost <= 0 || (cash && cost > *cash) || tech < 0 || tech > house.tech_level.value_or(10) ||
         !contains(rules.read_list(type, "Owner"), house.country)) return false;
     const auto required = rules.read_list(type, "RequiredHouses");
     if ((!required.empty() && !contains(required, house.country)) ||
@@ -254,6 +259,7 @@ struct PrototypeAI::Context {
     std::optional<ra2map::Cell> own_centre, enemy_centre; // Base House +53BC
     std::map<std::uint32_t, const WorldEntity*> own; // live own actors by ID
     std::map<std::uint32_t, const WorldEntity*> targets; // live legal enemy targets
+    std::vector<std::uint32_t> busy; // factories that got a build order in this decision
 
     std::int64_t count(std::uint32_t house, const std::string& type) const {
         return std::count_if(world.entities.begin(), world.entities.end(), [&](const WorldEntity& e) {
@@ -345,9 +351,19 @@ void PrototypeAI::reset() noexcept {
     teams_.clear();
     base_centres_.clear();
     plan_.clear();
+    naval_ = true; // 004E18C0
     weights_.clear();
     for (const auto& trigger : triggers_) weights_.push_back(trigger.weight);
     seed_ = 1;
+}
+
+void PrototypeAI::placement_failed(std::uint32_t house, const std::string& type) {
+    // 0044B480: Exit_Object returned 0 for a product whose type is a
+    // building (What_Am_I 6) with Naval (TechnoType +ADA) set. A failed
+    // land building only loses its product; its node stays, so 004E9660
+    // picks it again.
+    if (house == computer_house_ && registered(rules_, "BuildingTypes", type) && rules_.read_bool(type, "Naval"))
+        naval_ = false;
 }
 
 std::int32_t PrototypeAI::first_team_frame(const rules::IniFile& rules, Difficulty difficulty,
@@ -376,23 +392,27 @@ std::uint32_t PrototypeAI::random(std::uint32_t low, std::uint32_t high) {
 
 namespace {
 // BuildingType gates shared by 004EF890 and 004EF600: OwnerFlags,
-// RequiredHouses, ForbiddenHouses and AIBasePlanningSide.
-// TODO-ORIGINAL: the Super Weapons option gate (00A3D2C3) is taken as on.
+// RequiredHouses, ForbiddenHouses and AIBasePlanningSide. With the Super
+// Weapons option (00A3D2C3) off, a type whose SuperWeapon (BuildingType
+// +1374) has DisableableFromShell (SuperWeaponType +DF, through the
+// house super weapon at +1A0) is left out.
 bool plan_owner(const IniFile& rules, const std::string& type, const WorldHouse& house,
-                std::optional<std::int32_t> side) {
+                std::optional<std::int32_t> side, bool super_weapons) {
     if (!contains(rules.read_list(type, "Owner"), house.country)) return false;
     const auto required = rules.read_list(type, "RequiredHouses");
     if ((!required.empty() && !contains(required, house.country)) ||
         contains(rules.read_list(type, "ForbiddenHouses"), house.country)) return false;
     const auto planning = rules.read_integer(type, "AIBasePlanningSide", -1);
-    return planning == -1 || (side && planning == *side);
+    if (planning != -1 && (!side || planning != *side)) return false;
+    const auto weapon = rules.read_string(type, "SuperWeapon");
+    return super_weapons || none(weapon) || !rules.read_bool(weapon, "DisableableFromShell");
 }
 
 // Base 004EF600: the first entry of an [AI] list that the house may own.
 std::string first_owned(const IniFile& rules, const char* list, const WorldHouse& house,
-                        std::optional<std::int32_t> side) {
+                        std::optional<std::int32_t> side, bool super_weapons) {
     for (const auto& type : rules.read_list("AI", list))
-        if (registered(rules, "BuildingTypes", type) && plan_owner(rules, type, house, side)) return type;
+        if (registered(rules, "BuildingTypes", type) && plan_owner(rules, type, house, side, super_weapons)) return type;
     return {};
 }
 
@@ -426,7 +446,7 @@ void PrototypeAI::make_plan(const Context& context) {
     if (const auto* registry = rules_.find_section("BuildingTypes"))
         for (const auto& entry : registry->entries) {
             const auto& type = entry.value;
-            if (plan_owner(rules_, type, house, context.side) && rules_.read_bool(type, "AIBuildThis") &&
+            if (plan_owner(rules_, type, house, context.side, super_weapons_) && rules_.read_bool(type, "AIBuildThis") &&
                 rules_.read_integer(type, "TechLevel", -1) <= tech) pool.push_back(type);
         }
     std::vector<bool> used(pool.size(), false);
@@ -436,14 +456,14 @@ void PrototypeAI::make_plan(const Context& context) {
         return pool.size();
     };
     // The yard (if a candidate), then BuildPower without the candidate test.
-    if (const auto at = index(first_owned(rules_, "BuildConst", house, context.side)); at < pool.size()) {
+    if (const auto at = index(first_owned(rules_, "BuildConst", house, context.side, super_weapons_)); at < pool.size()) {
         used[at] = true;
         plan.push_back(pool[at]);
     }
-    if (auto power = first_owned(rules_, "BuildPower", house, context.side); !power.empty()) plan.push_back(power);
+    if (auto power = first_owned(rules_, "BuildPower", house, context.side, super_weapons_); !power.empty()) plan.push_back(power);
     // BuildBarracks moves to the front of A and BuildWeapons to the second place.
     for (const auto& [list, slot] : {std::pair<const char*, std::size_t>{"BuildBarracks", 0}, {"BuildWeapons", 1}}) {
-        const auto at = index(first_owned(rules_, list, house, context.side));
+        const auto at = index(first_owned(rules_, list, house, context.side, super_weapons_));
         if (at < pool.size() && slot < pool.size()) {
             std::swap(pool[slot], pool[at]);
             const bool flag = used[slot];
@@ -467,7 +487,7 @@ void PrototypeAI::make_plan(const Context& context) {
     }
     // 2 - AIDifficulty (House +C8, 0 is Brutal) more refineries, each after
     // a random node from the first refinery on.
-    const auto refinery = first_owned(rules_, "BuildRefinery", house, context.side);
+    const auto refinery = first_owned(rules_, "BuildRefinery", house, context.side, super_weapons_);
     for (std::size_t first = 0; !refinery.empty() && first + 1 < plan.size(); ++first) {
         if (!equal_name(plan[first], refinery)) continue;
         for (auto extra = static_cast<std::int32_t>(difficulty_); extra > 0; --extra) {
@@ -488,47 +508,104 @@ void PrototypeAI::make_plan(const Context& context) {
     plan_ = std::move(plan);
 }
 
-// Base 0042C3D0 returns the first node that is not built. A defense node
-// is resolved by 004F1190 when it is reached.
+// Base 004E9660 chooses the next building of the base plan. 0042C3D0
+// gives the first node that is not built; then:
+//  - a Naval node (BuildingType +ADA) is removed while House +138 is
+//    clear, and 0042C3D0 is asked once more;
+//  - a defense node (-1) is resolved by 004F1190; when that fails, the
+//    node is removed and nothing is chosen this time;
+//  - when free power (+52D0 - +15F88) is below the drain (+52D4) plus
+//    the node's drain (+C6C), a power node goes in front of the node and
+//    nothing is chosen this time. BuildConst types and types without a
+//    drain are exempt;
+//  - else the node type becomes the building to make (+553C).
+// TODO-ORIGINAL: the AIPickWallDefensePercent walls (Rules +BC8, 004F5D30),
+// node -3 (004F2350), the upgrade path (+C20) and the replacement skip of
+// 0042C3D0 (node +8, 004F64C0) are not modelled. House +15F88 is zero
+// (004E18C0) and is taken as zero.
 std::string PrototypeAI::plan_build(const Context& context) {
-    for (std::size_t i = 0; i < plan_.size(); ++i) {
-        if (plan_[i].empty()) {
-            // 004F1E50: IsBaseDefense types with a ground value that the
-            // country owns, at its tech level, whose prerequisites are in
-            // the house's other buildings. The pick is weighted by the type
-            // value plus 10000 / cost.
-            // TODO-ORIGINAL: the air and naval lists (004F1FF0, 004F2190)
-            // and the threat quadrant choice are not modelled, and the type
-            // value (BuildingType +11D8, 0045EAA0) is taken as zero.
-            std::vector<std::string> owned;
-            for (const auto* building : context.buildings)
-                if (!rules_.read_bool(building->type, "IsBaseDefense")) owned.push_back(building->type);
-            std::vector<std::pair<std::string, std::int64_t>> options;
-            std::int64_t sum = 0;
-            if (const auto* registry = rules_.find_section("BuildingTypes"))
-                for (const auto& entry : registry->entries) {
-                    const auto& type = entry.value;
-                    const auto cost = rules_.read_integer(type, "Cost");
-                    if (!rules_.read_bool(type, "IsBaseDefense") || cost <= 0 ||
-                        !contains(rules_.read_list(type, "Owner"), context.computer.country) ||
-                        rules_.read_integer(type, "TechLevel", -1) > context.computer.tech_level.value_or(10) ||
-                        !ground_weapon(rules_, type) || !plan_prerequisites(rules_, type, owned, owned.size())) continue;
-                    options.emplace_back(type, 10000 / cost);
-                    sum += 10000 / cost;
-                }
-            if (options.empty() || sum <= 0) return {};
-            const auto roll = random(1, static_cast<std::uint32_t>(sum));
-            std::int64_t walk = 0;
-            for (const auto& [type, weight] : options)
-                if ((walk += weight) >= roll) { plan_[i] = type; break; }
+    const auto unbuilt = [&]() {
+        for (std::size_t i = 0; i < plan_.size(); ++i) {
+            const auto& type = plan_[i];
+            if (type.empty()) return i;
+            const auto nodes = std::count_if(plan_.begin(), plan_.begin() + static_cast<std::ptrdiff_t>(i) + 1,
+                [&](const std::string& item) { return equal_name(item, type); });
+            if (std::count_if(context.buildings.begin(), context.buildings.end(),
+                    [&](const WorldEntity* e) { return equal_name(e->type, type); }) < nodes) return i;
         }
-        const auto& type = plan_[i];
-        const auto nodes = std::count_if(plan_.begin(), plan_.begin() + static_cast<std::ptrdiff_t>(i) + 1,
-            [&](const std::string& item) { return equal_name(item, type); });
-        if (std::count_if(context.buildings.begin(), context.buildings.end(),
-                [&](const WorldEntity* e) { return equal_name(e->type, type); }) < nodes) return type;
+        return plan_.size();
+    };
+    auto i = unbuilt();
+    if (i < plan_.size() && !naval_ && !plan_[i].empty() && rules_.read_bool(plan_[i], "Naval")) {
+        plan_.erase(plan_.begin() + static_cast<std::ptrdiff_t>(i));
+        i = unbuilt();
     }
-    return {};
+    if (i == plan_.size()) return {};
+    if (plan_[i].empty()) {
+        // 004F1E50: IsBaseDefense types with a ground value that the
+        // country owns, at its tech level, whose prerequisites are in
+        // the house's other buildings. The pick is weighted by the type
+        // value plus 10000 / cost.
+        // TODO-ORIGINAL: the air and naval lists (004F1FF0, 004F2190)
+        // and the threat quadrant choice are not modelled, and the type
+        // value (BuildingType +11D8, 0045EAA0) is taken as zero.
+        std::vector<std::string> owned;
+        for (const auto* building : context.buildings)
+            if (!rules_.read_bool(building->type, "IsBaseDefense")) owned.push_back(building->type);
+        std::vector<std::pair<std::string, std::int64_t>> options;
+        std::int64_t sum = 0;
+        if (const auto* registry = rules_.find_section("BuildingTypes"))
+            for (const auto& entry : registry->entries) {
+                const auto& type = entry.value;
+                const auto cost = rules_.read_integer(type, "Cost");
+                if (!rules_.read_bool(type, "IsBaseDefense") || cost <= 0 ||
+                    !contains(rules_.read_list(type, "Owner"), context.computer.country) ||
+                    rules_.read_integer(type, "TechLevel", -1) > context.computer.tech_level.value_or(10) ||
+                    !ground_weapon(rules_, type) || !plan_prerequisites(rules_, type, owned, owned.size())) continue;
+                options.emplace_back(type, 10000 / cost);
+                sum += 10000 / cost;
+            }
+        if (options.empty() || sum <= 0) {
+            plan_.erase(plan_.begin() + static_cast<std::ptrdiff_t>(i));
+            return {};
+        }
+        const auto roll = random(1, static_cast<std::uint32_t>(sum));
+        std::int64_t walk = 0;
+        for (const auto& [type, weight] : options)
+            if ((walk += weight) >= roll) { plan_[i] = type; break; }
+    }
+    const auto type = plan_[i];
+    const auto drain = std::max<std::int64_t>(0, -static_cast<std::int64_t>(rules_.read_integer(type, "Power")));
+    if (drain > 0 && !contains(rules_.read_list("AI", "BuildConst"), type)) {
+        std::int64_t output = 0, used = 0;
+        for (const auto* building : context.buildings) {
+            const auto power = rules_.read_integer(building->type, "Power");
+            if (power > 0) output += power;
+            else used -= power;
+        }
+        output = context.computer.power_output.value_or(static_cast<std::int32_t>(output));
+        used = context.computer.power_drain.value_or(static_cast<std::int32_t>(used));
+        if (output < used + drain) {
+            // House +130 side 0 takes GDIPowerPlant (Rules +7AC). Other
+            // sides take NodAdvancedPower (+7B8) when 004EF740 accepts it,
+            // else NodRegularPower (+7B4). 004E9660 passes the House
+            // building list (+6C) to 004EF740, which compares its entries
+            // with BuildingType pointers, so only a type without
+            // prerequisites can pass.
+            std::string power;
+            if (context.side.value_or(0) == 0) power = rules_.read_string("General", "GDIPowerPlant");
+            else {
+                power = rules_.read_string("General", "NodAdvancedPower");
+                if (!registered(rules_, "BuildingTypes", power) || !plan_prerequisites(rules_, power, {}, 0))
+                    power = rules_.read_string("General", "NodRegularPower");
+            }
+            if (registered(rules_, "BuildingTypes", power)) {
+                plan_.insert(plan_.begin() + static_cast<std::ptrdiff_t>(i), power);
+                return {};
+            }
+        }
+    }
+    return type;
 }
 
 bool PrototypeAI::condition(const Context& context, const Trigger& trigger) const {
@@ -702,7 +779,7 @@ void PrototypeAI::fill_teams(Context& context, std::vector<skirmish::Order>* res
     }
     // One legal request per factory per build decision. Production decides the rest.
     if (!result) return;
-    std::vector<std::uint32_t> busy;
+    auto busy = context.busy;
     for (const auto& name : wanted) {
         const auto* kind = factory_kind(rules_, name);
         if (!kind) continue;
@@ -947,7 +1024,7 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
     if (team_due) next_team_ = static_cast<std::int64_t>(game_frame) +
         std::max(1, by_difficulty(rules_, "TeamDelays", difficulty_, 2000));
 
-    Context context{world, *computer, *player, game_frame, side_index(rules_, *computer), {}, {}, {}, 0, false, {}, {}, {}, {}};
+    Context context{world, *computer, *player, game_frame, side_index(rules_, *computer), {}, {}, {}, 0, false, {}, {}, {}, {}, {}};
     auto& actors = context.actors;
     auto& buildings = context.buildings;
     auto& enemies = context.enemies;
@@ -1027,18 +1104,63 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
             // first gets a base centre and has no nodes.
             if (plan_.empty() && std::any_of(buildings.begin(), buildings.end(),
                     [&](const WorldEntity* e) { return yard(rules_, *e); })) make_plan(context);
-            if (const auto* construction = factory(rules_, buildings, "BuildingType")) {
-                std::int64_t power = 0;
-                for (const WorldEntity* building : buildings) power += rules_.read_integer(building->type, "Power");
-                // TODO-ORIGINAL: low power adds a BuildPower request before
-                // the plan; the original power rule is not recovered.
-                auto type = power < 0 ? first_owned(rules_, "BuildPower", *computer, context.side) : std::string{};
-                if (type.empty()) type = plan_build(context);
-                if (!type.empty() && registered(rules_, "BuildingTypes", type) &&
-                    buildable(rules_, *computer, actors, buildings, type, cash)) {
-                    result.push_back(order(skirmish::OrderKind::Build, computer_house_id, *construction, type));
-                    cash -= rules_.read_integer(type, "Cost");
+            // 004E9660 runs only while +553C is -1. Exit_Object (00440520
+            // case 6) and abandon (004B97C0) clear it, so no new building
+            // is chosen while one is in the factory: a Created structure.
+            const bool producing = std::any_of(world.entities.begin(), world.entities.end(), [&](const WorldEntity& e) {
+                return e.house_id == computer_house_id && e.kind == WorldKind::Structure && e.lifetime == Lifetime::Created;
+            });
+            std::string next;
+            if (const auto* construction = factory(rules_, buildings, "BuildingType"); construction && !producing) {
+                next = plan_build(context);
+                if (!next.empty() && registered(rules_, "BuildingTypes", next) &&
+                    buildable(rules_, *computer, actors, buildings, next, std::nullopt))
+                    result.push_back(order(skirmish::OrderKind::Build, computer_house_id, *construction, next));
+            }
+            // Base 004E9C90 (the war factory choice, while +5540 is -1):
+            // a computer house whose IQ (+194) is at least [IQ] Harvester
+            // (Rules +10C0) and whose +189 is clear makes the first
+            // [General] HarvesterUnit (Rules +9EC) its country owns, at its
+            // tech level, while it has fewer of it than
+            // HarvestersPerRefinery (Rules +1414) times the first two
+            // [AI] BuildRefinery types. There is no money test here.
+            // TODO-ORIGINAL: skirmish houses have the maximum IQ, and +189
+            // is only written by 004E18C0 (clear). The counter that
+            // 00491D10 reads is taken as owned objects, so a product in a
+            // factory counts.
+            const auto owned = [&](const std::string& type) {
+                return std::count_if(world.entities.begin(), world.entities.end(), [&](const WorldEntity& e) {
+                    return e.house_id == computer_house_id && equal_name(e.type, type) &&
+                        (e.lifetime == Lifetime::Created || (e.lifetime == Lifetime::Placed && e.resolved_hp.value_or(0) > 0));
+                });
+            };
+            std::string harvester;
+            for (const auto& type : rules_.read_list("General", "HarvesterUnit"))
+                if (registered(rules_, "VehicleTypes", type) && contains(rules_.read_list(type, "Owner"), computer->country)) {
+                    harvester = type;
+                    break;
                 }
+            const auto refineries = rules_.read_list("AI", "BuildRefinery");
+            std::int64_t refinery_count = 0;
+            for (std::size_t i = 0; i < std::min<std::size_t>(2, refineries.size()); ++i) refinery_count += owned(refineries[i]);
+            const auto* plant = factory(rules_, buildings, "UnitType");
+            if (plant && !harvester.empty() &&
+                rules_.read_integer(harvester, "TechLevel", -1) <= computer->tech_level.value_or(10) &&
+                owned(harvester) < rules_.read_integer("General", "HarvestersPerRefinery") * refinery_count &&
+                buildable(rules_, *computer, actors, buildings, harvester, std::nullopt)) {
+                result.push_back(order(skirmish::OrderKind::Build, computer_house_id, *plant, harvester));
+                context.busy.push_back(plant->id);
+            }
+            // QA trace, only with RA2_AI_PLAN_DEBUG set: one line every 1800 frames.
+            if (std::getenv("RA2_AI_PLAN_DEBUG") && game_frame % 1800 < build_interval_frames) {
+                std::cerr << "AIPLAN frame=" << game_frame << " house=" << computer_house_id << " cash=" << cash
+                          << " producing=" << producing << " next=" << (next.empty() ? "-" : next)
+                          << " naval=" << naval_ << " refineries=" << refinery_count
+                          << " harvesters=" << (harvester.empty() ? 0 : owned(harvester)) << " plan=";
+                for (const auto& node : plan_) std::cerr << (node.empty() ? "?" : node) << ',';
+                std::cerr << " have=";
+                for (const auto* b : buildings) std::cerr << b->type << ',';
+                std::cerr << '\n';
             }
         } else if (const auto* construction = factory(rules_, buildings, "BuildingType")) {
             const auto& side = context.side;

@@ -64,6 +64,24 @@ public:
     // node that 004F1190 has not resolved yet.
     const std::vector<std::string>& base_plan() const noexcept { return plan_; }
 
+    // The Super Weapons game option (00A3D2C3), default on. With the
+    // option off, 004EF890 and 004EF600 leave out each building whose
+    // SuperWeapon is DisableableFromShell. Set it before the first tick;
+    // the plan is made once.
+    void set_super_weapons(bool allowed) noexcept { super_weapons_ = allowed; }
+    bool super_weapons() const noexcept { return super_weapons_; }
+
+    // Base 0044B480: the construction yard factory calls Exit_Object
+    // (00440520) for a finished building. A result of 0 means that no
+    // place was found. For a Naval building the owner house then clears
+    // +138, and the factory abandons the product (004B97C0 refunds it).
+    // The caller reports each full failed placement search here; other
+    // houses are ignored.
+    void placement_failed(std::uint32_t house, const std::string& type);
+    // House +138, set by the House constructor 004E18C0. When it is clear,
+    // 004E9660 removes Naval nodes from the base plan.
+    bool naval_allowed() const noexcept { return naval_; }
+
     // Parsed AI.INI records. Public so tests can check the base data.
     struct TaskForce { std::string id; std::vector<std::pair<std::int32_t, std::string>> members; };
     struct ScriptStep { std::int32_t action = 0, argument = 0; };
@@ -114,6 +132,8 @@ private:
     // the yard dies, as the original does not clear it.
     std::map<std::uint32_t, ra2map::Cell> base_centres_;
     std::vector<std::string> plan_; // House +55F8 base nodes, by type name
+    bool super_weapons_ = true;     // 00A3D2C3
+    bool naval_ = true;             // House +138
     std::optional<std::int32_t> last_frame_;
     std::uint32_t computer_house_ = 0, player_house_ = 0, seed_ = 1;
     std::int64_t next_build_ = 0, next_attack_ = 0, next_team_ = 0;
