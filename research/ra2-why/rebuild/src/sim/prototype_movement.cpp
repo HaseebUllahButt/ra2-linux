@@ -224,15 +224,22 @@ RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map:
             const auto state=open_state(item.second,item.first,id,memo?memo->ctx:nullptr);
             if (state==Pass::Unresolved) resolved.entry_status=std::nullopt;
             else resolved.entry_status=state==Pass::Open||state==Pass::Busy?0:7;
-            if (item.second.terrain && item.second.terrain->height_level) {
-                EntryHeightCell height{};
-                if (item.second.terrain->height_level)
-                    height.level=static_cast<std::int8_t>(*item.second.terrain->height_level);
-                if (item.second.terrain->ramp_index)
-                    height.ramp=static_cast<std::uint8_t>(*item.second.terrain->ramp_index);
-                height.flag_100=item.second.terrain->bridge.value_or(false);
-                resolved.height=height;
-            } // No height level: height stays absent, so the kernel reports NeedsInput.
+            // The height needs every terrain value resolved and inside the
+            // original signed-byte and unsigned-byte domains. A missing or
+            // out-of-range value leaves the height absent, so the kernel
+            // reports NeedsInput. No value is invented.
+            if (item.second.terrain && item.second.terrain->height_level &&
+                item.second.terrain->ramp_index && item.second.terrain->bridge) {
+                const auto level=*item.second.terrain->height_level,ramp=*item.second.terrain->ramp_index;
+                if (level>=std::numeric_limits<std::int8_t>::min() && level<=std::numeric_limits<std::int8_t>::max() &&
+                    ramp>=0 && ramp<=std::numeric_limits<std::uint8_t>::max()) {
+                    EntryHeightCell height{};
+                    height.level=static_cast<std::int8_t>(level);
+                    height.ramp=static_cast<std::uint8_t>(ramp);
+                    height.flag_100=*item.second.terrain->bridge;
+                    resolved.height=height;
+                }
+            }
             if (item.second.cell_flag_40000) resolved.marked_40000=*item.second.cell_flag_40000;
             cells.push_back(resolved);
         }

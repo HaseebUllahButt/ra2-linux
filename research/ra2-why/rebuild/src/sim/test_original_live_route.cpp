@@ -104,17 +104,28 @@ int main(int argc,char** argv) {
         require(movement.route_trace().legacy_routes==0,"the legacy search answered the enclosed goal");
         std::cout<<"enclosed goal: kernel NoPath, Unit held outside the box\n";
     }
-    // A Cell without a height level rejects the order before any move.
+    // A Cell whose height inputs are missing or out of range rejects the
+    // order before any move. Each case removes or breaks one optional.
     {
-        auto world=open_field(20,20);
-        world.cells.at(key(18,10)).terrain->height_level=std::nullopt;
-        PrototypeMovement movement;movement.use_rules(rules);movement.use_original_path(distance);
-        place(world,1,"MTNK",2,10);
-        require(movement.issue(world,1,{18,10},movement.profile(unit(world,1)).speed).status==PrototypeMoveStatus::NeedsInput,
-            "a missing height did not reject the order");
-        require(!movement.moving(1),"a rejected order kept a route");
-        require(movement.route_trace().kernel_routes==0,"a missing height still produced a route");
-        std::cout<<"missing height: order rejected with no route\n";
+        const auto break_height=[](sw::Snapshot& world,const char* which) {
+            auto& terrain=*world.cells.at(key(18,10)).terrain;
+            if (std::string_view(which)=="height_level") terrain.height_level=std::nullopt;
+            else if (std::string_view(which)=="ramp_index") terrain.ramp_index=std::nullopt;
+            else if (std::string_view(which)=="bridge") terrain.bridge=std::nullopt;
+            else if (std::string_view(which)=="level_range") terrain.height_level=300;
+            else terrain.ramp_index=256;
+        };
+        for (const char* which:{"height_level","ramp_index","bridge","level_range","ramp_range"}) {
+            auto world=open_field(20,20);
+            break_height(world,which);
+            PrototypeMovement movement;movement.use_rules(rules);movement.use_original_path(distance);
+            place(world,1,"MTNK",2,10);
+            require(movement.issue(world,1,{18,10},movement.profile(unit(world,1)).speed).status==PrototypeMoveStatus::NeedsInput,
+                "a broken height input did not reject the order");
+            require(!movement.moving(1),"a rejected order kept a route");
+            require(movement.route_trace().kernel_routes==0,"a broken height input still produced a route");
+            std::cout<<"height input "<<which<<": order rejected with no route\n";
+        }
     }
     // start == goal is a complete empty route without a search.
     {
