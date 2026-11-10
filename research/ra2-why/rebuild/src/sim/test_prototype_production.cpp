@@ -727,12 +727,11 @@ int main(int argc,char** argv) try {
         // limit holds. An Alliance house builds its Black Eagle first.
         {
             auto allied=radar_world; auto allied_factories=radar_factories; auto allied_frame=local;
-            auto& allied_owner=allied.houses[0];
-            allied_owner.country="Alliance";
+            allied.houses[0].country="Alliance";
             const auto alliance=std::find(catalog.countries.begin(),catalog.countries.end(),"Alliance");
             require(alliance!=catalog.countries.end(),"Alliance country is missing");
-            allied_owner.country_index=std::int32_t(alliance-catalog.countries.begin());
-            *allied_owner.cash=100000;
+            allied.houses[0].country_index=std::int32_t(alliance-catalog.countries.begin());
+            *allied.houses[0].cash=100000;
             const auto eagle=build(allied,allied_factories,catalog,player,"BEAG",allied_frame,false);
             const auto& plane=actor(allied,eagle);
             require(plane.kind==w::Kind::Aircraft && plane.lifetime==w::Lifetime::Placed &&
@@ -745,18 +744,18 @@ int main(int argc,char** argv) try {
                     "BEAG took the airfield ground head");
             const auto* eagle_facts=catalog.find("BEAG");
             require(eagle_facts,"BEAG rules are missing");
-            require(count_at(allied_owner.aircraft_owned_5450,eagle_facts->heap_index)==1,
+            require(count_at(allied.houses[0].aircraft_owned_5450,eagle_facts->heap_index)==1,
                     "BEAG owned counter is wrong");
-            require(*allied_owner.cash<100000,"BEAG production did not spend cash");
+            require(*allied.houses[0].cash<100000,"BEAG production did not spend cash");
             require_prototype(allied);
         }
-        *owner.cash=100000;
-        const std::int32_t cash_before_planes=*owner.cash;
+        *radar_world.houses[0].cash=100000;
+        const std::int32_t cash_before_planes=*radar_world.houses[0].cash;
         const auto* orca_facts=catalog.find("ORCA");
         require(orca_facts,"ORCA rules are missing");
         std::vector<std::uint32_t> planes;
         for (int i=0;i<4;++i) {
-            const auto before=*owner.cash;
+            const auto before=*radar_world.houses[0].cash;
             const auto plane_id=build(radar_world,radar_factories,catalog,player,"ORCA",local,false);
             const auto& plane=actor(radar_world,plane_id);
             require(plane.kind==w::Kind::Aircraft && plane.lifetime==w::Lifetime::Placed &&
@@ -768,10 +767,10 @@ int main(int argc,char** argv) try {
                     "ORCA did not dock on the airfield pad Cell");
             require(radar_world.cells.at(std::uint32_t(origin.y)*512+origin.x).heads->ground_head==radar,
                     "ORCA took the airfield ground head");
-            require(*owner.cash<before,"ORCA production did not spend cash");
+            require(*radar_world.houses[0].cash<before,"ORCA production did not spend cash");
             planes.push_back(plane_id);
         }
-        require(count_at(owner.aircraft_owned_5450,orca_facts->heap_index)==4,
+        require(count_at(radar_world.houses[0].aircraft_owned_5450,orca_facts->heap_index)==4,
                 "ORCA owned counter is wrong");
         const auto fifth=proto::begin_production(radar_world,radar_factories,catalog,player,"ORCA",local);
         require(fifth.status==p::Status::Rejected,"fifth ORCA passed four dock slots");
@@ -787,7 +786,7 @@ int main(int argc,char** argv) try {
                 item.lifetime==w::Lifetime::Placed && item.active==true && item.in_limbo==false &&
                 item.resolved_hp.value_or(0)>0) ++live_planes;
         require(live_planes==4,"live plane count differs after the replacement");
-        require(*owner.cash<cash_before_planes,"aircraft production did not spend cash");
+        require(*radar_world.houses[0].cash<cash_before_planes,"aircraft production did not spend cash");
         require_prototype(radar_world);
         radar_world.houses[0].power_output=0;
         require(!sim::tech::radar_online(assets.rules(),radar_world,player),"radar stayed online without power");
