@@ -366,6 +366,7 @@ Catalog Catalog::from(const IniFile& rules,const IniFile& art,const IniFile& map
             if (const auto v=text(rules,map,id,"Prerequisite")) t.can.prerequisite=prerequisite_list(*v);
             if (const auto v=text(rules,map,id,"PrerequisiteOverride")) t.can.prerequisite_override=prerequisite_list(*v);
             bool naval=false; read_bool(rules,map,id,"Naval",naval); t.placement.naval=naval;
+            if (const auto v=text(rules,map,id,"Dock")) t.dock=IniFile::split_list(*v);
             if (rtti==Rtti::UnitType) if (const auto v=text(rules,map,id,"DeploysInto")) t.deploys_into=*v;
             if (rtti==Rtti::BuildingType) {
                 if (const auto v=text(rules,map,id,"SuperWeapon")) if (!v->empty() && !same_text(*v,"<none>")) {
@@ -393,6 +394,8 @@ Catalog Catalog::from(const IniFile& rules,const IniFile& art,const IniFile& map
                 if (const auto v=text(rules,map,id,"FreeUnit")) t.free_unit=*v;
                 bool waterbound=false; read_bool(rules,map,id,"WaterBound",waterbound);
                 t.placement.speed_type=waterbound?5:-1;                        // 00459ADE.
+                read_int(rules,map,id,"NumberOfDocks",t.number_of_docks);
+                read_bool(rules,map,id,"UnitReload",t.unit_reload);
                 read_int(rules,map,id,"AIBasePlanningSide",t.planning_side);
                 if (const auto v=text(rules,map,id,"Factory")) {                // 0046A4B0 table 007CD978.
                     static const std::pair<const char*,Rtti> kinds[]={{"BuildingType",Rtti::BuildingType},

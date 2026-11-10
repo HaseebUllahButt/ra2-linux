@@ -156,6 +156,9 @@ struct TypeFacts {
     std::int32_t cost=0;                 // +550.
     std::int32_t strength=0;             // ObjectType +A0.
     std::string deploys_into;            // UnitType +3C8 name.
+    std::vector<std::string> dock;       // Dock: names of the docking types.
+    std::int32_t number_of_docks=0;      // NumberOfDocks.
+    bool unit_reload=false;              // UnitReload.
     // BuildingType.
     PlacementBuilding placement;
     std::int32_t adjacent=3;             // +C40.
