@@ -4,11 +4,16 @@
 // launch effects live in sim/prototype_superweapon.h; this header only names,
 // gates and routes the player facing parts.
 //
-// Original references (analysis/ghidra-dump/functions.csv):
-// - 006cb560 SuperClass::Grant, 006cb7b0 Lose, 006cb4d0 SetOnHold,
-//   006cc080 recharge tick;
-// - 006cbca0 HasChargeProgressed, which triggers the ready announcement;
-// - 006cb920 ClickFire and 00752700 VoxClass::PlayFromName for the speech.
+// Original references, confirmed in the base export
+// (export/index.csv and export/functions.jsonl on the base dump):
+// - 006be010 team script Iron Curtain handler at the team centre;
+// - 006be1c0 team script ChronoSphere handler: source team centre,
+//   destination enemy building through 006bcf70;
+// - 006be440 destination Greatest_Threat handler.
+// The SuperClass charge functions (Grant, Lose, SetOnHold, the recharge
+// tick, HasChargeProgressed, ClickFire) and VoxClass::PlayFromName have no
+// entries in the base export index; the sim header cites them from the YR
+// decomp and marks them unverified against this dump.
 #include "../sim/prototype_superweapon.h"
 #include <cstdint>
 #include <functional>
@@ -32,6 +37,38 @@ struct SuperweaponEntry {
 // Click flow after a sidebar pick. ChronoSphere needs a source and a
 // destination click (PreDependent ChronoWarp pair); every other weapon
 // needs one target click.
+
+// One ordered fire call. ChronoSphere fires the sphere section at the
+// source first, then the PreDependent ChronoWarp section at the
+// destination (base 006be1c0 handler order: source team centre first).
+struct SuperweaponFireStep {
+    std::string section;   // [SuperWeaponTypes] section id to fire.
+    ra2map::Cell cell;     // Fire target cell.
+};
+
+// The ordered fire plan for one completed click flow. A ChronoSphere pick
+// without a source cell, or a rules set without a ChronoWarp section,
+// returns an empty plan; the caller reports the gap.
+inline std::vector<SuperweaponFireStep> superweapon_fire_plan(
+    const std::vector<sim::SuperweaponType>& types, const std::string& section,
+    const std::optional<ra2map::Cell>& source, ra2map::Cell target) {
+    std::vector<SuperweaponFireStep> steps;
+    const sim::SuperweaponType* picked = nullptr;
+    const sim::SuperweaponType* warp = nullptr;
+    for (const auto& type : types) {
+        if (type.id == section)picked = &type;
+        if (type.kind == sim::SuperKind::ChronoWarp)warp = &type;
+    }
+    if (!picked)return steps;
+    if (picked->kind == sim::SuperKind::ChronoSphere) {
+        if (!warp || !source)return steps;
+        steps.push_back({section, *source});
+        steps.push_back({warp->id, target});
+    } else {
+        steps.push_back({section, target});
+    }
+    return steps;
+}
 enum class SuperweaponFlow { None, ChooseTarget, ChronoSource, ChronoDestination };
 
 // The player's entries in [SuperWeaponTypes] order. Blocked sections (the
@@ -61,8 +98,8 @@ inline std::vector<SuperweaponEntry> superweapon_entries(
 }
 
 // Sections the Super Weapons option (00A3D2C3) removes: every granting
-// building has DisableableFromShell=yes, as House::Can_Build 004E3832
-// refuses those buildings. disableable(building) answers the flag.
+// building has DisableableFromShell=yes, as House::Can_Build refuses those
+// buildings. disableable(building) answers the flag.
 inline std::set<std::string> superweapons_blocked_by_option(
     const rules::IniFile& rules,
     const std::vector<sim::SuperweaponType>& types,
@@ -71,8 +108,10 @@ inline std::set<std::string> superweapons_blocked_by_option(
     const auto grants = sim::superweapon_grants(rules);
     for (const auto& type : types) {
         if (type.kind == sim::SuperKind::Invalid)continue;
+        const auto listed = grants.find(type.id);
+        if (listed == grants.end())continue;
         bool switchable = false;
-        for (const auto& building : grants.at(type.id))
+        for (const auto& building : listed->second)
             if (!disableable(building)) { switchable = false; break; }
             else switchable = true;
         if (switchable)blocked.insert(type.id);
@@ -100,10 +139,12 @@ inline std::string superweapon_launch_speech(sim::SuperKind kind) {
     }
 }
 
-// Battlefield overlay panel, top left under the status line. One row per
-// granted weapon. The draw code lives in battle.cpp; this is the layout.
+// Special weapon buttons on the left screen edge, as the original places
+// them (RA2 sidebar has no free rows: tabs, the 2x10 cameo grid and the
+// power bar fill it). One row per granted weapon. The draw code lives in
+// battle.cpp; this is the layout.
 struct SuperweaponPanel {
-    static constexpr int x = 4, y = 24, width = 176, row_height = 15;
+    static constexpr int x = 0, y = 24, width = 150, row_height = 15;
     static int height(std::size_t rows) {
         return rows ? int(rows) * row_height + 4 : 0;
     }

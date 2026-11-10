@@ -91,8 +91,37 @@ int main() try {
         [&](const std::string&) { return std::string(); });
     require(later.front().frames_left == 4 * 900 - 2, "the clock counts down per frame");
 
-    // Panel layout: rows are hit only inside the panel.
+    // Fire plan: the ChronoSphere fires at the source first, then the
+    // PreDependent ChronoWarp at the destination (base 006be1c0 order).
+    const auto chrono_types = [&]{
+        IniFile chrono_rules;
+        chrono_rules.parse(
+            "[SuperWeaponTypes]\n1=ChronoSphereSpecial\n2=ChronoWarpSpecial\n"
+            "[ChronoSphereSpecial]\nType=ChronoSphere\n"
+            "[ChronoWarpSpecial]\nType=ChronoWarp\n");
+        return ra2::sim::read_superweapon_types(chrono_rules);
+    }();
+    const ra2map::Cell source{5, 6}, destination{9, 9};
+    const auto plan = ra2::app::superweapon_fire_plan(chrono_types,
+        "ChronoSphereSpecial", source, destination);
+    require(plan.size() == 2, "chrono plan has two fire calls");
+    require(plan[0].section == "ChronoSphereSpecial" &&
+        plan[0].cell.x == source.x && plan[0].cell.y == source.y,
+        "the sphere fires at the source first");
+    require(plan[1].section == "ChronoWarpSpecial" &&
+        plan[1].cell.x == destination.x && plan[1].cell.y == destination.y,
+        "the warp fires at the destination second");
+    require(ra2::app::superweapon_fire_plan(chrono_types, "ChronoSphereSpecial",
+        std::nullopt, destination).empty(), "a chrono pick without a source has no plan");
+    const auto single = ra2::app::superweapon_fire_plan(chrono_types,
+        "ChronoWarpSpecial", std::nullopt, destination);
+    require(single.size() == 1 && single[0].cell.x == destination.x,
+        "a plain weapon fires once at the target");
+
+    // Panel layout: rows are hit only inside the panel, on the left edge as
+    // the original places the special weapon buttons.
     using ra2::app::SuperweaponPanel;
+    require(SuperweaponPanel::x == 0, "the panel sits on the left screen edge");
     require(!SuperweaponPanel::row_at(SuperweaponPanel::x - 1, SuperweaponPanel::y, 1),
         "left of the panel misses");
     require(SuperweaponPanel::row_at(SuperweaponPanel::x + 5, SuperweaponPanel::y + 5, 1) == 0u,

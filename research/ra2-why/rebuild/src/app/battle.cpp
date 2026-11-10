@@ -506,26 +506,22 @@ public:
         const auto flow=superweapon_flow_;
         superweapon_flow_=SuperweaponFlow::None;
         if(flow==SuperweaponFlow::ChooseTarget) {
-            fire_superweapon(superweapon_selected_,*cell);
+            for(const auto& step:superweapon_fire_plan(superweapon_types_,superweapon_selected_,{},*cell))
+                fire_superweapon(step.section,step.cell);
         } else if(flow==SuperweaponFlow::ChronoSource) {
             chrono_source_=*cell;
             superweapon_flow_=SuperweaponFlow::ChronoDestination;
             status("Select the destination. Right click cancels.");
         } else if(flow==SuperweaponFlow::ChronoDestination) {
-            // Base 006CB920 ClickFire: the ChronoSphere arm is the
-            // destination, the ChronoWarp click is the source.
-            const std::string warp=[&]{
-                for(const auto& type:superweapon_types_)
-                    if(type.kind==sim::SuperKind::ChronoWarp)return type.id;
-                return std::string();
-            }();
-            if(warp.empty()) {
+            // Base 006be1c0 team handler order: the sphere fires at the
+            // source first, then the PreDependent warp at the destination.
+            const auto plan=superweapon_fire_plan(superweapon_types_,superweapon_selected_,
+                chrono_source_,*cell);
+            if(plan.empty()) {
                 gaps_.insert("No ChronoWarp section in rules: chrono teleport needs a PreDependent pair");
                 status("Cannot teleport.");
-            } else {
-                fire_superweapon(superweapon_selected_,*cell);
-                fire_superweapon(warp,*chrono_source_);
             }
+            for(const auto& step:plan)fire_superweapon(step.section,step.cell);
             chrono_source_.reset();
         }
         return true;
