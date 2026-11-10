@@ -760,13 +760,18 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
             break;
         }
         case SuperKind::IronCurtain: {
-            // The curtain covers the clicked object only, not a Range area.
-            // Duration comes from [CombatDamage] IronCurtainDuration, read by
-            // the base 1.006 rules parse at FUN_00646C60 (offset +0xCA4).
+            // Base 1.006 FUN_006B26D0 loops exactly nine DAT_00A6F248 offsets (a
+            // 3x3 block around the click) and calls every object's virtual +148
+            // with the duration from rules +0xCA4. Duration comes from
+            // [CombatDamage] IronCurtainDuration, read at FUN_00646C60. Ownership
+            // and infantry eligibility live in the object handler; this
+            // prototype keeps them here.
             const auto duration = rules_.read_integer("CombatDamage", "IronCurtainDuration", 750);
             for (auto& entity : world.entities) {
                 if (!alive(&entity) || entity.house_id != house || !entity.cell) continue;
-                if (entity.cell->x != target.x || entity.cell->y != target.y) continue;
+                const auto distance = std::max(std::abs(int(entity.cell->x) - int(target.x)),
+                    std::abs(int(entity.cell->y) - int(target.y)));
+                if (distance > 1) continue;
                 if (entity.kind == w::Kind::Infantry) {
                     // TODO-ORIGINAL: the original Iron Curtain kills infantry.
                     if (unlink_entity(world, entity)) {

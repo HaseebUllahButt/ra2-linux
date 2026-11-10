@@ -357,12 +357,13 @@ void check_iron_curtain(const IniFile& rules, const std::string& exe) {
     supers.update_grants(world);
     for (int frame = 0; frame < 4500; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
     const auto report = supers.fire(world, 102, "IronCurtainSpecial", {50, 50}, 4500);
-    require(report.fired && report.shielded == 1 && report.destroyed == 1,
-        "Iron Curtain did not shield the tank and kill the infantry");
-    // The curtain covers the clicked object only: a neighbour one cell away
-    // stays unshielded (old code shielded everything inside Range).
-    require(!supers.invulnerable(6, 4500),
-        "Iron Curtain shielded a tank on the neighbouring Cell");
+    require(report.fired && report.shielded == 2 && report.destroyed == 1,
+        "Iron Curtain did not shield the 3x3 block and kill the infantry");
+    // The curtain covers the 3x3 block around the click (base 1.006
+    // FUN_006B26D0 loops nine DAT_00A6F248 offsets); the enemy two cells away
+    // stays unshielded.
+    require(supers.invulnerable(6, 4500),
+        "Iron Curtain missed a tank on the neighbouring Cell");
     require(supers.invulnerable(2, 4500) && supers.invulnerable(2, 5249) &&
         !supers.invulnerable(2, 5250), "Iron Curtain duration did not match 750 frames");
     require(!supers.invulnerable(4, 4500), "Iron Curtain shielded an enemy tank");
