@@ -157,9 +157,18 @@ public:
     // Does not change the world, RNG, attack orders, or projectiles.
     bool can_attack(const session::world::Snapshot&,std::uint32_t source_id,
                     std::uint32_t target_id) const;
-    // Source and target must be alive, placed Units, Infantry, or Structures.
-    // An accepted order remains active until stopped or either object dies.
+    // Source and target must be alive, placed Units, Infantry, Aircraft, or
+    // Structures. An accepted order remains active until stopped or either
+    // object dies.
     bool attack(session::world::Snapshot&,std::uint32_t source_id,std::uint32_t target_id);
+    // The flight mission controls permission to fire. An empty gate keeps
+    // the previous behavior. A source the gate rejects skips new shots in
+    // the tick idle guard scan and the tick orders loop; it keeps its order.
+    // Weapon timing and damage stay shared with the ground prototype. The
+    // gate never touches in-flight projectiles or their targets.
+    void set_fire_gate(std::function<bool(const session::world::Entity&)> gate) {
+        fire_gate_=std::move(gate);
+    }
     void stop(session::world::Snapshot&,std::uint32_t source_id);
     PrototypeCombatTick tick(session::world::Snapshot&,std::uint64_t frame);
     // Base 004E7DF0: kill every remaining owned actor, with no attacker.
@@ -189,6 +198,8 @@ private:
     struct TurretState { BaseFacing facing; std::uint16_t written=0; };
     std::map<std::uint32_t,TurretState> turrets_;
     std::set<std::uint32_t> prone_; // Infantry +5C3 after a panic hit.
+    // Flight mission fire permission. Empty means every placed source fires.
+    std::function<bool(const session::world::Entity&)> fire_gate_;
     std::optional<TurretAim> turret_aim(session::world::Entity& source,
         const session::world::Entity& target,bool omni_fire,std::int32_t frame);
 };

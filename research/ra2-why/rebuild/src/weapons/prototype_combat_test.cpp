@@ -374,6 +374,64 @@ void idle_defense_test(const rules::IniFile& rules,const rules::IniFile& art,con
     for (unsigned frame=1;frame<40 && !defended;++frame) if (guard.tick(tank,frame).fired) defended=frame;
     check(defended==12,"idle tank did not defend after its turret turned");
 }
+// The flight mission fire gate (Part 3) blocks new shots only. Weapon
+// timing, damage and in-flight projectiles stay shared with the prototype.
+void fire_gate_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+    rules::IniFile map;
+    auto w=make_world("ORCA","HTNK",world::Kind::Aircraft,world::Kind::Unit,150,400);
+    sim::PrototypeCombatRuntime combat(rules,map,art,exe);
+    combat.set_fire_gate([](const world::Entity& e) {return e.kind==world::Kind::Aircraft;});
+    check(combat.can_attack(w,1,2),"Aircraft source was rejected by can_attack");
+    check(combat.attack(w,1,2),"Aircraft attack order rejected with a true gate");
+    unsigned shot_frame=0;
+    for (unsigned frame=0;frame<60 && !shot_frame;++frame)
+        if (combat.tick(w,frame).fired) shot_frame=frame;
+    check(shot_frame,"true gate did not permit firing");
+    const int hp_after_shot=*w.entities[1].resolved_hp;
+    check(hp_after_shot<400,"Aircraft shot did not damage the target");
+    // A false gate blocks the next shot: no firing, no damage, no approach
+    // request. The order is retained.
+    const auto rng=w.random;
+    combat.set_fire_gate([](const world::Entity&){return false;});
+    const auto blocked=combat.tick(w,shot_frame+1);
+    check(blocked.fired==0 && blocked.out_of_range.empty() &&
+        blocked.unresolved.empty() && *w.entities[1].resolved_hp==hp_after_shot &&
+        w.entities[0].target_id==2u,
+        "false gate did not block a new shot");
+    same_rng(rng,w.random);
+    // A later true gate permits the shot again.
+    combat.set_fire_gate([](const world::Entity&){return true;});
+    bool fired_again=false;
+    for (unsigned frame=shot_frame+2;frame<shot_frame+120 && !fired_again;++frame)
+        fired_again=combat.tick(w,frame).fired>0;
+    check(fired_again,"restored true gate did not allow firing");
+    // A placed Aircraft source also acquires targets in the idle guard scan
+    // when the gate allows it.
+    auto idle=make_world("ORCA","HTNK",world::Kind::Aircraft,world::Kind::Unit,150,400);
+    idle.entities[0].target_id=0;
+    sim::PrototypeCombatRuntime guard(rules,map,art,exe);
+    guard.set_fire_gate([](const world::Entity&){return false;});
+    check(guard.tick(idle,0).fired==0 && idle.entities[0].target_id==0,
+        "false gate idle scan fired or acquired a target");
+    // AA weapons hit airborne Aircraft targets; AG-only weapons are rejected.
+    // The rules table decides: the Flak Cannon projectile (FlakProj) is
+    // AA-only and reaches an airborne target. The Intruder missile
+    // (AirToGroundMissile) is AG-only and must not.
+    check(rules.read_string("FlakProj","AA")=="yes" &&
+        rules.read_string("FlakProj","AG")=="no","FlakProj is no longer AA-only");
+    check(rules.read_string("AirToGroundMissile","AA")=="no" &&
+        rules.read_string("AirToGroundMissile","AG")=="yes","AirToGroundMissile is no longer AG-only");
+    auto air=make_world("NAFLAK","ZEP",world::Kind::Structure,world::Kind::Aircraft,400,2000);
+    air.entities[1].position->z=750;
+    sim::PrototypeCombatRuntime aa(rules,map,art,exe);
+    check(aa.can_attack(air,1,2),"AA weapon rejected an airborne Aircraft target");
+    check(aa.attack(air,1,2),"AA weapon air order rejected");
+    bool aa_fired=false;
+    for (unsigned frame=0;frame<60 && !aa_fired;++frame)
+        aa_fired=aa.tick(air,frame).fired>0;
+    check(aa_fired,"AA weapon did not fire at an airborne Aircraft target");
+    std::cout<<"Fire gate blocks new Aircraft shots only, AA vs AG targets passed\n";
+}
 // A small base: house 101 owns the yard and Rhinos, house 102 owns the
 // soldiers. Each object has its own Cell link.
 struct Piece { std::uint32_t id,house; const char* type; world::Kind kind; int x,y; };
@@ -625,6 +683,7 @@ int main(int argc,char** argv) {
                      <<" ROF="<<rules.read_string(weapon,"ROF")<<" damage="<<rules.read_string(weapon,"Damage")<<'\n';
         }
         std::cout<<"TeamDelays="<<rules.read_string("General","TeamDelays")<<'\n';
+        fire_gate_test(rules,art,std::string(argv[1])+"/game.exe");
         air_ground_test(rules,art,std::string(argv[1])+"/game.exe");
         fallen_house_test(rules,art,std::string(argv[1])+"/game.exe",files);
         tank_test(rules,art,std::string(argv[1])+"/game.exe");

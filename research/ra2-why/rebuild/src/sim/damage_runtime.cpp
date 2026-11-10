@@ -289,7 +289,8 @@ const Entity* prototype_find(const Snapshot& world,std::uint32_t id) {
 }
 bool prototype_alive(const Entity* e) {
     // TODO-ORIGINAL: Resolve missing active and limbo values from the actor.
-    return e && (e->kind==Kind::Unit || e->kind==Kind::Infantry || e->kind==Kind::Structure) &&
+    return e && (e->kind==Kind::Unit || e->kind==Kind::Infantry || e->kind==Kind::Aircraft ||
+        e->kind==Kind::Structure) &&
         e->lifetime==Lifetime::Placed && e->position && e->resolved_hp && *e->resolved_hp>0 &&
         (!e->active || *e->active) && (!e->in_limbo || !*e->in_limbo);
 }
@@ -861,6 +862,9 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
     for (auto& source : world.entities) {
         if (!prototype_alive(&source) || orders_.count(source.id) ||
             source.target_id.value_or(0) || !guard_mission(source)) continue;
+        // The flight mission may deny permission to fire. A rejected source
+        // keeps its order and is skipped here without an approach request.
+        if (fire_gate_ && !fire_gate_(source)) continue;
         // The prototype keeps the idle mission number during Move orders, so
         // a driving actor without a guard target is not idle and its old
         // guard place no longer applies.
@@ -896,6 +900,10 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             if (source) source->target_id=0;
             it=orders_.erase(it);continue;
         }
+        // Base flight mission: a source without permission to fire keeps its
+        // order, takes no shot and asks no approach. Weapon timing, damage
+        // and in-flight projectiles stay shared with the ground prototype.
+        if (fire_gate_ && !fire_gate_(*source)) {++it;continue;}
         try {
             const auto weapon=prototype_target_weapon(base_,map_,art_,world,*source,*target);
             std::optional<double> verse;
