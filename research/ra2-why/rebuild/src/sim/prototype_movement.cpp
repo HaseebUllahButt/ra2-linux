@@ -1,4 +1,5 @@
 #include "prototype_movement.h"
+#include "path.h"
 #include "../loop/profile.h"
 #include "../weapons/occupant_order.h"
 #include "drive.h"
@@ -193,7 +194,41 @@ struct SearchMemo {
     }
     static constexpr std::size_t lanes=8;
 };
-RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map::Cell goal,SearchMemo* memo=nullptr) {
+RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map::Cell goal,SearchMemo* memo=nullptr,const OriginalDistance* distance=nullptr) {
+    if (distance) {
+        // Resolved flat Cells of the search box feed the recovered original
+        // ground path kernel. Open or Busy Cells enter the pool with entry
+        // status 0, Closed or Held Cells with status 7. A bridge Cell keeps
+        // its original +100 flag, so the kernel reports Unsupported and the
+        // conservative legacy search below takes over. A kernel NeedsInput
+        // is never converted to success.
+        const int margin=32;
+        const int left=std::max(0,std::min(start.x,goal.x)-margin),right=std::min(511,std::max(start.x,goal.x)+margin);
+        const int top=std::max(0,std::min(start.y,goal.y)-margin),bottom=std::min(511,std::max(start.y,goal.y)+margin);
+        std::vector<ResolvedGroundPathCell> cells;
+        cells.reserve(static_cast<std::size_t>(right-left+1)*(bottom-top+1));
+        for (int y=top;y<=bottom;++y) for (int x=left;x<=right;++x) {
+            const ra2map::Cell at{static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)};
+            ResolvedGroundPathCell resolved{};
+            resolved.cell=at;
+            const auto state=pass_cell(world,at,id,memo?memo->ctx:nullptr);
+            resolved.entry_status=state==Pass::Open||state==Pass::Busy?0:7;
+            resolved.height=EntryHeightCell{};
+            if (world.cells.count(key(at)) && world.cells.at(key(at)).cell_flag_100) resolved.height->flag_100=true;
+            cells.push_back(resolved);
+        }
+        const auto found=find_original_ground_path(start,goal,cells,*distance,-1);
+        if (found.status==PathStatus::Found || found.status==PathStatus::Partial) {
+            RouteResult out{PrototypeMoveStatus::Complete,{},"original ground path kernel"};
+            auto at=start;
+            for (const auto direction:found.directions) {
+                at={static_cast<std::uint16_t>(at.x+directions[direction][0]),static_cast<std::uint16_t>(at.y+directions[direction][1])};
+                out.path.push_back(at);
+            }
+            return out;
+        }
+        if (found.status==PathStatus::NeedsInput) return {PrototypeMoveStatus::NeedsInput,{},found.evidence};
+    }
     const auto open_cell=[&](const World& w,ra2map::Cell c,std::uint32_t self) {
         return memo?memo->cell(w,c,self):pass_cell(w,c,self,nullptr);
     };
@@ -265,11 +300,11 @@ RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map:
 // every Unit is a wall. Each ring around the goal is read nearest to the
 // start first, so the Unit stops on the near side and does not drive
 // around the goal. If the start is the best open Cell, the Unit stays.
-RouteResult route_or_nearby(const World& world,std::uint32_t id,ra2map::Cell start,ra2map::Cell goal,const Context* ctx) {
+RouteResult route_or_nearby(const World& world,std::uint32_t id,ra2map::Cell start,ra2map::Cell goal,const Context* ctx,const OriginalDistance* original_distance=nullptr) {
     static thread_local SearchMemo shared;
     struct Clear { SearchMemo& m; ~Clear() { m.clear(); } } clear{shared};
     auto* memo=&shared;memo->ctx=ctx;
-    auto result=route(world,id,start,goal,memo);
+    auto result=route(world,id,start,goal,memo,original_distance);
     if (result.status!=PrototypeMoveStatus::Blocked) return result;
     std::vector<std::pair<std::int64_t,ra2map::Cell>> ring;
     for (int radius=1;radius<=8;++radius) {
@@ -283,7 +318,7 @@ RouteResult route_or_nearby(const World& world,std::uint32_t id,ra2map::Cell sta
         }
         // Stable: equal distances keep the row order, so replays match.
         std::stable_sort(ring.begin(),ring.end(),[](const auto& a,const auto& b){return a.first<b.first;});
-        for (const auto& [distance,candidate]:ring) {
+        for (const auto& [ring_distance,candidate]:ring) {
             if (same(candidate,start)) return {PrototypeMoveStatus::Complete,{},{}};
             const auto open=memo->cell(world,candidate,id);
             if (open==Pass::Unresolved) return {PrototypeMoveStatus::NeedsInput,{},"nearby prototype Cell state is unresolved"};
@@ -291,7 +326,7 @@ RouteResult route_or_nearby(const World& world,std::uint32_t id,ra2map::Cell sta
             // A Cell outside the known reachable set gives the same "no route"
             // result that a full search would return.
             if (memo->have_reachable && !memo->reachable[key(candidate)]) continue;
-            auto alternative=route(world,id,start,candidate,memo);
+            auto alternative=route(world,id,start,candidate,memo,original_distance);
             if (alternative.status==PrototypeMoveStatus::Complete && !alternative.path.empty()) return alternative;
             if (alternative.status==PrototypeMoveStatus::NeedsInput || alternative.status==PrototypeMoveStatus::Invalid) return alternative;
         }
@@ -483,7 +518,8 @@ PrototypeMoveResult PrototypeMovement::issue(const World& world,std::uint32_t id
     for (const auto& [owner,m]:motion_) if (m.stepping && owner!=id) { claims[key(m.from)]=owner;claims[key(m.to)]=owner; }
     const auto soldiers=soldiers_of(world,*this);
     const Context ctx{&movers,&claims,&soldiers,self.crusher,actor->kind==session::world::Kind::Infantry,actor->house_id,rules_?&self.ground:nullptr};
-    const auto path=route_or_nearby(world,id,*actor->cell,goal,&ctx);
+    const auto path=route_or_nearby(world,id,*actor->cell,goal,&ctx,
+        original_path_distance_?&*original_path_distance_:nullptr);
     if (path.status!=PrototypeMoveStatus::Complete) return fail(path.status,path.detail);
     moves_[id]={goal,speed,path.path};
     return {PrototypeMoveStatus::Complete,{},{},{},{},{}};

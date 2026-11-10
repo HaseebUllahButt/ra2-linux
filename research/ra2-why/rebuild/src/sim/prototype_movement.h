@@ -1,5 +1,6 @@
 #pragma once
 #include "../rules/ini_file.h"
+#include "distance.h"
 #include "../session/world/world.h"
 #include <array>
 #include <cstdint>
@@ -49,6 +50,10 @@ public:
     // object. Without rules, vehicles use the drive model with Track, ROT 0,
     // no acceleration, no crushing and a ground multiplier of one.
     void use_rules(const rules::IniFile&);
+    // Value-owned original distance table for the recovered ground path
+    // kernel. A copy is stored, so the caller's table need not outlive this
+    // object. Without it, routes use the conservative prototype search.
+    void use_original_path(const OriginalDistance& distance) { original_path_distance_=distance; }
     PrototypeMoveProfile profile(const session::world::Entity&) const;
     const PrototypeMoveGlobals& globals() const { return globals_; }
     // Speed is the original rule speed (Type +5A0, original_rule_speed()).
@@ -87,5 +92,6 @@ private:
     const rules::IniFile* rules_=nullptr;
     PrototypeMoveGlobals globals_;
     mutable std::map<std::string,PrototypeMoveProfile> profiles_;
+    std::optional<OriginalDistance> original_path_distance_;
 };
 }
