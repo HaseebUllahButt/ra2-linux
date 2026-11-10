@@ -1,13 +1,14 @@
 // Deterministic movement scenes. Fixed snapshots, no randomness.
 // Scenes: a tank across open ground, 8 tanks through a 2-cell gap with
 // distinct goals, and an infantry squad with distinct subcells.
-// Reference numbers: reference/REFERENCE.md "Unit speed".
-// Measured steady speeds (Game Speed 3, clear ground):
-//   Grizzly 0.105 cells/frame, Rhino 0.093, GI 0.039, Conscript 0.036.
-// The printed totals include start, stop and turning; the steady rate does not.
+// Reference numbers: reference/REFERENCE.md "Unit speed". Measured steady
+// speeds per game frame at Game Speed 3, clear ground: Grizzly 0.105,
+// Rhino 0.093, GI 0.039, Conscript about 0.036 cells/frame. The printed
+// totals include start, stop and turning; the steady rate does not.
 #include "prototype_movement.h"
 #include "drive.h"
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <map>
@@ -132,13 +133,15 @@ void check_subcells(const sw::Snapshot& world,const PrototypeMovement& movement)
 }
 
 // Steady displacement after warmup: the largest cells-per-frame rate over
-// any window of the run, so start, stop and turning stay out of it.
-double steady_cells_per_frame(const std::vector<std::pair<int,int>>& positions,unsigned window) {
+// any window of the run, so start, stop and turning stay out of it. The
+// distance is straight-line, so diagonal paths measure the same rate.
+double steady_cells_per_frame(const std::vector<std::pair<int,int>>& positions,unsigned window,bool axis_only=false) {
     double best=0.0;
     for (std::size_t i=window;i<positions.size();++i) {
-        const auto dx=std::abs(positions[i].first-positions[i-window].first);
-        const auto dy=std::abs(positions[i].second-positions[i-window].second);
-        best=std::max(best,(double(dx)+dy)/256.0/window);
+        const auto dx=positions[i].first-positions[i-window].first;
+        const auto dy=positions[i].second-positions[i-window].second;
+        if (axis_only && dx!=0 && dy!=0) continue; // Skip diagonal segments.
+        best=std::max(best,std::sqrt(double(dx)*dx+double(dy)*dy)/256.0/window);
     }
     return best;
 }
@@ -148,70 +151,88 @@ int main() try {
     const auto rules=test_rules();
 
     // Scene 1: one tank (MTNK) across 20 Cells of open ground.
-    // Measured: Grizzly steady 0.105 cells/frame; 11 Cells took 5.06 s
-    // (about 105 frames) including start, stop and one turn.
+    // Measured (REFERENCE.md): Grizzly steady 0.105 cells/frame; 11 Cells
+    // took 5.06 s total including start, stop and one turn.
     {
         auto world=field(32,12);PrototypeMovement movement;movement.use_rules(rules);
         put(world,901,"MTNK",sw::Kind::Unit,5,6,300);
-        require(movement.issue(world,901,{25,6},original_rule_speed(7)).status==PrototypeMoveStatus::Complete,"tank order refused");
+        const auto speed=movement.profile(unit(world,901)).speed;
+        require(movement.issue(world,901,{25,6},speed).status==PrototypeMoveStatus::Complete,"tank order refused");
         unsigned frames=0;std::vector<std::pair<int,int>> track;
         for (std::uint32_t frame=1;frame<=400;++frame) {
             require(movement.tick(world,frame).status==PrototypeMoveStatus::Complete,"scene 1 frame failed");
-            check_no_overlap(world);
+            check_no_overlap(world);check_subcells(world,movement);
             track.push_back({unit(world,901).position->x,unit(world,901).position->y});
             if (!movement.moving(901)) { frames=frame;break; }
         }
         const auto steady=steady_cells_per_frame(track,50);
-        std::cout<<"scene 1 open ground frames="<<frames<<" steady="<<steady<<" cells/frame\n";
-        // Measured: Grizzly steady 0.105 cells/frame at 20.75 screen fps
-        // (2.17 cells/s); 11 Cells took 5.06 s total including start, stop
-        // and turning. The steady measure skips warmup, so it matches the
-        // measured rate; the frame total does not.
+        const auto error=(steady-0.105)/0.105;
+        std::cout<<"scene 1 open ground frames="<<frames
+                 <<" steady="<<steady<<" cells/frame measured=0.105 error="<<error<<"\n";
         require(frames && frames<=400,"tank did not cross open ground in 400 frames");
-        require(steady>0.09 && steady<0.12,"steady tank speed far from the measured 0.105 cells/frame");
+        require(std::abs(error)<0.05,"steady tank speed off the measured 0.105 cells/frame");
         require(same_cell(*unit(world,901).cell,{25,6}),"tank missed its goal");
     }
 
-    // Scene 2: 8 tanks through a 2-cell gap, each with a distinct goal.
+    // Scene 2: 8 tanks (MTNK) through a 2-cell gap, each with a distinct
+    // goal. Measured steady rate per tank: 0.105 cells/frame (Grizzly).
     {
         auto world=field(40,20);PrototypeMovement movement;movement.use_rules(rules);
         for (int y=1;y<=20;++y) if (y!=9 && y!=10) world.cells.at(key(11,y)).ground_occupancy_124=1;
         const ra2map::Cell goals[8]={{20,2},{20,4},{20,6},{20,8},{20,12},{20,14},{20,16},{20,18}};
         for (unsigned i=0;i<8;++i) put(world,910+i,"MTNK",sw::Kind::Unit,static_cast<int>(2+i/4),static_cast<int>(2+i%4*5)+2,300);
+        double worst_error=0.0;unsigned frames=0;
+        std::map<std::uint32_t,std::vector<std::pair<int,int>>> tracks;
         for (unsigned i=0;i<8;++i)
-            require(movement.issue(world,910+i,goals[i],original_rule_speed(7)).status==PrototypeMoveStatus::Complete,"a tank in the gap was refused");
-        unsigned frames=0;
+            require(movement.issue(world,910+i,goals[i],movement.profile(unit(world,910+i)).speed).status==PrototypeMoveStatus::Complete,"a tank in the gap was refused");
         for (std::uint32_t frame=1;frame<=1200;++frame) {
             require(movement.tick(world,frame).status==PrototypeMoveStatus::Complete,"scene 2 frame failed");
-            check_no_overlap(world);
+            check_no_overlap(world);check_subcells(world,movement);
+            for (unsigned i=0;i<8;++i) tracks[910+i].push_back({unit(world,910+i).position->x,unit(world,910+i).position->y});
             if (!movement.active_count()) { frames=frame;break; }
         }
-        std::cout<<"scene 2 gap frames="<<frames<<"\n";
+        for (unsigned i=0;i<8;++i) {
+            const auto steady=steady_cells_per_frame(tracks[910+i],50);
+            worst_error=std::max(worst_error,std::abs((steady-0.105)/0.105));
+        }
+        std::cout<<"scene 2 gap frames="<<frames<<" worst steady error="<<worst_error<<"\n";
         require(frames && frames<=1200,"8 tanks did not clear the gap in 1200 frames");
+        require(worst_error<0.10,"a queued tank lost too much steady speed against the measured 0.105");
         for (unsigned i=0;i<8;++i) require(same_cell(*unit(world,910+i).cell,goals[i]),"a tank missed its distinct goal");
         check_no_overlap(world);
     }
 
     // Scene 3: an infantry squad (E1 and E2) with distinct subcells.
-    // Measured, not asserted: GI steady 0.80 cells/s (0.039 cells per
-    // screen frame); 7 Cells took 8.9 s total. Conscript 0.72-0.78
-    // (noisy). The sim runs rule-speed leptons per logic frame.
+    // Measured (REFERENCE.md): GI steady 0.80 cells/second, 0.039 cells
+    // per game frame; 7 Cells took 8.9 s total. Conscript 0.72-0.78
+    // (noisy), about 0.036 cells per game frame.
     {
         auto world=field(32,12);PrototypeMovement movement;movement.use_rules(rules);
         soldier(world,930,"E1",5,6,2);soldier(world,931,"E1",5,6,3);soldier(world,932,"E2",5,6,4);
         soldier(world,933,"E1",5,7,2);soldier(world,934,"E2",5,7,3);soldier(world,935,"E2",5,7,4);
         const ra2map::Cell goals[6]={{20,2},{20,4},{20,6},{20,8},{20,10},{20,12}};
         for (unsigned i=0;i<6;++i)
-            require(movement.issue(world,930+i,goals[i],original_rule_speed(4)).status==PrototypeMoveStatus::Complete,"a soldier was refused");
+            require(movement.issue(world,930+i,goals[i],movement.profile(unit(world,930+i)).speed).status==PrototypeMoveStatus::Complete,"a soldier was refused");
         check_subcells(world,movement);
-        unsigned frames=0;
+        unsigned frames=0;double e1_error=0.0,e2_error=0.0;
+        std::map<std::uint32_t,std::vector<std::pair<int,int>>> tracks;
         for (std::uint32_t frame=1;frame<=600;++frame) {
             require(movement.tick(world,frame).status==PrototypeMoveStatus::Complete,"scene 3 frame failed");
             check_no_overlap(world);check_subcells(world,movement);
+            for (unsigned i=0;i<6;++i) tracks[930+i].push_back({unit(world,930+i).position->x,unit(world,930+i).position->y});
             if (!movement.active_count()) { frames=frame;break; }
         }
-        std::cout<<"scene 3 squad frames="<<frames<<"\n";
+        for (unsigned i=0;i<6;++i) {
+            const auto steady=steady_cells_per_frame(tracks[930+i],50,true);
+            const auto measured=i<3?0.039:0.036;
+            const auto error=(steady-measured)/measured;
+            if (i<3) e1_error=std::max(e1_error,std::abs(error)); else e2_error=std::max(e2_error,std::abs(error));
+        }
+        std::cout<<"scene 3 squad frames="<<frames<<" worst E1 error="<<e1_error
+                 <<" worst E2 error="<<e2_error<<" (measured 0.039 and 0.036 cells/frame)\n";
         require(frames && frames<=600,"the squad did not arrive in 600 frames");
+        require(e1_error<0.05,"E1 steady speed off the measured 0.039 cells/frame");
+        require(e2_error<0.15,"E2 steady speed off the noisy measured 0.036 cells/frame");
         for (unsigned i=0;i<6;++i) require(same_cell(*unit(world,930+i).cell,goals[i]),"a soldier missed its goal");
         check_subcells(world,movement);
     }
