@@ -10,10 +10,9 @@
 // - 006be1c0 team script ChronoSphere handler: source team centre,
 //   destination enemy building through 006bcf70;
 // - 006be440 destination Greatest_Threat handler.
-// The SuperClass charge functions (Grant, Lose, SetOnHold, the recharge
-// tick, HasChargeProgressed, ClickFire) and VoxClass::PlayFromName have no
-// entries in the base export index; the sim header cites them from the YR
-// decomp and marks them unverified against this dump.
+// Base charge functions confirmed in the base RA2 1.006 export: SetOnHold
+// 0069CC60, Lose 0069CF40 and the launch dispatch 0069D850 (see the sim
+// header). Other SuperClass internals stay unverified against this dump.
 #include "../sim/prototype_superweapon.h"
 #include "battle_hud.h"
 #include <cstdint>
