@@ -366,6 +366,7 @@ Catalog Catalog::from(const IniFile& rules,const IniFile& art,const IniFile& map
             if (const auto v=text(rules,map,id,"Prerequisite")) t.can.prerequisite=prerequisite_list(*v);
             if (const auto v=text(rules,map,id,"PrerequisiteOverride")) t.can.prerequisite_override=prerequisite_list(*v);
             bool naval=false; read_bool(rules,map,id,"Naval",naval); t.placement.naval=naval;
+            if (const auto v=text(rules,map,id,"Dock")) t.dock=IniFile::split_list(*v);
             if (rtti==Rtti::UnitType) if (const auto v=text(rules,map,id,"DeploysInto")) t.deploys_into=*v;
             if (rtti==Rtti::BuildingType) {
                 if (const auto v=text(rules,map,id,"SuperWeapon")) if (!v->empty() && !same_text(*v,"<none>")) {
@@ -393,6 +394,8 @@ Catalog Catalog::from(const IniFile& rules,const IniFile& art,const IniFile& map
                 if (const auto v=text(rules,map,id,"FreeUnit")) t.free_unit=*v;
                 bool waterbound=false; read_bool(rules,map,id,"WaterBound",waterbound);
                 t.placement.speed_type=waterbound?5:-1;                        // 00459ADE.
+                read_int(rules,map,id,"NumberOfDocks",t.number_of_docks);
+                read_bool(rules,map,id,"UnitReload",t.unit_reload);
                 read_int(rules,map,id,"AIBasePlanningSide",t.planning_side);
                 if (const auto v=text(rules,map,id,"Factory")) {                // 0046A4B0 table 007CD978.
                     static const std::pair<const char*,Rtti> kinds[]={{"BuildingType",Rtti::BuildingType},
@@ -458,7 +461,8 @@ Catalog Catalog::from(const IniFile& rules,const IniFile& art,const IniFile& map
     read_int(rules,map,"General","AINavalYardAdjacency",c.naval_yard_adjacency);
     // OverlayType Wall: constructor 005DC5A0 clears it, the reader sets it.
     for (const auto& name:registry(rules,map,"OverlayTypes")) {
-        bool wall=false; read_bool(rules,map,name,"Wall",wall); c.overlay_wall.push_back(wall);
+        bool wall=false; read_bool(rules,map,name,"Wall",wall);
+        c.overlay_names.push_back(name); c.overlay_wall.push_back(wall);
     }
     for (const char* k:{"BuildSpeed","MinLowPowerProductionSpeed","MaxLowPowerProductionSpeed","LowPowerPenaltyModifier",
                         "MultipleFactory","WallBuildSpeedCoefficient"})
@@ -636,7 +640,10 @@ std::uint32_t ownable(const TypeFacts& t,std::int32_t session) {          // 006
 std::optional<const w::Entity*> who_can_build(const w::Snapshot& s,const FactorySet& f,const Catalog& c,
                                               const TypeFacts& type,const w::House& h,bool needs_530,bool legal_check) {
     if (!f.flags.session_type) return std::nullopt;
-    if (type.rtti==Rtti::AircraftType) return std::nullopt;                // Dock checks 00636F10/00636EA0 not recovered.
+    const bool aircraft=type.rtti==Rtti::AircraftType;
+    if (aircraft && type.dock.empty()) return static_cast<const w::Entity*>(nullptr);
+    std::int64_t dock_capacity=0;
+    bool primary=false;
     const auto mine=ownable(type,*f.flags.session_type);
     const w::Entity* candidate=nullptr;
     for (const auto* b:house_buildings(s,h.id)) {
@@ -656,8 +663,30 @@ std::optional<const w::Entity*> who_can_build(const w::Snapshot& s,const Factory
         if (!(ownable(*bt,*f.flags.session_type)&mine)) continue;
         const bool naval_unit=type.rtti==Rtti::UnitType && type.placement.naval;
         if (naval_unit ? !bt->placement.naval : bt->placement.naval) continue;
-        if (extra->second.primary) return b;
-        candidate=b;
+        if (aircraft) {
+            if (!bt->unit_reload || bt->number_of_docks<=0 ||
+                std::find(type.dock.begin(),type.dock.end(),b->type)==type.dock.end()) continue;
+            dock_capacity+=bt->number_of_docks;
+            if (!primary || extra->second.primary) candidate=b;
+            primary=primary || extra->second.primary;
+        } else {
+            if (extra->second.primary) return b;
+            candidate=b;
+        }
+    }
+    if (aircraft) {
+        // Base RadioClass::HasFreeLink 00636EA0: a plane reserves a pad
+        // link while flying too. Base ORCA and BEAG share the same Dock list.
+        // TODO-ORIGINAL: recover per-building radio links and dock offsets.
+        std::int64_t used=0;
+        for (const auto& actor:s.entities) {
+            if (actor.house_id!=h.id || actor.kind!=w::Kind::Aircraft ||
+                actor.lifetime!=w::Lifetime::Placed || actor.active==false ||
+                actor.in_limbo==true || actor.resolved_hp.value_or(0)<=0) continue;
+            const auto* facts=facts_of(c,actor);
+            if (facts && !facts->dock.empty()) ++used;
+        }
+        if (used>=dock_capacity) return static_cast<const w::Entity*>(nullptr);
     }
     return candidate;
 }
@@ -745,6 +774,7 @@ bool tracking_add(w::House& h,const TypeFacts& t) {
     case Rtti::BuildingType: return counter_add(h.buildings_owned_5420,t.heap_index,1);
     case Rtti::UnitType: return counter_add(h.units_owned_5430,t.heap_index,1);
     case Rtti::InfantryType: return counter_add(h.infantry_owned_5440,t.heap_index,1);
+    case Rtti::AircraftType: return counter_add(h.aircraft_owned_5450,t.heap_index,1);
     default: return false;
     }
 }
@@ -829,9 +859,12 @@ std::optional<Outcome> unlimbo_failure(const w::Snapshot& s,const Catalog& c,std
     // Permit base radar foundations and the factory bookkeeping below.
     // Base C export 00438CE0 sets radio link capacity in the constructor.
     // Other aircraft factories still require recovery of their dock behavior.
+    // A Wall=yes building places like a 1x1 building and then becomes its
+    // wall overlay (0042C000 reads Cell +44 against the type's overlay
+    // frame): the checks below are the normal Can_Enter_Cell ones.
     const bool base_radar=t->id=="AMRADR" || t->id=="GAAIRC";
-    if ((t->factory==Rtti::AircraftType && !base_radar) || t->placement.to_overlay || t->wall)
-        return fail(Status::Unsupported,"dock, wall and overlay building unlimbo is not recovered");
+    if ((t->factory==Rtti::AircraftType && !base_radar) || t->placement.to_overlay)
+        return fail(Status::Unsupported,"dock and overlay building unlimbo is not recovered");
     const auto ok=legal(s,c,*t,origin);                                    // Can_Enter_Cell 004453B0.
     if (!ok) return fail(Status::NeedsInput,"placement cells unresolved");
     if (!*ok) {
@@ -855,6 +888,29 @@ Outcome unlimbo_building(w::Snapshot& s,FactorySet& f,const Catalog& c,std::uint
     auto* b=entity_of(s,id);
     const auto* t=facts_of(c,*b);
     auto* h=house_of(s,b->house_id);
+    // A Wall=yes building never becomes a Structure: it becomes its wall
+    // overlay on each foundation Cell (0042C000 reads Cell +44 against the
+    // type's overlay frame). The temporary building retires; no structure
+    // chain, no active-building counters. The overlay index is the
+    // [OverlayTypes] position of the same name, as Catalog::overlay_names.
+    if (t->wall) {
+        int overlay=-1;
+        for (std::size_t i=0;i<c.overlay_names.size();++i)
+            if (same_text(c.overlay_names[i],t->id)) { overlay=std::int32_t(i); break; }
+        if (overlay<0) return fail(Status::NeedsInput,"wall type has no overlay");
+        for (const auto cell:footprint(origin,t->placement.foundation)) {
+            const auto key=cell_key(cell); if (!key || !s.cells.count(*key)) continue;
+            w::Undo::save_cell(s,*key);
+            auto& state=s.cells.at(*key);
+            if (!state.terrain) return fail(Status::NeedsInput,"wall cell terrain unresolved");
+            state.terrain->overlay_type_index=overlay;
+            state.wall_owner=h->id;
+            state.overlay_data_11e=0;
+        }
+        b=entity_of(s,id);
+        b->lifetime=w::Lifetime::Destroyed; b->on_map=false; b->object_field_76=1;
+        return Outcome{Status::Done,{},0,{}}; // no Structure survives
+    }
     for (const auto cell:footprint(origin,t->placement.foundation)) {       // Mark(PUT) 005D4160, Place_Down 0054AB70.
         const auto key=cell_key(cell); if (!key || !s.cells.count(*key)) continue;
         if (!link(s,*key,id,true)) return fail(Status::NeedsInput,"cell chain unresolved");

@@ -219,10 +219,17 @@ int main(int argc, char** argv) try {
             "second plane did not wait for the dock");
     require(capacity.issue(capacity_world, 11, 22).status == PrototypeAircraftStatus::Complete,
             "re-arm order failed");
+    for (int i=0;i<80;++i) {
+        require(capacity.tick(capacity_world,dock_frame++).status==PrototypeAircraftStatus::Complete,
+                "reserved pad tick failed");
+        require(capacity.phase(21)==AircraftPhase::Hover,
+                "takeoff released a reserved aircraft dock");
+    }
+    for (auto& e:capacity_world.entities) if(e.id==11) e.resolved_hp=0;
     frames_until(capacity, capacity_world, 21, AircraftPhase::Docked, dock_frame, 4000);
     run(capacity, capacity_world, dock_frame, 300);
     require(capacity.ammo(21) && *capacity.ammo(21) == 1, "waiting plane did not reload");
-    std::cout << "Dock capacity: two planes shared one pad with NumberOfDocks=1\n";
+    std::cout << "Dock capacity: flight keeps its reservation; a lost plane releases it\n";
 
     // A dead target sends the empty plane home without firing.
     world = fixture();

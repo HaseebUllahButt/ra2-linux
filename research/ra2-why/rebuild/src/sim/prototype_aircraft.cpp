@@ -278,10 +278,10 @@ std::int32_t PrototypeAircraft::reload_frames(const sw::Snapshot& world, const s
 }
 
 bool PrototypeAircraft::dock_free(const std::map<std::uint32_t, Flight>& flights,
-                                  const sw::Entity& pad) const {
+                                  const sw::Entity& pad, std::uint32_t self) const {
     std::size_t used = 0;
     for (const auto& [id, flight] : flights)
-        if (flight.pad == pad.id && (flight.phase == AircraftPhase::Docked || flight.phase == AircraftPhase::Land))
+        if (id != self && flight.pad == pad.id)
             ++used;
     const auto capacity = rules_.read_integer(pad.type, "NumberOfDocks", 1);
     return used < static_cast<std::size_t>(std::max(capacity, 0));
@@ -360,8 +360,10 @@ PrototypeAircraftResult PrototypeAircraft::issue(const sw::Snapshot& world, std:
         bool docked = false;
         for (const auto& candidate : world.entities) {
             if (!live(candidate) || candidate.kind != sw::Kind::Structure ||
+                candidate.house_id != entity->house_id ||
                 !candidate.cell || !same(*candidate.cell, *entity->cell) ||
-                !is_reload_pad(rules_, candidate.type) || !dock_matches(rules, candidate)) continue;
+                !is_reload_pad(rules_, candidate.type) || !dock_matches(rules, candidate) ||
+                !dock_free(flights_, candidate)) continue;
             flight.pad = candidate.id;
             flight.phase = AircraftPhase::Docked;
             docked = true;
@@ -429,7 +431,8 @@ std::optional<std::string> PrototypeAircraft::update(sw::Snapshot& world,
     PrototypeAircraftResult& result) {
     if (!actor.position) return "prototype aircraft position is unresolved";
     const auto* pad = flight.pad ? find_entity(world, flight.pad) : nullptr;
-    const bool pad_live = pad && live(*pad) && pad->kind == sw::Kind::Structure &&
+    const bool pad_live = pad && live(*pad) && pad->house_id == actor.house_id &&
+        pad->kind == sw::Kind::Structure &&
         is_reload_pad(rules_, pad->type) && dock_matches(flight.rules, *pad);
     const auto* victim = flight.target ? find_entity(world, *flight.target) : nullptr;
     if (victim && !victim->position)
@@ -534,7 +537,7 @@ std::optional<std::string> PrototypeAircraft::update(sw::Snapshot& world,
                 break;
             }
             if (fly_toward(actor, flight, cell_center(*pad->cell)))
-                flight.phase = dock_free(flights, *pad) ? AircraftPhase::Land : AircraftPhase::Hover;
+                flight.phase = dock_free(flights, *pad, actor.id) ? AircraftPhase::Land : AircraftPhase::Hover;
             break;
         }
         case AircraftPhase::Land: {
@@ -582,7 +585,7 @@ std::optional<std::string> PrototypeAircraft::update(sw::Snapshot& world,
                     flight.move_goal = *pad->cell;
                     break;
                 }
-                if (dock_free(flights, *pad)) flight.phase = AircraftPhase::Land;
+                if (dock_free(flights, *pad, actor.id)) flight.phase = AircraftPhase::Land;
             } else if (victim_live) {
                 flight.phase = AircraftPhase::FlyToTarget;
             }

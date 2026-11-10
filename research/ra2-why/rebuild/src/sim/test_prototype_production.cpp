@@ -723,6 +723,71 @@ int main(int argc,char** argv) try {
                 "placed radar has no active building count");
         require(*radar_world.houses[0].power_drain==*world.houses[0].power_drain+catalog.find(variant.second)->power_drain,
                 "radar power drain differs");
+        // Part 5c: produced planes dock on the airfield pad and the dock
+        // limit holds. An Alliance house builds its Black Eagle first.
+        {
+            auto allied=radar_world; auto allied_factories=radar_factories; auto allied_frame=local;
+            allied.houses[0].country="Alliance";
+            const auto alliance=std::find(catalog.countries.begin(),catalog.countries.end(),"Alliance");
+            require(alliance!=catalog.countries.end(),"Alliance country is missing");
+            allied.houses[0].country_index=std::int32_t(alliance-catalog.countries.begin());
+            *allied.houses[0].cash=100000;
+            const auto eagle=build(allied,allied_factories,catalog,player,"BEAG",allied_frame,false);
+            const auto& plane=actor(allied,eagle);
+            require(plane.kind==w::Kind::Aircraft && plane.lifetime==w::Lifetime::Placed &&
+                    plane.active==true && plane.in_limbo==false && plane.next==0 &&
+                    plane.occupancy_tracking==false,"BEAG did not activate on its pad");
+            require(!factory(allied_factories,eagle),"BEAG left a factory object");
+            require(plane.cell && plane.cell->x==origin.x && plane.cell->y==origin.y,
+                    "BEAG did not dock on the airfield pad Cell");
+            require(allied.cells.at(std::uint32_t(origin.y)*512+origin.x).heads->ground_head==radar,
+                    "BEAG took the airfield ground head");
+            const auto* eagle_facts=catalog.find("BEAG");
+            require(eagle_facts,"BEAG rules are missing");
+            require(count_at(allied.houses[0].aircraft_owned_5450,eagle_facts->heap_index)==1,
+                    "BEAG owned counter is wrong");
+            require(*allied.houses[0].cash<100000,"BEAG production did not spend cash");
+            require_prototype(allied);
+        }
+        *radar_world.houses[0].cash=100000;
+        const std::int32_t cash_before_planes=*radar_world.houses[0].cash;
+        const auto* orca_facts=catalog.find("ORCA");
+        require(orca_facts,"ORCA rules are missing");
+        std::vector<std::uint32_t> planes;
+        for (int i=0;i<4;++i) {
+            const auto before=*radar_world.houses[0].cash;
+            const auto plane_id=build(radar_world,radar_factories,catalog,player,"ORCA",local,false);
+            const auto& plane=actor(radar_world,plane_id);
+            require(plane.kind==w::Kind::Aircraft && plane.lifetime==w::Lifetime::Placed &&
+                    plane.active==true && plane.in_limbo==false && plane.next==0 &&
+                    plane.occupancy_tracking==false,
+                    "ORCA "+std::to_string(i)+" did not activate on its pad");
+            require(!factory(radar_factories,plane_id),"ORCA left a factory object");
+            require(plane.cell && plane.cell->x==origin.x && plane.cell->y==origin.y,
+                    "ORCA did not dock on the airfield pad Cell");
+            require(radar_world.cells.at(std::uint32_t(origin.y)*512+origin.x).heads->ground_head==radar,
+                    "ORCA took the airfield ground head");
+            require(*radar_world.houses[0].cash<before,"ORCA production did not spend cash");
+            planes.push_back(plane_id);
+        }
+        require(count_at(radar_world.houses[0].aircraft_owned_5450,orca_facts->heap_index)==4,
+                "ORCA owned counter is wrong");
+        const auto fifth=proto::begin_production(radar_world,radar_factories,catalog,player,"ORCA",local);
+        require(fifth.status==p::Status::Rejected,"fifth ORCA passed four dock slots");
+        destroy_actor(radar_world,planes.front());
+        const auto replacement=build(radar_world,radar_factories,catalog,player,"ORCA",local,false);
+        require(!factory(radar_factories,replacement) && actor(radar_world,replacement).kind==w::Kind::Aircraft &&
+                actor(radar_world,replacement).lifetime==w::Lifetime::Placed &&
+                actor(radar_world,replacement).active==true,
+                "replacement ORCA did not complete after a dock cleared");
+        int live_planes=0;
+        for (const auto& item:radar_world.entities)
+            if (item.house_id==player && item.kind==w::Kind::Aircraft &&
+                item.lifetime==w::Lifetime::Placed && item.active==true && item.in_limbo==false &&
+                item.resolved_hp.value_or(0)>0) ++live_planes;
+        require(live_planes==4,"live plane count differs after the replacement");
+        require(*radar_world.houses[0].cash<cash_before_planes,"aircraft production did not spend cash");
+        require_prototype(radar_world);
         radar_world.houses[0].power_output=0;
         require(!sim::tech::radar_online(assets.rules(),radar_world,player),"radar stayed online without power");
         require_prototype(radar_world);
@@ -872,6 +937,30 @@ int main(int argc,char** argv) try {
     require_in_front(world,catalog,enemy,"NAWEAP",actor(world,enemy_tank));
     require_in_front(world,catalog,enemy,"NAHAND",actor(world,enemy_infantry));
     require_prototype(world);
+    // A wall: the finished product places through prototype::place, writes
+    // its wall overlay on the Cell and retires the temporary building; the
+    // factory product clears. No live Structure stays on the map.
+    {
+        const auto* facts=catalog.find("GAWALL");
+        require(facts && facts->wall,"GAWALL is a wall type");
+        int overlay=-1;
+        for (std::size_t i=0;i<catalog.overlay_names.size();++i) if (catalog.overlay_names[i]=="GAWALL") overlay=int(i);
+        require(overlay>=0,"GAWALL has no overlay entry");
+        build(world,factories,catalog,player,"GAWALL",frame,false);
+        const auto origin=place_building(world,factories,catalog,player,"GAWALL",frame,base);
+        const auto& cell=world.cells.at(std::uint32_t(origin.y)*512+std::uint32_t(origin.x));
+        require(cell.terrain && cell.terrain->overlay_type_index && *cell.terrain->overlay_type_index==overlay,
+            "wall overlay did not survive placement");
+        require(cell.wall_owner && *cell.wall_owner==int(player),"wall owner missing after placement");
+        for (const auto& e:world.entities)
+            require(!(e.type=="GAWALL" && e.kind==w::Kind::Structure && e.lifetime==w::Lifetime::Placed),
+                "a wall left a live Structure on the map");
+        const auto* wall_factory=[&]{ for (const auto& x:factories.factories) if (x.house_id==player && x.slot==5) return &x; return (const p::FactoryState*)nullptr; }();
+        require(wall_factory && !wall_factory->object && wall_factory->object_type.empty() &&
+            wall_factory->progress==0 && wall_factory->suspended,"wall product did not clear from the factory");
+        require_prototype(world);
+        std::cout<<"GAWALL placed as an overlay at ("<<origin.x<<","<<origin.y<<") with the factory cleared\n";
+    }
     std::cout<<"MP02T2 prototype deploys both Houses and produces infantry and a tank\n";
     return 0;
 } catch (const std::exception& error) {

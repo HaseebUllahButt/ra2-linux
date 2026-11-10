@@ -281,14 +281,15 @@ public:
         ai_ini.parse(std::string_view(reinterpret_cast<const char*>(ai_bytes->data()),ai_bytes->size()));
         const auto ai_difficulty=difficulty_==ui::Opponent::Hard?sim::PrototypeAI::Difficulty::Hard:
             difficulty_==ui::Opponent::Medium?sim::PrototypeAI::Difficulty::Normal:sim::PrototypeAI::Difficulty::Easy;
-        ai_=sim::PrototypeAI(rules_,&ai_ini,ai_difficulty);
+        ai_=sim::PrototypeAI(rules_,&ai_ini,ai_difficulty,&assets_.art_ini());
         // One policy for each computer house, with the difficulty of its setup slot.
         const auto choices=opponent_choices(args_.setup,rules_,house(world_,player_).country,
             std::clamp(args_.setup.color.value_or(0),0,7),enemies_.size());
         for(std::size_t i=0;i<enemies_.size();++i) {
             const auto level=i<choices.size()?choices[i].difficulty:difficulty_;
             ais_.emplace_back(rules_,&ai_ini,level==ui::Opponent::Hard?sim::PrototypeAI::Difficulty::Hard:
-                level==ui::Opponent::Medium?sim::PrototypeAI::Difficulty::Normal:sim::PrototypeAI::Difficulty::Easy);
+                level==ui::Opponent::Medium?sim::PrototypeAI::Difficulty::Normal:sim::PrototypeAI::Difficulty::Easy,
+                &assets_.art_ini());
             // Base 004EF890 reads the Super Weapons option (00A3D2C3) for its plan pool.
             ais_.back().set_super_weapons(super_weapons_choice(args_.setup,rules_));
             // Base 00701580: a computer house adds AIVirtualPurifiers[difficulty]
@@ -1187,6 +1188,7 @@ public:
             if (type && type->rtti==p::Rtti::BuildingType) ready.push_back(f.object_type);
         }
         for (const auto& type:ready) {
+            if (place_wall(owner,type,frame)) continue;
             if (place_naval(owner,type,frame)) continue;
             std::vector<ra2map::Cell> bases;
             for (const auto& e:world_.entities) if (live(e)&&e.house_id==owner&&e.kind==w::Kind::Structure) bases.push_back(*e.cell);
@@ -1303,6 +1305,26 @@ public:
                 proto::cancel_production(world_,factories_,catalog_,owner,type,frame);
                 ais_[i].placement_failed(owner,type);
             }
+            return true;
+        }
+        return false;
+    }
+    // A finished wall goes on the Cell the base plan picked (0042C3D0):
+    // the plan counts the wall node built when that Cell holds the wall
+    // overlay of the wall type or any building. The wall product never
+    // takes the ring search; place() writes the wall overlay at the Cell.
+    bool place_wall(std::uint32_t owner,const std::string& type,std::uint32_t frame) {
+        const auto* product=catalog_.find(type);
+        if(!product || !product->wall)return false;
+        for(std::size_t i=0;i<enemies_.size() && i<ais_.size();++i) {
+            if(enemies_[i]!=owner)continue;
+            const auto request=ais_[i].wall_request();
+            if(!request || request->type!=type) return true; // no planned cell: wait for the plan
+            const auto outcome=proto::place(world_,factories_,catalog_,owner,type,
+                {std::int16_t(request->cell.x),std::int16_t(request->cell.y)},frame);
+            if(std::getenv("RA2_AI_PLAN_DEBUG") && frame%300==0)
+                std::cerr<<"WALLSITE frame="<<frame<<" type="<<type<<" cell="<<request->cell.x<<','<<request->cell.y
+                         <<" status="<<int(outcome.status)<<' '<<outcome.detail<<'\n';
             return true;
         }
         return false;
