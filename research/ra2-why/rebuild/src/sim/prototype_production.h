@@ -28,6 +28,11 @@ std::optional<CellXY> placement_origin(const Catalog&,const std::string& type,Ce
 // One cursor grid for a mouse Cell. A Cell is drawn legal (frame 0 in 00473F20)
 // only when the whole cursor passes proximity and that Cell passes 004718B0.
 // legal_cell is unknown when proximity or the Cell's own state is unknown.
+// The grid uses the same read-only click checks as place(), run on the
+// caller's Snapshot with no copy. A global click rejection (proximity, no
+// ready product, missing builder) makes legal false and every Cell red; an
+// unknown global check leaves every Cell unknown. A 004718B0 occupancy
+// rejection keeps the per-Cell blockers; legal is still false.
 // TODO-ORIGINAL: 00473F20 and the PLACE click (0049BB20 via 00499390) also need
 // the Cell to be revealed; the shroud input is not part of this helper.
 struct PlacementGridCell { CellXY cell; std::optional<bool> legal_cell; };
