@@ -30,28 +30,38 @@ struct PrototypeRepairSellRules {
 // forgets which buildings were repairing, like the movement prototype.
 // TODO-ORIGINAL: no deconstruction animation or timer (RA2 BuildingClass::
 // Mission_Selling, RA1 Mission_Deconstruction BUILDING.CPP 3385), no sounds,
-// no computer repair or sell decisions (RA1 Repair_AI, gamemd 00450630) and
-// no repair-bay selling of docked units.
+// no auto-repair decisions (base game.exe FUN_0044B9B0 only runs the step
+// for buildings the player set to repair) and no repair-bay selling of
+// docked units.
 class PrototypeRepairSell {
 public:
     // The art INI is optional; without it every footprint is one cell.
     explicit PrototypeRepairSell(const rules::IniFile& base_rules,
         const rules::IniFile* art_rules = nullptr);
 
-    // Credits for one repair step of the building type. RA1 shape
-    // (TechnoTypeClass::Repair_Cost): Cost / (Strength / RepairStep) times
-    // RepairPercent, truncated. Zero when the type has no usable Cost or
-    // Strength, which repairs for free like an original truncated zero.
+    // Credits for one repair step of the building type. Base game.exe
+    // FUN_0044B9B0 reads the per-step cost from the type virtual at vtable
+    // +0xB0 and the per-step health from +0xB4; the virtual body was
+    // not recovered, so this keeps the RA1 shape (TechnoTypeClass::
+    // Repair_Cost): Cost / (Strength / RepairStep) times RepairPercent,
+    // truncated. Zero when the type has no usable Cost or Strength, which
+    // repairs for free like an original truncated zero.
     std::int32_t repair_cost_per_step(const std::string& type) const;
 
     // Credits paid back for selling one of the type: Cost * RefundPercent,
-    // truncated (RA1 TechnoClass::Refund_Amount shape). Zero without Cost.
+    // truncated. Base game.exe AircraftClass::GetRefund 0x006D5850 calls the
+    // same type virtual at vtable +0xB8; its body was not recovered, so this
+    // keeps the RA1 TechnoClass::Refund_Amount shape. Zero without Cost.
     std::int32_t refund_amount(const std::string& type) const;
 
     // Crew size when selling: refund divided by the side divisor, clamped to
-    // 1..5 (gamemd 00451330). Side 0 is Allied, 1 Soviet, 2 third. Zero when
-    // the type is not Crewed, the side is unknown, or the refund is zero.
-    // TODO-ORIGINAL: the captured-building divisor doubling is not modeled.
+    // 1..5. Base game.exe sprays the crew in FUN_0043F8E0 and reads the crew
+    // type through BuildingClass::GetCrew 0x00449FB0; the exact base count
+    // divide was not recovered, so this keeps the RA1 divisor shape with the
+    // parsed [General] divisors. Side 0 is Allied, 1 Soviet, 2 third. Zero
+    // when the type is not Crewed, the side is unknown, or the refund is
+    // zero. TODO-ORIGINAL: the captured-building divisor doubling is not
+    // modeled.
     std::int32_t survivor_count(const session::world::House& house, const std::string& type) const;
 
     // Infantry type of the sold building's crew. TODO-ORIGINAL: the original
