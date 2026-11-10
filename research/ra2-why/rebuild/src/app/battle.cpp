@@ -1014,6 +1014,20 @@ public:
             auto& wait=auto_place_wait_[{owner,type}];
             if(wait.buildings==bases.size() && frame<wait.retry_frame)continue;
             bool placed=false;
+            // A full miner unloads on a cell next to the refinery's own cell
+            // (prototype_economy). Keep that block free: 13 Sentry Guns once
+            // closed it and the Brutal computer earned nothing from minute 20.
+            // TODO-ORIGINAL: 004F1190 picks defense cells; the refinery dock
+            // is a building radio contact, not a free cell.
+            std::set<std::pair<int,int>> dock;
+            for (const auto& e:world_.entities) if (live(e)&&e.house_id==owner&&e.kind==w::Kind::Structure&&rules_.read_bool(e.type,"Refinery"))
+                for (int dy=-1;dy<=1;++dy) for (int dx=-1;dx<=1;++dx) dock.insert({int(e.cell->x)+dx,int(e.cell->y)+dy});
+            const auto* product=catalog_.find(type);
+            const auto footprint=product?p::original_foundation_cells(product->placement.foundation):std::vector<p::CellXY>{};
+            const auto closes_dock=[&](int x,int y) {
+                for (const auto& part:footprint) if (dock.count({x+part.x,y+part.y})) return true;
+                return false;
+            };
             // The rings of near buildings overlap. A cell that failed once in
             // this search fails again, so each cell is tried once.
             std::set<std::pair<int,int>> tried;
@@ -1022,6 +1036,7 @@ public:
                     for (int dx=-radius;dx<=radius && !placed;++dx) {
                         if (std::max(std::abs(dx),std::abs(dy))!=radius) continue;
                         if (!tried.insert({int(base.x)+dx,int(base.y)+dy}).second) continue;
+                        if (closes_dock(int(base.x)+dx,int(base.y)+dy)) continue;
                         const p::CellXY cell{std::int16_t(int(base.x)+dx),std::int16_t(int(base.y)+dy)};
                         // place() checks proximity before its first write.
                         placed=proto::place(world_,factories_,catalog_,owner,type,cell,frame).status==p::Status::Done;
