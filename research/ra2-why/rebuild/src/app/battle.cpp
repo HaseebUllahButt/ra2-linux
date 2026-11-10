@@ -319,6 +319,11 @@ public:
         superweapons_=std::make_unique<sim::PrototypeSuperweapons>(rules_,
             (args_.game_directory/"game.exe").string());
         superweapons_->update_grants(world_);
+        // Iron Curtain and Force Shield protection in normal combat: the
+        // combat runtime asks the super weapon state before every hit.
+        combat_.set_invulnerability([this](std::uint32_t id,std::uint64_t frame) {
+            return superweapons_->invulnerable(id,frame);
+        });
         const auto initialized=proto::initialize(world_,factories_,catalog_,player_);
         if (initialized.status!=p::Status::Done) throw std::runtime_error(initialized.detail);
         refresh_power_damage();
@@ -1467,12 +1472,6 @@ public:
         // A producer can die during combat. Abandon its orphaned products
         // before checking defeat; production timers use this same frame.
         building_tools_.tick(world_,frame);
-        // Iron Curtain and Force Shield protection. The combat runtime has
-        // no invulnerability hook, so the app restores the health of every
-        // protected survivor after the tick and reports lethal hits as a gap.
-        std::map<std::uint32_t,int> shielded_hp;
-        for(const auto& e:world_.entities)
-            if(live(e)&&superweapons_->invulnerable(e.id,frame))shielded_hp[e.id]=*e.resolved_hp;
         refresh_power_damage();
         const auto after_combat=proto::tick(world_,factories_,catalog_,frame);
         if(after_combat.status!=p::Status::Done)gaps_.insert(after_combat.detail);
@@ -1485,15 +1484,6 @@ public:
             const auto cleanup=proto::tick(world_,factories_,catalog_,frame);
             if(cleanup.status!=p::Status::Done)gaps_.insert(cleanup.detail);
         }
-        std::size_t shielded_hits=0;
-        for(const auto& [id,hp]:shielded_hp)
-            for(auto& e:world_.entities)if(e.id==id) {
-                if(e.lifetime==w::Lifetime::Placed&&e.resolved_hp&&*e.resolved_hp<hp) {
-                    e.resolved_hp=hp;++shielded_hits;
-                } else if(e.lifetime!=w::Lifetime::Placed)
-                    gaps_.insert("Invulnerable actor took lethal combat damage: PrototypeCombatRuntime has no invulnerability hook");
-            }
-        if(shielded_hits)std::cout<<"Iron Curtain blocked "<<shielded_hits<<" hit(s) this match\n";
         // Charge clocks and due lightning storm strikes, one frame at a time.
         superweapons_->update_grants(world_);
         const auto super_tick=superweapons_->tick(world_,frame);
