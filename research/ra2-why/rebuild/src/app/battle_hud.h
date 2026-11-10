@@ -105,6 +105,8 @@ public:
                      const rules::IniFile& art, const std::vector<BuildChoice>& choices,
                      bool soviet = false);
     bool original_art() const noexcept { return art_.ready(); }
+    // The sidebar font, for overlays drawn by the battle root. Null without art.
+    const ui::GameFont* font() const noexcept { return art_.font(); }
 
     // Draw the sidebar and the command bar over the frame. Clips against the frame.
     void draw(render::Bitmap& frame, const HudState& state) const;

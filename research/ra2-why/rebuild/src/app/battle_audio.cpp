@@ -53,6 +53,15 @@ BattleAudio::BattleAudio(const fs::MixFileSystem& files,const rules::IniFile& ru
         }
         const auto speech=lower(eva_.read_string("EVA_UnitLost",side));
         if(!speech.empty())names.insert(speech+".wav");
+        // Super weapon speech (base 006CBCA0 announces a charged weapon and
+        // 00752700 plays a launch warning). Cache every line EVA.INI has.
+        for(const char* section:{"EVA_NuclearMissileReady",
+            "EVA_NuclearMissileLaunchDetected","EVA_WeatherControlDeviceReady",
+            "EVA_WeatherControlDeviceLaunchDetected","EVA_IronCurtainReady",
+            "EVA_ChronosphereReady","EVA_PsychicDominatorReady"}) {
+            const auto line=lower(eva_.read_string(section,side));
+            if(!line.empty())names.insert(line+".wav");
+        }
         std::size_t bytes=0;
         for(const auto& name:names) {
             try {
@@ -103,6 +112,10 @@ void BattleAudio::observe(const session::world::Snapshot& world,std::uint64_t fr
         seen_[e.id]={hp,e.lifetime==session::world::Lifetime::Placed,e.weapon_timer_start_frame};
     }
     ready_=true;
+}
+void BattleAudio::speak(const std::string& eva_section) {
+    if(!device_||eva_section.empty())return;
+    mixer_.on_event(eva_section);
 }
 void BattleAudio::service(bool paused) noexcept {
     if(!device_)return;

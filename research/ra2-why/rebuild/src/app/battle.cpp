@@ -26,6 +26,8 @@
 #include "battle_setup.h"
 #include "battle_options.h"
 #include "../sim/prototype_ai.h"
+#include "../sim/prototype_superweapon.h"
+#include "battle_superweapons.h"
 #include "../sim/prototype_economy.h"
 #include "../sim/prototype_movement.h"
 #include "../sim/prototype_aircraft.h"
@@ -163,6 +165,15 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
         return target;
     }
     BattleOrders orders_;
+    // Playable super weapons (Part 2). Charge clocks and effects live in
+    // sim::PrototypeSuperweapons; this block is display, input and speech.
+    std::unique_ptr<sim::PrototypeSuperweapons> superweapons_;
+    std::vector<sim::SuperweaponType> superweapon_types_;
+    std::set<std::string> superweapons_blocked_;
+    SuperweaponFlow superweapon_flow_=SuperweaponFlow::None;
+    std::string superweapon_selected_;
+    std::optional<ra2map::Cell> chrono_source_;
+    std::map<std::string,bool> superweapon_was_ready_;
     BattleHud hud_;
     BattleCursor cursor_;
     BattleEffects effects_;
@@ -298,6 +309,27 @@ public:
         victory_rules_.base_units=rules_.read_list("General","BaseUnit");
         // Base 004E3832 reads Super Weapons (00A3D2C3) in House::Can_Build.
         factories_.flags.super_weapons=super_weapons_choice(args_.setup,rules_);
+        // Playable super weapons: charge clocks, low power suspension and the
+        // launch effects. The game exe enables the original blast falloff.
+        superweapon_types_=sim::read_superweapon_types(rules_);
+        if(!*factories_.flags.super_weapons)
+            // Base 004E3832 keeps only weapons whose every granting building
+            // has DisableableFromShell=yes out of the game.
+            superweapons_blocked_=superweapons_blocked_by_option(rules_,superweapon_types_,
+                [&](const std::string& building) {
+                    const auto* type=catalog_.find(building);
+                    if(!type||type->can.super_weapon<0)return false;
+                    const auto flag=catalog_.super_weapon_disableable.find(type->can.super_weapon);
+                    return flag!=catalog_.super_weapon_disableable.end()&&flag->second;
+                });
+        superweapons_=std::make_unique<sim::PrototypeSuperweapons>(rules_,
+            (args_.game_directory/"game.exe").string());
+        superweapons_->update_grants(world_);
+        // Iron Curtain and Force Shield protection in normal combat: the
+        // combat runtime asks the super weapon state before every hit.
+        combat_.set_invulnerability([this](std::uint32_t id,std::uint64_t frame) {
+            return superweapons_->invulnerable(id,frame);
+        });
         const auto initialized=proto::initialize(world_,factories_,catalog_,player_);
         if (initialized.status!=p::Status::Done) throw std::runtime_error(initialized.detail);
         refresh_power_damage();
@@ -334,6 +366,9 @@ public:
         shroud_.hide_entities(initial,world_,player_);
         initial_scene_=scene_.render(terrain_,initial,{camera_x_,camera_y_,1024,768},&world_);
     }
+    const sim::PrototypeSuperweapons& superweapons() const {return *superweapons_;}
+    const std::vector<sim::SuperweaponType>& superweapon_types() const {return superweapon_types_;}
+    const std::set<std::string>& superweapons_blocked() const {return superweapons_blocked_;}
     const w::Snapshot& world() const {return world_;}
     sim::Victory result() const {return victory_.result;}
     bool autoplay_moved() const {return autoplay_moved_;}
@@ -414,6 +449,104 @@ public:
     }
     void queue(Order order) {pending_.push_back(std::move(order));}
     void status(std::string message) {status_.set(std::move(message),clock_.now_ms());}
+    // --- Playable super weapons (Part 2) ---------------------------------
+    std::vector<SuperweaponEntry> superweapon_entries_for_player() const {
+        return superweapon_entries(superweapon_types_,*superweapons_,player_,
+            superweapons_blocked_,[this](const std::string& type){return name(type);});
+    }
+    const sim::SuperweaponType* superweapon_type(const std::string& section) const {
+        for(const auto& type:superweapon_types_)if(type.id==section)return &type;
+        return nullptr;
+    }
+    // EVA speech for a charged weapon and a launch warning. The player hears
+    // the ready line once per charge; a nuke or storm launch plays the
+    // warning line (the original plays it for enemy launches).
+    void superweapon_audio() {
+        for(const auto& type:superweapon_types_) {
+            const bool ready=superweapons_->ready(player_,type.id);
+            if(ready&&!superweapon_was_ready_[type.id])
+                audio_.speak(superweapon_ready_speech(type.kind));
+            superweapon_was_ready_[type.id]=ready;
+        }
+    }
+    bool fire_superweapon(const std::string& section,ra2map::Cell cell) {
+        const auto* type=superweapon_type(section);
+        if(!type)return false;
+        const auto report=superweapons_->fire(world_,player_,section,cell,input_frame_);
+        if(report.fired) {
+            status(name(section)+" fired.");
+            audio_.speak(superweapon_launch_speech(type->kind));
+            if(type->kind==sim::SuperKind::Nuke||type->kind==sim::SuperKind::LightningStorm)
+                std::cout<<"Super weapon fired: "<<section<<" at "<<int(cell.x)<<','<<int(cell.y)
+                    <<" damaged="<<report.damaged<<" destroyed="<<report.destroyed<<'\n';
+        } else status("Cannot fire "+name(section)+".");
+        if(!report.revealed.empty())
+            gaps_.insert("Spy plane reveal cells are not applied: BattleShroud has no explore-cells hook (SpySat buildings already reveal through PrototypeShroud)");
+        for(const auto& note:report.notes)gaps_.insert(note);
+        return report.fired;
+    }
+    // A sidebar pick of a granted weapon starts the target flow. The cameo
+    // shows the charge clock; only a ready weapon accepts the click.
+    void superweapon_pick(const std::string& section) {
+        const auto* type=superweapon_type(section);
+        if(!type)return;
+        const auto entries=superweapon_entries_for_player();
+        const auto found=std::find_if(entries.begin(),entries.end(),
+            [&](const SuperweaponEntry& item){return item.section==section;});
+        if(found==entries.end())return;
+        const auto& entry=*found;
+        if(!entry.ready) {
+            status(entry.suspended?name(section)+" is on hold: low power.":
+                name(section)+" is not ready.");
+            return;
+        }
+        superweapon_selected_=section;
+        if(type->kind==sim::SuperKind::ChronoSphere) {
+            superweapon_flow_=SuperweaponFlow::ChronoSource;
+            status("Select the unit to teleport. Right click cancels.");
+        } else {
+            superweapon_flow_=SuperweaponFlow::ChooseTarget;
+            status("Select target for "+name(section)+". Right click cancels.");
+        }
+    }
+    // Target clicks for a picked weapon. Returns true when the input belonged
+    // to the super weapon flow and is consumed.
+    bool superweapon_input(const Input& input) {
+        if(superweapon_flow_==SuperweaponFlow::None)return false;
+        if(input.kind==InputKind::Button&&input.pressed&&input.key==SDL_BUTTON_RIGHT) {
+            superweapon_flow_=SuperweaponFlow::None;chrono_source_.reset();status("");
+            return true;
+        }
+        if(input.kind!=InputKind::Button||!input.pressed||input.key!=SDL_BUTTON_LEFT)return true;
+        const auto cell=cell_at({input.x,input.y});
+        if(!cell)return true;
+        const auto flow=superweapon_flow_;
+        superweapon_flow_=SuperweaponFlow::None;
+        if(flow==SuperweaponFlow::ChooseTarget) {
+            for(const auto& step:superweapon_fire_plan(superweapon_types_,superweapon_selected_,{},*cell))
+                fire_superweapon(step.section,step.cell);
+        } else if(flow==SuperweaponFlow::ChronoSource) {
+            chrono_source_=*cell;
+            superweapon_flow_=SuperweaponFlow::ChronoDestination;
+            status("Select the destination. Right click cancels.");
+        } else if(flow==SuperweaponFlow::ChronoDestination) {
+            // Base 006be1c0 team handler order: the sphere fires at the
+            // source first, then the PreDependent warp at the destination.
+            const auto plan=superweapon_fire_plan(superweapon_types_,superweapon_selected_,
+                chrono_source_,*cell);
+            if(plan.empty()) {
+                gaps_.insert("No ChronoWarp section in rules: chrono teleport needs a PreDependent pair");
+                status("Cannot teleport.");
+            }
+            // Source-first order, base 006be1c0: the sphere click arms the
+            // source block, the warp click lands it. A failed first call
+            // stops the second: a warp never fires through a failed arm.
+            for(const auto& step:plan)
+                if(!fire_superweapon(step.section,step.cell))break;
+            chrono_source_.reset();
+        }
+        return true;
+    }
     int factory_slot(const p::TypeFacts& type) const {
         return type.rtti==p::Rtti::BuildingType?(type.build_cat==5?5:4):
             type.rtti==p::Rtti::InfantryType?1:type.rtti==p::Rtti::UnitType?2:0;
@@ -542,7 +675,14 @@ public:
             if (input.pressed && (input.key==SDL_BUTTON_LEFT || input.key==SDL_BUTTON_RIGHT)) {
                 refresh_hud();
                 const auto action=hud_.handle_click(input.x,input.y,hud_state_);
-                if(action.kind==HudActionKind::Build && !victory_.settled()) {
+                if(action.kind==HudActionKind::Build && !victory_.settled() &&
+                    superweapon_type(action.type)) {
+                    // A granted super weapon cameo: left click starts the
+                    // target flow, right click is ignored.
+                    if(input.key==SDL_BUTTON_RIGHT)return;
+                    building_tool_=BuildingTool::None;
+                    superweapon_pick(action.type);
+                } else if(action.kind==HudActionKind::Build && !victory_.settled()) {
                     building_tool_=BuildingTool::None;
                     const auto* type=catalog_.find(action.type);
                     if(!type)return;
@@ -626,6 +766,7 @@ public:
             }
             return;
         }
+        if(superweapon_input(input))return;
         auto commands=orders_.handle(input,world_,view(),clock_.now_ms());
         if(!victory_.settled())pending_.insert(pending_.end(),commands.begin(),commands.end());
     }
@@ -1365,6 +1506,11 @@ public:
             const auto cleanup=proto::tick(world_,factories_,catalog_,frame);
             if(cleanup.status!=p::Status::Done)gaps_.insert(cleanup.detail);
         }
+        // Charge clocks and due lightning storm strikes, one frame at a time.
+        superweapons_->update_grants(world_);
+        const auto super_tick=superweapons_->tick(world_,frame);
+        for(const auto& note:super_tick.notes)gaps_.insert(note);
+        superweapon_audio();
         audio_.observe(world_,frame);
         sim::tech::update(rules_,world_);
         shroud_.update(world_,rules_);
@@ -1468,6 +1614,10 @@ public:
             choice.queued=build_queue_.count(type)+active_count(type);
             hud_state_.choices.push_back(std::move(choice));
         }
+        // Granted super weapons join the Defenses tab of the cameo grid:
+        // the cameo shows the charge clock, and only a ready weapon clicks.
+        for(const auto& entry:superweapon_entries_for_player())
+            hud_state_.choices.push_back(superweapon_choice(entry));
         hud_state_.choices=sidebar_choices_.update(hud_state_.choices);
         hud_state_.camera={camera_x_,camera_y_,BattleHud::sidebar_x,BattleHud::command_bar_y};
         hud_state_.map_width=terrain_.width;hud_state_.map_height=terrain_.height;
