@@ -632,7 +632,7 @@ build/resource_render_test: build/native/src/app/test_resource_render.o $(PROTOT
 build/battle_status_test: build/native/src/app/test_battle_status.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-build/battle_formation_test: build/native/src/app/test_battle_formation.o
+build/battle_formation_test: build/native/src/app/test_battle_formation.o build/native/src/rules/ini_file.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/prototype_economy_test: build/native/src/sim/test_prototype_economy.o $(PROTOTYPE_TEST_OBJECTS)
