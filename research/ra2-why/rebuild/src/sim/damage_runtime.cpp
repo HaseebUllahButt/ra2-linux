@@ -1,5 +1,7 @@
 #include "damage_runtime.h"
 #include "../loop/profile.h"
+#include <algorithm>
+#include <array>
 #include <map>
 #include <set>
 #include <cstdio>
@@ -289,7 +291,8 @@ const Entity* prototype_find(const Snapshot& world,std::uint32_t id) {
 }
 bool prototype_alive(const Entity* e) {
     // TODO-ORIGINAL: Resolve missing active and limbo values from the actor.
-    return e && (e->kind==Kind::Unit || e->kind==Kind::Infantry || e->kind==Kind::Structure) &&
+    return e && (e->kind==Kind::Unit || e->kind==Kind::Infantry || e->kind==Kind::Aircraft ||
+        e->kind==Kind::Structure) &&
         e->lifetime==Lifetime::Placed && e->position && e->resolved_hp && *e->resolved_hp>0 &&
         (!e->active || *e->active) && (!e->in_limbo || !*e->in_limbo);
 }
@@ -460,7 +463,17 @@ bool prototype_unlink(Snapshot& w,Entity& victim) {
             }
         }
     }
-    if (links.empty()) return false;
+    // Base flight mission: aircraft are unlinked from their Cell while
+    // flying. Flight unlinks them and clears Foot +5A0 occupancy tracking,
+    // so an unlinked victim with no tracking is already off the map. Only
+    // the known flying types take this path; every other rejection stands.
+    if (links.empty()) {
+        static const std::array<const char*,4> flying{{"ORCA","BEAG","ZEP","JUMPJET"}};
+        if (*victim.next!=0 || victim.occupancy_tracking.value_or(true) ||
+            std::find_if(flying.begin(),flying.end(),[&](const char* type){
+                return victim.type==type;})==flying.end()) return false;
+        return true;
+    }
     for (auto* link:links) *link=*victim.next;
     victim.next=0;
     // TODO-ORIGINAL: Replace with Unit Mark(0), its Cell setup, and reserved
@@ -867,6 +880,9 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
     for (auto& source : world.entities) {
         if (!prototype_alive(&source) || orders_.count(source.id) ||
             source.target_id.value_or(0) || !guard_mission(source)) continue;
+        // The flight mission may deny permission to fire. A rejected source
+        // keeps its order and is skipped here without an approach request.
+        if (fire_gate_ && !fire_gate_(source)) continue;
         // The prototype keeps the idle mission number during Move orders, so
         // a driving actor without a guard target is not idle and its old
         // guard place no longer applies.
@@ -902,6 +918,10 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             if (source) source->target_id=0;
             it=orders_.erase(it);continue;
         }
+        // Base flight mission: a source without permission to fire keeps its
+        // order, takes no shot and asks no approach. Weapon timing, damage
+        // and in-flight projectiles stay shared with the ground prototype.
+        if (fire_gate_ && !fire_gate_(*source)) {++it;continue;}
         try {
             const auto weapon=prototype_target_weapon(base_,map_,art_,world,*source,*target);
             std::optional<double> verse;
@@ -918,7 +938,12 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             // Base 006FB890: a turreted Unit with a target turns its turret
             // toward that target every frame, also while out of range.
             const auto aim=turret_aim(*source,*target,weapon->omni_fire,static_cast<std::int32_t>(frame));
-            const int d=distance_.between(*source->position,*target->position);
+            // AircraftClass::IsCloseEnoughToAttack (006C5070) delegates to
+            // weapon eligibility. Flight missions use ground separation here,
+            // so a bomber can reach a ground target below its cruise height.
+            // TODO-ORIGINAL: recover the complete aircraft range override.
+            const bool flying=prototype_air_target(base_,map_,world,*source);
+            const int d=distance_.between(*source->position,*target->position,flying);
             if (d>weapon->range) {report.out_of_range.emplace_back(source->id,target->id);++it;continue;}
             // TODO-ORIGINAL: Replace these direct range and targeting checks
             // with the full mission, eligibility, terrain and elevation paths.
