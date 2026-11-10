@@ -202,6 +202,9 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     int human_cash_before_=0,human_hold_cash_=0,human_hold_progress_=0;
     std::uint32_t human_product_=0;
     bool ai_opening_check_=std::getenv("RA2_AI_OPENING_CHECK")!=nullptr;
+    // QA probe (not for merge): per-house census and a player who stays home.
+    bool census_=std::getenv("RA2_HOUSE_CENSUS")!=nullptr, passive_=std::getenv("RA2_PASSIVE_PLAYER")!=nullptr;
+    std::map<std::uint32_t,std::set<std::uint32_t>> census_seen_;
     std::optional<std::uint32_t> first_ai_shot_;
     ui::Opponent difficulty_=ui::Opponent::Easy;
     std::uint32_t autoplay_unit_=0;
@@ -1083,7 +1086,7 @@ public:
         for(const auto& e:world_.entities) if(e.house_id==player_&&live(e)&&e.kind==w::Kind::Infantry)++foot;
         if(foot<6)queue({OrderKind::Build,player_,0,0,allied?"E1":"E2",{}});
         queue({OrderKind::Build,player_,0,0,allied?"MTNK":"HTNK",{}});
-        if(frame<120) return;
+        if(frame<120 || passive_) return;
         std::vector<std::uint32_t> fighters;
         for(const auto& e:world_.entities) if(e.house_id==player_&&fighter(e))fighters.push_back(e.id);
         for(const auto id:fighters) {
@@ -1217,6 +1220,22 @@ public:
             }
             std::cerr<<"Match frame="<<frame<<" player="<<ours<<" computer="<<theirs
                 <<" moved="<<moved<<" fired="<<fired<<" impacts="<<impacts<<" built="<<built<<'\n';
+        }
+        if(census_ && (frame%600==0 || victory_.settled())) {
+            for(const auto& h:world_.houses) {
+                if(h.id!=player_ && !is_enemy(h.id))continue;
+                int st=0,un=0,inf=0,air=0,miners=0,new_st=0,new_un=0;
+                auto& seen=census_seen_[h.id];
+                for(const auto& e:world_.entities)if(e.house_id==h.id&&live(e)&&e.kind!=w::Kind::Terrain) {
+                    if(e.kind==w::Kind::Structure)++st;else if(e.kind==w::Kind::Infantry)++inf;
+                    else if(e.kind==w::Kind::Aircraft)++air;else ++un;
+                    if(e.type=="HARV"||e.type=="CMIN")++miners;
+                    if(seen.insert(e.id).second){if(e.kind==w::Kind::Structure)++new_st;else ++new_un;}
+                }
+                std::cerr<<"CENSUS frame="<<frame<<" house="<<h.id<<" country="<<h.country
+                    <<" cash="<<h.cash.value_or(0)<<" structures="<<st<<" vehicles="<<un<<" infantry="<<inf
+                    <<" aircraft="<<air<<" miners="<<miners<<" new_structures="<<new_st<<" new_units="<<new_un<<'\n';
+            }
         }
         if(victory_.settled()) {
             building_tool_=BuildingTool::None;
