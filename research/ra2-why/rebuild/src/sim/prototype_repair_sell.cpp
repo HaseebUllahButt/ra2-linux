@@ -31,8 +31,10 @@ WorldHouse* find_house(World& world, std::uint32_t id) {
     return it == world.houses.end() ? nullptr : &*it;
 }
 
-// Original side order: 0 Allied, 1 Soviet, 2 third (gamemd 00451330 reads the
-// House side index and picks one of the three [General] divisors).
+// Original side order: 0 Allied, 1 Soviet, 2 third. Base game.exe 0x0044C520
+// picks the Soviet divisor (RulesClass +0x1164) only for a side value of 1;
+// every other value picks the Allied divisor (+0x1160). The parser
+// FUN_00647F40 reads both divisors; there is no third divisor.
 std::optional<std::int32_t> house_side(const WorldHouse& house, const rules::IniFile& rules) {
     if (house.side_index) return house.side_index;
     const auto* sides = rules.find_section("Sides");
@@ -141,8 +143,9 @@ PrototypeRepairSellRules PrototypeRepairSellRules::load(const rules::IniFile& ru
     result.refund_percent = rules.read_double("General", "RefundPercent", -1.0);
     result.allied_survivor_divisor = rules.read_integer("General", "AlliedSurvivorDivisor", 0);
     result.soviet_survivor_divisor = rules.read_integer("General", "SovietSurvivorDivisor", 0);
-    // The base RULES.INI has no third side; keep the Yuri's Revenge value.
-    result.third_survivor_divisor = rules.read_integer("General", "ThirdSurvivorDivisor", 750);
+    // The RULES parser FUN_00647F40 reads only the Allied and Soviet
+    // survivor divisors (+0x1160 and +0x1164). The installed RULES.INI has
+    // no third divisor and the count body 0x0044C520 reads none.
     if (result.repair_percent <= 0.0 || result.repair_percent > 1.0)
         throw std::runtime_error("Missing or invalid [General] RepairPercent");
     if (result.repair_rate_minutes <= 0.0)
@@ -151,8 +154,7 @@ PrototypeRepairSellRules PrototypeRepairSellRules::load(const rules::IniFile& ru
         throw std::runtime_error("Missing or invalid [General] RepairStep");
     if (result.refund_percent < 0.0 || result.refund_percent > 1.0)
         throw std::runtime_error("Missing or invalid [General] RefundPercent");
-    if (result.allied_survivor_divisor <= 0 || result.soviet_survivor_divisor <= 0 ||
-        result.third_survivor_divisor <= 0)
+    if (result.allied_survivor_divisor <= 0 || result.soviet_survivor_divisor <= 0)
         throw std::runtime_error("Missing or invalid [General] survivor divisors");
     return result;
 }
@@ -162,23 +164,32 @@ PrototypeRepairSell::PrototypeRepairSell(const rules::IniFile& base_rules,
     : rules_(base_rules), art_(art_rules), limits_(PrototypeRepairSellRules::load(base_rules)) {}
 
 std::int32_t PrototypeRepairSell::repair_cost_per_step(const std::string& type) const {
-    // TODO-ORIGINAL: the RA2 TechnoTypeClass::Repair_Cost rounding (type
-    // virtual +B0, read by gamemd 00450630) was not recovered. This is the
-    // visible RA1 shape with the RA2 percent value: Cost / (Strength /
-    // RepairStep) is integer division first, then the percent multiply
-    // truncates. Zero cost repairs for free, like an original truncated zero.
+    // Recovered from game.exe: the TechnoTypeClass vtable is 0x007AD080
+    // (RTTI .?AVTechnoTypeClass@@); BuildingTypeClass 0x0079D1F8 inherits
+    // the same slots. Slot +0xB0 is 0x006DAEC0, the per-step repair cost:
+    // Cost (virtual +0xAC) divided by (Strength / RepairStep), times
+    // RepairPercent (RulesClass +0x1338), truncated, with a minimum of 1.
+    // Slot +0xB4 is 0x006DAF10, which returns RepairStep (RulesClass
+    // +0x1334). A zero Cost divides safely and still clamps to 1.
+    // TODO-ORIGINAL: this guard returns 0 for a type without Strength or
+    // with a zero divisor; the original would divide by zero instead.
     const auto cost = rules_.read_integer(type, "Cost", 0);
     const auto strength = rules_.read_integer(type, "Strength", 0);
-    if (cost <= 0 || strength <= 0) return 0;
+    if (strength <= 0) return 0;
     const auto divisor = strength / limits_.repair_step;
     if (divisor <= 0) return 0;
-    return static_cast<std::int32_t>(static_cast<double>(cost / divisor) * limits_.repair_percent);
+    const auto value = static_cast<std::int32_t>(
+        static_cast<double>(cost / divisor) * limits_.repair_percent);
+    return value < 1 ? 1 : value;
 }
 
 std::int32_t PrototypeRepairSell::refund_amount(const std::string& type) const {
-    // RA1 TechnoClass::Refund_Amount shape: Cost times RefundPercent for a
-    // human house, truncated. The house CostBias is not modeled.
-    // TODO-ORIGINAL: gamemd reads the refund through type virtual +B8.
+    // Recovered from game.exe: the refund virtual is TechnoTypeClass vtable
+    // 0x007AD080 slot +0xB8 = 0x006DAD80. It multiplies the Cost (virtual
+    // +0xAC) by RefundPercent (RulesClass +0x13A0) and truncates. Its extra
+    // arguments can force the full price and apply a house factor.
+    // TODO-ORIGINAL: the house factor and full-price argument are not
+    // modeled; this is the plain human-house shape.
     const auto cost = rules_.read_integer(type, "Cost", 0);
     if (cost <= 0) return 0;
     return static_cast<std::int32_t>(static_cast<double>(cost) * limits_.refund_percent);
@@ -186,19 +197,23 @@ std::int32_t PrototypeRepairSell::refund_amount(const std::string& type) const {
 
 std::int32_t PrototypeRepairSell::survivor_count(const session::world::House& house,
     const std::string& type) const {
-    // gamemd 00451330: crewed buildings divide the sell cost by the side
-    // divisor and clamp the count to 1..5. A captured building doubles the
-    // divisor; capture state is not modeled here.
+    // Recovered from game.exe 0x0044C520 (BuildingClass vtable 0x0079CBBC
+    // slot 172): the refund (type virtual +0xB8 with the owner and 0)
+    // divided by the side divisor, clamped to 1..5, zero refund included.
+    // Only a side value of 1 picks the Soviet divisor; every other value
+    // picks the Allied one. A zero divisor returns 0. TODO-ORIGINAL: the
+    // original gates on BuildingClass +0x5B0 and a BuildingTypeClass byte
+    // at +0xAD9 (read through the building's type pointer at +0x418, so
+    // likely Crewed) and doubles the divisor for a captured building
+    // (+0x5B3); this keeps the Crewed rules check as its gate and does not
+    // model capture.
     if (!rules_.read_bool(type, "Crewed")) return 0;
-    const auto refund = refund_amount(type);
-    if (refund <= 0) return 0;
     const auto side = house_side(house, rules_);
     if (!side) return 0;
-    const auto divisor = *side == 0 ? limits_.allied_survivor_divisor
-        : *side == 1 ? limits_.soviet_survivor_divisor
-        : *side == 2 ? limits_.third_survivor_divisor : 0;
+    const auto divisor = *side == 1 ? limits_.soviet_survivor_divisor
+        : limits_.allied_survivor_divisor;
     if (divisor <= 0) return 0;
-    const auto count = refund / divisor;
+    const auto count = refund_amount(type) / divisor;
     return count < 1 ? 1 : count > 5 ? 5 : count;
 }
 
@@ -357,8 +372,12 @@ PrototypeRepairSell::SellResult PrototypeRepairSell::sell(World& world, std::uin
 
 PrototypeRepairSell::RepairTick PrototypeRepairSell::tick(World& world, std::uint32_t game_frame) {
     RepairTick result;
-    // Original interval: RepairRate minutes as frames, at least one. The
-    // gamemd repair AI 00450630 divides the shared frame by this interval.
+    // Original interval, recovered from game.exe 0x0044BBA1: the shared
+    // frame DAT_00A40D2C divided by trunc(RepairRate * 900.0), the 900.0
+    // constant read from 0x0079B608, and a step runs only on a zero
+    // remainder. The parser FUN_00647F40 stores RepairRate at RulesClass
+    // +0x1348. TODO-ORIGINAL: this max(1, ...) guard replaces the
+    // original's divide-by-zero on a zero interval.
     const auto interval = static_cast<std::uint32_t>(std::max(1,
         static_cast<std::int32_t>(limits_.repair_rate_minutes * limits_.ticks_per_minute)));
     if (last_frame_) {

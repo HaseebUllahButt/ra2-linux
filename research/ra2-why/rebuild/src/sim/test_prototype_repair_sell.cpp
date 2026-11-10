@@ -29,7 +29,6 @@ IniFile synthetic_rules() {
         "RefundPercent=50%\n"
         "AlliedSurvivorDivisor=500\n"
         "SovietSurvivorDivisor=250\n"
-        "ThirdSurvivorDivisor=750\n"
         "[Sides]\nGDI=AlliedCountry\nNod=SovietCountry\n"
         "[AlliedCountry]\nSide=GDI\n"
         "[SovietCountry]\nSide=Nod\n"
@@ -37,6 +36,8 @@ IniFile synthetic_rules() {
         "[CHEAP]\nCost=500\nStrength=400\nCrewed=yes\n"
         "[BARE]\nCost=2000\nStrength=1000\nCrewed=no\n"
         "[PRICY]\nCost=6000\nStrength=1000\nCrewed=yes\n"
+        "[TINY]\nCost=10\nStrength=1000\nCrewed=no\n"
+        "[FREE]\nCost=0\nStrength=1000\nCrewed=yes\n"
         "[E1]\nStrength=125\n"
         "[E2]\nStrength=100\n");
     return rules;
@@ -122,8 +123,8 @@ void check_rules_load() {
     require(limits.repair_percent == 0.15 &&
             std::abs(limits.repair_rate_minutes - 0.016) < 1e-6 &&
             limits.repair_step == 8 && limits.refund_percent == 0.5 &&
-            limits.allied_survivor_divisor == 500 && limits.soviet_survivor_divisor == 250 &&
-            limits.third_survivor_divisor == 750, "Rules load lost an authored value");
+            limits.allied_survivor_divisor == 500 && limits.soviet_survivor_divisor == 250,
+        "Rules load lost an authored value");
     bool threw = false;
     try {
         IniFile broken;
@@ -140,6 +141,11 @@ void check_money_math(const IniFile& rules, const IniFile& art) {
     // RA1 shape: Cost / (Strength / RepairStep) * RepairPercent, truncated.
     require(sell.repair_cost_per_step("WORKS") == 2, "War factory repair step cost changed");
     require(sell.repair_cost_per_step("CHEAP") == 1, "Cheap building repair step cost changed");
+    // Base 0x006DAEC0 clamps the step cost to a minimum of 1 credit:
+    // TINY is 10 / (1000 / 8) = 0 before the percent, so the clamp decides.
+    require(sell.repair_cost_per_step("TINY") == 1, "Repair step cost minimum clamp changed");
+    // A zero Cost divides safely and still clamps to 1.
+    require(sell.repair_cost_per_step("FREE") == 1, "Zero cost repair step clamp changed");
     require(sell.refund_amount("WORKS") == 1000, "War factory refund changed");
     require(sell.refund_amount("CHEAP") == 250, "Cheap building refund changed");
     const sw::House allied = house(1, "AlliedCountry", 0);
@@ -151,6 +157,12 @@ void check_money_math(const IniFile& rules, const IniFile& art) {
     require(sell.survivor_count(allied, "BARE") == 0, "Uncrewed building dropped crew");
     require(std::string(sell.crew_type(allied)) == "E1" &&
             std::string(sell.crew_type(soviet)) == "E2", "Crew infantry type changed");
+    // Base 0x0044C520: only a side value of 1 uses the Soviet divisor. A
+    // third-side house (2) uses the Allied divisor: 1000 / 500 = 2.
+    const sw::House third = house(4, "AlliedCountry", 0, 2);
+    require(sell.survivor_count(third, "WORKS") == 2, "Third side did not use the Allied divisor");
+    // Zero refund still clamps to 1 crew: 0 / 500 = 0, clamp to 1.
+    require(sell.survivor_count(allied, "FREE") == 1, "Zero refund crew clamp changed");
     // Side fallback through the [Sides] list when the house has no index.
     const sw::House no_index = house(3, "SovietCountry", 0);
     require(sell.survivor_count(no_index, "WORKS") == 4, "Side lookup ignored the country side");
@@ -323,15 +335,32 @@ void check_real_data(const char* game_dir) {
     rules.parse(std::string_view(reinterpret_cast<const char*>(rules_bytes->data()), rules_bytes->size()));
     art.parse(std::string_view(reinterpret_cast<const char*>(art_bytes->data()), art_bytes->size()));
 
+    // Base RULES.INI numbers, read back through the loader. The installed
+    // base file has RepairPercent=15%, RepairRate=.016, RepairStep=8,
+    // RefundPercent=50%, AlliedSurvivorDivisor=500, SovietSurvivorDivisor=250
+    // and no ThirdSurvivorDivisor key.
+    const auto limits = PrototypeRepairSellRules::load(rules);
+    require(limits.repair_percent == 0.15 &&
+            std::abs(limits.repair_rate_minutes - 0.016) < 1e-6 &&
+            limits.repair_step == 8 && limits.refund_percent == 0.5,
+        "Base RULES.INI repair values changed");
+    require(limits.allied_survivor_divisor == 500 &&
+            limits.soviet_survivor_divisor == 250,
+        "Base RULES.INI survivor divisors changed");
+
     PrototypeRepairSell sell(rules, &art);
+    // GAWEAP Cost 2000, Strength 1000; GAPILE Cost 500, Strength 500.
     require(sell.repair_cost_per_step("GAWEAP") == 2, "Base war factory repair step cost changed");
     require(sell.repair_cost_per_step("GAPILE") == 1, "Base barracks repair step cost changed");
     require(sell.refund_amount("GAWEAP") == 1000, "Base war factory refund changed");
     require(sell.refund_amount("GAPILE") == 250, "Base barracks refund changed");
     const sw::House allied = house(1, "Americans", 0);
     const sw::House soviet = house(2, "Russians", 0);
+    // GAPILE refund 250: Allied 250/500 clamps to 1, Soviet 250/250 is 1.
     require(sell.survivor_count(allied, "GAWEAP") == 2, "Base Allied crew count changed");
     require(sell.survivor_count(soviet, "GAWEAP") == 4, "Base Soviet crew count changed");
+    require(sell.survivor_count(allied, "GAPILE") == 1, "Base Allied barracks crew changed");
+    require(sell.survivor_count(soviet, "GAPILE") == 1, "Base Soviet barracks crew changed");
     require(std::string(sell.crew_type(allied)) == "E1" &&
             std::string(sell.crew_type(soviet)) == "E2", "Base crew types changed");
 
