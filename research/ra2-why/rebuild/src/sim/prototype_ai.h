@@ -81,6 +81,12 @@ public:
     // House +138, set by the House constructor 004E18C0. When it is clear,
     // 004E9660 removes Naval nodes from the base plan.
     bool naval_allowed() const noexcept { return naval_; }
+    // House +53BC as a Cell, once the house has had a construction yard.
+    std::optional<ra2map::Cell> base_centre(std::uint32_t house) const {
+        const auto found = base_centres_.find(house);
+        if (found == base_centres_.end()) return std::nullopt;
+        return found->second;
+    }
 
     // Parsed AI.INI records. Public so tests can check the base data.
     struct TaskForce { std::string id; std::vector<std::pair<std::int32_t, std::string>> members; };

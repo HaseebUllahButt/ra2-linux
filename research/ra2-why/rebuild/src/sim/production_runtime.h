@@ -113,6 +113,8 @@ struct PlacementMap {
     std::map<std::uint32_t,PlacementCell> cells;
     std::optional<PlacementCell> fallback;
     std::optional<std::array<bool,12>> buildable;   // LandType records at 00850EC0.
+    // LandType speed rows at 00850EA0 (nine floats a row), by SpeedType.
+    std::optional<std::array<std::array<float,8>,12>> land_speed;
     std::optional<std::int32_t> scenario_init;      // 00A40774.
     std::optional<bool> object_scan;                // 00A40958.
     std::optional<bool> editor_mode;                // 00A40D13.
@@ -130,7 +132,9 @@ struct PlacementBuilding {
 
 enum class Placement { Legal, Illegal, NeedsInput, Unsupported };
 std::uint32_t packed_cell(CellXY);
-// 004718B0 for a building type and speed type -1, outside special fence/tile/wall/naval branches.
+// 004718B0 for a building type, outside special fence/tile/wall branches.
+// A type with a SpeedType (WaterBound) needs a nonzero land speed; a Naval
+// type with SpeedType -1 (shore tiles) is not recovered.
 Placement original_clear_to_build(const PlacementMap&, CellXY, const PlacementBuilding&);
 // 0045D880 then 006DE0E0 for a BuildingType.
 Placement original_legal_placement(const PlacementMap&, CellXY origin, const PlacementBuilding&);
@@ -166,6 +170,7 @@ struct TypeFacts {
     std::int32_t extra_output=0, extra_drain=0; // +C70/+C74 from ExtraPower.
     bool sensor_array=false, tick_tank=false, icbm=false, artillery=false; // +1362 +135E +1363 +1364.
     bool wall=false;                     // +1215.
+    std::int32_t planning_side=-1;       // +5EC AIBasePlanningSide.
 };
 
 struct Catalog {
@@ -173,6 +178,12 @@ struct Catalog {
     std::vector<TypeFacts> buildings, units, infantry, aircraft; // Heap order.
     std::array<std::vector<std::int32_t>,6> generic_prerequisites; // Rules +2B8.. lists.
     std::optional<std::array<bool,12>> buildable;                  // LandType Buildable.
+    // LandType speeds by SpeedType, 0064D610: each key defaults to 1.0 and
+    // is capped at 1.0; Winged is always 1.0.
+    std::optional<std::array<std::array<float,8>,12>> land_speed;
+    std::vector<std::int32_t> shipyards;  // [General] Shipyard, Rules +790, heap indexes.
+    std::vector<bool> overlay_wall;       // [OverlayTypes] order: Wall (OverlayType +278).
+    std::int32_t naval_yard_adjacency=20; // Rules +C00 AINavalYardAdjacency, constructor 00640B80.
     double build_speed=0;                 // Rules +13B0.
     float minimum_low_power=0, maximum_low_power=0, low_power_penalty=0, multiple_factory=0;
     double wall_coefficient=0;
@@ -260,6 +271,20 @@ std::optional<std::vector<std::pair<CellXY,Placement>>> placement_cells(
 // its status and detail, or nothing when place() would reach that write.
 std::optional<Outcome> place_failure(const session::world::Snapshot&,const FactorySet&,const Catalog&,
                                      std::uint32_t house_id,const std::string& type,CellXY cell);
+// House::Find_Build_Location 004F03C0, the branch for a Naval building
+// (TechnoType +ADA): where a computer house puts its shipyard.
+// Found: the Cell. None: the original returns 00A40F10 and the product
+// cannot leave the factory. NeedsInput: a Cell or house fact is unknown.
+enum class SiteStatus { Found, None, NeedsInput };
+struct NavalSite { SiteStatus status=SiteStatus::NeedsInput; CellXY cell; std::string detail; };
+// base_centre is House +53BC (004F5BE0, the newest construction yard Cell).
+NavalSite naval_yard_site(const session::world::Snapshot&,const FactorySet&,const Catalog&,
+                          std::uint32_t house_id,CellXY base_centre,std::uint32_t frame);
+// A computer house starts a building without Can_Build: 0044B480 makes the
+// construction yard factory (004B90A0) and calls Factory::Set 004B9440,
+// which only creates the object. Then Factory::Start 004B9670.
+Outcome begin_computer_building(session::world::Snapshot&,FactorySet&,const Catalog&,std::uint32_t house_id,
+                                const std::string& type,std::uint64_t frame);
 // Event PLACE with a cell: House::Place_Object 004E6950 building path.
 Outcome place(session::world::Snapshot&,FactorySet&,const Catalog&,std::uint32_t house_id,
     const std::string& type,CellXY,std::uint64_t frame);
