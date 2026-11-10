@@ -137,6 +137,27 @@ def compare(orig_path, native_path, country, top, brief, rules):
         elif had_structures and s.get('vehicles', 0) + s.get('infantry', 0) == 0:
             defeat = s['min']
             break
+    # The original game also ends when it freezes: from one sample on, no
+    # house changes for 3 minutes or more until the log ends (the defeat
+    # screen stops the game).
+    groups = []  # one per minute: [key, first min, last min]
+    for s in orig_all:
+        m = s['min']
+        if groups and groups[-1][2] == m:
+            groups[-1][3].append(s)
+            continue
+        groups.append([None, m, m, [s]])
+    for g in groups:
+        g[0] = tuple(sorted((k, repr(v)) for s in g[3]
+                            for k, v in s.items()
+                            if k not in ('sec', 'frame', 'min') and not k.startswith('new_')))
+    freeze = None
+    for i in range(len(groups) - 1, -1, -1):
+        if groups[i][0] != groups[-1][0]:
+            break
+        freeze = groups[i][1]
+    if freeze is not None and groups[-1][2] - freeze >= 3.0:
+        defeat = freeze if defeat is None else min(defeat, freeze)
     if defeat is not None:
         end = min(end, defeat)
     diffs = []  # (score, text)
