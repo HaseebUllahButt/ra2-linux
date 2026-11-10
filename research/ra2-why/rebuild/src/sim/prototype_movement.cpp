@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+
 #include <functional>
 #include <limits>
 #include <map>
@@ -124,6 +125,11 @@ Pass pass_cell(const World& w,ra2map::Cell c,std::uint32_t self,const Context* c
     return open_state(it->second,key(c),self,ctx);
 }
 struct RouteResult { PrototypeMoveStatus status=PrototypeMoveStatus::Blocked;std::vector<ra2map::Cell> path;std::string detail; };
+// Counters for the tests: they prove which search answered a route.
+// kernel_routes counts kernel answers that produced a route (Found or
+// Partial); kernel_no_path counts kernel NoPath answers; legacy_routes
+// counts routes the conservative prototype search completed.
+using RouteTrace=PrototypeRouteTrace;
 // Work shared by the searches of one route_or_nearby call. The World, the
 // Unit and the start do not change during that call, so each Cell answer
 // of open_cell() stays the same. After one search finds no route, its
@@ -194,31 +200,49 @@ struct SearchMemo {
     }
     static constexpr std::size_t lanes=8;
 };
-RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map::Cell goal,SearchMemo* memo=nullptr,const OriginalDistance* distance=nullptr) {
+RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map::Cell goal,SearchMemo* memo=nullptr,const OriginalDistance* distance=nullptr,RouteTrace* trace=nullptr) {
+    // Both modes need the same validated inputs, so every check runs before
+    // either search starts.
+    if (!world.cell_order) return {PrototypeMoveStatus::NeedsInput,{},"prototype Cell allocation order is unresolved"};
+    if (start.x>=512 || start.y>=512 || goal.x>=512 || goal.y>=512)
+        return {PrototypeMoveStatus::Invalid,{},"start or goal is outside the Cell array"};
+    if (same(start,goal)) return {PrototypeMoveStatus::Complete,{},{}};
     if (distance) {
-        // Resolved flat Cells of the search box feed the recovered original
-        // ground path kernel. Open or Busy Cells enter the pool with entry
-        // status 0, Closed or Held Cells with status 7. A bridge Cell keeps
-        // its original +100 flag, so the kernel reports Unsupported and the
-        // conservative legacy search below takes over. A kernel NeedsInput
-        // is never converted to success.
-        const int margin=32;
-        const int left=std::max(0,std::min(start.x,goal.x)-margin),right=std::min(511,std::max(start.x,goal.x)+margin);
-        const int top=std::max(0,std::min(start.y,goal.y)-margin),bottom=std::min(511,std::max(start.y,goal.y)+margin);
+        // The recovered original ground path kernel reads every allocated
+        // Cell of the World. The search never creates a Cell that the map
+        // does not hold. Open or Busy Cells enter the pool with entry status
+        // 0, Closed or Held Cells with status 7, and an unresolved Cell with
+        // no status. Cell +140 bridge state comes from terrain.bridge, not
+        // from cell_flag_100. Height comes from the terrain; a Cell without
+        // a height level reports kernel NeedsInput instead of a zero height.
         std::vector<ResolvedGroundPathCell> cells;
-        cells.reserve(static_cast<std::size_t>(right-left+1)*(bottom-top+1));
-        for (int y=top;y<=bottom;++y) for (int x=left;x<=right;++x) {
-            const ra2map::Cell at{static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)};
+        cells.reserve(world.cells.size());
+        for (const auto& item:world.cells) {
+            if (item.first>=512u*512u) continue; // open_cell() never looks up such a key.
             ResolvedGroundPathCell resolved{};
-            resolved.cell=at;
-            const auto state=pass_cell(world,at,id,memo?memo->ctx:nullptr);
-            resolved.entry_status=state==Pass::Open||state==Pass::Busy?0:7;
-            resolved.height=EntryHeightCell{};
-            if (world.cells.count(key(at)) && world.cells.at(key(at)).cell_flag_100) resolved.height->flag_100=true;
+            resolved.cell={static_cast<std::uint16_t>(item.first%512),static_cast<std::uint16_t>(item.first/512)};
+            const auto state=open_state(item.second,item.first,id,memo?memo->ctx:nullptr);
+            if (state==Pass::Unresolved) resolved.entry_status=std::nullopt;
+            else resolved.entry_status=state==Pass::Open||state==Pass::Busy?0:7;
+            if (item.second.terrain && item.second.terrain->height_level) {
+                EntryHeightCell height{};
+                if (item.second.terrain->height_level)
+                    height.level=static_cast<std::int8_t>(*item.second.terrain->height_level);
+                if (item.second.terrain->ramp_index)
+                    height.ramp=static_cast<std::uint8_t>(*item.second.terrain->ramp_index);
+                height.flag_100=item.second.terrain->bridge.value_or(false);
+                resolved.height=height;
+            } // No height level: height stays absent, so the kernel reports NeedsInput.
+            if (item.second.cell_flag_40000) resolved.marked_40000=*item.second.cell_flag_40000;
             cells.push_back(resolved);
         }
-        const auto found=find_original_ground_path(start,goal,cells,*distance,-1);
-        if (found.status==PathStatus::Found || found.status==PathStatus::Partial) {
+        // Nonmonotone paths need the original postprocessing pass. The
+        // recovered slice supports the resolved zero actor threat weight
+        // only, and the Cell +40000 mark of every Cell must be resolved.
+        PathPostprocessing postprocessing{};postprocessing.actor_threat_weight=0.0;
+        const auto found=find_original_ground_path(start,goal,cells,*distance,-1,nullptr,&postprocessing);
+        if (found.status==PathStatus::Found) {
+            if (trace) ++trace->kernel_routes;
             RouteResult out{PrototypeMoveStatus::Complete,{},"original ground path kernel"};
             auto at=start;
             for (const auto direction:found.directions) {
@@ -227,17 +251,27 @@ RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map:
             }
             return out;
         }
-        if (found.status==PathStatus::NeedsInput) return {PrototypeMoveStatus::NeedsInput,{},found.evidence};
+        if (found.status==PathStatus::Partial) {
+            // A partial path is not an arrival. The move keeps its goal, so
+            // tick() plans again from the end of the partial path.
+            if (trace) ++trace->kernel_routes;
+            return RouteResult{PrototypeMoveStatus::Blocked,{},found.directions.empty()?
+                "original kernel partial path is empty":"original kernel partial path"};
+        }
+        if (found.status==PathStatus::NeedsInput) return RouteResult{PrototypeMoveStatus::NeedsInput,{},found.evidence};
+        if (found.status==PathStatus::NoPath) {
+            if (trace) ++trace->kernel_no_path;
+            return {PrototypeMoveStatus::Blocked,{},"original kernel found no path"};
+        }
+        // Unsupported: an explicit unsupported domain only, such as a bridge
+        // Cell. The conservative legacy search below takes over.
     }
     const auto open_cell=[&](const World& w,ra2map::Cell c,std::uint32_t self) {
         return memo?memo->cell(w,c,self):pass_cell(w,c,self,nullptr);
     };
-    if (!world.cell_order) return {PrototypeMoveStatus::NeedsInput,{},"prototype Cell allocation order is unresolved"};
-    if (goal.x>=512 || goal.y>=512) return {PrototypeMoveStatus::Invalid,{},"goal is outside the Cell array"};
     const auto destination=open_cell(world,goal,id);
     if (destination==Pass::Unresolved) return {PrototypeMoveStatus::NeedsInput,{},"goal Cell state is unresolved"};
     if (destination==Pass::Closed || destination==Pass::Held) return {PrototypeMoveStatus::Blocked,{},"goal Cell is blocked"};
-    if (same(start,goal)) return {PrototypeMoveStatus::Complete,{},{}};
     struct Node { int f,g;std::uint32_t serial,index; };
     struct Later { bool operator()(const Node& a,const Node& b) const {return a.f!=b.f?a.f>b.f:a.serial>b.serial;} };
     constexpr int infinity=std::numeric_limits<int>::max();
@@ -265,7 +299,9 @@ RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map:
                 if (cursor==0xffffffffu) return {PrototypeMoveStatus::Invalid,{},"prototype path chain is invalid"};
                 out.push_back({static_cast<std::uint16_t>(cursor%512),static_cast<std::uint16_t>(cursor/512)});
             }
-            std::reverse(out.begin(),out.end());return {PrototypeMoveStatus::Complete,std::move(out),{}};
+            std::reverse(out.begin(),out.end());
+            if (trace) ++trace->legacy_routes;
+            return {PrototypeMoveStatus::Complete,std::move(out),{}};
         }
         const int x=int(node.index%512),y=int(node.index/512);
         for (unsigned d=0;d<8;++d) {
@@ -300,11 +336,11 @@ RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map:
 // every Unit is a wall. Each ring around the goal is read nearest to the
 // start first, so the Unit stops on the near side and does not drive
 // around the goal. If the start is the best open Cell, the Unit stays.
-RouteResult route_or_nearby(const World& world,std::uint32_t id,ra2map::Cell start,ra2map::Cell goal,const Context* ctx,const OriginalDistance* original_distance=nullptr) {
+RouteResult route_or_nearby(const World& world,std::uint32_t id,ra2map::Cell start,ra2map::Cell goal,const Context* ctx,const OriginalDistance* original_distance=nullptr,RouteTrace* trace=nullptr) {
     static thread_local SearchMemo shared;
     struct Clear { SearchMemo& m; ~Clear() { m.clear(); } } clear{shared};
     auto* memo=&shared;memo->ctx=ctx;
-    auto result=route(world,id,start,goal,memo,original_distance);
+    auto result=route(world,id,start,goal,memo,original_distance,trace);
     if (result.status!=PrototypeMoveStatus::Blocked) return result;
     std::vector<std::pair<std::int64_t,ra2map::Cell>> ring;
     for (int radius=1;radius<=8;++radius) {
@@ -326,7 +362,7 @@ RouteResult route_or_nearby(const World& world,std::uint32_t id,ra2map::Cell sta
             // A Cell outside the known reachable set gives the same "no route"
             // result that a full search would return.
             if (memo->have_reachable && !memo->reachable[key(candidate)]) continue;
-            auto alternative=route(world,id,start,candidate,memo,original_distance);
+            auto alternative=route(world,id,start,candidate,memo,original_distance,trace);
             if (alternative.status==PrototypeMoveStatus::Complete && !alternative.path.empty()) return alternative;
             if (alternative.status==PrototypeMoveStatus::NeedsInput || alternative.status==PrototypeMoveStatus::Invalid) return alternative;
         }
@@ -519,7 +555,7 @@ PrototypeMoveResult PrototypeMovement::issue(const World& world,std::uint32_t id
     const auto soldiers=soldiers_of(world,*this);
     const Context ctx{&movers,&claims,&soldiers,self.crusher,actor->kind==session::world::Kind::Infantry,actor->house_id,rules_?&self.ground:nullptr};
     const auto path=route_or_nearby(world,id,*actor->cell,goal,&ctx,
-        original_path_distance_?&*original_path_distance_:nullptr);
+        original_path_distance_?&*original_path_distance_:nullptr,&trace_);
     if (path.status!=PrototypeMoveStatus::Complete) return fail(path.status,path.detail);
     moves_[id]={goal,speed,path.path};
     return {PrototypeMoveStatus::Complete,{},{},{},{},{}};
@@ -728,12 +764,22 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
                 // The route ended on a nearby Cell because the goal was held
                 // when it was planned, or a new order began part way into a
                 // step. Plan once more from the current Cell.
-                const auto revised=route_or_nearby(candidate,id,*actor->cell,movement->goal,&ctx);
+                const auto revised=route_or_nearby(candidate,id,*actor->cell,movement->goal,&ctx,
+                    original_path_distance_?&*original_path_distance_:nullptr,&trace_);
                 if (revised.status==PrototypeMoveStatus::NeedsInput || revised.status==PrototypeMoveStatus::Invalid) { failure=fail(revised.status,revised.detail);return Next::Fail; }
                 if (revised.status==PrototypeMoveStatus::Complete) movement->path=revised.path;
+                else if (revised.status==PrototypeMoveStatus::Blocked) return Next::Blocked;
                 else if (!adjacent) movement->path.clear();
             }
-            if (movement->path.empty()) return Next::Done;
+            // A route that ends on the current Cell is not an arrival unless
+            // the goal is this Cell, or a moving Unit only holds the goal
+            // for now. A closed goal keeps its route for the next replan.
+            if (movement->path.empty()) {
+                if (same(*actor->cell,movement->goal)) return Next::Done;
+                const auto goal_state=pass_cell(candidate,movement->goal,id,&ctx);
+                if (goal_state==Pass::Unresolved) { failure=fail(PrototypeMoveStatus::NeedsInput,"prototype goal Cell state is unresolved");return Next::Fail; }
+                return goal_state==Pass::Held||goal_state==Pass::Busy?Next::Done:Next::Blocked;
+            }
             target=movement->path.front();
             if (face(target)) return Next::Turn;
             auto available=pass_cell(candidate,target,id,&ctx);
@@ -752,7 +798,8 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
                 // A wall or a stopped Unit: plan around it, through moving
                 // Units. A Unit that blocks too long becomes a wall too.
                 const bool hard=available==Pass::Busy;
-                const auto revised=route_or_nearby(candidate,id,*actor->cell,movement->goal,hard?&strict:&ctx);
+                const auto revised=route_or_nearby(candidate,id,*actor->cell,movement->goal,hard?&strict:&ctx,
+                    original_path_distance_?&*original_path_distance_:nullptr,&trace_);
                 if (revised.status==PrototypeMoveStatus::NeedsInput || revised.status==PrototypeMoveStatus::Invalid) { failure=fail(revised.status,revised.detail);return Next::Fail; }
                 if (revised.status==PrototypeMoveStatus::Blocked) return Next::Blocked;
                 movement->path=revised.path;
@@ -961,21 +1008,31 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
             moves.erase(id);movers.erase(id);continue;
         }
         if (movement->path.empty() && !same(*actor->cell,movement->goal)) {
-            const auto revised=route_or_nearby(candidate,id,*actor->cell,movement->goal,&ctx);
+            const auto revised=route_or_nearby(candidate,id,*actor->cell,movement->goal,&ctx,
+                original_path_distance_?&*original_path_distance_:nullptr,&trace_);
             if (revised.status==PrototypeMoveStatus::NeedsInput || revised.status==PrototypeMoveStatus::Invalid) return fail(revised.status,revised.detail);
             if (revised.status==PrototypeMoveStatus::Complete) movement->path=revised.path;
         }
         // A blocked goal can resolve to the current Cell after entry but
         // before its center. Finish the step before releasing the route.
         if (movement->path.empty() && !at_center()) movement->path.push_back(*actor->cell);
-        if (movement->path.empty()) { finish(id,actor);continue; }
+        // A route that ends on the current Cell is not an arrival unless
+        // the goal is this Cell, or a moving Unit only holds the goal.
+        if (movement->path.empty() && same(*actor->cell,movement->goal)) { finish(id,actor);continue; }
+        if (movement->path.empty()) {
+            const auto goal_state=pass_cell(candidate,movement->goal,id,&ctx);
+            if (goal_state==Pass::Unresolved) return fail(PrototypeMoveStatus::NeedsInput,"prototype goal Cell state is unresolved");
+            if (goal_state==Pass::Held || goal_state==Pass::Busy) { finish(id,actor);continue; }
+            block();continue;
+        }
         auto target=movement->path.front();auto available=pass_cell(candidate,target,id,&ctx);
         if (available==Pass::Unresolved) return fail(PrototypeMoveStatus::NeedsInput,"prototype next Cell is unresolved");
         if (available==Pass::Busy && wait_for(target)) { hold();continue; }
         if (available!=Pass::Open) {
             if (goal_distance()<globals_.close_enough && at_center()) { finish(id,actor);continue; }
             const bool hard=available==Pass::Busy;
-            const auto revised=route_or_nearby(candidate,id,*actor->cell,movement->goal,hard?&strict:&ctx);
+            const auto revised=route_or_nearby(candidate,id,*actor->cell,movement->goal,hard?&strict:&ctx,
+                original_path_distance_?&*original_path_distance_:nullptr,&trace_);
             if (revised.status==PrototypeMoveStatus::NeedsInput || revised.status==PrototypeMoveStatus::Invalid) return fail(revised.status,revised.detail);
             if (revised.status==PrototypeMoveStatus::Blocked) { block();continue; }
             movement->path=revised.path;

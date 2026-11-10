@@ -22,6 +22,11 @@ struct PrototypeMoveResult {
     // Infantry killed this frame by a crushing vehicle (base 00705160).
     std::vector<std::uint32_t> crushed;
 };
+// Which search answered routes. Tests read this to prove the original
+// kernel ran and the legacy search did not.
+struct PrototypeRouteTrace {
+    std::uint64_t kernel_routes=0,kernel_no_path=0,legacy_routes=0;
+};
 // Rules values for one object type. Defaults are the original constructor
 // values; from_rules() reads the type's RULES.INI section.
 struct PrototypeMoveProfile {
@@ -56,6 +61,8 @@ public:
     void use_original_path(const OriginalDistance& distance) { original_path_distance_=distance; }
     PrototypeMoveProfile profile(const session::world::Entity&) const;
     const PrototypeMoveGlobals& globals() const { return globals_; }
+    // Route trace counters since this object was created.
+    const PrototypeRouteTrace& route_trace() const { return trace_; }
     // Speed is the original rule speed (Type +5A0, original_rule_speed()).
     // Drive vehicles spend it on track samples; other Units move that many
     // world units per frame. Commands do not change world.
@@ -93,5 +100,6 @@ private:
     PrototypeMoveGlobals globals_;
     mutable std::map<std::string,PrototypeMoveProfile> profiles_;
     std::optional<OriginalDistance> original_path_distance_;
+    PrototypeRouteTrace trace_;
 };
 }
