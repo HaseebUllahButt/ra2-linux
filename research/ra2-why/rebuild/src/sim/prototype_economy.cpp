@@ -35,6 +35,7 @@ bool held_by_friends(const sw::Snapshot& w,const sw::CellState& c,std::uint32_t 
 }
 PrototypeEconomy::PrototypeEconomy(const rules::IniFile& r):rules_(r) {
     movement_.use_rules(rules_);
+    purifier_bonus_=r.read_double("General","PurifierBonus",0.25);
     const auto* overlays=r.find_section("OverlayTypes");
     const auto* types=r.find_section("Tiberiums");
     if(!overlays || !types) return;
@@ -70,6 +71,31 @@ PrototypeEconomy::PrototypeEconomy(const rules::IniFile& r):rules_(r) {
     load_frames_=9*std::max(1,r.read_integer("General","HarvesterLoadRate",2));
     const long double dump=static_cast<long double>(r.read_double("General","HarvesterDumpRate",0.016))*900.0L;
     dump_frames_=dump<1?1:dump>1e6L?1000000:int(std::floor(dump))+(dump==std::floor(dump)?0:1);
+}
+void PrototypeEconomy::set_virtual_purifiers(std::uint32_t house,int count) {
+    virtual_purifiers_[house]=std::max(0,count);
+}
+int PrototypeEconomy::virtual_purifiers(const rules::IniFile& rules,int original_difficulty) {
+    const auto list=rules.read_list("General","AIVirtualPurifiers");
+    if(original_difficulty<0 || std::size_t(original_difficulty)>=list.size()) return 0;
+    return std::max(0,rules::IniFile::integer_value(list[std::size_t(original_difficulty)]).value_or(0));
+}
+// Base 00701580: purifiers = House +52CC (Ore Purifier buildings); zero when
+// the power percentage is below one; plus the virtual purifiers of a
+// computer house. Extra = purifiers * PurifierBonus * load.
+// TODO-ORIGINAL: the original multiplies the bail amount as a float before
+// GiveTiberium; here the credit value is cut to a whole number.
+std::int64_t PrototypeEconomy::purifier_credits(const session::world::Snapshot& w,std::uint32_t house,
+                                                std::int64_t credits) const {
+    int purifiers=0;
+    for(const auto& e:w.entities)
+        if(e.house_id==house && e.kind==session::world::Kind::Structure &&
+           e.lifetime==session::world::Lifetime::Placed && e.resolved_hp.value_or(1)>0 &&
+           rules_.read_bool(e.type,"OrePurifier",false)) ++purifiers;
+    for(const auto& h:w.houses) if(h.id==house && h.power_output && h.power_drain && *h.power_output<*h.power_drain) purifiers=0;
+    if(const auto found=virtual_purifiers_.find(house);found!=virtual_purifiers_.end()) purifiers+=found->second;
+    if(purifiers<=0 || credits<=0) return 0;
+    return std::int64_t(double(purifiers)*purifier_bonus_*double(credits));
 }
 int PrototypeEconomy::load(std::uint32_t id) const { auto i=cargo_.find(id);return i==cargo_.end()?0:i->second.total; }
 int PrototypeEconomy::resource(const sw::CellState& c) const {
@@ -181,7 +207,9 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
                 if(!house) continue;
                 auto full=std::find_if(bag.bails.begin(),bag.bails.end(),[](int b){return b>0;});
                 if(full==bag.bails.end()) { bag={};bag.next=frame+1;continue; }
-                const auto credits=std::int64_t(*full)*resources_[std::size_t(full-bag.bails.begin())].value;
+                const auto base_credits=std::int64_t(*full)*resources_[std::size_t(full-bag.bails.begin())].value;
+                // 00701580 gives the load, then the purifier share of the same load.
+                const auto credits=base_credits+purifier_credits(w,e.house_id,base_credits);
                 *house->cash=int(std::min<std::int64_t>(std::numeric_limits<int>::max(),std::int64_t(*house->cash)+credits));
                 bag.total-=*full;*full=0;bag.next=frame+std::uint32_t(dump_frames_);
                 continue;

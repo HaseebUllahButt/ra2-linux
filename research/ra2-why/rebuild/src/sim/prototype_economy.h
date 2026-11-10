@@ -13,6 +13,13 @@ public:
     explicit PrototypeEconomy(const rules::IniFile& rules);
     void tick(session::world::Snapshot& world, std::uint32_t frame);
     int load(std::uint32_t miner) const;
+    // Base 00701580 (unload): a computer house in a multiplayer game adds
+    // Rules AIVirtualPurifiers[its difficulty] to its Ore Purifier count.
+    // The battle sets this count for each computer house; default is zero.
+    void set_virtual_purifiers(std::uint32_t house, int count);
+    // [General] AIVirtualPurifiers for an original difficulty index
+    // (House +C8: 0 hardest, 1 medium, 2 easiest). Zero when not listed.
+    static int virtual_purifiers(const rules::IniFile& rules, int original_difficulty);
 private:
     // Bails per resource index. Docked unloading gives one resource at a time.
     struct Cargo { std::vector<int> bails; int total=0; std::uint32_t next=0; bool returning=false, loading=false, docked=false; std::optional<ra2map::Cell> target; };
@@ -26,6 +33,10 @@ private:
     std::map<std::uint32_t,Cargo> cargo_;
     std::optional<std::uint32_t> last_;
     bool grows_=true, spreads_=true; // General TiberiumGrows and TiberiumSpreads.
+    std::map<std::uint32_t,int> virtual_purifiers_;
+    double purifier_bonus_=0.25; // General PurifierBonus (Rules +C40).
+    // Extra credits for one unloaded resource worth `credits`.
+    std::int64_t purifier_credits(const session::world::Snapshot&,std::uint32_t house,std::int64_t credits) const;
     // Frames per bail (9 animation steps of General HarvesterLoadRate) and
     // frames per docked resource unload (General HarvesterDumpRate minutes).
     int load_frames_=18, dump_frames_=15;

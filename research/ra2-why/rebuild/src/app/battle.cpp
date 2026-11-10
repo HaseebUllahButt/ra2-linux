@@ -260,6 +260,10 @@ public:
             const auto level=i<choices.size()?choices[i].difficulty:difficulty_;
             ais_.emplace_back(rules_,&ai_ini,level==ui::Opponent::Hard?sim::PrototypeAI::Difficulty::Hard:
                 level==ui::Opponent::Medium?sim::PrototypeAI::Difficulty::Normal:sim::PrototypeAI::Difficulty::Easy);
+            // Base 00701580: a computer house adds AIVirtualPurifiers[difficulty]
+            // (House +C8: 0 hardest) to its purifier count when it unloads ore.
+            economy_.set_virtual_purifiers(enemies_[i],sim::PrototypeEconomy::virtual_purifiers(rules_,
+                level==ui::Opponent::Hard?0:level==ui::Opponent::Medium?1:2));
         }
         ai_targets_.assign(enemies_.size(),0);
         if(!ai_.uses_ai_ini())throw std::runtime_error("Base AI.INI has no usable team triggers");

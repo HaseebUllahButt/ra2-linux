@@ -80,6 +80,39 @@ int main(int argc,char** argv) {
         assert(cash.size()==2 && cash[0].second==30 && cash[1].second==100);
         assert(cash[1].first-cash[0].first==23 && cash[0].first>=bails[1].first+27+23);
     }
+    // Purifier share, base 00701580: each Ore Purifier adds PurifierBonus of
+    // the load, a computer house adds its virtual purifiers, and low power
+    // removes only the real ones.
+    {
+        rules::IniFile bonus;
+        bonus.parse("[General]\nHarvesterLoadRate=1\nHarvesterDumpRate=.01\nCloseEnough=2.25\nBlockagePathDelay=60\n"
+                    "PurifierBonus=.25\nAIVirtualPurifiers=4,2,0\n"
+                    "[HARV]\nLocomotor={4A582741-9839-11d1-B709-00A024DDAFD1}\nSpeed=4\nStorage=2\n[GAOREP]\nOrePurifier=yes\n"
+                    "[OverlayTypes]\n0=TIB01\n[TIB01]\nTiberium=yes\n[Tiberiums]\n0=Poor\n[Poor]\nImage=1\nValue=30\n");
+        assert(sim::PrototypeEconomy::virtual_purifiers(bonus,0)==4 && sim::PrototypeEconomy::virtual_purifiers(bonus,1)==2 &&
+               sim::PrototypeEconomy::virtual_purifiers(bonus,2)==0 && sim::PrototypeEconomy::virtual_purifiers(bonus,3)==0 &&
+               sim::PrototypeEconomy::virtual_purifiers(bonus,-1)==0);
+        const auto first_unload=[&](int virtual_count,int real,bool low_power) {
+            auto w=fixture("HARV",0);
+            for(int i=0;i<real;++i) {
+                sw::Entity purifier;purifier.id=50+std::uint32_t(i);purifier.house_id=1;purifier.type="GAOREP";
+                purifier.kind=sw::Kind::Structure;purifier.lifetime=sw::Lifetime::Placed;purifier.resolved_hp=900;
+                purifier.cell=ra2map::Cell{12,std::uint16_t(8-i)};purifier.position=sim::Coord{12*256+128,(8-i)*256+128,0};
+                purifier.layer=sw::Layer::Ground;purifier.next=0;
+                w.entities.push_back(purifier);
+            }
+            if(low_power) { w.houses[0].power_output=10;w.houses[0].power_drain=20; }
+            sim::PrototypeEconomy economy(bonus);
+            if(virtual_count) economy.set_virtual_purifiers(1,virtual_count);
+            for(unsigned frame=0;frame<3000 && *w.houses[0].cash==0;++frame) economy.tick(w,frame);
+            return *w.houses[0].cash;
+        };
+        assert(first_unload(0,0,false)==60);        // Two bails of 30.
+        assert(first_unload(0,1,false)==75);        // One purifier: +25%.
+        assert(first_unload(4,0,false)==120);       // Hardest computer: +100%.
+        assert(first_unload(2,1,false)==105);       // Medium computer with one purifier: +75%.
+        assert(first_unload(2,1,true)==90);         // Low power: the building does not count.
+    }
     // Guards stand on every Cell beside the refinery when the full miner
     // comes back. The miner heads for a Cell that friendly soldiers hold,
     // they step aside, and it unloads. The old code waited for an empty
