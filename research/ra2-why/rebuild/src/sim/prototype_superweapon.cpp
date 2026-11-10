@@ -355,7 +355,9 @@ std::vector<ra2map::Cell> drop_cells(ra2map::Cell target, std::size_t wanted) {
 } // namespace
 
 SuperKind superweapon_kind(std::string_view type_name) {
-    // Parse table of 006CE570, in original order.
+    // Type= name table, in base rules order (see read_superweapon_types; the
+    // base 1.006 Type parse handlers live around 006B and 0069, e.g. the
+    // launch dispatch FUN_0069D850).
     static const std::array<std::pair<SuperKind, const char*>, 12> names{{
         {SuperKind::Nuke, "MultiMissile"}, {SuperKind::IronCurtain, "IronCurtain"},
         {SuperKind::LightningStorm, "LightningStorm"}, {SuperKind::ChronoSphere, "ChronoSphere"},
@@ -522,7 +524,8 @@ SuperTickReport PrototypeSuperweapons::tick(session::world::Snapshot& world, std
             if (slot == index_.end()) continue;
             auto& state = item.second;
             if (!state.present) continue;
-            // SetOnHold 006CB4D0: low power pauses the clock, power resumes it.
+            // SetOnHold (base 1.006 export 0069CC60): low power pauses the
+            // clock, power resumes it. RA1 SUPER.CPP Suspend agrees.
             if (types_[slot->second].is_powered && powered_down && !state.one_time)
                 state.suspended = true;
             else if (state.suspended)
