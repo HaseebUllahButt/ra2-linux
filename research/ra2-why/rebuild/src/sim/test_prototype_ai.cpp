@@ -656,7 +656,7 @@ void check_base_plan() {
         "[Sides]\nAllies=Local\nSoviets=Enemy\n"
         "[BuildingTypes]\n0=YARD\n1=POWER\n2=BARR\n3=REF\n4=WORK\n5=RADAR\n6=SKIP\n7=DEF\n"
         "[AI]\nBuildConst=YARD\nBuildPower=POWER\nBuildRefinery=REF\nBuildBarracks=BARR\nBuildWeapons=WORK\n"
-        "BuildRadar=RADAR\n"
+        "BuildRadar=RADAR\nMaximumBaseDefenseValue=60\n"
         "[YARD]\nConstructionYard=yes\nFactory=BuildingType\nOwner=Local\nAIBuildThis=yes\nTechLevel=-1\nCost=3000\n"
         "[POWER]\nPower=100\nOwner=Local\nTechLevel=1\nCost=600\n"
         "[BARR]\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=500\nPrerequisite=POWER\n"
@@ -665,7 +665,7 @@ void check_base_plan() {
         "[RADAR]\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=1000\nPrerequisite=PROC\n"
         "[SKIP]\nOwner=Local\nAIBuildThis=no\nTechLevel=1\nCost=100\n"
         "[DEF]\nOwner=Local\nIsBaseDefense=yes\nTechLevel=1\nCost=500\nPrerequisite=BARRACKS\nPrimary=GUN\n"
-        "[GUN]\nDamage=10\nProjectile=SHOT\n[SHOT]\nAG=yes\n");
+        "[GUN]\nDamage=10\nROF=20\nProjectile=SHOT\n[SHOT]\nAG=yes\n");
     const auto ai = parse(
         "[TaskForces]\n0=TF\n[TF]\n0=1,GI\n[TeamTypes]\n0=T\n[T]\nTaskForce=TF\n"
         "[AITriggerTypes]\nTR=Attack,T,<all>,0,-1,<none>,0,50,1,100,1,0,0,0,<none>,1,1,1\n");
@@ -704,6 +704,58 @@ void check_base_plan() {
         require(count(built, "REF") == 1 + extra && count(built, "DEF") == defenses &&
             built.size() == plan.size() - 1, "Computer did not build every base plan node in turn");
     }
+}
+
+// Base 004F1190 resolves a defense node: the quarter around the yard with
+// the least defense value, then the kind (ground, air, naval) it needs
+// most; an empty list falls back to air. 0045EAA0 rates each defense.
+void check_defense_choice() {
+    const auto text = [](const std::string& cap) {
+        return "[General]\nAlliedBaseDefenseCounts=1,1,1\n[Sides]\nAllies=Local\nSoviets=Enemy\n"
+            "[BuildingTypes]\n0=YARD\n1=GUNS\n2=FLAK\n3=A\n4=B\n5=C\n"
+            "[AI]\nBuildConst=YARD\n" + cap +
+            "[A]\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=100\n[B]\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=100\n"
+            "[C]\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=100\n" +
+            "[YARD]\nConstructionYard=yes\nFactory=BuildingType\nOwner=Local\nAIBuildThis=yes\nTechLevel=-1\nCost=3000\n"
+            "[GUNS]\nOwner=Local\nIsBaseDefense=yes\nTechLevel=1\nCost=500\nPrimary=GUN\n"
+            "[FLAK]\nOwner=Local\nIsBaseDefense=yes\nTechLevel=1\nCost=1000\nPrimary=AAGUN\n"
+            "[GUN]\nDamage=10\nROF=20\nProjectile=SHOT\nWarhead=AP\n[SHOT]\nAG=yes\n"
+            "[AAGUN]\nDamage=30\nROF=10\nProjectile=FLAKSHOT\nWarhead=FL\n[FLAKSHOT]\nAA=yes\nAG=no\n"
+            "[AP]\nVerses=100%,100%,100%,50%,100%\n[FL]\nVerses=10%,100%,100%,100%,200%\n";
+    };
+    const auto ai = parse(
+        "[TaskForces]\n0=TF\n[TF]\n0=1,GI\n[TeamTypes]\n0=T\n[T]\nTaskForce=TF\n"
+        "[AITriggerTypes]\nTR=Attack,T,<all>,0,-1,<none>,0,50,1,100,1,0,0,0,<none>,1,1,1\n");
+    // Plan: YARD, A, B, C (built), then one defense node.
+    const auto first_defense = [&](const IniFile& rules, const std::vector<std::pair<std::string, ra2map::Cell>>& extra) {
+        sw::Snapshot world;
+        world.houses = {house(computer, "Local", false), house(player, "Enemy", true)};
+        world.entities = {actor(rules, 1, computer, "YARD", sw::Kind::Structure, {20, 20}),
+                          actor(rules, 90, player, "YARD", sw::Kind::Structure, {60, 60}),
+                          actor(rules, 2, computer, "A", sw::Kind::Structure, {21, 21}),
+                          actor(rules, 3, computer, "B", sw::Kind::Structure, {19, 21}),
+                          actor(rules, 4, computer, "C", sw::Kind::Structure, {21, 19})};
+        std::uint32_t id = 5;
+        for (const auto& [type, cell] : extra) world.entities.push_back(actor(rules, id++, computer, type, sw::Kind::Structure, cell));
+        PrototypeAI policy(rules, &ai, PrototypeAI::Difficulty::Hard);
+        for (const auto& order : frames(policy, world, 0, 2))
+            if (order.kind == OrderKind::Build) return order.type;
+        return std::string{};
+    };
+    const auto rules = parse(text("MaximumBaseDefenseValue=60\n"));
+    // No defenses: every need is 0.33, so the naval list is asked first.
+    // FLAK is the only type with a naval value (AA and Verses[0] 10%).
+    require(first_defense(rules, {}) == "FLAK",
+        "The first defense of an undefended base was not the air and naval type");
+    // A FLAK in every quarter: each quarter has air 60 and naval 12; the
+    // north quarter is the first least one and needs ground most.
+    require(first_defense(rules, {{"FLAK", {20, 10}}, {"FLAK", {30, 20}}, {"FLAK", {20, 30}}, {"FLAK", {10, 20}}}) == "GUNS",
+        "A base with air defense in every quarter did not add a ground defense");
+    // MaximumBaseDefenseValue defaults to -1 (0065B830): no type has a
+    // value, so the node is removed and nothing is built.
+    const auto uncapped = parse(text(""));
+    const auto none_built = first_defense(uncapped, {});
+    require(none_built.empty(), "A defense was chosen without MaximumBaseDefenseValue");
 }
 
 // A small base for the 004E9660 / 004E9C90 checks. Plan: YARD, POWER,
@@ -1351,6 +1403,7 @@ int main(int argc, char** argv) try {
     run_check("check_enemy_power_triggers", [&] { check_enemy_power_triggers(); });
     run_check("check_defense_cap_release", [&] { check_defense_cap_release(); });
     run_check("check_team_structure", [&] { check_team_structure(); });
+    run_check("check_defense_choice", [&] { check_defense_choice(); });
     run_check("check_production_choice", [&] { check_production_choice(); });
     run_check("check_team_policy", [&] { check_team_policy(); });
     run_check("check_team_lifetime", [&] { check_team_lifetime(); });

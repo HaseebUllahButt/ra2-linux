@@ -272,18 +272,131 @@ void PrototypeAI::make_plan(const Context& context) {
     plan_ = std::move(plan);
 }
 
+// Base 0045EAA0, for an IsBaseDefense BuildingType (+138A): from the
+// Primary weapon, rate = (int)(Damage / (ROF * 0.025)) (0079D2E8). With
+// an AG projectile (+274) the ground value (+11D8) is rate * Verses[3];
+// with an AA projectile (+275) the air value (+11DC) is rate * Verses[4]
+// and the naval value (+11E0) is rate * Verses[0]. Each value is at most
+// [AI] MaximumBaseDefenseValue (Rules +9CC).
+std::array<std::int32_t, 3> PrototypeAI::defense_values(const std::string& type) const {
+    std::array<std::int32_t, 3> values{};
+    if (!rules_.read_bool(type, "IsBaseDefense")) return values;
+    const auto weapon = rules_.read_string(type, "Primary");
+    if (none(weapon) || !rules_.find_section(weapon)) return values;
+    const auto rof = rules_.read_integer(weapon, "ROF");
+    if (rof <= 0) return values; // TODO-ORIGINAL: the original divides by zero here.
+    const double damage = rules_.read_integer(weapon, "Damage");
+    const auto rate = static_cast<std::int32_t>(damage / (static_cast<double>(rof) * 0.025));
+    const auto projectile = rules_.read_string(weapon, "Projectile");
+    const auto verses = IniFile::split_list(rules_.read_string(rules_.read_string(weapon, "Warhead"), "Verses"));
+    const auto versus = [&](std::size_t armor) {
+        if (armor >= verses.size()) return 1.0;
+        auto text = verses[armor];
+        if (!text.empty() && text.back() == '%') text.pop_back();
+        return IniFile::double_value(text).value_or(100.0) / 100.0;
+    };
+    const auto cap = rules_.read_integer("AI", "MaximumBaseDefenseValue", -1);
+    const auto value = [&](double product) {
+        return static_cast<double>(cap) < product ? cap : static_cast<std::int32_t>(product);
+    };
+    if (rules_.read_bool(projectile, "AG", true)) values[0] = value(rate * versus(3));
+    if (rules_.read_bool(projectile, "AA", false)) {
+        values[1] = value(rate * versus(4));
+        values[2] = value(rate * versus(0));
+    }
+    return values;
+}
+
+// Base 004F1190 for a defense node of the plan (the cell list argument is
+// empty). The four quarters around House +5640 (the yard Cell at deploy)
+// sum the defense values of the house's buildings in them (00451710,
+// 00451760, 004517B0); the quarter with the least total (the first on a
+// tie) is defended. Its need for each kind is 0.33 (+15F7C..+15F84) less
+// that kind's share of the total. The kind with the largest need (ground
+// only when it beats both others; then air only when it beats naval) gives
+// the list: 004F1E50 ground, 004F1FF0 air, 004F2190 naval. An empty list
+// falls back to air, then naval, then ground. Each list holds the
+// BuildingTypes the country owns, with a value of that kind, at the
+// house's tech level, whose prerequisites (004EF740) are in the house's
+// buildings other than IsBaseDefense types and WallTower (Rules +78C).
+// One entry is taken as is; more are weighted by value + 10000 / cost.
+// TODO-ORIGINAL: the place search 004F03C0 (a zero Cell fails the node)
+// is left to the caller, and upgrades (Building +4C0) do not add values.
+std::string PrototypeAI::defense_choice(const Context& context) {
+    std::array<std::array<std::int64_t, 3>, 4> quarters{};
+    const auto centre = context.own_centre;
+    std::vector<std::string> owned;
+    const auto tower = rules_.read_string("General", "WallTower");
+    for (const auto* building : context.buildings) {
+        if (!rules_.read_bool(building->type, "IsBaseDefense") && !equal_name(building->type, tower))
+            owned.push_back(building->type);
+        if (!centre || !building->cell) continue;
+        const int dx = building->cell->x - centre->x, dy = building->cell->y - centre->y;
+        if (!dx && !dy) continue;
+        // 004BA600 is atan2 on floats; the 16-bit direction is 0 at north
+        // and grows clockwise (0079B630 pi/2, 0079B628 -65536/2pi).
+        const double angle = std::atan2(static_cast<float>(-dy), static_cast<float>(dx));
+        const auto direction = static_cast<std::uint16_t>(static_cast<std::int32_t>((angle - 1.5707963267948966) *
+            -10430.060040584269));
+        const auto quarter = ((direction >> 13) + 1) >> 1 & 3;
+        const auto values = defense_values(building->type);
+        for (std::size_t k = 0; k < 3; ++k) quarters[quarter][k] += values[k];
+    }
+    std::size_t chosen = 0;
+    std::int64_t least = 999999;
+    for (std::size_t q = 0; q < 4; ++q) {
+        const auto total = quarters[q][0] + quarters[q][1] + quarters[q][2];
+        if (total < least) { least = total; chosen = q; }
+    }
+    std::array<float, 3> need{};
+    for (std::size_t k = 0; k < 3; ++k)
+        need[k] = 0.33f - (least == 0 ? 0.0f : static_cast<float>(quarters[chosen][k]) / static_cast<float>(least));
+    std::array<std::vector<std::string>, 3> lists;
+    if (const auto* registry = rules_.find_section("BuildingTypes"))
+        for (const auto& entry : registry->entries) {
+            const auto& type = entry.value;
+            if (!contains(rules_.read_list(type, "Owner"), context.computer.country) ||
+                rules_.read_integer(type, "TechLevel", -1) > context.computer.tech_level.value_or(10) ||
+                !plan_prerequisites(rules_, type, owned, owned.size())) continue;
+            const auto values = defense_values(type);
+            for (std::size_t k = 0; k < 3; ++k) if (values[k] > 0) lists[k].push_back(type);
+        }
+    std::size_t kind = need[0] <= need[1] || need[0] <= need[2] ? (need[1] <= need[2] ? 2 : 1) : 0;
+    if (lists[kind].empty()) {
+        if (!lists[1].empty()) kind = 1;
+        else if (!lists[2].empty()) kind = 2;
+        else if (!lists[0].empty()) kind = 0;
+        else return {};
+    }
+    const auto& list = lists[kind];
+    if (list.size() == 1) return list.front();
+    std::vector<std::int64_t> weights;
+    std::int64_t sum = 0;
+    for (const auto& type : list) {
+        const auto cost = rules_.read_integer(type, "Cost");
+        weights.push_back(defense_values(type)[kind] + (cost > 0 ? 10000 / cost : 0));
+        sum += weights.back();
+    }
+    if (sum <= 0) return {};
+    const auto roll = random(1, static_cast<std::uint32_t>(sum));
+    std::int64_t walk = 0;
+    for (std::size_t n = 0; n < list.size(); ++n)
+        if ((walk += weights[n]) >= roll) return list[n];
+    return {};
+}
+
 // Base 004E9660 chooses the next building of the base plan. 0042C3D0
 // gives the first node that is not built; then:
 //  - a Naval node (BuildingType +ADA) is removed while House +138 is
 //    clear, and 0042C3D0 is asked once more;
-//  - a defense node (-1) is resolved by 004F1190; when that fails, the
-//    node is removed and nothing is chosen this time;
+//  - a defense node (-1) is resolved by 004F1190 (defense_choice); when
+//    that fails, the node is removed and nothing is chosen this time;
 //  - when free power (+52D0 - +15F88) is below the drain (+52D4) plus
 //    the node's drain (+C6C), a power node goes in front of the node and
 //    nothing is chosen this time. BuildConst types and types without a
 //    drain are exempt;
 //  - else the node type becomes the building to make (+553C).
-// TODO-ORIGINAL: the AIPickWallDefensePercent walls (Rules +BC8, 004F5D30),
+// TODO-ORIGINAL: the AIPickWallDefensePercent walls (Rules +BCC, 004F5D30),
 // node -3 (004F2350), the upgrade path (+C20) and the replacement skip of
 // 0042C3D0 (node +8, 004F64C0) are not modelled. House +15F88 is zero
 // (004E18C0) and is taken as zero.
@@ -306,37 +419,12 @@ std::string PrototypeAI::plan_build(const Context& context) {
     }
     if (i == plan_.size()) return {};
     if (plan_[i].empty()) {
-        // 004F1E50: IsBaseDefense types with a ground value that the
-        // country owns, at its tech level, whose prerequisites are in
-        // the house's other buildings. The pick is weighted by the type
-        // value plus 10000 / cost.
-        // TODO-ORIGINAL: the air and naval lists (004F1FF0, 004F2190)
-        // and the threat quadrant choice are not modelled, and the type
-        // value (BuildingType +11D8, 0045EAA0) is taken as zero.
-        std::vector<std::string> owned;
-        for (const auto* building : context.buildings)
-            if (!rules_.read_bool(building->type, "IsBaseDefense")) owned.push_back(building->type);
-        std::vector<std::pair<std::string, std::int64_t>> options;
-        std::int64_t sum = 0;
-        if (const auto* registry = rules_.find_section("BuildingTypes"))
-            for (const auto& entry : registry->entries) {
-                const auto& type = entry.value;
-                const auto cost = rules_.read_integer(type, "Cost");
-                if (!rules_.read_bool(type, "IsBaseDefense") || cost <= 0 ||
-                    !contains(rules_.read_list(type, "Owner"), context.computer.country) ||
-                    rules_.read_integer(type, "TechLevel", -1) > context.computer.tech_level.value_or(10) ||
-                    !ground_weapon(rules_, type) || !plan_prerequisites(rules_, type, owned, owned.size())) continue;
-                options.emplace_back(type, 10000 / cost);
-                sum += 10000 / cost;
-            }
-        if (options.empty() || sum <= 0) {
+        auto pick = defense_choice(context);
+        if (pick.empty()) {
             plan_.erase(plan_.begin() + static_cast<std::ptrdiff_t>(i));
             return {};
         }
-        const auto roll = random(1, static_cast<std::uint32_t>(sum));
-        std::int64_t walk = 0;
-        for (const auto& [type, weight] : options)
-            if ((walk += weight) >= roll) { plan_[i] = type; break; }
+        plan_[i] = std::move(pick);
     }
     const auto type = plan_[i];
     const auto drain = std::max<std::int64_t>(0, -static_cast<std::int64_t>(rules_.read_integer(type, "Power")));

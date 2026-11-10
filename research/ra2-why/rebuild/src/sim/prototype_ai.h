@@ -196,6 +196,8 @@ private:
     const TaskForce* task_force(const TeamType&) const;
     void make_plan(const Context&);
     std::string plan_build(const Context&);
+    std::array<std::int32_t, 3> defense_values(const std::string& type) const;
+    std::string defense_choice(const Context&);
     bool condition(const Context&, const Trigger&) const;
     std::uint32_t random(std::uint32_t low, std::uint32_t high);
 
