@@ -323,15 +323,34 @@ void check_real_data(const char* game_dir) {
     rules.parse(std::string_view(reinterpret_cast<const char*>(rules_bytes->data()), rules_bytes->size()));
     art.parse(std::string_view(reinterpret_cast<const char*>(art_bytes->data()), art_bytes->size()));
 
+    // Base RULES.INI numbers, read back through the loader. The installed
+    // base file has RepairPercent=15%, RepairRate=.016, RepairStep=8,
+    // RefundPercent=50%, AlliedSurvivorDivisor=500, SovietSurvivorDivisor=250
+    // and no ThirdSurvivorDivisor key.
+    const auto limits = PrototypeRepairSellRules::load(rules);
+    require(limits.repair_percent == 0.15 &&
+            std::abs(limits.repair_rate_minutes - 0.016) < 1e-6 &&
+            limits.repair_step == 8 && limits.refund_percent == 0.5,
+        "Base RULES.INI repair values changed");
+    require(limits.allied_survivor_divisor == 500 &&
+            limits.soviet_survivor_divisor == 250,
+        "Base RULES.INI survivor divisors changed");
+    require(limits.third_survivor_divisor == 0,
+        "Base RULES.INI gained a third survivor divisor");
+
     PrototypeRepairSell sell(rules, &art);
+    // GAWEAP Cost 2000, Strength 1000; GAPILE Cost 500, Strength 500.
     require(sell.repair_cost_per_step("GAWEAP") == 2, "Base war factory repair step cost changed");
     require(sell.repair_cost_per_step("GAPILE") == 1, "Base barracks repair step cost changed");
     require(sell.refund_amount("GAWEAP") == 1000, "Base war factory refund changed");
     require(sell.refund_amount("GAPILE") == 250, "Base barracks refund changed");
     const sw::House allied = house(1, "Americans", 0);
     const sw::House soviet = house(2, "Russians", 0);
+    // GAPILE refund 250: Allied 250/500 clamps to 1, Soviet 250/250 is 1.
     require(sell.survivor_count(allied, "GAWEAP") == 2, "Base Allied crew count changed");
     require(sell.survivor_count(soviet, "GAWEAP") == 4, "Base Soviet crew count changed");
+    require(sell.survivor_count(allied, "GAPILE") == 1, "Base Allied barracks crew changed");
+    require(sell.survivor_count(soviet, "GAPILE") == 1, "Base Soviet barracks crew changed");
     require(std::string(sell.crew_type(allied)) == "E1" &&
             std::string(sell.crew_type(soviet)) == "E2", "Base crew types changed");
 

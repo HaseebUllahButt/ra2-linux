@@ -144,13 +144,10 @@ PrototypeRepairSellRules PrototypeRepairSellRules::load(const rules::IniFile& ru
     result.allied_survivor_divisor = rules.read_integer("General", "AlliedSurvivorDivisor", 0);
     result.soviet_survivor_divisor = rules.read_integer("General", "SovietSurvivorDivisor", 0);
     // The base RULES parser FUN_00647F40 reads only the Allied and Soviet
-    // survivor divisors (+0x1160 and +0x1164); there is no third divisor in
-    // the base game. Fall back to the Soviet divisor for a third house.
-    result.third_survivor_divisor =
-        rules.read_integer("General", "ThirdSurvivorDivisor", 0);
-    if (result.third_survivor_divisor <= 0)
-        result.third_survivor_divisor =
-            rules.read_integer("General", "SovietSurvivorDivisor", 0);
+    // survivor divisors (+0x1160 and +0x1164). The installed base RULES.INI
+    // has no ThirdSurvivorDivisor key. Read one only when the rules author
+    // it; otherwise a third-side house spawns no crew.
+    result.third_survivor_divisor = rules.read_integer("General", "ThirdSurvivorDivisor", 0);
     if (result.repair_percent <= 0.0 || result.repair_percent > 1.0)
         throw std::runtime_error("Missing or invalid [General] RepairPercent");
     if (result.repair_rate_minutes <= 0.0)
@@ -159,8 +156,7 @@ PrototypeRepairSellRules PrototypeRepairSellRules::load(const rules::IniFile& ru
         throw std::runtime_error("Missing or invalid [General] RepairStep");
     if (result.refund_percent < 0.0 || result.refund_percent > 1.0)
         throw std::runtime_error("Missing or invalid [General] RefundPercent");
-    if (result.allied_survivor_divisor <= 0 || result.soviet_survivor_divisor <= 0 ||
-        result.third_survivor_divisor <= 0)
+    if (result.allied_survivor_divisor <= 0 || result.soviet_survivor_divisor <= 0)
         throw std::runtime_error("Missing or invalid [General] survivor divisors");
     return result;
 }
@@ -172,6 +168,8 @@ PrototypeRepairSell::PrototypeRepairSell(const rules::IniFile& base_rules,
 std::int32_t PrototypeRepairSell::repair_cost_per_step(const std::string& type) const {
     // TODO-ORIGINAL: the TechnoTypeClass::Repair_Cost rounding (type virtual
     // +0xB0, read by the base repair step FUN_0044B9B0) was not recovered.
+    // The export has no TechnoTypeClass vtable, so the virtual target stays
+    // unknown.
     // This is the visible RA1 shape with the base percent value: Cost /
     // (Strength / RepairStep) is integer division first, then the percent
     // multiply truncates. Zero cost repairs for free, like an original
@@ -185,7 +183,7 @@ std::int32_t PrototypeRepairSell::repair_cost_per_step(const std::string& type) 
 }
 
 std::int32_t PrototypeRepairSell::refund_amount(const std::string& type) const {
-       // RA1 TechnoClass::Refund_Amount shape: Cost times RefundPercent for a
+    // RA1 TechnoClass::Refund_Amount shape: Cost times RefundPercent for a
     // human house, truncated. The house CostBias is not modeled.
     // Base game.exe AircraftClass::GetRefund 0x006D5850 reads the refund
     // through the same type virtual at vtable +0xB8.

@@ -17,7 +17,10 @@ struct PrototypeRepairSellRules {
     std::int32_t allied_survivor_divisor = 0; // [General] AlliedSurvivorDivisor.
     std::int32_t soviet_survivor_divisor = 0; // [General] SovietSurvivorDivisor.
     std::int32_t third_survivor_divisor = 0;  // [General] ThirdSurvivorDivisor; the base
-                                              // RULES.INI omits it, so 750 is assumed.
+                                              // RULES.INI omits it and the base parser
+                                              // reads no third divisor. Zero means a
+                                              // third-side crew is never spawned unless
+                                              // the rules author a value.
     std::int32_t ticks_per_minute = 900;      // Original TICKS_PER_MINUTE.
 
     // Pass the loaded base RULES.INI, with any intended map overrides applied.
