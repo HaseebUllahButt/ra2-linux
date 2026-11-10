@@ -450,6 +450,14 @@ std::vector<std::pair<std::string,CanBuild>> options(const w::Snapshot& world,co
 Outcome begin_production(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,
                          std::uint32_t house_id,const std::string& type,std::uint64_t frame) {
     return transaction(world,factories,[&](w::Snapshot& candidate,FactorySet& next) {
+        // A computer house builds its buildings through 0044B480, not the
+        // PRODUCE event, so Can_Build does not stop it.
+        const auto* t=catalog.find(type);
+        const auto house=std::find_if(candidate.houses.begin(),candidate.houses.end(),
+            [&](const w::House& h) { return h.id==house_id; });
+        if (t && t->rtti==Rtti::BuildingType && house!=candidate.houses.end() &&
+            house->human_controlled && !*house->human_controlled)
+            return ra2::sim::production::begin_computer_building(candidate,next,catalog,house_id,type,frame);
         return ra2::sim::production::begin_production(candidate,next,catalog,house_id,type,frame);
     });
 }

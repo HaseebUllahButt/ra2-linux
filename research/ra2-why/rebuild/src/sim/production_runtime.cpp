@@ -210,7 +210,19 @@ Placement original_clear_to_build(const PlacementMap& map,CellXY c,const Placeme
         if (building.to_overlay) return Placement::Unsupported;
         return Placement::Illegal;                                              // 00471BDF, editor off.
     }
-    if (building.speed_type!=-1 || building.naval) return Placement::Unsupported;
+    if (building.speed_type!=-1) {
+        // 00471C5D: with a SpeedType (WaterBound), the Cell flags and ramp
+        // are not read. The land speed row (00850EA0 + LandType*24h) for
+        // that SpeedType must be nonzero.
+        if (building.speed_type<0 || building.speed_type>=8) return Placement::Unsupported;
+        if (!cell->land_type || !map.land_speed) return Placement::NeedsInput;
+        if (*cell->land_type<0 || *cell->land_type>=12) return Placement::Unsupported;
+        const float speed=(*map.land_speed)[std::size_t(*cell->land_type)][std::size_t(building.speed_type)];
+        return speed!=0.0f?Placement::Legal:Placement::Illegal;
+    }
+    // 00471CA1: a Naval type with SpeedType -1 tests the shore tile range
+    // at 00A52580, which is not recovered.
+    if (building.naval) return Placement::Unsupported;
     if (!cell->flags_140) return Placement::NeedsInput;
     if (*cell->flags_140&0x100 || *cell->flags_140&0x400) return Placement::Illegal;
     if (*cell->ramp) return Placement::Illegal;
@@ -381,6 +393,7 @@ Catalog Catalog::from(const IniFile& rules,const IniFile& art,const IniFile& map
                 if (const auto v=text(rules,map,id,"FreeUnit")) t.free_unit=*v;
                 bool waterbound=false; read_bool(rules,map,id,"WaterBound",waterbound);
                 t.placement.speed_type=waterbound?5:-1;                        // 00459ADE.
+                read_int(rules,map,id,"AIBasePlanningSide",t.planning_side);
                 if (const auto v=text(rules,map,id,"Factory")) {                // 0046A4B0 table 007CD978.
                     static const std::pair<const char*,Rtti> kinds[]={{"BuildingType",Rtti::BuildingType},
                         {"UnitType",Rtti::UnitType},{"InfantryType",Rtti::InfantryType},{"AircraftType",Rtti::AircraftType}};
@@ -427,6 +440,26 @@ Catalog Catalog::from(const IniFile& rules,const IniFile& art,const IniFile& map
         bool b=false; read_bool(rules,map,lands[l],"Buildable",b); buildable[std::size_t(l)]=b;
     }
     if (all) c.buildable=buildable;
+    // 0064D610: Foot, Track, Wheel, Hover, Float, Amphibious and FloatBeach
+    // default to 1.0 and are capped at 1.0. Winged is set to 1.0.
+    if (all) {
+        static const char* speeds[8]={"Foot","Track","Wheel","Hover","Winged","Float","Amphibious","FloatBeach"};
+        std::array<std::array<float,8>,12> table{};
+        for (int l=0;l<12;++l) for (int k=0;k<8;++k) {
+            double v=1.0;
+            if (k!=4) if (const auto t=text(rules,map,lands[l],speeds[k])) if (const auto d=IniFile::double_value(*t)) v=*d;
+            table[std::size_t(l)][std::size_t(k)]=float(std::min(v,1.0));
+        }
+        c.land_speed=table;
+    }
+    // 00647F40: [General] Shipyard names that are BuildingTypes, in order.
+    if (const auto v=text(rules,map,"General","Shipyard"))
+        for (const auto& token:IniFile::split_list(*v)) { const auto i=building_index(token); if (i!=-1) c.shipyards.push_back(i); }
+    read_int(rules,map,"General","AINavalYardAdjacency",c.naval_yard_adjacency);
+    // OverlayType Wall: constructor 005DC5A0 clears it, the reader sets it.
+    for (const auto& name:registry(rules,map,"OverlayTypes")) {
+        bool wall=false; read_bool(rules,map,name,"Wall",wall); c.overlay_wall.push_back(wall);
+    }
     for (const char* k:{"BuildSpeed","MinLowPowerProductionSpeed","MaxLowPowerProductionSpeed","LowPowerPenaltyModifier",
                         "MultipleFactory","WallBuildSpeedCoefficient"})
         if (!text(rules,map,"General",k)) c.gaps.push_back(std::string("General.")+k+" missing; Rules constructor value not recovered");
@@ -449,6 +482,9 @@ Catalog Catalog::from(const IniFile& rules,const IniFile& art,const IniFile& map
 // Snapshot and FactorySet together only when it completes.
 #include "../session/world/world.h"
 #include "build_time.h"
+#include "cell_fit.h"
+#include "cell_projection.h"
+#include <cmath>
 #include <set>
 
 namespace ra2::sim::production {
@@ -512,7 +548,7 @@ PlacementMap placement_view(const w::Snapshot& s,const Catalog& c,const std::vec
     PlacementMap m;
     m.width=s.geometry->width; m.local_x=s.geometry->local.x; m.local_y=s.geometry->local.y;
     m.local_width=s.geometry->local.width; m.local_height=s.geometry->local.height;
-    m.buildable=c.buildable;
+    m.buildable=c.buildable; m.land_speed=c.land_speed;
     // A completed scenario runs with ScenarioInit 0, 00A40958 set by 005135F0,
     // and the editor flag cleared by 0051512E.
     m.scenario_init=0; m.object_scan=true; m.editor_mode=false;
@@ -899,17 +935,24 @@ Outcome deploy(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std:
     Outcome o; o.status=Status::Done; o.entity=id; return o;
 }
 
-Outcome begin_production(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint32_t house_id,
-                         const std::string& type,std::uint64_t frame) {
+namespace {
+// computer: the 0044B480 path, which has no Can_Build test.
+Outcome start_production(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint32_t house_id,
+                         const std::string& type,std::uint64_t frame,bool computer) {
     if (!runtime_ready(snapshot)) return fail(Status::NeedsInput,"setup is not complete");
     w::Undo undo(snapshot); auto& s=snapshot; auto f=factories; // Restores unless committed.
     const auto* t=c.find(type); if (!t) return fail(Status::Rejected,"unknown type");
     auto* h=house_of(s,house_id); if (!h) return fail(Status::Rejected,"unknown house");
-    // Sidebar gate: the cameo exists only when Can_Build(type,false,true) is positive.
-    const auto gate=original_can_build(t->can,can_build_house(s,f,c,*h),can_build_rules(f,c),false,true);
-    if (gate==CanBuild::NeedsInput || gate==CanBuild::Unsupported) return fail(Status::NeedsInput,"eligibility inputs unresolved");
-    if (gate!=CanBuild::Can) return fail(Status::Rejected,"not buildable now");
-    const auto builder=who_can_build(s,f,c,*t,*h,true,true);               // 004E5F18.
+    if (computer && t->rtti!=Rtti::BuildingType) return fail(Status::Rejected,"not a building type");
+    if (!computer) {
+        // Sidebar gate: the cameo exists only when Can_Build(type,false,true) is positive.
+        const auto gate=original_can_build(t->can,can_build_house(s,f,c,*h),can_build_rules(f,c),false,true);
+        if (gate==CanBuild::NeedsInput || gate==CanBuild::Unsupported) return fail(Status::NeedsInput,"eligibility inputs unresolved");
+        if (gate!=CanBuild::Can) return fail(Status::Rejected,"not buildable now");
+    }
+    // 004E5F18 for an event. A computer house needs a construction yard
+    // that can run 0044B480.
+    const auto builder=who_can_build(s,f,c,*t,*h,true,!computer);
     if (!builder) return fail(Status::NeedsInput,"factory buildings unresolved");
     if (!*builder) return fail(Status::Rejected,"No-one can build");
     const auto slot=slot_of(*t); if (slot<0) return fail(Status::Unsupported,"no factory slot");
@@ -943,6 +986,16 @@ Outcome begin_production(w::Snapshot& snapshot,FactorySet& factories,const Catal
     factory->timer_start=frame;
     undo.commit(); factories=std::move(f);
     Outcome o; o.status=Status::Done; o.entity=factory_in_slot(factories,house_id,slot)->object; o.value=*frames; return o;
+}
+}
+
+Outcome begin_production(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint32_t house_id,
+                         const std::string& type,std::uint64_t frame) {
+    return start_production(snapshot,factories,c,house_id,type,frame,false);
+}
+Outcome begin_computer_building(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint32_t house_id,
+                                const std::string& type,std::uint64_t frame) {
+    return start_production(snapshot,factories,c,house_id,type,frame,true);
 }
 
 Outcome hold_production(w::Snapshot& s,FactorySet& f,const Catalog& c,std::uint32_t owner,
@@ -1035,6 +1088,182 @@ std::optional<bool> passes_proximity(const w::Snapshot& s,const FactorySet& f,co
         }
     }
     return ok;
+}
+
+namespace {
+struct SiteUnknown { std::string why; };
+// 00548070 for the water search: the canonical Cell of a linear index, or
+// the fallback Cell (00A6F9F8) that receives the query coordinates.
+struct SiteCell { const w::CellState* state; CellXY xy; };
+SiteCell site_cell(const w::Snapshot& s,CellXY c) {
+    const std::int32_t index=std::int32_t(c.y)*0x200+c.x;
+    if (index>=0 && index<=0x3FFFF) {
+        const auto it=s.cells.find(std::uint32_t(index));
+        if (it!=s.cells.end() && it->second.allocated && *it->second.allocated)
+            return {&it->second,{std::int16_t(index&0x1FF),std::int16_t(index>>9)}};
+    }
+    return {nullptr,c};
+}
+// The fallback Cell keeps its 00470F10 constructor values: height 0,
+// ramp 0, LandType 0, no overlay, no bridge and empty occupancy.
+const TerrainCell& fallback_terrain() {
+    static const TerrainCell t=original_default_terrain_cell({0,0});
+    return t;
+}
+bool site_bridge(const w::CellState& c) {
+    if (c.cell_flags_140) return (*c.cell_flags_140&0x100)!=0;
+    if (c.terrain && c.terrain->bridge) return *c.terrain->bridge;
+    throw SiteUnknown{"Cell bridge flag unresolved"};
+}
+}
+
+NavalSite naval_yard_site(const w::Snapshot& s,const FactorySet& f,const Catalog& c,std::uint32_t house_id,
+                          CellXY centre,std::uint32_t frame) {
+    NavalSite out;
+    try {
+        if (!s.geometry) throw SiteUnknown{"map geometry unresolved"};
+        const auto* h=house_of(s,house_id); if (!h) throw SiteUnknown{"house missing"};
+        if (!h->country_index || !h->side_index || !f.flags.super_weapons) throw SiteUnknown{"house country, side or Super Weapons option unresolved"};
+        if (!c.land_speed) throw SiteUnknown{"LandType speeds unresolved"};
+        // 004EF600 on Rules +790: the first [General] Shipyard type that the
+        // house may own (+5E8 by 004F94D0, +B50, +B54, +5EC, +1374).
+        const auto bit=1u<<(std::uint32_t(*h->country_index)&31u);
+        const TypeFacts* yard=nullptr;
+        for (const auto index:c.shipyards) {
+            const auto* t=c.building(index); if (!t) continue;
+            if (!(t->owner&bit)) continue;
+            if (t->can.required_houses!=0xFFFFFFFFu && !(t->can.required_houses&bit)) continue;
+            if (t->can.forbidden_houses!=0xFFFFFFFFu && (t->can.forbidden_houses&bit)) continue;
+            if (t->planning_side!=-1 && t->planning_side!=*h->side_index) continue;
+            if (!*f.flags.super_weapons && t->can.super_weapon!=-1) {
+                const auto it=c.super_weapon_disableable.find(t->can.super_weapon);
+                if (it==c.super_weapon_disableable.end()) throw SiteUnknown{"super weapon type unresolved"};
+                if (it->second) continue;
+            }
+            yard=t; break;
+        }
+        if (!yard) throw SiteUnknown{"no [General] Shipyard type for the house"}; // 00458930 would read a null type.
+        if (yard->placement.foundation<0 || yard->placement.foundation>=22) throw SiteUnknown{"Shipyard foundation unresolved"};
+        const auto [width,height]=kFoundationBounds[std::size_t(yard->placement.foundation)]; // 00458930/00458940.
+        const auto& land_speed=*c.land_speed;
+        CellFitCallbacks fit;
+        fit.land_speed=[&](int land,int speed)->std::optional<float> {
+            if (land<0 || land>=12 || speed<0 || speed>=8) return std::nullopt;
+            return land_speed[std::size_t(land)][std::size_t(speed)];
+        };
+        const auto fit_state=[&](ra2map::Cell point)->std::optional<CellFitState> {
+            const auto cell=site_cell(s,{std::int16_t(point.x),std::int16_t(point.y)});
+            CellFitState st;
+            st.object_cell=ra2map::Cell{std::uint16_t(cell.xy.x),std::uint16_t(cell.xy.y)};
+            if (!cell.state) {
+                const auto& t=fallback_terrain();
+                st.level=*t.height_level; st.bridge=false; st.ground_occupancy=0; st.bridge_occupancy=0;
+                st.overlay_index=-1; st.land_type=*t.land_type;
+                return st;
+            }
+            const auto& state=*cell.state;
+            if (!state.terrain || !state.terrain->height_level || !state.terrain->overlay_type_index) return std::nullopt;
+            st.level=*state.terrain->height_level; st.bridge=site_bridge(state);
+            st.land_type=state.terrain->land_type;
+            // A Cell with no tile (0xFFFF) and no TMP data keeps the Cell
+            // constructor LandType (00470F10: Clear).
+            if (!st.land_type && state.terrain->tile_index==0xFFFF && !state.terrain->tmp_terrain)
+                st.land_type=*fallback_terrain().land_type;
+            st.overlay_index=*state.terrain->overlay_type_index;
+            if (state.ground_occupancy_124) st.ground_occupancy=std::uint8_t(*state.ground_occupancy_124&0xFF);
+            if (state.bridge_occupancy_128) st.bridge_occupancy=std::uint8_t(*state.bridge_occupancy_128&0xFF);
+            if (*st.overlay_index!=-1) {
+                // Movement zone 0 reads only the Wall flag (+278).
+                if (state.overlay) st.overlay=CellFitOverlay{true,state.overlay->flag_2a8,state.overlay->flag_22d};
+                else if (*st.overlay_index>=0 && std::size_t(*st.overlay_index)<c.overlay_wall.size())
+                    st.overlay=CellFitOverlay{true,bool(c.overlay_wall[std::size_t(*st.overlay_index)]),std::nullopt};
+            }
+            return st;
+        };
+        const ProjectionLookup project=[&](ra2map::Cell point)->std::optional<ProjectionCellState> {
+            const auto cell=site_cell(s,{std::int16_t(point.x),std::int16_t(point.y)});
+            if (!cell.state) return ProjectionCellState{*fallback_terrain().height_level,false,false};
+            const auto& state=*cell.state;
+            if (!state.terrain || !state.terrain->height_level || !state.cell_flags_140) return std::nullopt;
+            return ProjectionCellState{*state.terrain->height_level,(*state.cell_flags_140&0x1000)!=0,(*state.cell_flags_140&0x100)!=0};
+        };
+        const auto exact=[&](CellXY point) {
+            const auto r=original_cell_projection({point.x*256+128,point.y*256+128,0},project);
+            if (r.status!=CellProjectionStatus::Complete || !r.answer) throw SiteUnknown{"006A6A50 projection unresolved: "+r.detail};
+            return r.answer->x==std::uint16_t(point.x) && r.answer->y==std::uint16_t(point.y);
+        };
+        PlacementMap local;
+        local.width=s.geometry->width; local.local_x=s.geometry->local.x; local.local_y=s.geometry->local.y;
+        local.local_width=s.geometry->local.width; local.local_height=s.geometry->local.height;
+        // 005502E0(centre, SpeedType 5, zone -1, 0, 0, w+2, h+2, 0, 0, 0, 1, (0,0), 0).
+        std::vector<CellXY> admitted; bool exact_found=false;
+        const auto probe=[&](int x,int y) {
+            const CellXY point{std::int16_t(x),std::int16_t(y)};
+            const auto cell=site_cell(s,point);
+            PlacementCell usable;
+            if (cell.state) {
+                if (!cell.state->terrain || !cell.state->terrain->height_level || !cell.state->terrain->ramp_index)
+                    throw SiteUnknown{"Cell height or ramp unresolved"};
+                usable.height=std::int8_t(*cell.state->terrain->height_level);
+                usable.ramp=std::uint8_t(*cell.state->terrain->ramp_index);
+            } else { usable.height=std::int8_t(*fallback_terrain().height_level); usable.ramp=std::uint8_t(*fallback_terrain().ramp_index); }
+            const auto inside=in_local_map(local,cell.xy,usable);       // 0055A740(1).
+            if (!inside) throw SiteUnknown{"0055A740 inputs unresolved"};
+            if (!*inside) return false;
+            RectangleFitQuery q;                                        // 00550CF0 -> 00478760.
+            q.origin=ra2map::Cell{std::uint16_t(point.x),std::uint16_t(point.y)};
+            q.width=width+2; q.height=height+2; q.speed_type=5; q.component=0xFFFFFFFFu;
+            q.movement_zone=0; q.level=-1; q.above_bridge=false; q.reject_overlay=false;
+            const auto r=original_rectangle_fit(q,fit_state,fit);
+            if (r.status!=CellFitStatus::Complete || !r.allowed) throw SiteUnknown{"00550CF0 block test unresolved: "+r.detail};
+            if (!*r.allowed) return false;
+            // Argument 12 is set, so a bridge Cell is allowed.
+            admitted.push_back(point);
+            if (exact(point)) exact_found=true;                       // 006A6A50: this ring ends the search.
+            return admitted.size()==24;
+        };
+        const int limit=std::min(s.geometry->width+s.geometry->height,32);
+        bool full=false;
+        for (int r=0;r<limit && !full;++r) {
+            for (int i=-r;i<=r && !full;++i) full=probe(centre.x+i,centre.y-r) || probe(centre.x+i,centre.y+r);
+            for (int j=-r+1;j<=r-1 && !full;++j) full=probe(centre.x-r,centre.y+j) || probe(centre.x+r,centre.y+j);
+            if (exact_found) break;
+        }
+        if (admitted.empty()) { out.status=SiteStatus::None; return out; }      // 00A6F238.
+        // 00550AE7: Cells whose projection is the Cell itself come first.
+        // The source argument is the empty Cell, so the frame picks one.
+        std::vector<CellXY> first,other;
+        for (const auto point:admitted) (exact(point)?first:other).push_back(point);
+        const auto& choices=first.empty()?other:first;
+        const auto cell=choices[frame%choices.size()];                // 00A40D2C % count.
+        // 004F04CE: reject the Cell when it is more than AINavalYardAdjacency
+        // Cells from the first construction yard (House +54, the +50 list).
+        const w::Entity* conyard=nullptr;
+        for (const auto* b:house_buildings(s,house_id)) {
+            const auto* bt=facts_of(c,*b);
+            if (bt && bt->construction_yard && b->lifetime==w::Lifetime::Placed) { conyard=b; break; }
+        }
+        if (conyard) {
+            const auto* bt=facts_of(c,*conyard);
+            if (!conyard->position || bt->placement.foundation<0 || bt->placement.foundation>=22) throw SiteUnknown{"construction yard position unresolved"};
+            const auto [yw,yh]=kFoundationBounds[std::size_t(bt->placement.foundation)];
+            // BuildingClass::GetCoords 00444080: Location + (w*80h-80h, h*80h-80h).
+            const double cx=conyard->position->x+yw*0x80-0x80, cy=conyard->position->y+yh*0x80-0x80, cz=conyard->position->z;
+            const auto target=site_cell(s,cell);
+            // TODO-ORIGINAL: Cell::GetCoords is not in the export; take the
+            // Cell centre at its floor height.
+            double tz=0;
+            if (target.state) {
+                if (!target.state->terrain || !target.state->terrain->floor_world_height) throw SiteUnknown{"Cell floor height unresolved"};
+                tz=*target.state->terrain->floor_world_height;
+            }
+            const double dx=cell.x*256+128-cx, dy=cell.y*256+128-cy, dz=tz-cz;
+            const auto length=std::int64_t(std::sqrt(dx*dx+dy*dy+dz*dz));   // 0041B780: ftol(sqrt).
+            if (std::int64_t(c.naval_yard_adjacency)*256<length) { out.status=SiteStatus::None; return out; } // 00A40F10.
+        }
+        out.status=SiteStatus::Found; out.cell=cell;
+    } catch (const SiteUnknown& e) { out.status=SiteStatus::NeedsInput; out.detail=e.why; }
+    return out;
 }
 
 std::optional<bool> legal_placement(const w::Snapshot& s,const Catalog& c,

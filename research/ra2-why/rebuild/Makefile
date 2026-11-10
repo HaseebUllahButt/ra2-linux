@@ -779,7 +779,7 @@ run-map:
 sim-production-runtime: build/sim_production_runtime_test
 	build/sim_production_runtime_test
 
-build/sim_production_runtime_test: $(SESSION_WORLD_OBJECTS) build/native/src/sim/floor.o build/native/src/sim/test_production_runtime.o build/native/src/sim/production_runtime.o build/native/src/sim/build_time.o build/native/src/sim/factory.o build/native/src/sim/random.o build/native/src/rules/ini_file.o
+build/sim_production_runtime_test: $(SESSION_WORLD_OBJECTS) build/native/src/sim/floor.o build/native/src/sim/test_production_runtime.o build/native/src/sim/production_runtime.o build/native/src/sim/cell_fit.o build/native/src/sim/cell_projection.o build/native/src/sim/build_time.o build/native/src/sim/factory.o build/native/src/sim/random.o build/native/src/rules/ini_file.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 .PHONY: sim-goal-runtime sim-goal-runtime-real sim-live-cell-setup sim-unit-visibility

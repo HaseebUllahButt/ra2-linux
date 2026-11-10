@@ -1011,6 +1011,7 @@ public:
             if (type && type->rtti==p::Rtti::BuildingType) ready.push_back(f.object_type);
         }
         for (const auto& type:ready) {
+            if (place_naval(owner,type,frame)) continue;
             std::vector<ra2map::Cell> bases;
             for (const auto& e:world_.entities) if (live(e)&&e.house_id==owner&&e.kind==w::Kind::Structure) bases.push_back(*e.cell);
             // A full search that found no place is costly (it stalled frames
@@ -1049,19 +1050,39 @@ public:
                 if(placed)break;
             }
             if(placed)auto_place_wait_.erase({owner,type});
-            else {
-                wait={bases.size(),frame+auto_place_retry_frames};
-                // Base 0044B480 abandons a computer's finished Naval building
-                // that found no place: refund it (004B97C0) and tell the plan.
-                // TODO-ORIGINAL: water placement (004F03C0, 005502E0) is not
-                // modelled, so every Naval product ends here.
-                for(std::size_t i=0;i<enemies_.size() && i<ais_.size();++i)
-                    if(enemies_[i]==owner && rules_.read_bool(type,"Naval")) {
-                        proto::cancel_production(world_,factories_,catalog_,owner,type,frame);
-                        ais_[i].placement_failed(owner,type);
-                    }
-            }
+            else wait={bases.size(),frame+auto_place_retry_frames};
         }
+    }
+    // A computer's finished Naval building (TechnoType +ADA) goes on water.
+    // Exit_Object asks House::Find_Build_Location 004F03C0, which searches
+    // rings around House +53BC (005502E0). With no Cell, Exit_Object returns
+    // 0 and 0044B480 abandons the product: refund it (004B97C0) and tell the
+    // plan (House +138). Returns false for a product that is not handled here.
+    // TODO-ORIGINAL: Exit_Object 00440520 is not in the export; the building
+    // goes on the returned Cell itself.
+    bool place_naval(std::uint32_t owner,const std::string& type,std::uint32_t frame) {
+        const auto* product=catalog_.find(type);
+        if(!product || !product->placement.naval)return false;
+        for(std::size_t i=0;i<enemies_.size() && i<ais_.size();++i) {
+            if(enemies_[i]!=owner)continue;
+            bool placed=false;
+            if(const auto centre=ais_[i].base_centre(owner)) {
+                const auto site=p::naval_yard_site(world_,factories_,catalog_,owner,
+                    {std::int16_t(centre->x),std::int16_t(centre->y)},frame);
+                // QA trace, only with RA2_AI_PLAN_DEBUG set.
+                if(std::getenv("RA2_AI_PLAN_DEBUG"))
+                    std::cerr<<"NAVALSITE frame="<<frame<<" house="<<owner<<" centre="<<centre->x<<','<<centre->y
+                             <<" status="<<int(site.status)<<" cell="<<site.cell.x<<','<<site.cell.y<<' '<<site.detail<<'\n';
+                if(site.status==p::SiteStatus::Found)
+                    placed=proto::place(world_,factories_,catalog_,owner,type,site.cell,frame).status==p::Status::Done;
+            }
+            if(!placed) {
+                proto::cancel_production(world_,factories_,catalog_,owner,type,frame);
+                ais_[i].placement_failed(owner,type);
+            }
+            return true;
+        }
+        return false;
     }
     void autoplay(std::uint32_t frame) {
         loop::profile::Timer probe(loop::profile::Phase::Autoplay);

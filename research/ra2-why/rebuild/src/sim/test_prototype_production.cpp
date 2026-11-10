@@ -311,6 +311,48 @@ int main(int argc,char** argv) try {
     std::uint64_t frame=0;
     done(proto::tick(world,factories,catalog,frame),"initial power tick");
 
+    // A computer house starts a building through 0044B480, which has no
+    // Can_Build test: TechLevel -1 stops the sidebar, not the computer.
+    {
+        auto barred=catalog;
+        for (auto& t:barred.buildings) if (t.id=="GAPOWR" || t.id=="NAPOWR") t.can.tech_level=-1;
+        auto copy=world; auto copy_factories=factories;
+        require(proto::begin_production(copy,copy_factories,barred,player,"GAPOWR",frame).status==p::Status::Rejected,
+                "sidebar started a TechLevel -1 building");
+        done(proto::begin_production(copy,copy_factories,barred,enemy,"NAPOWR",frame),"computer TechLevel -1 building");
+        require_prototype(copy);
+    }
+    // WaterBound shipyards: 004718B0 reads the Float land speed, so open
+    // water is legal and land is not, for the player's cursor and Unlimbo.
+    // The computer finds water near its base (004F03C0 -> 005502E0).
+    {
+        std::optional<p::CellXY> water;
+        for (const auto& [key,cell]:world.cells) {
+            const p::CellXY at{std::int16_t(key%512),std::int16_t(key/512)};
+            bool open=true;
+            for (const auto o:p::original_foundation_cells(catalog.find("GAYARD")->placement.foundation)) {
+                const auto it=world.cells.find(std::uint32_t((at.y+o.y)*512+at.x+o.x));
+                open=open && it!=world.cells.end() && it->second.terrain && it->second.terrain->land_type==2 &&
+                    it->second.heads && it->second.heads->ground_head==0;
+            }
+            if (open && p::legal_placement(world,catalog,"GAYARD",at)) { water=at; break; }
+            (void)cell;
+        }
+        require(water.has_value(),"MP02T2 has no open water for a shipyard");
+        require(p::legal_placement(world,catalog,"GAYARD",{std::int16_t(base.x),std::int16_t(base.y)})==false,"shipyard accepted on the yard");
+        // The frame picks one ring candidate; a far one is rejected
+        // (AINavalYardAdjacency), so try a few frames.
+        std::optional<p::NavalSite> site;
+        for (std::uint32_t at=0;at<64 && !site;++at) {
+            const auto found=p::naval_yard_site(world,factories,catalog,enemy,
+                {std::int16_t(enemy_base.x),std::int16_t(enemy_base.y)},at);
+            require(found.status!=p::SiteStatus::NeedsInput,"water search inputs unresolved: "+found.detail);
+            if (found.status==p::SiteStatus::Found) site=found;
+        }
+        require(site && p::legal_placement(world,catalog,"NAYARD",site->cell)==true,
+                "computer found no legal water Cell near its MP02T2 base");
+    }
+
     // A queued building must not keep the House alive after its last yard dies.
     {
         auto lost=world;

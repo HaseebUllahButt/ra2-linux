@@ -104,13 +104,18 @@ bool prerequisite(const IniFile& rules, const Actors& buildings, const std::stri
 // while it is made (004B9300), and 004E9660 picks the next base node
 // without a money test. 004E9C90 tests Available_Money >= cost for units.
 bool buildable(const IniFile& rules, const WorldHouse& house, const Actors& actors,
-               const Actors& buildings, const std::string& type, std::optional<std::int64_t> cash) {
+               const Actors& buildings, const std::string& type, std::optional<std::int64_t> cash,
+               bool plan_node = false) {
     const auto cost = rules.read_integer(type, "Cost", -1);
     const auto tech = rules.read_integer(type, "TechLevel", -1);
     // TODO-ORIGINAL: This is a conservative policy filter, not House::Can_Build.
     // The production runtime remains responsible for the final legality check.
     // Prototype games use level ten when the house has no resolved tech level.
-    if (cost <= 0 || (cash && cost > *cash) || tech < 0 || tech > house.tech_level.value_or(10) ||
+    // A base plan node had its tech test in 004EF890 (TechLevel <= House
+    // +11C, so -1 passes), and 004E9660 makes no other: a map that sets
+    // TechLevel=-1 on its shipyard still gets one in the computer's plan.
+    const bool tech_ok = plan_node || (tech >= 0 && tech <= house.tech_level.value_or(10));
+    if (cost <= 0 || (cash && cost > *cash) || !tech_ok ||
         !contains(rules.read_list(type, "Owner"), house.country)) return false;
     const auto required = rules.read_list(type, "RequiredHouses");
     if ((!required.empty() && !contains(required, house.country)) ||
@@ -1114,7 +1119,7 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
             if (const auto* construction = factory(rules_, buildings, "BuildingType"); construction && !producing) {
                 next = plan_build(context);
                 if (!next.empty() && registered(rules_, "BuildingTypes", next) &&
-                    buildable(rules_, *computer, actors, buildings, next, std::nullopt))
+                    buildable(rules_, *computer, actors, buildings, next, std::nullopt, true))
                     result.push_back(order(skirmish::OrderKind::Build, computer_house_id, *construction, next));
             }
             // Base 004E9C90 (the war factory choice, while +5540 is -1):

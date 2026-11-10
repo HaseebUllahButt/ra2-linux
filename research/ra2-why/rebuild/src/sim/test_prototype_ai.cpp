@@ -640,8 +640,8 @@ void check_base_plan() {
 
 // A small base for the 004E9660 / 004E9C90 checks. Plan: YARD, POWER,
 // BARR, REF, WORK, DOCK, LAB, SUPER, PLAIN (Easy, no defense nodes).
-IniFile base_rules(const std::string& extra = {}) {
-    return parse(
+std::string base_rules_text(const std::string& extra = {}) {
+    return
         "[General]\nPrerequisitePower=POWER\nPrerequisiteProc=REF\nHarvestersPerRefinery=2\nHarvesterUnit=MINER\n"
         "GDIPowerPlant=POWER\nNodRegularPower=POWER\n" + extra +
         "[Sides]\nAllies=Local\nSoviets=Enemy\n"
@@ -658,8 +658,9 @@ IniFile base_rules(const std::string& extra = {}) {
         "[SUPER]\nSuperWeapon=SWA\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=2500\nPrerequisite=LAB\nPower=-10\n"
         "[PLAIN]\nSuperWeapon=SWB\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\nCost=2500\nPrerequisite=LAB\nPower=-10\n"
         "[SWA]\nDisableableFromShell=yes\n[SWB]\nDisableableFromShell=no\n"
-        "[MINER]\nHarvester=yes\nOwner=Local\nTechLevel=1\nCost=1400\nPrerequisite=WORK\n");
+        "[MINER]\nHarvester=yes\nOwner=Local\nTechLevel=1\nCost=1400\nPrerequisite=WORK\n";
 }
+IniFile base_rules(const std::string& extra = {}) { return parse(base_rules_text(extra)); }
 
 IniFile base_ai() {
     return parse("[TaskForces]\n0=TF\n[TF]\n0=1,GI\n[TeamTypes]\n0=T\n[T]\nTaskForce=TF\n"
@@ -729,6 +730,34 @@ void check_naval_placement_failure() {
         "Base plan stopped at the naval yard that could not be placed");
     policy.reset();
     require(policy.naval_allowed(), "A new match did not set House +138 again (004E18C0)");
+}
+
+// Base 004EF890 keeps a type whose TechLevel is -1 (it tests TechLevel <=
+// House +11C), and 004E9660 orders a plan node without a tech test. A map
+// that sets TechLevel=-1 on its shipyard still gets the shipyard built;
+// the computer then drops it when it finds no water.
+void check_naval_tech_level_minus_one() {
+    auto text = base_rules_text();
+    const std::string dock = "[DOCK]\nNaval=yes\nOwner=Local\nAIBuildThis=yes\nTechLevel=1\n";
+    const auto at = text.find(dock);
+    require(at != std::string::npos, "test rules lost the DOCK section");
+    text.replace(at, dock.size(), "[DOCK]\nNaval=yes\nOwner=Local\nAIBuildThis=yes\nTechLevel=-1\n");
+    const auto rules = parse(text);
+    const auto ai = base_ai();
+    auto world = base_world(rules);
+    PrototypeAI policy(rules, &ai);
+    std::uint32_t id = 2;
+    bool ordered = false;
+    for (std::int32_t frame = 0; frame < 90 * 40 && !ordered; frame += 90)
+        for (const auto& type : building_orders(rules, policy.tick(world, computer, player, frame))) {
+            if (type == "DOCK") { ordered = true; break; }
+            world.entities.push_back(actor(rules, id, computer, type, sw::Kind::Structure,
+                {static_cast<std::uint16_t>(12 + id), 10}));
+            ++id;
+        }
+    require(ordered, "Computer did not order a plan node with TechLevel -1");
+    const auto centre = policy.base_centre(computer);
+    require(centre && centre->x == 10 && centre->y == 10, "House +53BC is not the construction yard Cell");
 }
 
 // Base 004EF890 and 004EF600: with the Super Weapons option (00A3D2C3)
@@ -1072,6 +1101,7 @@ int main(int argc, char** argv) try {
     check_base_plan();
     check_installed_base_plan(rules, ai, allied, soviet);
     check_naval_placement_failure();
+    check_naval_tech_level_minus_one();
     check_super_weapon_option();
     check_building_without_cash();
     check_power_and_defense_nodes();

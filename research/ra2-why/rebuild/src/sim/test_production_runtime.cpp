@@ -77,10 +77,88 @@ void placement_cases() {
 }
 unsigned checks=0;
 void require(bool ok,const char* what) { ++checks; if (!ok) throw std::runtime_error(what); }
+namespace w=ra2::session::world;
+// A flat 100x100 map, Cells 60..139. Water (LandType 2) fills x 100..119,
+// y 80..99; every other Cell is Clear. A computer construction yard (4x4)
+// stands at (90,90).
+struct NavalFixture { Catalog catalog; w::Snapshot world; FactorySet factories; };
+NavalFixture naval_fixture(bool water=true) {
+    NavalFixture n; auto& c=n.catalog; auto& s=n.world; auto& f=n.factories;
+    c.countries={"Russians"};
+    std::array<std::array<float,8>,12> speeds{};
+    for (int l=0;l<12;++l) for (int k=0;k<8;++k) speeds[std::size_t(l)][std::size_t(k)]=(k==5)?(l==2?1.0f:0.0f):1.0f;
+    c.land_speed=speeds;
+    std::array<bool,12> buildable{}; buildable.fill(true); buildable[2]=false; c.buildable=buildable;
+    c.build_speed=0.7; c.minimum_low_power=0.5f; c.maximum_low_power=0.8f; c.low_power_penalty=1; c.multiple_factory=0.8f;
+    TypeFacts yard; yard.id="YARD"; yard.rtti=Rtti::BuildingType; yard.heap_index=0; yard.can.heap_index=0;
+    yard.factory=Rtti::BuildingType; yard.construction_yard=true; yard.placement.foundation=18; yard.owner=1;
+    yard.can.tech_level=1; yard.cost=3000; yard.strength=1000;
+    TypeFacts ship; ship.id="SHIP"; ship.rtti=Rtti::BuildingType; ship.heap_index=1; ship.can.heap_index=1;
+    ship.placement.naval=true; ship.placement.speed_type=5; ship.placement.foundation=18; ship.owner=1;
+    ship.can.tech_level=-1; ship.cost=1000; ship.strength=1500; ship.factory=Rtti::UnitType; ship.planning_side=1;
+    c.buildings={yard,ship}; c.shipyards={1};
+    s.setup_progress=w::SetupProgress::Complete;
+    s.geometry=ra2::session::PlacementGeometry{100,100,{2,2,96,90}};
+    for (int y=60;y<140;++y) for (int x=60;x<140;++x) {
+        w::CellState cell; cell.allocated=true; cell.heads=ra2::weapons::CellContentHeads{};
+        ra2::sim::TerrainCell t; t.cell={std::uint16_t(x),std::uint16_t(y)}; t.tile_index=0; t.height_level=0; t.ramp_index=0;
+        t.floor_world_height=0; t.overlay_type_index=-1; t.bridge=false;
+        t.land_type=water && x>=100 && x<120 && y>=80 && y<100?2:0; cell.terrain=t;
+        cell.cell_flags_140=0; cell.ground_occupancy_124=0; cell.bridge_occupancy_128=0;
+        s.cells[std::uint32_t(y*512+x)]=cell;
+    }
+    w::House h; h.id=1; h.original_index=0; h.country="Russians"; h.country_index=0; h.side_index=1;
+    h.cash=5000; h.tech_level=10; h.human_controlled=false; h.house_flag_135=false;
+    h.stolen_tech_204=false; h.stolen_tech_205=false; h.stolen_mask_208=0; h.stolen_mask_20c=0; h.stolen_mask_210=0; h.stolen_mask_214=0;
+    h.power_output=100; h.power_drain=0;
+    for (auto* m:{&h.buildings_active_5460,&h.buildings_owned_5420,&h.buildings_ever_54a0,&h.units_owned_5430,&h.units_ever_54b0,
+                  &h.infantry_owned_5440,&h.infantry_ever_54c0,&h.aircraft_owned_5450,&h.aircraft_ever_54d0}) *m=std::map<std::int32_t,std::int32_t>{};
+    s.houses.push_back(h); s.creation_order.push_back({w::CreatedKind::House,1});
+    w::Entity e; e.id=2; e.house_id=1; e.kind=w::Kind::Structure; e.type="YARD"; e.lifetime=w::Lifetime::Placed;
+    e.cell=ra2map::Cell{90,90}; e.position=ra2::sim::Coord{90*256+128,90*256+128,0}; e.layer=w::Layer::Ground;
+    e.next=0; e.object_field_74=1; e.object_field_76=0; e.on_map=true; e.mission=0; e.original_type_index=0;
+    s.entities.push_back(e); s.creation_order.push_back({w::CreatedKind::Entity,2});
+    for (const auto o:original_foundation_cells(18)) s.cells.at(std::uint32_t((90+o.y)*512+90+o.x)).heads->ground_head=2;
+    f.flags.session_type=1; f.flags.super_weapons=true; f.flags.build_off_ally=false; f.flags.player_house=1;
+    f.buildings[2]=BuildingState{}; f.house_factory_counts[1]={0,0,0,0,0,0}; f.power_blackout_idle[1]=true;
+    return n;
+}
+// A WaterBound building (SpeedType 5) on water: 004718B0 reads the Float
+// column of the land speed table (00850EA0) and skips the land checks.
+// The ring search 004F03C0 -> 005502E0 finds a Cell whose 6x6 block is
+// water, picks it by frame, and rejects it beyond AINavalYardAdjacency.
+// A computer house starts the shipyard without Can_Build (0044B480).
+void naval_cases() {
+    auto n=naval_fixture();
+    require(legal_placement(n.world,n.catalog,"SHIP",{100,80})==true,"shipyard is legal on open water");
+    require(legal_placement(n.world,n.catalog,"SHIP",{98,80})==false,"shipyard is illegal on land");
+    const auto grid=placement_cells(n.world,n.catalog,"SHIP",{98,80});
+    require(grid && grid->size()==16,"shipyard cursor grid has 16 Cells");
+    int legal_cells=0; for (const auto& [cell,r]:*grid) { (void)cell; if (r==Placement::Legal) ++legal_cells; }
+    require(legal_cells==8,"cursor marks only the water Cells legal");
+    const auto first=naval_yard_site(n.world,n.factories,n.catalog,1,{90,90},0);
+    require(first.status==SiteStatus::Found && first.cell==CellXY{100,80},"first ring candidate for frame 0");
+    // Ring 10 admits (100,80) from the top row, then (100,81)..(100,94).
+    const auto later=naval_yard_site(n.world,n.factories,n.catalog,1,{90,90},18);
+    require(later.status==SiteStatus::Found && later.cell==CellXY{100,83},"frame 18 picks candidate 18 mod 15");
+    auto near=n; near.catalog.naval_yard_adjacency=10;
+    require(naval_yard_site(near.world,near.factories,near.catalog,1,{90,90},0).status==SiteStatus::None,
+        "a Cell beyond AINavalYardAdjacency is rejected");
+    auto dry=naval_fixture(false);
+    require(naval_yard_site(dry.world,dry.factories,dry.catalog,1,{90,90},0).status==SiteStatus::None,
+        "no water gives no Cell");
+    // TechLevel -1: the sidebar refuses it, the computer path starts it.
+    require(begin_production(n.world,n.factories,n.catalog,1,"SHIP",0).status==Status::Rejected,"sidebar refuses TechLevel -1");
+    const auto started=begin_computer_building(n.world,n.factories,n.catalog,1,"SHIP",0);
+    require(started.status==Status::Done && started.entity,"computer starts its shipyard");
+    for (auto& x:n.factories.factories) if (x.object==*started.entity) x.progress=54;
+    require(place(n.world,n.factories,n.catalog,1,"SHIP",first.cell,1).status==Status::Done,"shipyard placed on water");
+    const w::Entity* placed=nullptr; for (const auto& e:n.world.entities) if (e.id==*started.entity) placed=&e;
+    require(placed && placed->lifetime==w::Lifetime::Placed && placed->cell->x==100 && placed->cell->y==80,"shipyard stands at the site");
+}
 void self_test() {
     // 004B9630 preserves paid stages; 004B97C0 refunds only paid money.
     {
-        namespace w=ra2::session::world;
         w::Snapshot world; world.setup_progress=w::SetupProgress::Complete;
         world.geometry=ra2::session::PlacementGeometry{100,100,{2,2,96,90}};
         w::House owner; owner.id=1; owner.cash=800;
@@ -118,6 +196,7 @@ void self_test() {
         require(cancel_production(world,factories,catalog,1,"E1",16).status==Status::Done &&
             *world.houses.front().cash==1075,"completed product refunds full cost before exit");
     }
+    naval_cases();
     // Foundation lists from 00454EF0: GACNST uses 4x4 (index 18).
     require(original_foundation_cells(18).size()==16,"4x4 foundation");
     require(original_foundation_cells(9).size()==8,"special 3x3 foundation");
