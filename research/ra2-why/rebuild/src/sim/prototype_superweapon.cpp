@@ -466,6 +466,8 @@ void PrototypeSuperweapons::lose(std::uint32_t house, std::size_t slot) {
     state.ready = false;
     state.suspended = false;
     state.remaining = 0;
+    // Losing the sphere cancels a stale arm; the warp must not fire through it.
+    if (types_[slot].kind == SuperKind::ChronoSphere) armed_.erase(house);
 }
 
 void PrototypeSuperweapons::discharge(std::uint32_t house, std::size_t slot) {
@@ -536,11 +538,11 @@ SuperTickReport PrototypeSuperweapons::tick(session::world::Snapshot& world, std
             }
         }
     }
-    // A nuke in flight lands when its missile arrives (FUN_0069D850 case 0
-    // spawns the bullet; the blast follows on a later frame).
-    if (nuke_ && frame >= nuke_->impact) {
-        const auto target = nuke_->target;
-        nuke_.reset();
+    // Nukes in flight land when their missiles arrive (FUN_0069D850 case 0
+    // spawns the bullet; the blast follows on a later frame). Every launch
+    // keeps its own pending impact; none is lost.
+    for (const auto& pending : nukes_) {
+        if (frame < pending.impact) continue;
         auto weapon = blast_weapon(rules_, "NukePayload");
         if (!weapon) {
             // The hardcoded payload first; a WeaponType= override second.
@@ -550,19 +552,22 @@ SuperTickReport PrototypeSuperweapons::tick(session::world::Snapshot& world, std
                     if (weapon) break;
                 }
         }
-        if (weapon) {
-            auto epicenter = cell_center(target);
-            epicenter.z = floor_z(world, target);
-            const auto blast = detonate(world, epicenter, *weapon, rules_, distance_.get(),
-                invulnerable_, frame);
-            report.damaged = blast.damaged;
-            report.destroyed = blast.destroyed;
-            report.nukes = 1;
-            for (const auto& missing : blast.missing) report.notes.push_back(missing);
-        } else {
+        if (!weapon) {
             report.notes.push_back("nuke payload weapon is unavailable");
+            continue;
         }
+        auto epicenter = cell_center(pending.target);
+        epicenter.z = floor_z(world, pending.target);
+        const auto blast = detonate(world, epicenter, *weapon, rules_, distance_.get(),
+            invulnerable_, frame);
+        report.damaged += blast.damaged;
+        report.destroyed += blast.destroyed;
+        ++report.nukes;
+        for (const auto& missing : blast.missing) report.notes.push_back(missing);
     }
+    nukes_.erase(std::remove_if(nukes_.begin(), nukes_.end(),
+        [frame](const PendingNuke& pending) { return frame >= pending.impact; }),
+        nukes_.end());
     // Lightning storm strikes, one game frame at a time.
     if (!storm_ || !storm_->active) return report;
     const auto deferment = rules_.read_integer("General", "LightningDeferment", 250);
@@ -665,6 +670,22 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
             report.notes.push_back("no armed ChronoSphere for this house");
             return report;
         }
+        // The warp fires through the source sphere: it must still be granted,
+        // charged and not suspended at the warp click. A stale arm from a lost
+        // or discharged sphere must not fire.
+        const SuperweaponState* sphere = nullptr;
+        bool sphere_found = false;
+        for (std::size_t slot = 0; slot < types_.size(); ++slot)
+            if (types_[slot].kind == SuperKind::ChronoSphere) {
+                sphere = house_state(house, types_[slot].id);
+                sphere_found = true;
+            }
+        if (!sphere_found || !sphere || !sphere->present || !sphere->ready ||
+            sphere->suspended) {
+            report.notes.push_back("the armed ChronoSphere is not granted and ready");
+            armed_.erase(house);
+            return report;
+        }
         // The second click is the DESTINATION; the source block is the armed
         // ChronoSphere cell (base 1.006 FUN_0069D850 case 4 reads +0x4A as the
         // source block and the click as the landing area). This prototype uses
@@ -749,8 +770,15 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
             constexpr int kFallLeptons = 20000;
             constexpr int kMissileSpeed = 0x600;
             const auto delay = (kFallLeptons + kMissileSpeed - 1) / kMissileSpeed;
-            if (nuke_) report.notes.push_back("earlier nuke missile replaced while in flight");
-            nuke_ = PendingNuke{frame + static_cast<std::uint64_t>(delay), target};
+            // Validate the payload before the charge is consumed, so a rules
+            // mistake cannot cost a launch.
+            auto weapon = blast_weapon(rules_, "NukePayload");
+            if (!weapon && !type->weapon.empty()) weapon = blast_weapon(rules_, type->weapon);
+            if (!weapon) {
+                report.notes.push_back("nuke payload weapon is unavailable");
+                return report;
+            }
+            nukes_.push_back(PendingNuke{frame + static_cast<std::uint64_t>(delay), target});
             report.notes.push_back("nuke missile in flight");
             break;
         }

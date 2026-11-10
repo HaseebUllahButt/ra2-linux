@@ -320,6 +320,25 @@ void check_nuke(const IniFile& rules, const std::string& exe) {
         "Nuke falloff at 5 cells did not match the original damage math");
     require(world.entities[3].resolved_hp == 400, "Nuke reached beyond its 10 cell spread");
     require(chain_ok(world), "Nuke deaths broke the Cell chains");
+    // A launch already in flight lands even if the silo is lost afterwards.
+    auto in_flight = make_world();
+    place(in_flight, 1, 102, "NAMISL", sw::Kind::Structure, {10, 10}, 1000);
+    place(in_flight, 2, 101, "HTNK", sw::Kind::Unit, {50, 50}, 400);
+    PrototypeSuperweapons flight(rules, exe);
+    flight.update_grants(in_flight);
+    for (int frame = 0; frame < 9000; ++frame) flight.tick(in_flight, static_cast<std::uint64_t>(frame));
+    require(flight.fire(in_flight, 102, "MultiSpecial", {50, 50}, 9000).fired,
+        "In-flight nuke launch rejected");
+    in_flight.entities[0].lifetime = sw::Lifetime::Destroyed;
+    flight.update_grants(in_flight);
+    int flight_destroyed = 0, flight_nukes = 0;
+    for (int frame = 9001; frame <= 9014; ++frame) {
+        const auto impact = flight.tick(in_flight, static_cast<std::uint64_t>(frame));
+        flight_destroyed += impact.destroyed;
+        flight_nukes += impact.nukes;
+    }
+    require(flight_nukes == 1 && flight_destroyed == 1,
+        "Losing the silo cancelled a nuke already in flight");
     // The recharge clock runs while the missile flies: 14 charge frames passed.
     require(!supers.ready(102, "MultiSpecial") &&
         supers.frames_left(102, "MultiSpecial") == 9000 - 14,
@@ -433,6 +452,22 @@ void check_chrono(const IniFile& rules, const std::string& exe) {
     require(blocked_warp.fired && blocked_warp.teleported == 0 &&
         blocked.entities[1].cell && blocked.entities[1].cell->x == 50,
         "Warp moved a tank onto an occupied Cell");
+    // Losing the sphere after arming cancels the arm: the warp must not fire
+    // through a stale arm.
+    auto stale = make_world();
+    place(stale, 1, 102, "GACSPH", sw::Kind::Structure, {10, 10}, 1000);
+    place(stale, 2, 102, "HTNK", sw::Kind::Unit, {50, 50}, 400);
+    PrototypeSuperweapons stale_supers(rules, exe);
+    stale_supers.update_grants(stale);
+    for (int frame = 0; frame < 6300; ++frame) stale_supers.tick(stale, static_cast<std::uint64_t>(frame));
+    (void)stale_supers.fire(stale, 102, "ChronoSphereSpecial", {50, 50}, 6300);
+    stale.entities[0].lifetime = sw::Lifetime::Destroyed;
+    stale_supers.update_grants(stale);
+    const auto stale_warp = stale_supers.fire(stale, 102, "ChronoWarpSpecial", {55, 50}, 6301);
+    require(!stale_warp.fired && stale_warp.teleported == 0 &&
+        !stale_warp.notes.empty(), "Warp fired through a stale arm after the sphere was lost");
+    require(stale.entities[1].cell && stale.entities[1].cell->x == 50,
+        "Stale arm moved a tank");
 }
 
 void check_paradrop(const IniFile& rules, const std::string& exe) {
@@ -534,6 +569,22 @@ void check_guards(const IniFile& rules) {
     plain_supers.update_grants(world);
     report = plain_supers.fire(world, 102, "MultiSpecial", {50, 50}, 0);
     require(!report.fired, "Rules without super weapons fired");
+    // A missing nuke payload is validated before the charge is consumed.
+    IniFile no_payload;
+    no_payload.parse(
+        "[SuperWeaponTypes]\n1=MultiSpecial\n"
+        "[MultiSpecial]\nType=MultiMissile\nRechargeTime=1\n"
+        "[BuildingTypes]\n1=NAMISL\n[NAMISL]\nSuperWeapon=MultiSpecial\n");
+    auto no_payload_world = make_world();
+    place(no_payload_world, 1, 102, "NAMISL", sw::Kind::Structure, {10, 10}, 1000);
+    PrototypeSuperweapons payload_supers(no_payload);
+    payload_supers.update_grants(no_payload_world);
+    for (int frame = 0; frame < 900; ++frame) payload_supers.tick(no_payload_world, static_cast<std::uint64_t>(frame));
+    const auto payload_report = payload_supers.fire(no_payload_world, 102, "MultiSpecial", {50, 50}, 900);
+    require(!payload_report.fired && !payload_report.notes.empty(),
+        "Nuke fired without a payload weapon");
+    require(payload_supers.ready(102, "MultiSpecial"),
+        "A failed payload validation consumed the nuke charge");
 }
 } // namespace
 

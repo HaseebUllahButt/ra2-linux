@@ -136,7 +136,7 @@ private:
         std::uint64_t impact = 0; // Frame the missile lands.
         ra2map::Cell target{};
     };
-    std::optional<PendingNuke> nuke_; // Missile in flight.
+    std::vector<PendingNuke> nukes_; // Missiles in flight, one per launch.
     std::optional<Storm> storm_;
     std::vector<ra2map::Cell> bolts_; // Recent storm bolts for separation.
     std::unique_ptr<class OriginalDistance> distance_;
