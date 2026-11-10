@@ -434,6 +434,70 @@ void fire_gate_test(const rules::IniFile& rules,const rules::IniFile& art,const 
     check(aa_fired,"AA weapon did not fire at an airborne Aircraft target");
     std::cout<<"Fire gate blocks new Aircraft shots only, AA vs AG targets passed\n";
 }
+// The target gate (Part 3) controls permission per source-target pair. A
+// false result blocks can_attack, attack, idle guard acquisition, return
+// fire and active orders; a rejected active order pauses without clearing.
+void target_gate_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+    rules::IniFile map;
+    auto w=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400);
+    w.entities[0].mission=0;
+    sim::PrototypeCombatRuntime combat(rules,map,art,exe);
+    // A false gate blocks can_attack and the attack order.
+    combat.set_target_gate([](const world::Snapshot&,const world::Entity&,
+                              const world::Entity&){return false;});
+    check(!combat.can_attack(w,1,2),"false gate left can_attack true");
+    check(!combat.attack(w,1,2),"false gate accepted an attack order");
+    // The idle guard scan must not acquire a target.
+    check(combat.tick(w,0).fired==0 && !w.entities[0].target_id.value_or(0),
+          "false gate idle guard acquired or fired");
+    // Return fire: the target shoots first; the victim must not retaliate.
+    sim::PrototypeCombatRuntime quiet(rules,map,art,exe);
+    // The gate blocks only the victim's pair, so the enemy can still land
+    // its shot while the victim cannot retaliate.
+    quiet.set_target_gate([](const world::Snapshot&,const world::Entity& s,
+                             const world::Entity&){return s.id!=1;});
+    check(quiet.attack(w,2,1),"the enemy attack order was rejected");
+
+    for (unsigned frame=0;frame<60;++frame) quiet.tick(w,frame);
+    // The victim is entity id 1 (index 0); the enemy shot must land on it.
+    check(*w.entities[0].resolved_hp<400,"the enemy shot did not land");
+    check(!w.entities[0].target_id.value_or(0),
+          "the victim retaliated through a false gate");
+    // A true gate permits firing.
+    combat.set_target_gate([](const world::Snapshot&,const world::Entity&,
+                              const world::Entity&){return true;});
+    check(combat.can_attack(w,1,2),"true gate left can_attack false");
+    check(combat.attack(w,1,2),"true gate rejected the attack order");
+    // The 120mm shell flies about 11 frames: keep ticking until the damage.
+    unsigned shot_frame=0,impact_frame=0;
+    for (unsigned frame=1;frame<120;++frame) {
+        const auto r=combat.tick(w,frame);
+        if (r.fired && !shot_frame) shot_frame=frame;
+        if (shot_frame && *w.entities[1].resolved_hp<400) {impact_frame=frame;break;}
+    }
+    check(shot_frame,"true gate did not permit firing");
+    check(impact_frame,"the accepted shot did not damage the target");
+    const int hp_after_shot=*w.entities[1].resolved_hp;
+    // Changing the gate to false pauses the accepted order: no shot, no
+    // approach request, the order and the target stay.
+    const auto rng=w.random;
+    combat.set_target_gate([](const world::Snapshot&,const world::Entity&,
+                              const world::Entity&){return false;});
+    const auto paused=combat.tick(w,impact_frame+1);
+    check(paused.fired==0 && paused.out_of_range.empty() &&
+          paused.unresolved.empty() && w.entities[0].target_id==2 &&
+          *w.entities[1].resolved_hp==hp_after_shot,
+          "the false gate did not pause the accepted order");
+    same_rng(rng,w.random);
+    // True resumes the paused order.
+    combat.set_target_gate([](const world::Snapshot&,const world::Entity&,
+                              const world::Entity&){return true;});
+    bool resumed=false;
+    for (unsigned frame=impact_frame+2;frame<impact_frame+160 && !resumed;++frame)
+        resumed=combat.tick(w,frame).fired>0;
+    check(resumed,"the resumed gate did not fire again");
+    std::cout<<"Target gate blocks can_attack, acquisition, return fire and pauses active orders passed\n";
+}
 // Flight unlinks flying aircraft from their Cells and clears occupancy
 // tracking. A death must accept such an actor and still reject every other
 // unlink case.
@@ -842,6 +906,7 @@ int main(int argc,char** argv) {
         }
         std::cout<<"TeamDelays="<<rules.read_string("General","TeamDelays")<<'\n';
         fire_gate_test(rules,art,std::string(argv[1])+"/game.exe");
+        target_gate_test(rules,art,std::string(argv[1])+"/game.exe");
         unlinked_aircraft_death_test(rules,art,std::string(argv[1])+"/game.exe");
         air_ground_test(rules,art,std::string(argv[1])+"/game.exe");
         fallen_house_test(rules,art,std::string(argv[1])+"/game.exe",files);

@@ -640,6 +640,8 @@ bool PrototypeCombatRuntime::can_attack(const session::world::Snapshot& world,
     // TODO-ORIGINAL: Resolve alliances beyond matching House IDs.
     if (!prototype_alive(source) || !prototype_alive(target) || source->house_id==target->house_id)
         return false;
+    // The target gate blocks the pair before any weapon or verse checks.
+    if (target_gate_ && !target_gate_(world,*source,*target)) return false;
     const auto weapon=prototype_target_weapon(base_,map_,art_,world,*source,*target);
     if (!weapon) return false;
     const auto verse=prototype_verse(base_,map_,*weapon,*target);
@@ -1000,6 +1002,9 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             if (source) source->target_id=0;
             it=orders_.erase(it);continue;
         }
+        // The target gate pauses a rejected active order: it keeps its
+        // order, takes no shot and asks no approach.
+        if (target_gate_ && !target_gate_(world,*source,*target)) {++it;continue;}
         // Base flight mission: a source without permission to fire keeps its
         // order, takes no shot and asks no approach. Weapon timing, damage
         // and in-flight projectiles stay shared with the ground prototype.

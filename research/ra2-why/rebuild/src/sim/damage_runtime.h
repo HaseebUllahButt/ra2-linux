@@ -177,6 +177,15 @@ public:
     void set_fire_gate(std::function<bool(const session::world::Entity&)> gate) {
         fire_gate_=std::move(gate);
     }
+    // The target gate controls permission per source-target pair. An empty
+    // gate keeps the previous behavior. A false result blocks can_attack,
+    // idle guard acquisition, retaliation and the active orders loop. A
+    // rejected active order pauses: it keeps its order, takes no shot and
+    // asks no approach. In-flight projectiles are unchanged.
+    void set_target_gate(std::function<bool(const session::world::Snapshot&,
+        const session::world::Entity&,const session::world::Entity&)> gate) {
+        target_gate_=std::move(gate);
+    }
     void stop(session::world::Snapshot&,std::uint32_t source_id);
     PrototypeCombatTick tick(session::world::Snapshot&,std::uint64_t frame);
     // Base 004E7DF0: kill every remaining owned actor, with no attacker.
@@ -192,6 +201,9 @@ private:
     OriginalDistance distance_;
     weapons::BaseBallisticAngles angles_;
     std::map<std::uint32_t,std::uint32_t> orders_;
+    // Per source-target permission gate. Empty keeps the previous behavior.
+    std::function<bool(const session::world::Snapshot&,
+        const session::world::Entity&,const session::world::Entity&)> target_gate_;
     // Targets found by the idle threat scan or kept after retaliation.
     // Base 006D31E0 Threat_Range: Guard uses GuardRange or the weapon range,
     // Area Guard uses twice GuardRange or the longer weapon range (max 16
