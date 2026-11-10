@@ -861,18 +861,24 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
         case SuperKind::IronCurtain: {
             // Base 1.006 FUN_006B26D0 loops exactly nine DAT_00A6F248 offsets (a
             // 3x3 block around the click) and calls every object's virtual +148
-            // with the duration from rules +0xCA4. Duration comes from
-            // [CombatDamage] IronCurtainDuration, read at FUN_00646C60. Ownership
-            // and infantry eligibility live in the object handler; this
-            // prototype keeps them here.
+            // with the duration from rules +0xCA4 (read at FUN_00646C60). The
+            // object handlers decide eligibility and carry no owner check:
+            // Building vtable 0079CBBC+148 -> FUN_00452E60, which stores the
+            // protection timer via FUN_006D86B0; Unit vtable 007ADDF8+148 ->
+            // FUN_004CD3F0, which kills Organic types (type+0xB47, set by the
+            // rules parse FUN_006DAF60 near lines 1940-1944) with lethal damage
+            // via +158, else stores the timer; Infantry vtable 007A3540+148 ->
+            // FUN_005091C0, lethal armor-bypassing damage via +158. The timer
+            // lives at Techno +154/+158/+15C (FUN_006D86B0).
             const auto duration = rules_.read_integer("CombatDamage", "IronCurtainDuration", 750);
             for (auto& entity : world.entities) {
-                if (!alive(&entity) || entity.house_id != house || !entity.cell) continue;
+                if (!alive(&entity) || !entity.cell) continue;
                 const auto distance = std::max(std::abs(int(entity.cell->x) - int(target.x)),
                     std::abs(int(entity.cell->y) - int(target.y)));
                 if (distance > 1) continue;
                 if (entity.kind == w::Kind::Infantry) {
-                    // TODO-ORIGINAL: the original Iron Curtain kills infantry.
+                    // The infantry handler kills the soldier with armor-bypassing
+                    // lethal damage, whatever the owner.
                     if (unlink_entity(world, entity)) {
                         entity.resolved_hp = 0;
                         entity.active = false;
@@ -882,6 +888,21 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
                         ++report.destroyed;
                     } else {
                         report.notes.push_back("curtained infantry has unresolved Cell links");
+                    }
+                    continue;
+                }
+                if (entity.kind == w::Kind::Unit &&
+                    rules_.read_bool(entity.type, "Organic", false)) {
+                    // The unit handler kills Organic types with lethal damage.
+                    if (unlink_entity(world, entity)) {
+                        entity.resolved_hp = 0;
+                        entity.active = false;
+                        entity.in_limbo = true;
+                        entity.target_id = 0;
+                        entity.lifetime = w::Lifetime::Destroyed;
+                        ++report.destroyed;
+                    } else {
+                        report.notes.push_back("curtained organic unit has unresolved Cell links");
                     }
                     continue;
                 }

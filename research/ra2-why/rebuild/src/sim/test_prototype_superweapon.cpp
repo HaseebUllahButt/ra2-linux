@@ -407,20 +407,39 @@ void check_iron_curtain(const IniFile& rules, const std::string& exe) {
     place(world, 4, 101, "HTNK", sw::Kind::Unit, {52, 50}, 400);
     place(world, 5, 102, "NAMISL", sw::Kind::Structure, {11, 10}, 1000);
     place(world, 6, 102, "HTNK", sw::Kind::Unit, {51, 50}, 400);
+    place(world, 7, 101, "HTNK", sw::Kind::Unit, {49, 50}, 400);
+    place(world, 8, 101, "E1", sw::Kind::Infantry, {51, 50}, 125);
+    place(world, 9, 101, "SQD", sw::Kind::Unit, {49, 49}, 300);
     PrototypeSuperweapons supers(rules, exe);
     supers.update_grants(world);
     for (int frame = 0; frame < 4500; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
     const auto report = supers.fire(world, 102, "IronCurtainSpecial", {50, 50}, 4500);
-    require(report.fired && report.shielded == 2 && report.destroyed == 1,
-        "Iron Curtain did not shield the 3x3 block and kill the infantry");
+    // Eligibility has no owner check: ground units and structures are
+    // shielded whatever the house; infantry and Organic units die. Aircraft
+    // stay excluded. shielded: own tank 2, own tank 6, enemy tank 7.
+    // destroyed: own infantry 3, enemy infantry 8, enemy Organic squid 9.
+    require(report.fired && report.shielded == 3 && report.destroyed == 3,
+        "Iron Curtain did not shield the 3x3 block and kill infantry and Organic units");
     // The curtain covers the 3x3 block around the click (base 1.006
     // FUN_006B26D0 loops nine DAT_00A6F248 offsets); the enemy two cells away
     // stays unshielded.
     require(supers.invulnerable(6, 4500),
         "Iron Curtain missed a tank on the neighbouring Cell");
+    require(supers.invulnerable(7, 4500),
+        "Iron Curtain missed an enemy tank on the neighbouring Cell");
     require(supers.invulnerable(2, 4500) && supers.invulnerable(2, 5249) &&
         !supers.invulnerable(2, 5250), "Iron Curtain duration did not match 750 frames");
-    require(!supers.invulnerable(4, 4500), "Iron Curtain shielded an enemy tank");
+    require(!supers.invulnerable(4, 4500), "Iron Curtain shielded a tank outside the 3x3 block");
+    require(world.entities[6].lifetime == sw::Lifetime::Placed,
+        "Iron Curtain destroyed the adjacent enemy tank");
+    require(world.entities[7].lifetime == sw::Lifetime::Destroyed,
+        "Iron Curtain left the adjacent enemy infantry alive");
+    require(world.entities[8].lifetime == sw::Lifetime::Destroyed,
+        "Iron Curtain left the Organic unit alive");
+    require(world.entities[2].lifetime == sw::Lifetime::Destroyed,
+        "Iron Curtain left own infantry alive");
+    require(world.entities[3].lifetime == sw::Lifetime::Placed,
+        "Iron Curtain affected a tank outside the 3x3 block");
     // A nuke cannot hurt the curtained tank but kills the rest. The nuke is
     // ready at frame 9000 and its impact lands 3200 frames after the click, so
     // the curtain must be refreshed inside its 750 frame window of the impact.
