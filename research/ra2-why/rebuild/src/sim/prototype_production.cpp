@@ -192,7 +192,7 @@ Outcome abandon_orphans(w::Snapshot& world,FactorySet& factories,const Catalog& 
 // Larger x+y goes first; on a tie, the larger x (the War Factory door side).
 // A Cell must be flat (ramp 0) at the height level of the building's own
 // Cell, so a product never lands on a cliff or a ramp.
-std::optional<ra2map::Cell> exit_cell(const w::Snapshot& world,const Catalog& catalog,const w::Entity& building) {
+std::optional<ra2map::Cell> exit_cell(const w::Snapshot& world,const Catalog& catalog,const w::Entity& building,bool naval=false) {
     if (!building.cell) return {};
     const auto* type=catalog.find(building.type);
     if (!type || type->placement.foundation<0 || type->placement.foundation>=22) return {};
@@ -215,7 +215,8 @@ std::optional<ra2map::Cell> exit_cell(const w::Snapshot& world,const Catalog& ca
         ring.clear();
         for (int y=top-radius;y<=bottom+radius;++y) for (int x=left-radius;x<=right+radius;++x) {
             if (x!=left-radius && x!=right+radius && y!=top-radius && y!=bottom+radius) continue;
-            if (x<0 || y<0 || x>=512 || y>=512 || x+y<=front) continue;
+            if (x<0 || y<0 || x>=512 || y>=512) continue;
+            if (!naval && x+y<=front) continue;
             ring.push_back({x,y});
         }
         std::sort(ring.begin(),ring.end(),[](const auto& a,const auto& b) {
@@ -228,12 +229,13 @@ std::optional<ra2map::Cell> exit_cell(const w::Snapshot& world,const Catalog& ca
             const auto& cell=it->second;
             if (cell.allocated!=true || !cell.heads || cell.heads->ground_head || cell.heads->bridge_head ||
                 !cell.ground_occupancy_124 || *cell.ground_occupancy_124 || !cell.terrain ||
-                !cell.terrain->floor_world_height || cell.terrain->height_level!=level ||
+                !cell.terrain->floor_world_height ||
+                (!naval && cell.terrain->height_level!=level) ||
                 cell.terrain->ramp_index!=0 ||
                 !cell.terrain->land_type ||
-                *cell.terrain->land_type==2 || *cell.terrain->land_type==3 ||
+                (naval ? *cell.terrain->land_type!=2 : (*cell.terrain->land_type==2 || *cell.terrain->land_type==3)) ||
                 cell.terrain->overlay_type_index!= -1 || cell.terrain->bridge!=false ||
-                (cell.unit_land_speed && *cell.unit_land_speed<=0)) continue;
+                (!naval && cell.unit_land_speed && *cell.unit_land_speed<=0)) continue;
             return ra2map::Cell{static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)};
         }
     }
@@ -339,18 +341,22 @@ Outcome add_free_unit(w::Snapshot& world,const Catalog& catalog,const w::Entity&
 
 // The completed FactoryState owns its object until a free exit is found.
 // A failed exit keeps the object and lets the next tick try again.
+// A naval product (slot 3) leaves its shipyard onto the nearest free Water Cell.
+// TODO-ORIGINAL: Exit_Object for a shipyard (the dock and the bib) is not recovered.
 Outcome discharge(w::Snapshot& world,FactorySet& factories,const Catalog& catalog) {
     Outcome result{Status::Done,{},{},{}};
     for (auto& factory:factories.factories) {
-        if (!factory.object || factory.progress!=54 || (factory.slot!=1 && factory.slot!=2)) continue;
+        if (!factory.object || factory.progress!=54 ||
+            (factory.slot!=1 && factory.slot!=2 && factory.slot!=3)) continue;
+        const bool naval=factory.slot==3;
         auto* item=entity(world,factory.object);
         const auto wanted=factory.slot==1 ? Rtti::InfantryType : Rtti::UnitType;
         const auto kind=factory.slot==1 ? w::Kind::Infantry : w::Kind::Unit;
         if (!item || item->kind!=kind || item->lifetime!=w::Lifetime::Created || item->house_id!=factory.house_id)
             return fail(Status::NeedsInput,"completed factory object is invalid");
-        const auto* building=choose_factory(world,factories,catalog,factory.house_id,wanted);
+        const auto* building=choose_factory(world,factories,catalog,factory.house_id,wanted,naval);
         if (!building) { result.detail="waiting for a factory exit"; continue; }
-        const auto cell=exit_cell(world,catalog,*building);
+        const auto cell=exit_cell(world,catalog,*building,naval);
         if (!cell) { result.detail="waiting for a clear factory exit"; continue; }
         if (!place_exit_actor(world,*item,*cell)) return fail(Status::NeedsInput,"factory object cannot be activated");
         if (kind==w::Kind::Unit && item->original_type_index) {
@@ -589,13 +595,14 @@ Outcome tick(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,std
         const auto wanted=product_kind(factory.slot);
         if (!wanted) return fail(Status::NeedsInput,"factory slot is unknown");
         if (!choose_factory(world,factories,catalog,factory.house_id,*wanted,factory.slot==3)) needed=true;
-        if (factory.progress==54 && (factory.slot==1 || factory.slot==2)) {
+        if (factory.progress==54 && (factory.slot==1 || factory.slot==2 || factory.slot==3)) {
+            const bool naval=factory.slot==3;
             const auto* item=entity(world,factory.object);
             const auto expected=factory.slot==1 ? w::Kind::Infantry : w::Kind::Unit;
             if (!item || item->kind!=expected || item->lifetime!=w::Lifetime::Created ||
                 item->house_id!=factory.house_id) return fail(Status::NeedsInput,"completed factory object is invalid");
-            const auto* building=choose_factory(world,factories,catalog,factory.house_id,*wanted);
-            if (building && exit_cell(world,catalog,*building)) needed=true;
+            const auto* building=choose_factory(world,factories,catalog,factory.house_id,*wanted,naval);
+            if (building && exit_cell(world,catalog,*building,naval)) needed=true;
             else waiting_for_exit=true;
         }
         if (!factory.suspended && factory.progress<54 &&
