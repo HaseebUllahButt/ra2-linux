@@ -1,3 +1,5 @@
+#include <cstdlib>
+#include <iostream>
 #include "prototype_economy.h"
 #include "drive.h"
 #include "../loop/profile.h"
@@ -147,6 +149,22 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
     std::vector<sw::Entity*> miners;
     for(auto& e:w.entities) if(alive(e) && e.kind==sw::Kind::Unit && (e.type=="CMIN" || e.type=="HARV")) miners.push_back(&e);
     std::sort(miners.begin(),miners.end(),[](auto a,auto b){return a->id<b->id;});
+    // QA trace, only with RA2_MINER_DEBUG set: each miner every 600 frames.
+    static const bool trace=std::getenv("RA2_MINER_DEBUG")!=nullptr;
+    if(trace && frame%600==0) for(auto* miner:miners) {
+        const auto& bag=cargo_[miner->id];
+        std::cerr<<"MINER frame="<<frame<<" id="<<miner->id<<" house="<<miner->house_id<<" cell="<<miner->cell->x<<','<<miner->cell->y
+                 <<" load="<<bag.total<<" returning="<<bag.returning<<" docked="<<bag.docked<<" loading="<<bag.loading
+                 <<" moving="<<movement_.moving(miner->id)<<" next="<<bag.next;
+        if(bag.target) std::cerr<<" target="<<bag.target->x<<','<<bag.target->y;
+        std::cerr<<'\n';
+    }
+    if(trace && frame%6000==0 && !miners.empty()) {
+        std::cerr<<"STRUCTS frame="<<frame;
+        for(const auto& b:w.entities) if(alive(b) && b.kind==sw::Kind::Structure)
+            std::cerr<<' '<<b.house_id<<':'<<b.type<<'@'<<b.cell->x<<','<<b.cell->y;
+        std::cerr<<'\n';
+    }
     for(auto* miner:miners) {
         auto& e=*miner;live.insert(e.id);auto& bag=cargo_[e.id];
         // Ore can grow, or another miner can leave it, after this route
