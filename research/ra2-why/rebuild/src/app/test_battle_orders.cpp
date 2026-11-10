@@ -52,7 +52,6 @@ struct Fixture {
             entity(50,1,Kind::Unit,"PCV",180,140),
             entity(40,1,Kind::Unit,"smcv",160,120),
             entity(60,1,Kind::Structure,"GAPOWR",115,130),
-            entity(70,1,Kind::Aircraft,"ORCA",100,50),
             entity(80,0,Kind::Terrain,"TREE01",195,60),
             entity(200,2,Kind::Unit,"HTNK",220,60),
             entity(210,2,Kind::Infantry,"E2",220,95),
@@ -429,6 +428,31 @@ void shroud_filter() {
     expect_orders(f.click(220,60),OrderKind::Attack,{10,30,40,50},200);
 }
 
+// Owned aircraft select by click and box and take Move, Attack and Stop
+// orders like ground units. A dead aircraft drops out of the selection.
+void aircraft_selection() {
+    Fixture f;
+    f.world.entities.push_back(entity(70,1,Kind::Aircraft,"ORCA",100,50));
+    f.click(100,50);
+    f.selected({70});
+    f.controller.clear();
+    f.box(60,40,120,55);
+    f.selected({70});
+    expect_orders(f.click(30,180),OrderKind::Move,{70},0,{103,218});
+    expect_orders(f.click(220,60),OrderKind::Attack,{70},200);
+    expect_orders(f.click(240,165),OrderKind::Attack,{70},230);
+    expect_orders(f.send(key('s')),OrderKind::Stop,{70});
+    f.get(70).resolved_hp=0;
+    f.controller.sync(f.world);
+    f.selected({});
+    f.world.entities.push_back(entity(71,1,Kind::Aircraft,"ORCA",110,55));
+    f.click(110,55);
+    f.selected({71});
+    f.get(71).lifetime=Lifetime::Destroyed;
+    f.controller.sync(f.world);
+    f.selected({});
+}
+
 } // namespace
 
 int main() try {
@@ -442,6 +466,7 @@ int main() try {
     callbacks_and_ordering();
     event_edges();
     shroud_filter();
+    aircraft_selection();
     std::cout << "Battle input checks passed: selection, bounds, orders, deployment, and cancellation.\n";
 } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

@@ -295,6 +295,123 @@ int main(int argc, char** argv) try {
     require(left.phase(11) == AircraftPhase::Docked && left.ammo(11) == 1, "replay mission did not finish");
     std::cout << "Replay: two instances flew the same mission together\n";
 
+    // External combat mode: the plane only faces its target and never fires.
+    world = fixture();
+    PrototypeAircraft external(rules, true);
+    std::uint32_t ext_frame = 0;
+    require(external.issue(world, 11, 13).status == PrototypeAircraftStatus::Complete,
+            "external attack order failed");
+    require(!external.ready_to_fire(11), "docked plane reported ready to fire");
+    frames_until(external, world, 11, AircraftPhase::FlyToTarget, ext_frame, 400);
+    require(!external.ready_to_fire(11), "flying plane reported ready before Attack");
+    frames_until(external, world, 11, AircraftPhase::Attack, ext_frame, 2000);
+    unsigned ext_shots = 0;
+    for (unsigned counted = 0; counted < 60; ++counted, ++ext_frame) {
+        const auto step = external.tick(world, ext_frame);
+        require(step.status == PrototypeAircraftStatus::Complete, "external frame failed");
+        ext_shots += step.shots.size();
+    }
+    require(ext_shots == 0, "external mode emitted shots");
+    require(actor(world, 13).resolved_hp && *actor(world, 13).resolved_hp == 400,
+            "external mode subtracted hit points directly");
+    require(external.ammo(11) && *external.ammo(11) == 1, "external mode spent ammo");
+    require(external.ready_to_fire(11), "external plane at its target was not ready");
+    std::cout << "External combat: no shots, no direct damage, ammo untouched\n";
+
+    // ready_to_fire gates on the Attack phase and fired() spends ammo once.
+    require(!external.ready_to_fire(999), "unknown aircraft reported ready to fire");
+    external.fired(11);
+    require(external.ammo(11) && *external.ammo(11) == 0, "fired did not spend one shot");
+    require(external.phase(11) == AircraftPhase::ReturnToPad,
+            "exhausted plane did not return to its pad");
+    require(!external.ready_to_fire(11), "empty plane reported ready to fire");
+    external.fired(11);
+    require(external.ammo(11) && *external.ammo(11) == 0, "fired ran on a not-ready plane");
+    frames_until(external, world, 11, AircraftPhase::Docked, ext_frame, 4000);
+    std::cout << "Fired gate: Attack only, one shot per call, empty plane went home\n";
+
+    // A re-issued move keeps the spent ammo; a later move adds no refills.
+    require(external.issue_move(world, 11, {20, 20}).status == PrototypeAircraftStatus::Complete,
+            "plane move order failed");
+    require(external.ammo(11) && *external.ammo(11) == 0, "plane move refilled spent ammo");
+    run(external, world, ext_frame, 100);
+    require(external.issue_move(world, 11, {24, 24}).status == PrototypeAircraftStatus::Complete,
+            "second plane move order failed");
+    require(external.ammo(11) && *external.ammo(11) == 0, "later plane move refilled ammo");
+    frames_until(external, world, 11, AircraftPhase::Docked, ext_frame, 8000);
+    require_at(world, 11, 4, 4, 0);
+    std::cout << "Plane move: spent ammo kept across re-issued moves, then docked\n";
+
+    // The Kirov takes a move order and holds at the goal cell.
+    world = fixture();
+    PrototypeAircraft kirov_move(rules);
+    std::uint32_t kirov_frame = 0;
+    require(kirov_move.issue_move(world, 14, {20, 24}).status == PrototypeAircraftStatus::Complete,
+            "airship move order failed");
+    run(kirov_move, world, kirov_frame, 2000);
+    require_at(world, 14, 20, 24, 750);
+    run(kirov_move, world, kirov_frame, 10);
+    require(!kirov_move.active(14), "airship did not release its finished move");
+    std::cout << "Kirov move: flew to the goal cell at cruise height 750\n";
+
+    // A plane takes a move order, reaches it and returns to its pad.
+    world = fixture();
+    PrototypeAircraft plane_move(rules);
+    std::uint32_t move_frame = 0;
+    require(plane_move.issue_move(world, 11, {20, 24}).status == PrototypeAircraftStatus::Complete,
+            "plane move order failed");
+    require(plane_move.ammo(11) && *plane_move.ammo(11) == 1, "new plane move did not load ammo");
+    run(plane_move, world, move_frame, 3000);
+    require(plane_move.active(11), "plane dropped its move mission");
+    frames_until(plane_move, world, 11, AircraftPhase::Docked, move_frame, 4000);
+    require_at(world, 11, 4, 4, 0);
+    std::cout << "Plane move: reached the goal cell and returned to its pad\n";
+
+    // Map actors can have no occupancy_tracking value. Detach their real
+    // ground link and preserve the infantry spot of the remaining neighbour.
+    world = fixture();
+    world.entities.push_back(entity(16,1,"E1",sw::Kind::Infantry,{10,10},0,125));
+    auto mutable_actor = [&](std::uint32_t id) -> sw::Entity& {
+        return *std::find_if(world.entities.begin(),world.entities.end(),
+            [&](const auto& e){return e.id==id;});
+    };
+    mutable_actor(15).next=16;
+    mutable_actor(16).position=Coord{10*256+192,10*256+64,0};
+    auto& start=world.cells.at(key(10,10));
+    start.heads.emplace().ground_head=15;
+    start.ground_occupancy_124=0x24u;
+    PrototypeAircraft detached(rules,true);
+    require(detached.issue_move(world,15,{20,20}).status==PrototypeAircraftStatus::Complete,"linked flyer move rejected");
+    require(detached.tick(world,0).status==PrototypeAircraftStatus::Complete,"linked flyer tick rejected");
+    require(world.cells.at(key(10,10)).heads->ground_head==16 &&
+        world.cells.at(key(10,10)).ground_occupancy_124==4u &&
+        actor(world,15).next==0 && actor(world,15).occupancy_tracking==false,
+        "flying unit did not release its ground cell and preserve its neighbour");
+    // A dock pad keeps its own whole-cell bit when its aircraft takes off.
+    world=fixture();
+    mutable_actor(11).next=10;
+    auto& pad_cell=world.cells.at(key(4,4));
+    pad_cell.heads.emplace().ground_head=11;
+    pad_cell.ground_occupancy_124=0x20u;
+    PrototypeAircraft pad_detach(rules,true);
+    require(pad_detach.issue(world,11,13).status==PrototypeAircraftStatus::Complete,"pad attack rejected");
+    require(pad_detach.tick(world,0).status==PrototypeAircraftStatus::Complete,"pad detach rejected");
+    require(world.cells.at(key(4,4)).heads->ground_head==10 &&
+        world.cells.at(key(4,4)).ground_occupancy_124==0x20u,"takeoff cleared the pad occupancy");
+    // Unknown chained occupants reject the whole frame without movement.
+    world=fixture();
+    mutable_actor(15).next=9999;
+    auto& bad_cell=world.cells.at(key(10,10));
+    bad_cell.heads.emplace().ground_head=15;
+    bad_cell.ground_occupancy_124=0x20u;
+    PrototypeAircraft bad_chain(rules,true);
+    require(bad_chain.issue_move(world,15,{20,20}).status==PrototypeAircraftStatus::Complete,"bad-chain order rejected early");
+    const auto old_position=actor(world,15).position;
+    require(bad_chain.tick(world,0).status==PrototypeAircraftStatus::NeedsInput &&
+        actor(world,15).position->x==old_position->x && actor(world,15).next==9999,
+        "unknown flight ground chain changed the world");
+    std::cout<<"Flight releases ground cells, preserves neighbours and rejects unknown chains\n";
+
     // Bad orders fail cleanly and cancel stops the mission.
     require(aircraft.issue(world, 0, 13).status == PrototypeAircraftStatus::Invalid,
             "zero aircraft id was accepted");
@@ -304,10 +421,6 @@ int main(int argc, char** argv) try {
             "self target was accepted");
     require(aircraft.issue(world, 11, 13).status == PrototypeAircraftStatus::Invalid,
             "dead target was accepted");
-    require(aircraft.issue_move(world, 11, {8, 8}).status == PrototypeAircraftStatus::Invalid,
-            "plane move order was accepted");
-    require(aircraft.issue_move(world, 14, {8, 8}).status == PrototypeAircraftStatus::Invalid,
-            "airship move order was accepted");
     world = fixture();
     PrototypeAircraft cancel_test(rules);
     require(cancel_test.issue(world, 11, 13).status == PrototypeAircraftStatus::Complete,
