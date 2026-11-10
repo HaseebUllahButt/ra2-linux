@@ -10,7 +10,7 @@
 # (Russians); 10000 credits; 10 start units; Super Weapons off.
 #
 # Usage (from rebuild/): tools/ai_reference_check.sh
-# Environment: GAME_DIR (../game-full), ORACLE_CENSUS, FRAMES (40000), JOBS (6),
+# Environment: BIN (build/ra2-native), GAME_DIR (../game-full), ORACLE_CENSUS, FRAMES (40000), JOBS (6),
 #              OUT (build/ai-reference), TOP (6 differences for each match).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -20,7 +20,7 @@ FRAMES=${FRAMES:-40000}
 JOBS=${JOBS:-6}
 OUT=${OUT:-build/ai-reference}
 TOP=${TOP:-6}
-BIN=build/ra2-native
+BIN=${BIN:-build/ra2-native}
 [ -x "$BIN" ] || { echo "missing $BIN: run make build/ra2-native" >&2; exit 2; }
 [ -d "$GAME_DIR" ] || { echo "missing game folder $GAME_DIR" >&2; exit 2; }
 mkdir -p "$OUT"
