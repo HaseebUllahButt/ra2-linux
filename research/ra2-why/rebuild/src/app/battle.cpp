@@ -1047,20 +1047,59 @@ public:
                 for (const auto& part:footprint) if (dock.count({x+part.x,y+part.y})) return true;
                 return false;
             };
-            // The rings of near buildings overlap. A cell that failed once in
-            // this search fails again, so each cell is tried once.
-            std::set<std::pair<int,int>> tried;
-            for (const auto base:bases) {
-                for (int radius=2;radius<=12 && !placed;++radius) for (int dy=-radius;dy<=radius && !placed;++dy)
-                    for (int dx=-radius;dx<=radius && !placed;++dx) {
-                        if (std::max(std::abs(dx),std::abs(dy))!=radius) continue;
-                        if (!tried.insert({int(base.x)+dx,int(base.y)+dy}).second) continue;
-                        if (closes_dock(int(base.x)+dx,int(base.y)+dy)) continue;
-                        const p::CellXY cell{std::int16_t(int(base.x)+dx),std::int16_t(int(base.y)+dy)};
-                        // place() checks proximity before its first write.
-                        placed=proto::place(world_,factories_,catalog_,owner,type,cell,frame).status==p::Status::Done;
+            // House::Find_Build_Location 004F03C0 and 005686B0: the computer wants
+            // AIBaseSpacing free cells around a new building (one more for
+            // ProtectWithWall or WantsExtraSpace), then settles for none.
+            // TODO-ORIGINAL: the candidate cells (House +5614, 004513B0), the
+            // direction offsets and the BaseSpacerOfHouses cells (Cell +DC) are
+            // not modelled; the ring search stays.
+            const int extra=rules_.read_bool(type,"ProtectWithWall")||rules_.read_bool(type,"WantsExtraSpace")?1:0;
+            const int S1=rules_.read_integer("AI","AIBaseSpacing",1)+extra;
+            const int S2=extra;
+            std::set<std::pair<int,int>> occupied;
+            for (const auto& e:world_.entities) if (live(e)&&e.kind==w::Kind::Structure) {
+                const auto* found=catalog_.find(e.type);
+                if (found) for (const auto& off:p::original_foundation_cells(found->placement.foundation))
+                    occupied.insert({e.cell->x+off.x,e.cell->y+off.y});
+                else occupied.insert({e.cell->x,e.cell->y});
+            }
+            const auto spaced=[&](int x,int y,int S) {
+                if (S==0) return true;
+                int minX=x,maxX=x,minY=y,maxY=y;
+                for (const auto& part:footprint) {
+                    minX=std::min(minX,x+part.x);maxX=std::max(maxX,x+part.x);
+                    minY=std::min(minY,y+part.y);maxY=std::max(maxY,y+part.y);
+                }
+                for (int cy=minY-S;cy<=maxY+S;++cy) for (int cx=minX-S;cx<=maxX+S;++cx) {
+                    if (occupied.count({cx,cy})) return false;
+                    const auto it=world_.cells.find(std::uint32_t(cy)*512+std::uint32_t(cx));
+                    if (it!=world_.cells.end() && it->second.terrain) {
+                        if (it->second.terrain->overlay_type_index.value_or(-1)!=-1) return false;
+                        if (it->second.terrain->ramp_index.value_or(0)!=0) return false;
                     }
-                if(placed)break;
+                }
+                return true;
+            };
+            // The rings of near buildings overlap. A cell that failed once in
+            // this search fails again, so each cell is tried once. The set is
+            // cleared between the two passes for the computer: a cell skipped
+            // in the tight pass must be tried in the loose pass.
+            for (int pass=0;pass<(is_enemy(owner)?2:1) && !placed;++pass) {
+                const int S=pass==0?S1:S2;
+                std::set<std::pair<int,int>> tried;
+                for (const auto base:bases) {
+                    for (int radius=2;radius<=12 && !placed;++radius) for (int dy=-radius;dy<=radius && !placed;++dy)
+                        for (int dx=-radius;dx<=radius && !placed;++dx) {
+                            if (std::max(std::abs(dx),std::abs(dy))!=radius) continue;
+                            if (!tried.insert({int(base.x)+dx,int(base.y)+dy}).second) continue;
+                            if (closes_dock(int(base.x)+dx,int(base.y)+dy)) continue;
+                            if (is_enemy(owner) && !spaced(int(base.x)+dx,int(base.y)+dy,S)) continue;
+                            const p::CellXY cell{std::int16_t(int(base.x)+dx),std::int16_t(int(base.y)+dy)};
+                            // place() checks proximity before its first write.
+                            placed=proto::place(world_,factories_,catalog_,owner,type,cell,frame).status==p::Status::Done;
+                        }
+                    if(placed)break;
+                }
             }
             if(placed)auto_place_wait_.erase({owner,type});
             else wait={bases.size(),frame+auto_place_retry_frames};
