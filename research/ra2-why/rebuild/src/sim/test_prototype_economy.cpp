@@ -211,16 +211,26 @@ int main(int argc,char** argv) {
         sim::PrototypeEconomy economy(guarded);
         for(unsigned frame=0;frame<3000 && *w.houses[0].cash==0;++frame) economy.tick(w,frame);
         assert(*w.houses[0].cash==2*30);
-        assert(w.entities[0].cell && w.entities[0].cell->x==1 && w.entities[0].cell->y==3);
-        const auto& dock=w.cells[3*512+1];
-        assert(dock.heads->ground_head==10);
-        const auto& guard=w.entities[2];
-        assert(guard.id==10 && guard.next && *guard.next==1);
+        // Keep the nearest-cell rule from the footprint search. The export
+        // has no harvest or unload mission body that requires cell (1,3).
+        // Cell (3,4) is nearest to the full miner at (7,4).
+        assert(w.entities[0].cell && w.entities[0].cell->x==3 && w.entities[0].cell->y==4);
+        const auto& dock=w.cells[4*512+3];
+        assert(dock.heads->ground_head==14);
+        const auto& guard=w.entities[6];
+        assert(guard.id==14 && guard.next && *guard.next==1);
         assert(!w.entities[0].next || !*w.entities[0].next);
         assert(*dock.ground_occupancy_124==(4u|0x20u));
         const auto& vacated=w.cells[4*512+7];
         assert(vacated.heads->ground_head==0 && *vacated.ground_occupancy_124==0);
-        for(const auto& e:w.entities) if(e.kind==sw::Kind::Infantry) assert(e.resolved_hp.value_or(0)>0 && e.lifetime==sw::Lifetime::Placed);
+        for(const auto& e:w.entities) if(e.kind==sw::Kind::Infantry) {
+            assert(e.resolved_hp.value_or(0)>0 && e.lifetime==sw::Lifetime::Placed);
+            assert(e.cell);
+            const auto& c=w.cells[e.cell->y*512u+e.cell->x];
+            assert(c.heads->ground_head==e.id);
+            assert(e.next && *e.next==(e.id==14?1u:0u));
+            assert(*c.ground_occupancy_124==(e.id==14?(4u|0x20u):4u));
+        }
     }
     // Row 7 puts the new field beyond the previous adjacent-only scan.
     for(auto type:{"CMIN","HARV"}) for(int ore_y:{4,5,7}) {
