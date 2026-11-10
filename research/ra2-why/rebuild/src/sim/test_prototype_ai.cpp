@@ -945,6 +945,51 @@ void check_power_and_defense_nodes() {
         "An unresolved defense node stopped the base plan");
 }
 
+// Base 004E9660 and 004F5D30: below AIPickWallDefensePercent the defense
+// node becomes a ring of wall nodes around the last built ProtectWithWall
+// building before it. The ring goes right after that building's node.
+void check_wall_pick() {
+    auto text = base_rules_text("AlliedBaseDefenseCounts=1,1,1\nAIPickWallDefensePercent=100,100,100\n");
+    const std::string yard = "[YARD]\nConstructionYard=yes\n";
+    const auto at = text.find(yard);
+    require(at != std::string::npos, "test rules lost the YARD section");
+    text.replace(at, yard.size(), yard + "ProtectWithWall=yes\nFoundation=2x2\n");
+    text += "[WALL]\nWall=yes\nAIBasePlanningSide=1\n[WALL2]\nWall=yes\nAIBasePlanningSide=0\n";
+    text.replace(text.find("[AI]\n"), 5, "[AI]\nConcreteWalls=WALL,WALL2\n");
+    const auto rules = parse(text);
+    const auto ai = base_ai();
+    auto world = base_world(rules);
+    PrototypeAI policy(rules, &ai);
+    std::vector<std::string> built;
+    std::uint32_t id = 2;
+    for (std::int32_t frame = 0; frame < 90 * 30; frame += 90)
+        for (const auto& type : building_orders(rules, policy.tick(world, computer, player, frame))) {
+            world.entities.push_back(actor(rules, id, computer, type, sw::Kind::Structure,
+                {static_cast<std::uint16_t>(12 + id), 10}));
+            ++id;
+            built.push_back(type);
+        }
+    const auto plan = policy.base_plan();
+    const auto cells = policy.base_plan_cells();
+    require(std::find(plan.begin(), plan.end(), std::string{}) == plan.end() &&
+        std::find(built.begin(), built.end(), "PLAIN") != built.end() &&
+        std::find(built.begin(), built.end(), "WALL2") == built.end(),
+        "The wall pick did not replace the defense node, or the plan stopped");
+    // YARD at (10, 10), 2x2: 12 wall Cells from (9, 9) to (12, 12), after node 0.
+    require(plan.size() > 13 && plan[0] == "YARD" && !cells[0] && plan[13] != "WALL2",
+        "The wall ring is not right after the protected building");
+    std::set<std::pair<int, int>> ring;
+    for (std::size_t i = 1; i <= 12; ++i) {
+        require(plan[i] == "WALL2" && cells[i], "A wall node has the wrong type or no Cell");
+        ring.insert({cells[i]->x, cells[i]->y});
+    }
+    require(ring.size() == 12 && !ring.count({10, 10}) && ring.count({9, 9}) && ring.count({12, 12}) &&
+        ring.count({12, 9}) && ring.count({9, 12}) && ring.count({11, 9}) && ring.count({9, 11}),
+        "The wall ring Cells are not the border around the 2x2 yard");
+    // The corners go in last at the same place, so (12, 12) comes first.
+    require(cells[1]->x == 12 && cells[1]->y == 12, "The wall nodes are not in the 004F7270 order");
+}
+
 // Base 004E9C90: the war factory makes the first owned HarvesterUnit while
 // the house has fewer than HarvestersPerRefinery per refinery.
 void check_harvester_ratio() {
@@ -1392,6 +1437,7 @@ int main(int argc, char** argv) try {
     run_check("check_original_trigger_gates", [&] { check_original_trigger_gates(); });
     run_check("check_first_team_timer", [&] { check_first_team_timer(); });
     run_check("check_base_plan", [&] { check_base_plan(); });
+    run_check("check_wall_pick", [&] { check_wall_pick(); });
     run_check("check_installed_base_plan", [&] { check_installed_base_plan(rules, ai, allied, soviet); });
     run_check("check_naval_placement_failure", [&] { check_naval_placement_failure(); });
     run_check("check_naval_tech_level_minus_one", [&] { check_naval_tech_level_minus_one(); });

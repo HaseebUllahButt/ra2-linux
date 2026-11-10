@@ -269,7 +269,8 @@ void PrototypeAI::make_plan(const Context& context) {
         const auto at = random(3, static_cast<std::uint32_t>(plan.size() - 1));
         plan.insert(plan.begin() + at + 1, std::string{});
     }
-    plan_ = std::move(plan);
+    plan_.clear();
+    for (auto& type : plan) plan_.push_back({std::move(type), std::nullopt});
 }
 
 // Base 0045EAA0, for an IsBaseDefense BuildingType (+138A): from the
@@ -386,48 +387,130 @@ std::string PrototypeAI::defense_choice(const Context& context) {
     return {};
 }
 
+// Base 004F5D30 (the wall pick for the defense node at index `node`).
+// The wall type is the first [AI] ConcreteWalls entry (Rules +900) whose
+// AIBasePlanningSide (+5EC) is the house's side or -1. The search goes
+// back from node - 1 to the first built node (0042C0A0) whose type has
+// ProtectWithWall (+13E5) and is not the wall type. Around that building
+// (Location Cell X, Y; foundation width W 00458930 and height H 00458940)
+// wall nodes with Cells go in right after its node: (X-1+i, Y-1) and
+// (X-1+i, Y+H) for i = 1..W, (X-1, Y-1+j) and (X+W, Y-1+j) for j = 1..H,
+// then the corners (X-1, Y-1), (X+W, Y-1), (X-1, Y+H) and (X+W, Y+H)
+// (004F7270). Each insert goes at the same place, so the last is first.
+// Returns false when no building is found.
+bool PrototypeAI::plan_walls(const Context& context, std::size_t node) {
+    std::string wall;
+    for (const auto& type : rules_.read_list("AI", "ConcreteWalls")) {
+        const auto side = rules_.read_integer(type, "AIBasePlanningSide", -1);
+        if (side == -1 || side == context.side.value_or(0)) {
+            wall = type;
+            break;
+        }
+    }
+    for (auto i = static_cast<std::ptrdiff_t>(node) - 1; i >= 0; --i) {
+        const auto& type = plan_[static_cast<std::size_t>(i)].type;
+        if (type.empty() || equal_name(type, wall) || !rules_.read_bool(type, "ProtectWithWall")) continue;
+        // Our nodes name a type, not a Cell: node i stands for the k-th
+        // building of its type, k = the nodes of that type up to i.
+        const auto rank = std::count_if(plan_.begin(), plan_.begin() + i + 1,
+            [&](const PlanNode& item) { return equal_name(item.type, type) && !item.cell; });
+        const WorldEntity* building = nullptr;
+        std::int64_t seen = 0;
+        for (const auto* entity : context.buildings)
+            if (equal_name(entity->type, type) && entity->cell && ++seen == rank) {
+                building = entity;
+                break;
+            }
+        if (!building) continue;
+        std::int32_t width = 1, height = 1;
+        const auto foundation = rules_.read_string(type, "Foundation");
+        if (const auto x = foundation.find_first_of("xX"); x != std::string::npos) {
+            width = std::max(1, number(foundation.substr(0, x), 1));
+            height = std::max(1, number(foundation.substr(x + 1), 1));
+        }
+        const std::int32_t left = building->cell->x - 1, top = building->cell->y - 1;
+        const auto at = plan_.begin() + i + 1;
+        std::vector<PlanNode> ring;
+        const auto add = [&](std::int32_t x, std::int32_t y) {
+            if (x < 0 || y < 0) return;
+            ring.push_back({wall, ra2map::Cell{static_cast<std::uint16_t>(x), static_cast<std::uint16_t>(y)}});
+        };
+        for (std::int32_t n = 1; n <= width; ++n) {
+            add(left + n, top);
+            add(left + n, top + height + 1);
+        }
+        for (std::int32_t n = 1; n <= height; ++n) {
+            add(left, top + n);
+            add(left + width + 1, top + n);
+        }
+        add(left, top);
+        add(left + width + 1, top);
+        add(left, top + height + 1);
+        add(left + width + 1, top + height + 1);
+        plan_.insert(at, ring.rbegin(), ring.rend());
+        return true;
+    }
+    return false;
+}
+
 // Base 004E9660 chooses the next building of the base plan. 0042C3D0
 // gives the first node that is not built; then:
 //  - a Naval node (BuildingType +ADA) is removed while House +138 is
 //    clear, and 0042C3D0 is asked once more;
-//  - a defense node (-1) is resolved by 004F1190 (defense_choice); when
-//    that fails, the node is removed and nothing is chosen this time;
+//  - a defense node (-1) first draws 006388A0(0, 99). Below
+//    AIPickWallDefensePercent (Rules +BCC, by AIDifficulty +C8) the wall
+//    pick 004F5D30 runs; when it succeeds the defense node is removed and
+//    nothing is chosen this time. Else 004F1190 (defense_choice) resolves
+//    the node; when that fails, the node is removed and nothing is chosen;
 //  - when free power (+52D0 - +15F88) is below the drain (+52D4) plus
 //    the node's drain (+C6C), a power node goes in front of the node and
 //    nothing is chosen this time. BuildConst types and types without a
 //    drain are exempt;
 //  - else the node type becomes the building to make (+553C).
-// TODO-ORIGINAL: the AIPickWallDefensePercent walls (Rules +BCC, 004F5D30),
-// node -3 (004F2350), the upgrade path (+C20) and the replacement skip of
-// 0042C3D0 (node +8, 004F64C0) are not modelled. House +15F88 is zero
+// A wall node (with a Cell) is built (0042C000) when the Cell holds the
+// wall overlay (+1215, +BEC) or any building.
+// TODO-ORIGINAL: our game cannot place a wall building (it becomes an
+// overlay), so a wall node counts as built and the walls are not made.
+// Node -3 (004F2350), the upgrade path (+C20) and the replacement skip
+// of 0042C3D0 (node +8, 004F64C0) are not modelled. House +15F88 is zero
 // (004E18C0) and is taken as zero.
 std::string PrototypeAI::plan_build(const Context& context) {
     const auto unbuilt = [&]() {
         for (std::size_t i = 0; i < plan_.size(); ++i) {
-            const auto& type = plan_[i];
+            const auto& type = plan_[i].type;
             if (type.empty()) return i;
+            if (plan_[i].cell) continue; // a wall node, see above
             const auto nodes = std::count_if(plan_.begin(), plan_.begin() + static_cast<std::ptrdiff_t>(i) + 1,
-                [&](const std::string& item) { return equal_name(item, type); });
+                [&](const PlanNode& item) { return equal_name(item.type, type) && !item.cell; });
             if (std::count_if(context.buildings.begin(), context.buildings.end(),
                     [&](const WorldEntity* e) { return equal_name(e->type, type); }) < nodes) return i;
         }
         return plan_.size();
     };
     auto i = unbuilt();
-    if (i < plan_.size() && !naval_ && !plan_[i].empty() && rules_.read_bool(plan_[i], "Naval")) {
+    if (i < plan_.size() && !naval_ && !plan_[i].type.empty() && rules_.read_bool(plan_[i].type, "Naval")) {
         plan_.erase(plan_.begin() + static_cast<std::ptrdiff_t>(i));
         i = unbuilt();
     }
     if (i == plan_.size()) return {};
-    if (plan_[i].empty()) {
+    if (plan_[i].type.empty()) {
+        if (static_cast<std::int32_t>(random(0, 99)) <
+                by_difficulty(rules_, "AIPickWallDefensePercent", difficulty_, 0) &&
+            plan_walls(context, i)) {
+            const auto defense = std::find_if(plan_.begin(), plan_.end(), [](const PlanNode& node) {
+                return node.type.empty() && !node.cell;
+            });
+            if (defense != plan_.end()) plan_.erase(defense);
+            return {};
+        }
         auto pick = defense_choice(context);
         if (pick.empty()) {
             plan_.erase(plan_.begin() + static_cast<std::ptrdiff_t>(i));
             return {};
         }
-        plan_[i] = std::move(pick);
+        plan_[i].type = std::move(pick);
     }
-    const auto type = plan_[i];
+    const auto type = plan_[i].type;
     const auto drain = std::max<std::int64_t>(0, -static_cast<std::int64_t>(rules_.read_integer(type, "Power")));
     if (drain > 0 && !contains(rules_.read_list("AI", "BuildConst"), type)) {
         std::int64_t output = 0, used = 0;
@@ -453,7 +536,7 @@ std::string PrototypeAI::plan_build(const Context& context) {
                     power = rules_.read_string("General", "NodRegularPower");
             }
             if (registered(rules_, "BuildingTypes", power)) {
-                plan_.insert(plan_.begin() + static_cast<std::ptrdiff_t>(i), power);
+                plan_.insert(plan_.begin() + static_cast<std::ptrdiff_t>(i), PlanNode{power, std::nullopt});
                 return {};
             }
         }
@@ -786,7 +869,9 @@ void PrototypeAI::house_ai(Context& context, std::vector<skirmish::Order>& resul
                   << " producing=" << producing << " next=" << (next.empty() ? "-" : next)
                   << " naval=" << naval_ << " units=" << (choice_[0].empty() ? "-" : choice_[0])
                   << " infantry=" << (choice_[1].empty() ? "-" : choice_[1]) << " teams=" << teams_.size() << " plan=";
-        for (const auto& node : plan_) std::cerr << (node.empty() ? "?" : node) << ',';
+        for (const auto& node : plan_)
+            if (!node.cell) std::cerr << (node.type.empty() ? "?" : node.type) << ',';
+            else if (&node == &plan_.front() || !(&node)[-1].cell) std::cerr << node.type << "-ring,";
         std::cerr << " have=";
         for (const auto* b : context.buildings) std::cerr << b->type << ',';
         std::cerr << " making=";

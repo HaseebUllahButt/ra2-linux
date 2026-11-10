@@ -65,7 +65,17 @@ public:
     std::vector<TeamView> teams() const;
     // Base 004EF890 base plan, in build order. An empty name is a defense
     // node that 004F1190 has not resolved yet.
-    const std::vector<std::string>& base_plan() const noexcept { return plan_; }
+    std::vector<std::string> base_plan() const {
+        std::vector<std::string> names;
+        for (const auto& node : plan_) names.push_back(node.type);
+        return names;
+    }
+    // The Cell of each node (House +55F8 node +4); only wall nodes have one.
+    std::vector<std::optional<ra2map::Cell>> base_plan_cells() const {
+        std::vector<std::optional<ra2map::Cell>> cells;
+        for (const auto& node : plan_) cells.push_back(node.cell);
+        return cells;
+    }
 
     // The Super Weapons game option (00A3D2C3), default on. With the
     // option off, 004EF890 and 004EF600 leave out each building whose
@@ -198,6 +208,7 @@ private:
     std::string plan_build(const Context&);
     std::array<std::int32_t, 3> defense_values(const std::string& type) const;
     std::string defense_choice(const Context&);
+    bool plan_walls(const Context&, std::size_t node);
     bool condition(const Context&, const Trigger&) const;
     std::uint32_t random(std::uint32_t low, std::uint32_t high);
 
@@ -217,7 +228,10 @@ private:
     // Base House +53BC: the last seen construction yard Cell. It stays when
     // the yard dies, as the original does not clear it.
     std::map<std::uint32_t, ra2map::Cell> base_centres_;
-    std::vector<std::string> plan_; // House +55F8 base nodes, by type name
+    // House +55F8 base nodes (16 bytes each): +0 the BuildingType (by
+    // name; empty for a defense node, -1) and +4 the Cell.
+    struct PlanNode { std::string type; std::optional<ra2map::Cell> cell; };
+    std::vector<PlanNode> plan_;
     bool super_weapons_ = true;     // 00A3D2C3
     bool naval_ = true;             // House +138
     // House +5540, +5544, +5548: the vehicle, infantry and aircraft to make
