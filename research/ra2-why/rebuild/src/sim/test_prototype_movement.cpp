@@ -1,4 +1,5 @@
 #include "prototype_movement.h"
+#include "../app/battle_shroud.h"
 #include <algorithm>
 #include <cstdint>
 #include <cmath>
@@ -369,6 +370,23 @@ void original_rules_tests() {
 }
 }
 int main() try {
+    {
+        auto world=fixture();
+        rules::IniFile sight;sight.parse("[HTNK]\nSight=1\n[E1]\nSight=1\n");
+        app::BattleShroud shroud;shroud.update(world,sight);
+        const ra2map::Cell goal{10,2};
+        require(!shroud.revealed(1,goal),"move test goal must start in black shroud");
+        PrototypeMovement movement;
+        require(movement.issue(world,101,goal,64).status==PrototypeMoveStatus::Complete,
+                "black ground refused a move order");
+        for(unsigned frame=0;frame<300 && movement.moving(101);++frame)
+            require(movement.tick(world,frame).status==PrototypeMoveStatus::Complete,
+                    "move through black ground failed");
+        require(same_cell(*world.entities[0].cell,goal),"unit did not reach black ground");
+        shroud.update(world,sight);
+        require(shroud.revealed(1,goal),"unit did not reveal its destination");
+    }
+
     auto idle_world=fixture();PrototypeMovement idle;
     auto idle_incomplete=idle_world;idle_incomplete.setup_progress=sw::SetupProgress::PackedMapRead;
     require(idle.tick(idle_incomplete,10).status==PrototypeMoveStatus::NeedsInput,"idle frame accepted unfinished setup");
