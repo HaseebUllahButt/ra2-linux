@@ -37,36 +37,38 @@ const w::House* find_house(const Snapshot& world, std::uint32_t id) {
     return found == world.houses.end() ? nullptr : &*found;
 }
 
-// Base HouseClass::IsAlliedTo: the masks at +5674 hold one bit per original
-// house index. Allied when either side marks the other. Houses without the
-// recovered fields are never allied, so an enemy stays detectable.
-bool allied(const Snapshot& world, std::uint32_t a, std::uint32_t b) {
-    if (a == b) return true;
-    const auto* ha = find_house(world, a);
-    const auto* hb = find_house(world, b);
-    if (!ha || !hb) return false;
-    const auto bit_of = [](const w::House& house) -> std::optional<unsigned> {
-        if (!house.original_index || *house.original_index < 0 ||
-            *house.original_index >= 32)
-            return std::nullopt;
-        return static_cast<unsigned>(*house.original_index);
-    };
-    const auto bit_b = bit_of(*hb), bit_a = bit_of(*ha);
-    if (bit_b && ha->alliance_mask_5674 &&
-        (*ha->alliance_mask_5674 & (1u << *bit_b)))
+// Base 004E5540 as the Psychic Sensor scan uses it: FUN_004386FF loads the
+// current viewer into ECX, pushes the enemy owner and calls 004E5540. Only
+// the viewer mask at +5674 is tested, one bit per original house index; the
+// reverse enemy mask must NOT suppress detection. The same original_index
+// also counts as allied. Houses without the recovered fields are never
+// allied, so an enemy stays detectable.
+bool allied(const Snapshot& world, std::uint32_t viewer, std::uint32_t other) {
+    if (viewer == other) return true;
+    const auto* hv = find_house(world, viewer);
+    const auto* ho = find_house(world, other);
+    if (!hv || !ho) return false;
+    if (hv->original_index && ho->original_index &&
+        *hv->original_index == *ho->original_index)
         return true;
-    if (bit_a && hb->alliance_mask_5674 &&
-        (*hb->alliance_mask_5674 & (1u << *bit_a)))
-        return true;
-    return false;
+    if (!ho->original_index || *ho->original_index < 0 ||
+        *ho->original_index >= 32)
+        return false;
+    return hv->alliance_mask_5674 &&
+        (*hv->alliance_mask_5674 & (1u << *ho->original_index));
 }
 
-// Base 004F2CC0 (HouseClass::UpdatePower) keeps output and drain per house.
-// Powered=yes buildings go offline when output < drain.
+// Active-sensor gate: Building vtable 0079CBBC+30C -> 00450360. The powered
+// branch queries the House power percentage and rejects below 1.0. The
+// output/drain fields are the per-house evidence from the 004F2CC0 recount
+// (HouseClass::UpdatePower); the fraction stands in for GetPowerPercentage.
 bool house_powered(const Snapshot& world, std::uint32_t house_id) {
     const auto* house = find_house(world, house_id);
     if (!house || !house->power_output || !house->power_drain) return true;
-    return *house->power_output >= *house->power_drain;
+    if (*house->power_drain <= 0) return true;
+    const double percentage =
+        static_cast<double>(*house->power_output) / *house->power_drain;
+    return percentage >= 1.0;
 }
 
 // TODO-ORIGINAL: fallback for fixture tests only. The original FUN_0044DAA0
@@ -84,15 +86,12 @@ int fallback_distance(Coord from, Coord to) {
 
 PrototypePsychicSensor::PrototypePsychicSensor(const IniFile& base_rules,
                                                const std::string& game_exe)
-    : rules_(base_rules) {
-    if (!game_exe.empty()) {
-        try {
-            distance_ = std::make_unique<OriginalDistance>(
-                OriginalDistance::from_executable(game_exe));
-        } catch (const std::exception&) {
-            distance_.reset(); // Fallback distance.
-        }
-    }
+    : rules_(base_rules) { // Own a copy of the rules, matching core ownership.
+    // Fallback distance only when no executable was supplied. A supplied but
+    // invalid game.exe is a caller error and must report failure.
+    if (!game_exe.empty())
+        distance_ = std::make_unique<OriginalDistance>(
+            OriginalDistance::from_executable(game_exe));
 }
 
 PrototypePsychicSensor::~PrototypePsychicSensor() = default;
@@ -112,7 +111,8 @@ std::vector<PsychicThreat> PrototypePsychicSensor::query(const w::Snapshot& worl
         if (entity.house_id != viewer_house || entity.kind != w::Kind::Structure ||
             !alive(&entity))
             continue;
-        const auto radius = rules_.read_double(entity.type, "PsychicDetectionRadius", 0.0);
+        // Loader 0045A4E7 reads the radius with 0050D7F0, an integer read.
+        const auto radius = rules_.read_integer(entity.type, "PsychicDetectionRadius", 0);
         if (radius <= 0.0) continue;
         if (rules_.read_bool(entity.type, "Powered", false) &&
             !house_powered(world, viewer_house))

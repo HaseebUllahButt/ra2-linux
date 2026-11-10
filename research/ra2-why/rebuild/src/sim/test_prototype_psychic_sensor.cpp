@@ -187,6 +187,36 @@ void check_own_and_allied_excluded() {
     require(find_threat(threats, 22), "enemy units must be detected");
 }
 
+// 5b. The alliance test is asymmetric: an enemy that marks the viewer in its
+// own mask must not suppress detection. Only the viewer mask counts
+// (004386FF loads the viewer into ECX and calls 004E5540).
+void check_enemy_mask_does_not_suppress() {
+    const auto rules = fixture_rules();
+    auto world = make_world();
+    world.houses[2].alliance_mask_5674 = 0b001u; // Enemy marks the viewer.
+    place(world, 10, 1, "NAPSIS", sw::Kind::Structure, cell_center(20, 20));
+    place(world, 20, 3, "MTNK", sw::Kind::Unit, cell_center(21, 20));
+    const PrototypePsychicSensor sensor(rules);
+    PsychicGoalLookup near_goal = [](std::uint32_t) { return cell_center(21, 20); };
+    const auto threats = sensor.query(world, 1, near_goal);
+    require(find_threat(threats, 20),
+        "the enemy mask must never suppress viewer detection");
+}
+
+// 5c. The same original_index counts as allied, as 004E5540 does.
+void check_same_original_index_allied() {
+    const auto rules = fixture_rules();
+    auto world = make_world();
+    world.houses[2].original_index = 0; // Same original index as the viewer.
+    place(world, 10, 1, "NAPSIS", sw::Kind::Structure, cell_center(20, 20));
+    place(world, 20, 3, "MTNK", sw::Kind::Unit, cell_center(21, 20));
+    const PrototypePsychicSensor sensor(rules);
+    PsychicGoalLookup near_goal = [](std::uint32_t) { return cell_center(21, 20); };
+    const auto threats = sensor.query(world, 1, near_goal);
+    require(!find_threat(threats, 20),
+        "the same original_index must count as allied");
+}
+
 // 6. Low power disables a Powered=yes sensor; a non-powered sensor stays on.
 void check_low_power_disables_powered_sensor() {
     const auto rules = fixture_rules();
@@ -308,12 +338,22 @@ int main(int argc, char** argv) try {
     check_nearby_enemy_far_orders_not_detected();
     check_goal_inside_detected();
     check_own_and_allied_excluded();
+    check_enemy_mask_does_not_suppress();
+    check_same_original_index_allied();
     check_low_power_disables_powered_sensor();
     check_dead_sensor_stops();
     check_z_distance_matters();
     check_no_world_mutation();
     check_order_and_sensor_choice();
     check_original_distance(game_dir + "/game.exe");
+    // A supplied but invalid executable must report failure, not fall back.
+    bool threw = false;
+    try {
+        PrototypePsychicSensor bad(fixture_rules(), game_dir + "/missing-game.exe");
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    require(threw, "an invalid supplied game.exe must report failure");
     std::cout << "Psychic sensor spot checks passed: radius threshold, attack target, "
                  "goal destination, own and allied exclusion, low power, dead sensor, "
                  "height, purity, ordering and the original distance table.\n";
