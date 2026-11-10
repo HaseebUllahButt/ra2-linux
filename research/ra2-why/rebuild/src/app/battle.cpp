@@ -277,6 +277,11 @@ public:
             // (House +C8: 0 hardest) to its purifier count when it unloads ore.
             economy_.set_virtual_purifiers(enemies_[i],sim::PrototypeEconomy::virtual_purifiers(rules_,
                 level==ui::Opponent::Hard?0:level==ui::Opponent::Medium?1:2));
+            // Base 0065E8C0: at the start each computer house gets
+            // MultiplayerAICM[difficulty] percent of its money (Brutal 400).
+            for(auto& h:world_.houses) if(h.id==enemies_[i] && h.cash)
+                *h.cash+=sim::PrototypeEconomy::start_money_bonus(rules_,
+                    level==ui::Opponent::Hard?0:level==ui::Opponent::Medium?1:2,*h.cash);
         }
         ai_targets_.assign(enemies_.size(),0);
         if(!ai_.uses_ai_ini())throw std::runtime_error("Base AI.INI has no usable team triggers");

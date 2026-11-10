@@ -81,6 +81,14 @@ int PrototypeEconomy::virtual_purifiers(const rules::IniFile& rules,int original
     if(original_difficulty<0 || std::size_t(original_difficulty)>=list.size()) return 0;
     return std::max(0,rules::IniFile::integer_value(list[std::size_t(original_difficulty)]).value_or(0));
 }
+std::int32_t PrototypeEconomy::start_money_bonus(const rules::IniFile& rules,int original_difficulty,
+                                                std::int32_t available_money) {
+    const auto list=rules.read_list("General","MultiplayerAICM");
+    if(original_difficulty<0 || std::size_t(original_difficulty)>=list.size()) return 0;
+    const auto percent=rules::IniFile::integer_value(list[std::size_t(original_difficulty)]).value_or(0);
+    // fild percent; fmul 0.01 (0079C518); fimul money; __ftol (0077F110) cuts toward zero.
+    return static_cast<std::int32_t>(static_cast<double>(percent)*0.01*static_cast<double>(available_money));
+}
 // Base 00701580: purifiers = House +52CC (Ore Purifier buildings); zero when
 // the power percentage is below one; plus the virtual purifiers of a
 // computer house. Extra = purifiers * PurifierBonus * load.

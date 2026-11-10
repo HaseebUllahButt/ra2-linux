@@ -92,6 +92,16 @@ int main(int argc,char** argv) {
         assert(sim::PrototypeEconomy::virtual_purifiers(bonus,0)==4 && sim::PrototypeEconomy::virtual_purifiers(bonus,1)==2 &&
                sim::PrototypeEconomy::virtual_purifiers(bonus,2)==0 && sim::PrototypeEconomy::virtual_purifiers(bonus,3)==0 &&
                sim::PrototypeEconomy::virtual_purifiers(bonus,-1)==0);
+        // Base 0065E8C0: the computer start bonus, MultiplayerAICM percent of its money.
+        rules::IniFile cm;
+        cm.parse("[General]\nMultiplayerAICM=400,0,0\n");
+        assert(sim::PrototypeEconomy::start_money_bonus(cm,0,10000)==40000 &&
+               sim::PrototypeEconomy::start_money_bonus(cm,1,10000)==0 &&
+               sim::PrototypeEconomy::start_money_bonus(cm,2,10000)==0 &&
+               sim::PrototypeEconomy::start_money_bonus(cm,3,10000)==0 &&
+               sim::PrototypeEconomy::start_money_bonus(bonus,0,10000)==0);
+        cm.parse("[General]\nMultiplayerAICM=33,0,0\n");
+        assert(sim::PrototypeEconomy::start_money_bonus(cm,0,2501)==825); // 825.33 cut down
         const auto first_unload=[&](int virtual_count,int real,bool low_power) {
             auto w=fixture("HARV",0);
             for(int i=0;i<real;++i) {
