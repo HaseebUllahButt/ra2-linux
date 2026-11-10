@@ -170,6 +170,13 @@ public:
         fire_gate_=std::move(gate);
     }
     void stop(session::world::Snapshot&,std::uint32_t source_id);
+    // Caller-set invulnerability check (Iron Curtain / Force Shield). A
+    // target that passes takes no positive damage this frame: its HP and
+    // Cell chains stay unchanged and no retaliation starts. Zero or
+    // negative damage still lands. Base Take_Damage 0044A990 area/direct
+    // paths, checked before the damage kernel.
+    using Invulnerability=std::function<bool(std::uint32_t entity,std::uint64_t frame)>;
+    void set_invulnerability(Invulnerability check) {invulnerable_=std::move(check);}
     PrototypeCombatTick tick(session::world::Snapshot&,std::uint64_t frame);
     // Base 004E7DF0: kill every remaining owned actor, with no attacker.
     // Shares normal combat death unlinking and emits Death events for callers.
@@ -181,6 +188,7 @@ private:
     OriginalDistance distance_;
     weapons::BaseBallisticAngles angles_;
     std::map<std::uint32_t,std::uint32_t> orders_;
+    Invulnerability invulnerable_; // Caller-set; empty means everyone is vulnerable.
     // Targets found by the idle threat scan or kept after retaliation.
     // Base 006D31E0 Threat_Range: Guard uses GuardRange or the weapon range,
     // Area Guard uses twice GuardRange or the longer weapon range (max 16
