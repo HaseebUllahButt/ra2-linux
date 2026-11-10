@@ -794,8 +794,13 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
             const auto fall_altitude = rules_.read_integer(
                 rules_.read_string("NukePayload", "Projectile", "GiantNukeDown"),
                 "DetonationAltitude", 30000);
-            // TODO-ORIGINAL: the vertical projectiles carry Acceleration=1; this
-            // prototype uses the constant-speed read of the rules values.
+            // Case 0 also draws random velocities scaled by -100.0 (FUN_004BA480
+            // / FUN_004BA4D0) for the missile, so the exact original frame count
+            // is not recoverable from the decompile alone.
+            // TODO-ORIGINAL: exact impact timing. The vertical projectiles carry
+            // Acceleration=1 and the case 0 draw applies a random -100 scaled
+            // velocity; this prototype keeps the constant-speed read of the
+            // rules values.
             const auto delay = (rise_altitude + rise_speed - 1) / rise_speed +
                 (fall_altitude + fall_speed - 1) / fall_speed;
             nukes_.push_back(PendingNuke{frame + static_cast<std::uint64_t>(delay), target});
