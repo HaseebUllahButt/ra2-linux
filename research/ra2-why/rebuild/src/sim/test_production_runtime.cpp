@@ -225,10 +225,12 @@ void self_test() {
         barr.can.tech_level=1; barr.owner=1;
         TypeFacts gi; gi.id="E1"; gi.rtti=Rtti::InfantryType; gi.heap_index=0; gi.can.heap_index=0;
         gi.cost=200; gi.strength=100; gi.can.tech_level=1; gi.can.build_limit=0x7FFFFFFF; gi.owner=1;
+        TypeFacts e2; e2.id="E2"; e2.rtti=Rtti::InfantryType; e2.heap_index=3; e2.can.heap_index=3;
+        e2.cost=500; e2.strength=100; e2.can.tech_level=1; e2.can.build_limit=0x7FFFFFFF; e2.owner=1;
         TypeFacts limited; limited.id="LTD"; limited.rtti=Rtti::InfantryType; limited.heap_index=2;
         limited.can.heap_index=2; limited.cost=100; limited.strength=100; limited.can.tech_level=1;
         limited.can.build_limit=-2; limited.owner=1;
-        catalog.buildings={barr}; catalog.infantry={gi,limited};
+        catalog.buildings={barr}; catalog.infantry={gi,e2,limited};
         FactorySet factories; factories.flags.session_type=1; factories.flags.super_weapons=true;
         factories.flags.build_off_ally=false; factories.flags.player_house=1;
         factories.buildings[2]=BuildingState{}; factories.house_factory_counts[1]={0,0,0,0,0,0};
@@ -257,14 +259,21 @@ void self_test() {
         require(cancel_production(world,factories,catalog,1,"LTD",0).status==Status::Done,
             "right click removes the last queued LTD");
         require(factories.factories.back().queued.empty(),"the LTD queue is empty");
-        // The whole infantry queue is one pool: 30 clicks fill it.
-        for (int click=0;click<30;++click)
+        // The whole infantry queue is one pool: 29 GI clicks plus one
+        // Engineer-style type fill it to 30 (reference: 29 GIs queued, the
+        // Engineer icon took 1, 29 + 1 = 30).
+        for (int click=0;click<29;++click)
             require(begin_production(world,factories,catalog,1,"E1",0).status==Status::Done,
                 "queue click accepted");
+        require(begin_production(world,factories,catalog,1,"E2",0).status==Status::Done,
+            "the mixed type takes the 30th queue slot");
         require(factories.factories.front().queued.size()==30,"the queue holds 30 items");
+        require(factories.factories.front().queued.back()=="E2","the 30th entry is the mixed type");
         require(*world.houses.front().cash==5000,"queued items cost nothing");
         require(begin_production(world,factories,catalog,1,"E1",0).status==Status::Rejected,
             "click 32 is refused at the queue limit");
+        require(begin_production(world,factories,catalog,1,"E2",0).status==Status::Rejected,
+            "click 33 for the mixed type is refused too");
         // Run the GI factory to completion, then the queue advances.
         std::uint64_t frame=0;
         for (frame=1;factories.factories.front().progress!=54 && frame<=2000;++frame)
