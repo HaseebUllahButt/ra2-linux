@@ -33,19 +33,19 @@ struct PrototypeRepairSellRules {
 // forgets which buildings were repairing, like the movement prototype.
 // TODO-ORIGINAL: no deconstruction animation or timer (RA2 BuildingClass::
 // Mission_Selling, RA1 Mission_Deconstruction BUILDING.CPP 3385), no sounds,
-// no auto-repair decisions (base game.exe FUN_0044B9B0 only runs the step
-// for buildings the player set to repair) and no repair-bay selling of
-// docked units.
+// no repair-bay selling of docked units. The base auto-repair path
+// FUN_0044B9B0 also holds computer repair decisions (it calls the owner
+// virtuals at +0x188 and +0x184); those decisions are not modeled.
 class PrototypeRepairSell {
 public:
     // The art INI is optional; without it every footprint is one cell.
     explicit PrototypeRepairSell(const rules::IniFile& base_rules,
         const rules::IniFile* art_rules = nullptr);
 
-    // Credits for one repair step of the building type. Base game.exe
-    // FUN_0044B9B0 reads the per-step cost from the type virtual at vtable
-    // +0xB0 and the per-step health from +0xB4; the virtual body was
-    // not recovered, so this keeps the RA1 shape (TechnoTypeClass::
+    // Credits for one repair step of the building type. The base step path
+    // in FUN_0044B9B0 reads the per-step cost from the type virtual at
+    // vtable +0xB0 and the per-step health from +0xB4; those virtual bodies
+    // are not recovered, so this keeps the RA1 shape (TechnoTypeClass::
     // Repair_Cost): Cost / (Strength / RepairStep) times RepairPercent,
     // truncated. Zero when the type has no usable Cost or Strength, which
     // repairs for free like an original truncated zero.
@@ -57,18 +57,22 @@ public:
     // keeps the RA1 TechnoClass::Refund_Amount shape. Zero without Cost.
     std::int32_t refund_amount(const std::string& type) const;
 
-    // Crew size when selling: refund divided by the side divisor, clamped to
-    // 1..5. Base game.exe sprays the crew in FUN_0043F8E0 and reads the crew
-    // type through BuildingClass::GetCrew 0x00449FB0; the exact base count
-    // divide was not recovered, so this keeps the RA1 divisor shape with the
-    // parsed [General] divisors. Side 0 is Allied, 1 Soviet, 2 third. Zero
-    // when the type is not Crewed, the side is unknown, or the refund is
-    // zero. TODO-ORIGINAL: the captured-building divisor doubling is not
-    // modeled.
+    // Crew size when selling. TODO-ORIGINAL: no deterministic base sell
+    // count is proven. FUN_0043F8E0 is the random destruction-survivor
+    // spray (random gate, one roll per foundation cell); it reads a count
+    // from the BuildingClass virtual at vtable 0x0079CBBC slot 172
+    // (0x0044C520, body not in the export) and the crew type from GetCrew
+    // (slot 184, 0x00449FB0, which has a 25 percent engineer branch). This
+    // keeps the RA1 divisor shape with the parsed [General] divisors as a
+    // stand-in: refund divided by the side divisor, clamped to 1..5. Side 0
+    // is Allied, 1 Soviet, 2 third. Zero when the type is not Crewed, the
+    // side is unknown, or the refund is zero. TODO-ORIGINAL: the captured-
+    // building divisor doubling is not modeled.
     std::int32_t survivor_count(const session::world::House& house, const std::string& type) const;
 
-    // Infantry type of the sold building's crew. TODO-ORIGINAL: the original
-    // crew-type selection is not recovered; the prototype uses the side's
+    // Infantry type of the sold building's crew. TODO-ORIGINAL: the base
+    // GetCrew 0x00449FB0 can return an engineer (25 percent branch) and its
+    // full selection is not recovered; the prototype always uses the side's
     // basic infantry (Allied E1, Soviet E2, third INIT).
     const char* crew_type(const session::world::House& house) const;
 
