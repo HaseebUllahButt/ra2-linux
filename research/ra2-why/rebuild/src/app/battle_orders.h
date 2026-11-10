@@ -26,7 +26,7 @@ struct BattleView {
 // TODO-ORIGINAL: Recover hit shapes, drag and double-click limits, overlap priority,
 // selection modifiers, groups, and original deploy input rules.
 // Left clicks select or order. Right clicks cancel selection.
-// Boxes include owned Unit and Infantry anchors.
+// Boxes include owned Unit, Infantry, and Aircraft anchors.
 class BattleOrders {
 public:
     explicit BattleOrders(std::uint32_t house);

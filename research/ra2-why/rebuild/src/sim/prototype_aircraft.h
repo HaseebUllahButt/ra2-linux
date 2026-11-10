@@ -57,14 +57,26 @@ struct PrototypeAircraftResult {
 // damage and the missing crash handling with original AircraftClass AI.
 class PrototypeAircraft {
 public:
-    explicit PrototypeAircraft(const rules::IniFile& base_rules);
+    // external_combat hands the trigger pull to the caller: the aircraft only
+    // faces its target and reports ready_to_fire; the caller calls fired().
+    explicit PrototypeAircraft(const rules::IniFile& base_rules,
+        bool external_combat = false);
+
+    // True only during the Attack phase with unlimited or positive ammo.
+    bool ready_to_fire(std::uint32_t aircraft) const;
+    // Spend one shot after a ready_to_fire call; an exhausted plane clears
+    // its target and returns to its pad. Ignored when not ready.
+    void fired(std::uint32_t aircraft);
 
     // Order a placed aircraft to attack a target entity. A plane on the ground
     // docks at the nearest owned pad listed in its Dock= rules with a free
     // dock slot. A plane without a pad still flies and hovers on return.
     PrototypeAircraftResult issue(const session::world::Snapshot& world,
         std::uint32_t aircraft, std::uint32_t target);
-    // Order a hover infantry to fly to a cell and hold there.
+    // Order a flying entity to fly to a cell and hold there. Hover infantry
+    // stays at the goal; planes and airships keep their ammo and pad on a
+    // re-issued move, a new plane loads Ammo= and picks a pad, and a plane
+    // flies back to its pad through the Hover logic once the goal is reached.
     PrototypeAircraftResult issue_move(const session::world::Snapshot& world,
         std::uint32_t aircraft, ra2map::Cell goal);
     void cancel(session::world::Snapshot& world, std::uint32_t aircraft);
@@ -113,6 +125,7 @@ private:
         const session::world::Entity& pad) const;
 
     rules::IniFile rules_;
+    bool external_combat_ = false;     // Caller pulls the trigger via fired().
     std::int32_t flight_level_ = 1500; // [General] FlightLevel, world units.
     double reload_rate_ = 0.3;         // [General] ReloadRate, minutes per ammo point.
     std::map<std::uint32_t, Flight> flights_;
