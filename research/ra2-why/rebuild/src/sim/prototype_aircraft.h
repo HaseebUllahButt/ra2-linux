@@ -122,7 +122,7 @@ private:
     std::int32_t reload_frames(const session::world::Snapshot& world,
         const session::world::Entity& actor, const Flight& flight) const;
     bool dock_free(const std::map<std::uint32_t, Flight>& flights,
-        const session::world::Entity& pad) const;
+        const session::world::Entity& pad, std::uint32_t self=0) const;
 
     rules::IniFile rules_;
     bool external_combat_ = false;     // Caller pulls the trigger via fired().
