@@ -266,6 +266,8 @@ public:
             const auto level=i<choices.size()?choices[i].difficulty:difficulty_;
             ais_.emplace_back(rules_,&ai_ini,level==ui::Opponent::Hard?sim::PrototypeAI::Difficulty::Hard:
                 level==ui::Opponent::Medium?sim::PrototypeAI::Difficulty::Normal:sim::PrototypeAI::Difficulty::Easy);
+            // Base 004EF890 reads the Super Weapons option (00A3D2C3) for its plan pool.
+            ais_.back().set_super_weapons(super_weapons_choice(args_.setup,rules_));
             // Base 00701580: a computer house adds AIVirtualPurifiers[difficulty]
             // (House +C8: 0 hardest) to its purifier count when it unloads ore.
             economy_.set_virtual_purifiers(enemies_[i],sim::PrototypeEconomy::virtual_purifiers(rules_,
@@ -877,7 +879,10 @@ public:
             break;
         case 11:
             if(victory_.settled()) {
-                require(victory_.result==sim::Victory::PlayerWon,"Human input: scripted player lost the match");
+                // The base plan now builds Easy defenses (004EF890), so the
+                // start army may lose. This check covers input and the result
+                // screen, not who wins.
+                std::cout<<"Human input result: "<<result_name(victory_.result)<<'\n';
                 require(show_score_&&score_image_,"Human input: result screen is missing");
                 checkpoint(state,"08-result");test_key(SDLK_TAB);human_camera_=camera_x_;
                 human_wait_frame_=state.frame_counter;
@@ -1044,7 +1049,18 @@ public:
                 if(placed)break;
             }
             if(placed)auto_place_wait_.erase({owner,type});
-            else wait={bases.size(),frame+auto_place_retry_frames};
+            else {
+                wait={bases.size(),frame+auto_place_retry_frames};
+                // Base 0044B480 abandons a computer's finished Naval building
+                // that found no place: refund it (004B97C0) and tell the plan.
+                // TODO-ORIGINAL: water placement (004F03C0, 005502E0) is not
+                // modelled, so every Naval product ends here.
+                for(std::size_t i=0;i<enemies_.size() && i<ais_.size();++i)
+                    if(enemies_[i]==owner && rules_.read_bool(type,"Naval")) {
+                        proto::cancel_production(world_,factories_,catalog_,owner,type,frame);
+                        ais_[i].placement_failed(owner,type);
+                    }
+            }
         }
     }
     void autoplay(std::uint32_t frame) {
