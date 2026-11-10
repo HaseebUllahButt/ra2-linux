@@ -236,6 +236,7 @@ public:
                 !args.headless,16*frame_delay_ticks(args)) {
         if(const auto labels=assets_.read_asset("RA2.CSF"))labels_.parse(labels->data(),labels->size());
         movement_.use_rules(rules_);
+        movement_.use_original_path(sim::OriginalDistance::from_executable((args.game_directory/"game.exe").string()));
         combat_.set_fire_gate([this](const w::Entity& actor) {
             return !flies(actor) || aircraft_.ready_to_fire(actor.id);
         });
