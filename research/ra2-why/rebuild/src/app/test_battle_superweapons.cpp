@@ -35,6 +35,16 @@ w::Snapshot world_with_silo() {
     house.id = 101;house.country = "Russians";
     house.power_output = 200;house.power_drain = 100;
     world.houses = {house};
+    for (int y = 5; y <= 80; ++y)
+        for (int x = 5; x <= 80; ++x) {
+            w::CellState cell;
+            cell.allocated = true;cell.heads.emplace();cell.cell_flag_100 = false;
+            cell.ground_occupancy_124 = 0;cell.terrain.emplace();
+            cell.terrain->cell = {static_cast<std::uint16_t>(x), static_cast<std::uint16_t>(y)};
+            cell.terrain->floor_world_height = 0;cell.terrain->ramp_index = 0;
+            cell.terrain->overlay_type_index = -1;
+            world.cells.emplace(static_cast<std::uint32_t>(y) * 512 + x, cell);
+        }
     w::Entity silo;
     silo.id = 1;silo.house_id = 101;silo.kind = w::Kind::Structure;silo.type = "NAMISL";
     silo.lifetime = w::Lifetime::Placed;silo.resolved_hp = 100;
@@ -93,14 +103,16 @@ int main() try {
 
     // Fire plan: the ChronoSphere fires at the source first, then the
     // PreDependent ChronoWarp at the destination (base 006be1c0 order).
-    const auto chrono_types = [&]{
-        IniFile chrono_rules;
-        chrono_rules.parse(
+    const auto chrono_rules = [&]{
+        IniFile rules;
+        rules.parse(
             "[SuperWeaponTypes]\n1=ChronoSphereSpecial\n2=ChronoWarpSpecial\n"
             "[ChronoSphereSpecial]\nType=ChronoSphere\n"
-            "[ChronoWarpSpecial]\nType=ChronoWarp\n");
-        return ra2::sim::read_superweapon_types(chrono_rules);
+            "[ChronoWarpSpecial]\nType=ChronoWarp\n"
+            "[BuildingTypes]\n1=GACSPH\n[GACSPH]\nSuperWeapon=ChronoSphereSpecial\n");
+        return rules;
     }();
+    const auto chrono_types = ra2::sim::read_superweapon_types(chrono_rules);
     const ra2map::Cell source{5, 6}, destination{9, 9};
     const auto plan = ra2::app::superweapon_fire_plan(chrono_types,
         "ChronoSphereSpecial", source, destination);
@@ -117,6 +129,45 @@ int main() try {
         "ChronoWarpSpecial", std::nullopt, destination);
     require(single.size() == 1 && single[0].cell.x == destination.x,
         "a plain weapon fires once at the target");
+
+    // Functional regression: the click order moves the source tank to the
+    // second click. The sphere fires at the tank's cell, the warp fires at
+    // the destination, and the tank lands there.
+    auto chrono_world = world_with_silo();
+    chrono_world.entities.clear();
+    w::Entity yard;
+    yard.id = 1;yard.house_id = 101;yard.kind = w::Kind::Structure;yard.type = "GACSPH";
+    yard.lifetime = w::Lifetime::Placed;yard.resolved_hp = 1000;
+    yard.cell = ra2map::Cell{10, 10};yard.position = ra2::sim::Coord{2560, 2560, 0};
+    chrono_world.entities.push_back(yard);
+    w::Entity tank = yard;
+    tank.id = 2;tank.kind = w::Kind::Unit;tank.type = "HTNK";
+    tank.cell = ra2map::Cell{50, 50};tank.position = ra2::sim::Coord{50 * 256 + 128, 50 * 256 + 128, 0};
+    tank.layer = w::Layer::Ground;
+    tank.next = 0; // Chain end, as the sim fixture's first cell occupant.
+    chrono_world.entities.push_back(tank);
+    for (auto& pair : chrono_world.cells) {
+        pair.second.heads.emplace();
+        pair.second.ground_occupancy_124 = 0;
+        if (pair.second.terrain)pair.second.terrain->floor_world_height = 0;
+    }
+    chrono_world.cells.at(50u * 512 + 50).heads->ground_head = 2;
+    PrototypeSuperweapons supers(chrono_rules);
+    supers.update_grants(chrono_world);
+    for (int frame = 0; frame < 6300; ++frame)
+        supers.tick(chrono_world, static_cast<std::uint64_t>(frame));
+    require(supers.ready(101, "ChronoSphereSpecial"), "the sphere did not charge");
+    const ra2map::Cell tank_cell{50, 50}, landing{55, 55};
+    const auto chrono_plan = ra2::app::superweapon_fire_plan(chrono_types,
+        "ChronoSphereSpecial", tank_cell, landing);
+    require(chrono_plan.size() == 2, "the chrono plan is not a pair");
+    const auto arm = supers.fire(chrono_world, 101, chrono_plan[0].section, chrono_plan[0].cell, 6300);
+    require(arm.fired, "the sphere click was rejected");
+    const auto warp = supers.fire(chrono_world, 101, chrono_plan[1].section, chrono_plan[1].cell, 6301);
+    require(warp.fired && warp.teleported == 1, "the warp click did not move the tank");
+    require(chrono_world.entities[1].cell && chrono_world.entities[1].cell->x == landing.x &&
+        chrono_world.entities[1].cell->y == landing.y,
+        "the source tank did not arrive at the second click");
 
     // Panel layout: rows are hit only inside the panel, on the left edge as
     // the original places the special weapon buttons.

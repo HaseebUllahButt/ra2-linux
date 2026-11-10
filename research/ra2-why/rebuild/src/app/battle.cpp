@@ -460,9 +460,9 @@ public:
             superweapon_was_ready_[type.id]=ready;
         }
     }
-    void fire_superweapon(const std::string& section,ra2map::Cell cell) {
+    bool fire_superweapon(const std::string& section,ra2map::Cell cell) {
         const auto* type=superweapon_type(section);
-        if(!type)return;
+        if(!type)return false;
         const auto report=superweapons_->fire(world_,player_,section,cell,input_frame_);
         if(report.fired) {
             status(name(section)+" fired.");
@@ -474,6 +474,7 @@ public:
         if(!report.revealed.empty())
             gaps_.insert("Spy plane reveal cells are not applied: BattleShroud has no explore-cells hook (SpySat buildings already reveal through PrototypeShroud)");
         for(const auto& note:report.notes)gaps_.insert(note);
+        return report.fired;
     }
     // Sidebar pick and target clicks. Returns true when the input belonged
     // to the super weapon flow and is consumed.
@@ -526,7 +527,11 @@ public:
                 gaps_.insert("No ChronoWarp section in rules: chrono teleport needs a PreDependent pair");
                 status("Cannot teleport.");
             }
-            for(const auto& step:plan)fire_superweapon(step.section,step.cell);
+            // Source-first order, base 006be1c0: the sphere click arms the
+            // source block, the warp click lands it. A failed first call
+            // stops the second: a warp never fires through a failed arm.
+            for(const auto& step:plan)
+                if(!fire_superweapon(step.section,step.cell))break;
             chrono_source_.reset();
         }
         return true;
