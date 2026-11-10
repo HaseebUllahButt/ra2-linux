@@ -169,11 +169,31 @@ bool is_reload_pad(const rules::IniFile& rules, std::string_view building_type) 
     return rules.read_bool(building_type, "UnitReload", false);
 }
 
-PrototypeAircraft::PrototypeAircraft(const rules::IniFile& base_rules) : rules_(base_rules) {
+PrototypeAircraft::PrototypeAircraft(const rules::IniFile& base_rules, bool external_combat)
+    : rules_(base_rules), external_combat_(external_combat) {
     flight_level_ = base_rules.read_integer("General", "FlightLevel", 1500);
     reload_rate_ = base_rules.read_double("General", "ReloadRate", 0.3);
     if (flight_level_ <= 0 || reload_rate_ <= 0)
         throw std::runtime_error("Missing or invalid aircraft general rules");
+}
+
+bool PrototypeAircraft::ready_to_fire(std::uint32_t aircraft) const {
+    const auto found = flights_.find(aircraft);
+    if (found == flights_.end()) return false;
+    const auto& flight = found->second;
+    return flight.phase == AircraftPhase::Attack && armed(flight.rules.ammo, flight.ammo);
+}
+
+void PrototypeAircraft::fired(std::uint32_t aircraft) {
+    if (!ready_to_fire(aircraft)) return;
+    auto& flight = flights_.at(aircraft);
+    if (flight.rules.ammo >= 0) --flight.ammo;
+    if (flight.rules.ammo >= 0 && flight.ammo <= 0) {
+        flight.target.reset();
+        flight.phase = flight.rules.family == PrototypeAircraftRules::Family::Plane
+            ? AircraftPhase::ReturnToPad
+            : AircraftPhase::Hover;
+    }
 }
 
 std::optional<AircraftPhase> PrototypeAircraft::phase(std::uint32_t aircraft) const {
@@ -320,8 +340,6 @@ PrototypeAircraftResult PrototypeAircraft::issue_move(const sw::Snapshot& world,
     } catch (const std::runtime_error& error) {
         return fail(PrototypeAircraftStatus::Invalid, error.what());
     }
-    if (rules.family != PrototypeAircraftRules::Family::Hover)
-        return fail(PrototypeAircraftStatus::Invalid, "prototype planes and airships do not take move orders");
     if (!live(*entity) || !entity->position)
         return fail(PrototypeAircraftStatus::NeedsInput, "prototype hover infantry state is unresolved");
     const auto cruise = cruise_height(world, *entity, rules);
@@ -339,6 +357,12 @@ PrototypeAircraftResult PrototypeAircraft::issue_move(const sw::Snapshot& world,
     flight.move_goal = goal;
     flight.phase = AircraftPhase::Hover;
     flight.cruise_z = *cruise;
+    flight.ammo = rules.ammo;
+    // A plane on a move order keeps a pad for its return; the Hover logic
+    // flies it back once the goal is reached.
+    if (rules.family == PrototypeAircraftRules::Family::Plane)
+        if (const auto reserved = pick_pad(world, rules, entity->house_id, flights_, *entity->position))
+            flight.pad = *reserved;
     flights_.emplace(aircraft, std::move(flight));
     return done();
 }
@@ -429,6 +453,9 @@ std::optional<std::string> PrototypeAircraft::update(sw::Snapshot& world,
             }
             face(actor, facing_index(std::int64_t(victim->position->x) - actor.position->x,
                                      std::int64_t(victim->position->y) - actor.position->y));
+            // External combat: the caller pulls the trigger via fired(); the
+            // aircraft only tracks and faces its target here.
+            if (external_combat_) break;
             if (--flight.fire_timer <= 0) {
                 if (flight.rules.ammo >= 0) --flight.ammo;
                 result.shots.push_back({actor.id, *flight.target, flight.rules.damage});
