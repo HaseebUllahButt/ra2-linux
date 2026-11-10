@@ -259,8 +259,9 @@ RouteResult route(const World& world,std::uint32_t id,ra2map::Cell start,ra2map:
             return out;
         }
         if (found.status==PathStatus::Partial) {
-            // A partial path is not an arrival. The move keeps its goal, so
-            // tick() plans again from the end of the partial path.
+            // A partial path is not an arrival. This route discards the
+            // partial directions; the move keeps its goal, so tick() plans
+            // again from the Unit's current Cell.
             if (trace) ++trace->kernel_routes;
             return RouteResult{PrototypeMoveStatus::Blocked,{},found.directions.empty()?
                 "original kernel partial path is empty":"original kernel partial path"};

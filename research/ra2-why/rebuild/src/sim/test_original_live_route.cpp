@@ -39,9 +39,11 @@ sw::Snapshot open_field(int width,int height) {
     return world;
 }
 void place(sw::Snapshot& world,std::uint32_t id,const char* type,int x,int y) {
-    sw::Entity unit;unit.id=id;unit.type=type;unit.kind=sw::Kind::Unit;unit.lifetime=sw::Lifetime::Placed;
+    sw::Entity unit;unit.id=id;unit.house_id=1;unit.type=type;unit.kind=sw::Kind::Unit;unit.lifetime=sw::Lifetime::Placed;
     unit.cell=ra2map::Cell{static_cast<std::uint16_t>(x),static_cast<std::uint16_t>(y)};
-    unit.position=ground_cell_center(x,y);unit.layer=sw::Layer::Ground;unit.next=0;unit.resolved_hp=300; // MTNK full 300 HP.unit.hull_facing=64;
+    unit.position=ground_cell_center(x,y);unit.layer=sw::Layer::Ground;unit.next=0;
+    unit.resolved_hp=300;unit.maximum_hp=300; // MTNK full 300 HP.
+    unit.hull_facing=64;
     world.entities.push_back(unit);world.creation_order.push_back({sw::CreatedKind::Entity,id});
     auto& c=world.cells.at(key(x,y));c.heads->ground_head=id;c.ground_occupancy_124=32;
 }
