@@ -948,6 +948,14 @@ Outcome deploy(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std:
 }
 
 namespace {
+// Rules +0xE8 caps one factory queue; the default 30 is stored at 0072C27F.
+constexpr std::size_t queue_limit=30;
+// FactoryClass::CountTotal 004B9E40: the active object plus queued entries.
+int count_total(const FactoryState& factory,const std::string& type) {
+    int total=factory.object && factory.object_type==type ? 1 : 0;
+    for (const auto& item:factory.queued) if (item==type) ++total;
+    return total;
+}
 // computer: the 0044B480 path, which has no Can_Build test.
 Outcome start_production(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint32_t house_id,
                          const std::string& type,std::uint64_t frame,bool computer) {
@@ -974,7 +982,20 @@ Outcome start_production(w::Snapshot& snapshot,FactorySet& factories,const Catal
         return fail(Status::Rejected,"Cannot queue buildings");
     const bool resume=factory->suspended && factory->object && factory->object_type==t->id;
     if (!resume) {
-        if (factory->object) return fail(Status::Unsupported,"factory queue and abandon 004B97C0 are not recovered");
+        if (factory->object) {
+            // FactoryClass::Queue_Type 004B9440: the active object stays; the
+            // type joins the +40 queue. The click is refused when Rules +0xE8
+            // (default 30, 0072C27F) or the build limit is reached. FUN_004F4F30
+            // re-checks the limit against CountTotal 004B9E40 (object + queued).
+            if (factory->queued.size()>=queue_limit)
+                return fail(Status::Rejected,"queue limit reached");
+            if (t->can.build_limit<0 &&
+                std::abs(t->can.build_limit)<=count_total(*factory,t->id))
+                return fail(Status::Rejected,"queue build limit reached");
+            factory->queued.push_back(t->id);
+            undo.commit(); factories=std::move(f);
+            Outcome o; o.status=Status::Done; return o;
+        }
         // Factory::Set 004B9440: Create_One_Of, then Cost_Of.
         const auto kind=t->rtti==Rtti::BuildingType?w::Kind::Structure:t->rtti==Rtti::UnitType?w::Kind::Unit:
             t->rtti==Rtti::InfantryType?w::Kind::Infantry:w::Kind::Aircraft;
@@ -1030,8 +1051,16 @@ Outcome cancel_production(w::Snapshot& snapshot,FactorySet& factories,const Cata
     const auto* t=c.find(type);
     if (!t) return fail(Status::Rejected,"unknown type");
     auto* factory=factory_in_slot(factories,owner,slot_of(*t));
-    if (!factory || !factory->object || factory->object_type!=type)
-        return fail(Status::Rejected,"no product to cancel");
+    if (!factory) return fail(Status::Rejected,"no product to cancel");
+    // FactoryClass::RemoveOneFromQueue 004B9DF0: a right click removes the
+    // first queued entry of this type. Queued items cost nothing to cancel.
+    if (!factory->object || factory->object_type!=type) {
+        auto& queue=factory->queued;
+        const auto item=std::find(queue.begin(),queue.end(),type);
+        if (item==queue.end()) return fail(Status::Rejected,"no product to cancel");
+        queue.erase(item);
+        return Outcome{Status::Done,{},0,{}};
+    }
     auto* h=house_of(snapshot,owner);
     const auto* item=entity_of(snapshot,factory->object);
     if (!h || !h->cash || !item || item->lifetime!=w::Lifetime::Created)
@@ -1348,12 +1377,19 @@ Outcome place(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::
 
 Outcome tick(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::uint64_t frame) {
     if (!runtime_ready(snapshot)) return fail(Status::NeedsInput,"setup is not complete");
-    // This tick writes House records only. Edit the Snapshot in place and
-    // restore its Houses on failure instead of copying every Cell.
+    // This tick writes House records, and the queue advance can create the
+    // next queued object. Edit the Snapshot in place and restore its Houses
+    // and Entities on failure instead of copying every Cell.
     struct Restore {
-        w::Snapshot& world; std::vector<w::House> houses; bool keep=false;
-        ~Restore() { if (!keep) world.houses=std::move(houses); }
-    } restore{snapshot,snapshot.houses};
+        w::Snapshot& world; std::vector<w::House> houses; std::vector<w::Entity> entities;
+        std::vector<w::CreatedObject> creation_order; bool keep=false;
+        ~Restore() {
+            if (!keep) {
+                world.houses=std::move(houses); world.entities=std::move(entities);
+                world.creation_order=std::move(creation_order);
+            }
+        }
+    } restore{snapshot,snapshot.houses,snapshot.entities,snapshot.creation_order};
     auto& s=snapshot; auto f=factories;
     // House::AI 004E41B4 -> Recalc_Power 004F2CC0 for skirmish sessions.
     for (auto& [id,dirty]:f.power_dirty) {
@@ -1402,6 +1438,33 @@ Outcome tick(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::u
         if (installment>*h->cash) { --factory.progress; continue; }
         *h->cash-=installment; factory.balance-=installment;
         if (factory.progress==54) factory.suspended=true;
+    }
+    // FactoryClass::StartProduction 004B9D70: an idle factory starts the
+    // first queued type. The queue is popped before the object is created.
+    for (auto& factory:f.factories) {
+        if (factory.object || factory.queued.empty() ||
+            (factory.interval!=0 && !factory.suspended)) continue;
+        const auto* t=c.find(factory.queued.front());
+        if (!t) return fail(Status::NeedsInput,"queued type unresolved");
+        auto* h=house_of(s,factory.house_id);
+        if (!h) return fail(Status::NeedsInput,"queued house unresolved");
+        const auto kind=t->rtti==Rtti::BuildingType?w::Kind::Structure:t->rtti==Rtti::UnitType?w::Kind::Unit:
+            t->rtti==Rtti::InfantryType?w::Kind::Infantry:w::Kind::Aircraft;
+        const auto cost=cost_of(c,*t,*h); if (!cost) return fail(Status::NeedsInput,"cost unresolved");
+        const auto id=create_object(s,*t,factory.house_id,kind); if (!id) return fail(Status::NeedsInput,"no entity id");
+        h=house_of(s,factory.house_id);
+        if (!tracking_add(*h,*t)) return fail(Status::NeedsInput,"owned counter unresolved");
+        if (kind==w::Kind::Unit && h->unit_count && h->unit_type_counts) { ++*h->unit_count; ++(*h->unit_type_counts)[t->heap_index]; }
+        if (kind==w::Kind::Structure) f.buildings[*id]=BuildingState{};
+        factory.queued.erase(factory.queued.begin());
+        factory.object=*id; factory.object_type=t->id; factory.progress=0; factory.balance=*cost;
+        factory.suspended=true; factory.interval=0; factory.timer_duration=0; factory.timer_start=frame;
+        const auto frames=build_frames(c,f,*t,*house_of(s,factory.house_id));
+        if (!frames) return fail(Status::NeedsInput,"queued build time inputs unresolved");
+        factory.suspended=false;
+        factory.interval=factory_stage_frames(*frames);                       // 004B9670 writes +34 and +30.
+        factory.timer_duration=factory.interval;
+        factory.timer_start=frame;
     }
     restore.keep=true; factories=std::move(f);
     return Outcome{Status::Done,{},{},{}};
