@@ -224,7 +224,17 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
         if(frame<bag.next) continue;
         sw::Entity* refinery=nullptr;int best=std::numeric_limits<int>::max();
         for(auto& b:w.entities) if(alive(b) && b.kind==sw::Kind::Structure && b.house_id==e.house_id && (b.type=="GAREFN" || b.type=="NAREFN")) {
-            int d=distance(*e.cell,*b.cell);if(d<best || (d==best && refinery && b.id<refinery->id)) {best=d;refinery=&b;}
+            // TODO-ORIGINAL UnitClass::Mission_Harvest docks at the refinery dock; here any cell beside the footprint unloads.
+            int fw=1,fh=1;
+            if(auto f=rules_.read_string(b.type,"Foundation");f.find('x')!=std::string::npos) {
+                fw=std::max(1,atoi(f.substr(0,f.find('x')).c_str()));
+                fh=std::max(1,atoi(f.substr(f.find('x')+1).c_str()));
+            }
+            int cx=std::clamp(int(e.cell->x),int(b.cell->x),int(b.cell->x)+fw-1);
+            int cy=std::clamp(int(e.cell->y),int(b.cell->y),int(b.cell->y)+fh-1);
+            int dx=int(e.cell->x)-cx,dy=int(e.cell->y)-cy;
+            int d=dx*dx+dy*dy;
+            if(d<best || (d==best && refinery && b.id<refinery->id)) {best=d;refinery=&b;}
         }
         if(!refinery) continue;
         const int capacity=std::max(1,rules_.read_integer(e.type,"Storage",e.type=="CMIN"?20:40));
@@ -238,7 +248,14 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
         if(bag.returning) {
             bag.loading=false;
             // TODO-ORIGINAL UnitClass::Mission_Harvest: adjacent docking replaces building radio and dock animations.
-            if(distance(*e.cell,*refinery->cell)<=2) {
+            int rw=1,rh=1;
+            if(auto f=rules_.read_string(refinery->type,"Foundation");f.find('x')!=std::string::npos) {
+                rw=std::max(1,atoi(f.substr(0,f.find('x')).c_str()));
+                rh=std::max(1,atoi(f.substr(f.find('x')+1).c_str()));
+            }
+            const int ex=int(e.cell->x),ey=int(e.cell->y);
+            const int fx=int(refinery->cell->x),fy=int(refinery->cell->y);
+            if(ex>=fx-1&&ex<=fx+rw&&ey>=fy-1&&ey<=fy+rh) {
                 // 00701580 state 3: dock, wait, then give all of the first
                 // non-empty resource. Repeat until the cargo is empty.
                 if(!bag.docked) { bag.docked=true;bag.next=frame+std::uint32_t(dump_frames_);continue; }
@@ -260,9 +277,17 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
             // soldiers hold; they step aside for it. The old code waited for
             // an empty Cell and the full miner never moved (MP02T2, HARV at
             // 87,123 from frame 10039).
-            for(int pass=0;pass<2;++pass) for(int dy=-1;dy<=1;++dy) for(int dx=-1;dx<=1;++dx) {
-                int x=int(refinery->cell->x)+dx,y=int(refinery->cell->y)+dy;
-                if((!dx&&!dy)||x<0||y<0||x>=512||y>=512||movement_.moving(e.id)) continue;
+            // Ring of cells around the refinery footprint, nearest first.
+            std::vector<ra2map::Cell> ring;
+            for(int y=fy-1;y<=fy+rh;++y) for(int x=fx-1;x<=fx+rw;++x) {
+                bool inside=x>=fx&&x<fx+rw&&y>=fy&&y<fy+rh;
+                if(inside||x<0||y<0||x>=512||y>=512) continue;
+                ring.push_back(ra2map::Cell{std::uint16_t(x),std::uint16_t(y)});
+            }
+            std::sort(ring.begin(),ring.end(),[&](auto a,auto b){return distance(*e.cell,a)!=distance(*e.cell,b)?distance(*e.cell,a)<distance(*e.cell,b):a.y!=b.y?a.y<b.y:a.x<b.x;});
+            bool done=false;
+            for(int pass=0;pass<2&&!done;++pass) for(std::size_t ri=0;ri<ring.size()&&!done;++ri) {
+                int x=int(ring[ri].x),y=int(ring[ri].y);
                 ra2map::Cell target{std::uint16_t(x),std::uint16_t(y)};auto i=w.cells.find(key(target));
                 if(i==w.cells.end()) continue;
                 if(pass?e.type=="CMIN" || !held_by_friends(w,i->second,e.house_id):!open(i->second)) continue;
@@ -272,7 +297,7 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
                     old->second.heads->ground_head=0;old->second.ground_occupancy_124=0;
                     i->second.heads->ground_head=e.id;i->second.ground_occupancy_124=32;
                     e.cell=target;e.position=Coord{x*256+128,y*256+128,*i->second.terrain->floor_world_height};
-                    bag.next=frame+1;dx=2;dy=2;
+                    bag.next=frame+1;done=true;
                 } else movement_.issue(w,e.id,target,original_rule_speed(rules_.read_integer(e.type,"Speed",4)));
             }
             continue;
