@@ -225,8 +225,67 @@ int main(int argc, char** argv) try {
         require(shroud.cell_visible_to(2, cell(20, 20)), "the enemy keeps its own sight");
         check_tick_is_idempotent(shroud, world, rules);
     }
-    // Sight rules: zero reveals nothing, a missing key reads as zero,
-    // unplaced and terrain objects never sight.
+    // Spy satellite eligibility, per base FUN_004F2FC0: a dead, inactive,
+    // limbo or mission-0x13 satellite must not grant the view, and
+    // losing the last eligible one reshrouds. Restoring an eligible one
+    // brings the full map view back. The power check does not exist in this
+    // path, so a house with no power output still gets the full reveal.
+    {
+        PrototypeShroud shroud(40, 40);
+        ra2::rules::IniFile rules;
+        rules.parse("[SAT]\nSpySat=yes\nPowered=yes\nSight=1\n[TANK]\nSight=2\n");
+        sw::Snapshot world;
+        world.houses = {house(1, "Player")};
+        world.entities = {actor(1, 1, "SAT", sw::Kind::Structure, 5, 5),
+            actor(2, 1, "TANK", sw::Kind::Unit, 6, 6)};
+        shroud.tick(world, rules);
+        require(shroud.cell_visible_to(1, cell(39, 39)), "healthy satellite reveals the map");
+
+        const auto restore = [&]() {
+            auto& sat = world.entities[0];
+            sat.resolved_hp = 100;
+            sat.active = true;
+            sat.in_limbo = false;
+            sat.mission = 0;
+        };
+        const auto expect_blind = [&](const char* why) {
+            shroud.tick(world, rules);
+            require(!shroud.cell_visible_to(1, cell(39, 39)), why);
+            require(!shroud.cell_revealed_to(1, cell(39, 39)), "loss reshrouds the explored map");
+            require(shroud.cell_visible_to(1, cell(8, 6)), "tank sight stays after the loss");
+        };
+        const auto expect_full = [&](const char* why) {
+            shroud.tick(world, rules);
+            require(shroud.cell_visible_to(1, cell(39, 39)), why);
+        };
+
+        world.entities[0].resolved_hp = 0;
+        expect_blind("zero HP satellite stops the full map view");
+        restore();
+        expect_full("restored satellite restores the full view");
+
+        world.entities[0].active = false;
+        expect_blind("inactive satellite stops the full map view");
+        restore();
+        expect_full("reactivated satellite restores the full view");
+
+        world.entities[0].in_limbo = true;
+        expect_blind("limbo satellite stops the full map view");
+        restore();
+        expect_full("un-limbo satellite restores the full view");
+
+        world.entities[0].mission = 0x13;
+        expect_blind("mission 0x13 satellite stops the full map view");
+        restore();
+        expect_full("idle-mission satellite restores the full view");
+
+        // No power gate: an unpowered house keeps the full satellite view.
+        world.houses[0].power_output = 0;
+        world.houses[0].power_drain = 100;
+        expect_full("unpowered house keeps the full satellite view");
+        world.houses[0].power_output = std::nullopt;
+        world.houses[0].power_drain = std::nullopt;
+    }
     {
         PrototypeShroud shroud(40, 40);
         ra2::rules::IniFile rules;
@@ -295,6 +354,7 @@ int main(int argc, char** argv) try {
         require(rules.read_bool("GAGAP", "GapGenerator"), "gap generator flag");
         require(rules.read_integer("GAGAP", "GapRadiusInCells") == 10, "gap radius in cells");
         require(rules.read_bool("GASPYSAT", "SpySat"), "spy satellite flag");
+        require(rules.read_bool("GASPYSAT", "Powered"), "the satellite type is powered");
 
         sw::Snapshot world;
         world.houses = {house(1, "Americans"), house(2, "Russians")};
