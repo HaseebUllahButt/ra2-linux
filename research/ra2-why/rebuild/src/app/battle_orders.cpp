@@ -69,7 +69,8 @@ bool BattleOrders::selectable(const session::world::Entity& entity) const {
     // TODO-ORIGINAL: Recover type selectability, cargo, cloak, and discovery checks.
     // Root's projection callback must reject hidden objects until those fields exist.
     return house_ && entity.house_id==house_ && live(entity) &&
-        (entity.kind==Kind::Unit || entity.kind==Kind::Infantry);
+        (entity.kind==Kind::Unit || entity.kind==Kind::Infantry ||
+            entity.kind==Kind::Aircraft);
 }
 void BattleOrders::cancel_pointer() {
     press_.reset();

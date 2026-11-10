@@ -196,6 +196,124 @@ void self_test() {
         require(cancel_production(world,factories,catalog,1,"E1",16).status==Status::Done &&
             *world.houses.front().cash==1075,"completed product refunds full cost before exit");
     }
+    // Queue limit: FactoryClass::Queue_Type 004B9440 caps one queue at
+    // Rules +0xE8 (default 30, stored at 0072C27F). Queued items cost
+    // nothing until they become the active object. RemoveOneFromQueue
+    // 004B9DF0 removes the first queued entry. StartProduction 004B9D70
+    // starts the front entry when the factory is idle.
+    {
+        w::Snapshot world; world.setup_progress=w::SetupProgress::Complete;
+        world.geometry=ra2::session::PlacementGeometry{100,100,{2,2,96,90}};
+        w::House owner; owner.id=1; owner.cash=5000; owner.tech_level=10;
+        owner.power_output=100; owner.power_drain=10; owner.human_controlled=true;
+        for (auto* m:{&owner.buildings_active_5460,&owner.buildings_owned_5420,&owner.buildings_ever_54a0,
+                      &owner.units_owned_5430,&owner.units_ever_54b0,&owner.infantry_owned_5440,
+                      &owner.infantry_ever_54c0,&owner.aircraft_owned_5450,&owner.aircraft_ever_54d0})
+            *m=std::map<std::int32_t,std::int32_t>{};
+        world.houses.push_back(owner); world.creation_order.push_back({w::CreatedKind::House,1});
+        w::Entity barracks; barracks.id=2; barracks.house_id=1; barracks.kind=w::Kind::Structure;
+        barracks.type="BARR"; barracks.lifetime=w::Lifetime::Placed; barracks.cell=ra2map::Cell{90,90};
+        barracks.position=ra2::sim::Coord{90*256+128,90*256+128,0}; barracks.layer=w::Layer::Ground;
+        barracks.next=0; barracks.object_field_74=1; barracks.object_field_76=0; barracks.on_map=true;
+        barracks.mission=0; barracks.resolved_hp=400; barracks.maximum_hp=400; barracks.original_type_index=1;
+        world.entities.push_back(barracks); world.creation_order.push_back({w::CreatedKind::Entity,2});
+        Catalog catalog; catalog.build_speed=0.7;
+        catalog.minimum_low_power=0.5f; catalog.maximum_low_power=0.8f;
+        catalog.low_power_penalty=1; catalog.multiple_factory=0.8f; catalog.wall_coefficient=3;
+        TypeFacts barr; barr.id="BARR"; barr.rtti=Rtti::BuildingType; barr.heap_index=1; barr.can.heap_index=1;
+        barr.factory=Rtti::InfantryType; barr.cost=500; barr.strength=400;
+        barr.can.tech_level=1; barr.owner=1;
+        TypeFacts gi; gi.id="E1"; gi.rtti=Rtti::InfantryType; gi.heap_index=0; gi.can.heap_index=0;
+        gi.cost=200; gi.strength=100; gi.can.tech_level=1; gi.can.build_limit=0x7FFFFFFF; gi.owner=1;
+        TypeFacts e2; e2.id="E2"; e2.rtti=Rtti::InfantryType; e2.heap_index=3; e2.can.heap_index=3;
+        e2.cost=500; e2.strength=100; e2.can.tech_level=1; e2.can.build_limit=0x7FFFFFFF; e2.owner=1;
+        TypeFacts limited; limited.id="LTD"; limited.rtti=Rtti::InfantryType; limited.heap_index=2;
+        limited.can.heap_index=2; limited.cost=100; limited.strength=100; limited.can.tech_level=1;
+        limited.can.build_limit=-2; limited.owner=1;
+        catalog.buildings={barr}; catalog.infantry={gi,e2,limited};
+        FactorySet factories; factories.flags.session_type=1; factories.flags.super_weapons=true;
+        factories.flags.build_off_ally=false; factories.flags.player_house=1;
+        factories.buildings[2]=BuildingState{}; factories.house_factory_counts[1]={0,0,0,0,0,0};
+        factories.power_blackout_idle[1]=true;
+        // GI: cost 200 x 0.7 x 0.9 = 126 build frames; stage interval 126/54 = 2.
+        const auto first=begin_production(world,factories,catalog,1,"E1",0);
+        require(first.status==Status::Done && first.value && *first.value==125,"GI builds in 125 frames");
+                require(factories.factories.front().balance==200 && factories.factories.front().progress==0 && factories.factories.front().interval==2 &&
+            factories.factories.front().timer_duration==2 && !factories.factories.front().suspended,"GI factory starts at stage 0, interval 2");
+        // The build limit counts the queued entries of the type. The GI
+        // object occupies the infantry factory, so each LTD click queues one.
+                require(begin_production(world,factories,catalog,1,"LTD",0).status==Status::Done,
+            "limited type queues once");
+        require(factories.factories.back().queued.size()==1,"the LTD queue holds 1");
+        require(begin_production(world,factories,catalog,1,"LTD",0).status==Status::Done,
+            "limited type queues twice");
+        require(factories.factories.back().queued.size()==2,"the LTD queue holds 2");
+        require(begin_production(world,factories,catalog,1,"LTD",0).status==Status::Rejected,
+            "BuildLimit -2 refuses the third LTD");
+        require(*world.houses.front().cash==5000,"queued LTDs cost nothing");
+        // Right click on a queued icon removes one entry of that type.
+        require(cancel_production(world,factories,catalog,1,"LTD",0).status==Status::Done,
+            "right click removes one queued LTD");
+        require(factories.factories.back().queued.size()==1,"the LTD queue drops to 1");
+        require(*world.houses.front().cash==5000,"queued cancel refunds nothing");
+        require(cancel_production(world,factories,catalog,1,"LTD",0).status==Status::Done,
+            "right click removes the last queued LTD");
+        require(factories.factories.back().queued.empty(),"the LTD queue is empty");
+        // The whole infantry queue is one pool of 30 including the active
+        // object: 28 GI clicks plus one Engineer-style type fill it to
+        // 29 queued + 1 active = 30 (reference: 29 GIs queued, the Engineer
+        // icon took 1, 29 + 1 = 30).
+        for (int click=0;click<28;++click)
+            require(begin_production(world,factories,catalog,1,"E1",0).status==Status::Done,
+                "queue click accepted");
+        require(begin_production(world,factories,catalog,1,"E2",0).status==Status::Done,
+            "the mixed type takes the 30th slot");
+        require(factories.factories.front().queued.size()==29,"the queue holds 29 queued items");
+        require(factories.factories.front().queued.back()=="E2","the last entry is the mixed type");
+        require(*world.houses.front().cash==5000,"queued items cost nothing");
+        require(begin_production(world,factories,catalog,1,"E1",0).status==Status::Rejected,
+            "click 31 is refused at the queue limit");
+        require(begin_production(world,factories,catalog,1,"E2",0).status==Status::Rejected,
+            "click 32 for the mixed type is refused too");
+        // A same-type right click removes a queued entry and keeps the active
+        // object and the cash.
+        const auto active_before=factories.factories.front().object;
+        require(cancel_production(world,factories,catalog,1,"E1",0).status==Status::Done,
+            "same-type right click removes a queued GI");
+        require(*world.houses.front().cash==5000 &&
+            factories.factories.front().object==active_before &&
+            factories.factories.front().queued.size()==28,
+            "same-type cancel keeps the active object and the cash");
+        // A tick with no pending queue advance leaves the entities untouched.
+        const auto entities_before=world.entities.size();
+        require(tick(world,factories,catalog,1).status==Status::Done,"tick with a full queue");
+        require(world.entities.size()==entities_before,"no pending queue means no entity copy");
+        // Run the GI factory to completion, then the queue advances.
+        std::uint64_t frame=0;
+        for (frame=1;factories.factories.front().progress!=54 && frame<=2000;++frame)
+            require(tick(world,factories,catalog,frame).status==Status::Done,"tick");
+        require(factories.factories.front().progress==54 && factories.factories.front().suspended && *world.houses.front().cash==4800,
+            "GI finished after 126 frames and paid 200");
+        // Deliver the finished GI out of the factory (Exit_Object); the
+        // factory is idle and StartProduction 004B9D70 runs on the next tick.
+        { auto& done=factories.factories.front(); done.object=0; done.object_type.clear();
+          done.suspended=true; done.progress=0; done.interval=0; done.timer_duration=0; }
+        require(tick(world,factories,catalog,++frame).status==Status::Done,"advance tick");
+        require(factories.factories.front().object && factories.factories.front().object_type=="E1" && factories.factories.front().progress==0 &&
+            factories.factories.front().balance==200 && factories.factories.front().queued.size()==27 &&
+            world.houses.front().infantry_owned_5440->at(0)==2,
+            "the idle factory started the next queued GI");
+        // A right click on the building icon removes a queued GI first.
+        require(cancel_production(world,factories,catalog,1,"E1",0).status==Status::Done,
+            "right click removes a queued GI");
+        require(*world.houses.front().cash==4800 &&
+            factories.factories.front().queued.size()==26,
+            "queued GI cancel refunds nothing");
+        require(cancel_production(world,factories,catalog,1,"E1",0).status==Status::Done,
+            "right click removes the next queued GI");
+        require(factories.factories.front().queued.size()==25 &&
+            *world.houses.front().cash==4800,"queued GI cancel refunds nothing");
+    }
     naval_cases();
     // Foundation lists from 00454EF0: GACNST uses 4x4 (index 18).
     require(original_foundation_cells(18).size()==16,"4x4 foundation");

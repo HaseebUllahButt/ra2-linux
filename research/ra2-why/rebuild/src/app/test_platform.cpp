@@ -39,10 +39,14 @@ int main() {
         require(std::all_of(scaled.begin(), scaled.end(), [](auto b) { return b == 255; }),
                 "Resized native texture was not presented");
 
-        window.poll();
-        SDL_Window* native = SDL_GetWindowFromID(1);
+        window.inject_for_test({InputKind::Key, 0, 0, SDLK_F12, true});
+        SDL_Event keydown{};
+        require(SDL_PeepEvents(&keydown, 1, SDL_GETEVENT, SDL_KEYDOWN, SDL_KEYDOWN) == 1,
+                "No native keydown event was queued");
+        const auto id = keydown.key.windowID;
+        SDL_Window* native = SDL_GetWindowFromID(id);
         require(native != nullptr, "Native test window is missing");
-        const auto id = SDL_GetWindowID(native);
+        window.poll();
         std::vector<std::uint8_t> square(32 * 32 * 4, 255);
         window.present(square.data(), 32, 32, square.size());
         const auto letterboxed = window.capture(width, height);

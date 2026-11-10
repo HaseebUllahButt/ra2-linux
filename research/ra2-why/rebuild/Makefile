@@ -21,7 +21,7 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
 NATIVE_SOURCES += src/app/battle.cpp src/app/battle_scene.cpp src/app/battle_orders.cpp src/app/battle_hud.cpp src/app/hud_art.cpp src/app/battle_shroud.cpp src/sim/prototype_shroud.cpp \
     src/app/battle_audio.cpp src/audio/game_audio.cpp src/audio/audio.cpp src/audio/lookup.cpp \
     src/app/battle_effects.cpp src/app/battle_help.cpp src/app/battle_setup.cpp src/app/battle_options.cpp src/app/battle_options_art.cpp src/app/battle_cursor.cpp src/ui/score_screen.cpp \
-    src/sim/prototype_movement.cpp src/sim/prototype_ai.cpp src/sim/prototype_infantry.cpp \
+    src/sim/prototype_aircraft.cpp src/sim/prototype_movement.cpp src/sim/prototype_ai.cpp src/sim/prototype_ai_team.cpp src/sim/prototype_infantry.cpp \
     src/sim/prototype_victory.cpp src/sim/prototype_production.cpp src/sim/prototype_economy.cpp \
     src/sim/prototype_tech.cpp src/sim/prototype_repair_sell.cpp src/render/battle_radar.cpp
 NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
@@ -76,7 +76,7 @@ feature-audio:
 feature-headless:
 	bash tools/test_headless_match.sh "$(FEATURE_GAME_DIR)" 1000
 
-.PHONY: native native-check platform run-platform catalog terrain-inputs scene actors ui audio voxel sim sim-move sim-replacement
+.PHONY: native native-check platform run-platform catalog terrain-inputs scene actors ui audio voxel sim sim-move sim-replacement sim-movement-scenes
 
 FS_OBJECTS = build/native/src/fs/mix_archive.o build/native/src/fs/mix_bootstrap.o build/native/src/fs/filename_hash.o
 GFX_OBJECTS = build/native/src/gfx/palette.o build/native/src/gfx/shp_decode.o
@@ -86,7 +86,7 @@ MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o 
 SESSION_OBJECTS = build/native/src/session/session.o build/native/src/session/map_geometry.o build/native/src/session/placement_terrain.o
 SESSION_WORLD_OBJECTS = build/native/src/session/world/world.o build/native/src/session/world/speed_type.o build/native/src/session/world/movement_zone.o build/native/src/session/world/unit_flags.o $(SESSION_OBJECTS) build/native/src/sim/random.o build/native/src/sim/distance.o build/native/src/sim/coarse_category.o build/native/src/sim/cell_setup.o build/native/src/sim/replacement.o build/native/src/sim/world.o build/native/src/sim/floor.o build/native/src/rules/ini_file.o build/native/src/weapons/occupant_order.o
 
-native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-postprocessed-path sim-filtered-path sim-smoothing sim-full-smoothing sim-entry-height sim-category sim-resource-cell sim-regions sim-movement-regions sim-component-lookup sim-goal-control sim-retry-edges sim-hierarchy-retry sim-local-reachability sim-search-memory sim-foot-path sim-nearest-cell sim-cell-projection sim-nearest-projection sim-cell-fit sim-rectangle-fit sim-nearest-fit sim-hierarchy-memory sim-overlay-mark sim-hierarchy sim-hierarchy-route sim-replacement sim-world sim-cell-setup sim-build-time sim-production sim-production-runtime sim-goal-runtime sim-goal-runtime-real sim-live-cell-setup sim-unit-visibility session session-terrain session-world weapons combat-runtime
+native-check: native platform terrain-inputs scene base-move actors ui audio voxel sim sim-move sim-route sim-path sim-postprocessed-path sim-filtered-path sim-smoothing sim-full-smoothing sim-entry-height sim-category sim-resource-cell sim-regions sim-movement-regions sim-movement-scenes sim-component-lookup sim-goal-control sim-retry-edges sim-hierarchy-retry sim-local-reachability sim-search-memory sim-prototype-speed sim-original-live-route sim-foot-path sim-nearest-cell sim-cell-projection sim-nearest-projection sim-cell-fit sim-rectangle-fit sim-nearest-fit sim-hierarchy-memory sim-overlay-mark sim-hierarchy sim-hierarchy-route sim-replacement sim-world sim-cell-setup sim-build-time sim-production sim-production-runtime sim-goal-runtime sim-goal-runtime-real sim-live-cell-setup sim-unit-visibility session session-terrain session-world weapons combat-runtime
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --frames 3 --headless
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --frames 3 --headless --yuri
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --map ../analysis/extracted/maps/2PEAKS.MAP --frames 3 --headless
@@ -94,6 +94,16 @@ native-check: native platform terrain-inputs scene base-move actors ui audio vox
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --map ALL01T.MAP --frames 3 --headless
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --map MP25MW.MAP --frames 3 --headless
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --frames 3 --headless
+
+build/extract_file: build/native/src/tools/extract_file.o $(FS_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/native/src/tools/extract_file.o: tools/extract_file.cpp
+	mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -I src -MMD -MP -c $< -o $@
+
+build/rules.ini: build/extract_file
+	build/extract_file $(TEST_GAME_DIR) RULES.INI > $@.tmp && mv $@.tmp $@
 
 actors: build/actors_test
 	build/actors_test $(TEST_GAME_DIR)
@@ -134,6 +144,13 @@ sim: build/sim_test
 build/sim_test: build/native/src/sim/test_main.o $(SIM_OBJECTS) $(MAP_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
+sim-movement-scenes: build/sim_movement_scenes_test
+	build/sim_movement_scenes_test
+	build/sim_movement_scenes_test $(TEST_GAME_DIR)/game.exe
+
+build/sim_movement_scenes_test: build/native/src/sim/test_movement_scenes.o build/native/src/sim/prototype_movement.o build/native/src/sim/path.o build/native/src/sim/path_smoothing.o build/native/src/sim/cell_entry.o build/native/src/sim/prototype_shroud.o build/native/src/sim/drive.o build/native/src/sim/distance.o build/native/src/sim/random.o build/native/src/sim/world.o build/native/src/sim/ground.o build/native/src/weapons/occupant_order.o build/native/src/app/battle_shroud.o build/native/src/rules/ini_file.o
+	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
+
 sim-move: build/sim_move_test
 	build/sim_move_test $(TEST_GAME_DIR) ../analysis/extracted
 	build/sim_move_test $(TEST_GAME_DIR) ../analysis/extracted --base
@@ -146,6 +163,19 @@ sim-route: build/sim_route_test
 	build/sim_route_test $(TEST_GAME_DIR)/game.exe $(TEST_GAME_DIR)/gamemd.exe
 
 build/sim_route_test: build/native/src/sim/test_route.o build/native/src/sim/drive.o build/native/src/sim/ground.o build/native/src/sim/distance.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+.PHONY: sim-prototype-speed sim-original-live-route
+sim-prototype-speed: build/sim_prototype_speed_test
+	build/sim_prototype_speed_test
+
+build/sim_prototype_speed_test: build/native/src/sim/test_prototype_speed.o build/native/src/sim/prototype_movement.o build/native/src/sim/path.o build/native/src/sim/path_smoothing.o build/native/src/sim/cell_entry.o build/native/src/sim/drive.o build/native/src/sim/distance.o build/native/src/sim/random.o build/native/src/sim/world.o build/native/src/sim/ground.o build/native/src/weapons/occupant_order.o build/native/src/rules/ini_file.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+sim-original-live-route: build/sim_original_live_route_test
+	build/sim_original_live_route_test $(TEST_GAME_DIR)/game.exe
+
+build/sim_original_live_route_test: build/native/src/sim/test_original_live_route.o build/native/src/sim/prototype_movement.o build/native/src/sim/path.o build/native/src/sim/path_smoothing.o build/native/src/sim/cell_entry.o build/native/src/sim/drive.o build/native/src/sim/distance.o build/native/src/sim/random.o build/native/src/sim/world.o build/native/src/sim/ground.o build/native/src/weapons/occupant_order.o build/native/src/rules/ini_file.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 .PHONY: sim-path sim-entry-height
@@ -580,12 +610,19 @@ PROTOTYPE_TEST_OBJECTS = $(filter-out build/native/src/app/main.o,$(NATIVE_OBJEC
 human-input-check: native
 	tools/test_human_input.sh $(abspath build/ra2-native) $(FEATURE_GAME_DIR)
 
+# Compare our computer opponent with the original census logs (not part of test).
+.PHONY: ai-reference-check
+ai-reference-check: native build/rules.ini
+	GAME_DIR=$(TEST_GAME_DIR) tools/ai_reference_check.sh
+
 skirmish-check: native skirmish-tests
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --frames 3
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --autoplay --frames 20000
-	RA2_TEST_OPPONENTS=ee build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --map MP09T3.MAP --headless --autoplay --frames 30000
+	# Original height checks route around cliffs. This match ends at frame 37119.
+	RA2_TEST_OPPONENTS=ee build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --map MP09T3.MAP --headless --autoplay --frames 45000
 
-skirmish-tests: build/battle_building_tools_test build/battle_shroud_test build/battle_score_test build/resource_render_test build/battle_status_test build/battle_formation_test build/prototype_economy_test build/battle_audio_test build/prototype_movement_test build/battle_effects_test build/battle_queue_test build/battle_radar_test build/battle_radar_world_test build/battle_help_test build/battle_setup_test build/super_weapon_option_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/original_combat_measurements_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test
+skirmish-tests: build/aircraft_combat_test build/battle_building_tools_test build/battle_shroud_test build/battle_score_test build/resource_render_test build/battle_status_test build/battle_formation_test build/prototype_economy_test build/battle_audio_test build/prototype_movement_test build/battle_effects_test build/battle_queue_test build/battle_radar_test build/battle_radar_world_test build/battle_help_test build/battle_setup_test build/super_weapon_option_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/original_combat_measurements_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test
+	build/aircraft_combat_test $(TEST_GAME_DIR)
 	build/resource_render_test $(TEST_GAME_DIR)
 	build/battle_status_test
 	build/battle_building_tools_test
@@ -683,7 +720,7 @@ build/prototype_combat_test: build/native/src/weapons/prototype_combat_test.o $(
 build/prototype_victory_test: build/native/src/sim/test_prototype_victory.o build/native/src/sim/prototype_victory.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-build/prototype_ai_test: build/native/src/sim/test_prototype_ai.o build/native/src/sim/prototype_ai.o $(MAP_OBJECTS) $(FS_OBJECTS)
+build/prototype_ai_test: build/native/src/sim/test_prototype_ai.o build/native/src/sim/prototype_ai.o build/native/src/sim/prototype_ai_team.o build/native/src/sim/random.o $(MAP_OBJECTS) $(FS_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 build/prototype_infantry_test: build/native/src/sim/test_prototype_infantry.o build/native/src/sim/prototype_infantry.o $(MAP_OBJECTS) $(FS_OBJECTS)
@@ -827,4 +864,8 @@ build/battle_score_test: build/native/src/app/test_battle_score.o $(filter-out b
 	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -o $@
 
 build/battle_shroud_test: build/native/src/app/test_battle_shroud.o $(PROTOTYPE_TEST_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
+
+# Aircraft missions share the playable weapon and damage runtime.
+build/aircraft_combat_test: build/native/src/sim/test_aircraft_combat.o $(PROTOTYPE_TEST_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@

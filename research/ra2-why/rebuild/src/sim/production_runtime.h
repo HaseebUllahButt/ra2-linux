@@ -209,6 +209,10 @@ struct FactoryState {
     std::uint64_t timer_start=0;         // +28.
     std::int32_t timer_duration=0;       // +30 current stage timer; each stage reloads it from +34.
     bool suspended=true;                 // +6C.
+    // +40 dynamic vector of queued type ids, count +4C. Queued items cost
+    // nothing until they become the active object. Rules +0xE8 caps the
+    // queue; the default 30 is stored at 0072C27F.
+    std::vector<std::string> queued;
 };
 struct SessionFlags {
     std::optional<std::int32_t> session_type;  // 00A3D298.

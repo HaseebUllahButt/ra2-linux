@@ -18,15 +18,25 @@ bool live(const w::Entity& e) {
     return e.lifetime==w::Lifetime::Placed && !e.in_limbo.value_or(false) &&
         e.on_map.value_or(true) && e.resolved_hp.value_or(1)>0;
 }
+// game.exe 0x004F2CC0 (HouseClass::UpdatePower) recounts per house: it walks
+// the house buildings, skips limbo/off-map ones, and adds each building's
+// GetPowerOutput 0x00449D40 and GetPowerDrain 0x00449DD0.
 HousePower recount(const rules::IniFile& r,const w::Snapshot& s,unsigned id) {
     std::int64_t output=0,drain=0;
     for(const auto& e:s.entities) if(e.house_id==id && e.kind==w::Kind::Structure && live(e)) {
-        const auto power=r.read_integer(e.type,"Power");
+        const int power=r.read_integer(e.type,"Power");
         if(power>0) {
-            const int strength=r.read_integer(e.type,"Strength",1);
-            // TODO-ORIGINAL 00449D40: upgrades, disabled plants, and country modifiers.
-            output+=power*std::clamp(double(e.resolved_hp.value_or(strength))/std::max(1,strength),0.0,1.0);
-        } else drain-=std::int64_t(power);
+            // 0x00449D40: power plants add Type Power= plus turbine upgrades
+            // and powerups (not in the snapshot yet), then scale the sum by
+            // Health/Strength 0x005D4540 and truncate with x87 F2I 0x0077F110.
+            const int strength=std::max(1,r.read_integer(e.type,"Strength",1));
+            const int hp=std::max(0,e.resolved_hp.value_or(strength));
+            output+=(int)((double)hp/(double)strength*(double)power);
+        } else if(power<0) {
+            // 0x00449DD0: drain is Type Power= (negative in INI), never
+            // health scaled, zero when the building is off or disabled.
+            drain-=(std::int64_t)power;
+        }
     }
     return {int(std::min(output,std::int64_t(INT32_MAX))),int(std::min(drain,std::int64_t(INT32_MAX)))};
 }
@@ -37,12 +47,27 @@ HousePower house_power(const rules::IniFile& r,const w::Snapshot& s,unsigned id)
     if(h && h->power_output && h->power_drain) return {*h->power_output,*h->power_drain};
     return recount(r,s,id);
 }
+// game.exe 0x006C22A0 (TechnoClass::TimeToBuild, called from the per-house
+// factory rate update 0x004B9EB0) computes the build clock speed with x87
+// float arithmetic: speed = 1 - (1 - PowerFraction 0x004E8330) *
+// LowPowerPenaltyModifier; speed = max(speed, MinLowPowerProductionSpeed);
+// when the fraction is below 1 also speed = min(speed,
+// MaxLowPowerProductionSpeed); a zero speed becomes 0.01. Build frames are
+// F2I(cost / speed) 0x0077F110, and the factory clock Rate is frames/54
+// clamped to 1..255 (0x004B9EB0). This returns the reciprocal so callers can
+// divide build time by it.
 double production_multiplier(const rules::IniFile& r,const HousePower& p) {
-    if(!p.low()) return 1;
-    const double lo=std::clamp(r.read_double("General","MinLowPowerProductionSpeed",.5),.001,1.0);
-    const double hi=std::clamp(r.read_double("General","MaxLowPowerProductionSpeed",.8),lo,1.0);
-    // TODO-ORIGINAL FactoryClass::AI: verify interpolation and integer rounding.
-    return 1.0/(lo+(hi-lo)*std::clamp(p.fraction()*r.read_double("General","LowPowerPenaltyModifier",1),0.0,1.0));
+    const float frac=(float)p.fraction();
+    const float mod=(float)r.read_double("General","LowPowerPenaltyModifier",1);
+    float speed=1.f-(1.f-frac)*mod;
+    const float lo=(float)r.read_double("General","MinLowPowerProductionSpeed",.5);
+    if(speed<lo) speed=lo;
+    if(frac<1.f) {
+        const float hi=(float)r.read_double("General","MaxLowPowerProductionSpeed",.8);
+        if(speed>hi) speed=hi;
+    }
+    if(speed==0.f) speed=0.01f;
+    return 1.0/(double)speed;
 }
 bool defenses_online(const HousePower& p) { return !p.low(); }
 bool building_online(const rules::IniFile& r,const HousePower& p,const std::string& type) {

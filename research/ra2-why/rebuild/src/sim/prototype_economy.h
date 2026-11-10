@@ -20,6 +20,13 @@ public:
     // [General] AIVirtualPurifiers for an original difficulty index
     // (House +C8: 0 hardest, 1 medium, 2 easiest). Zero when not listed.
     static int virtual_purifiers(const rules::IniFile& rules, int original_difficulty);
+    // Base 0065E8C0 (multiplayer start): each computer house that is not
+    // MultiplayPassive gets GiveMoney (004E5440) of
+    // Available_Money (IHouse slot +18) * MultiplayerAICM[House +C8] * 0.01.
+    // The original difficulty index is 0 hardest; Brutal 400 turns 10000
+    // credits into 50000. Returns the amount to add.
+    static std::int32_t start_money_bonus(const rules::IniFile& rules, int original_difficulty,
+                                          std::int32_t available_money);
 private:
     // Bails per resource index. Docked unloading gives one resource at a time.
     struct Cargo {

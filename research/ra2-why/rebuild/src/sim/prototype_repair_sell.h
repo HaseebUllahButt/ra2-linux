@@ -16,8 +16,8 @@ struct PrototypeRepairSellRules {
     double refund_percent = 0.0;      // [General] RefundPercent: sell refund as a share of Cost.
     std::int32_t allied_survivor_divisor = 0; // [General] AlliedSurvivorDivisor.
     std::int32_t soviet_survivor_divisor = 0; // [General] SovietSurvivorDivisor.
-    std::int32_t third_survivor_divisor = 0;  // [General] ThirdSurvivorDivisor; the base
-                                              // RULES.INI omits it, so 750 is assumed.
+    // The base game has no third survivor divisor; only a side value of 1
+    // uses the Soviet divisor, every other side value uses the Allied one.
     std::int32_t ticks_per_minute = 900;      // Original TICKS_PER_MINUTE.
 
     // Pass the loaded base RULES.INI, with any intended map overrides applied.
@@ -25,37 +25,51 @@ struct PrototypeRepairSellRules {
     static PrototypeRepairSellRules load(const rules::IniFile& rules);
 };
 
-// Player building repair and sell for prototype worlds. One instance serves
+// Human-player building repair and sell for prototype worlds. One instance serves
 // one match. Repair state lives here, not in the world; a rebuilt helper
 // forgets which buildings were repairing, like the movement prototype.
 // TODO-ORIGINAL: no deconstruction animation or timer (RA2 BuildingClass::
 // Mission_Selling, RA1 Mission_Deconstruction BUILDING.CPP 3385), no sounds,
-// no computer repair or sell decisions (RA1 Repair_AI, gamemd 00450630) and
-// no repair-bay selling of docked units.
+// no repair-bay selling of docked units. The base auto-repair path
+// FUN_0044B9B0 also holds computer repair decisions (it calls the owner
+// virtuals at +0x188 and +0x184); those decisions are not modeled.
 class PrototypeRepairSell {
 public:
     // The art INI is optional; without it every footprint is one cell.
     explicit PrototypeRepairSell(const rules::IniFile& base_rules,
         const rules::IniFile* art_rules = nullptr);
 
-    // Credits for one repair step of the building type. RA1 shape
-    // (TechnoTypeClass::Repair_Cost): Cost / (Strength / RepairStep) times
-    // RepairPercent, truncated. Zero when the type has no usable Cost or
-    // Strength, which repairs for free like an original truncated zero.
+    // Credits for one repair step of the building type. Recovered from
+    // game.exe: TechnoTypeClass vtable 0x007AD080, slot +0xB0 = 0x006DAEC0
+    // is Cost / (Strength / RepairStep) times RepairPercent, truncated,
+    // with a minimum of 1; a zero Cost divides safely and still clamps to
+    // 1. Slot +0xB4 = 0x006DAF10 returns RepairStep. Zero when the type has
+    // no Strength or a zero divisor (the original would divide by zero
+    // instead).
     std::int32_t repair_cost_per_step(const std::string& type) const;
 
     // Credits paid back for selling one of the type: Cost * RefundPercent,
-    // truncated (RA1 TechnoClass::Refund_Amount shape). Zero without Cost.
+    // truncated. Recovered from game.exe: TechnoTypeClass vtable 0x007AD080
+    // slot +0xB8 = 0x006DAD80; its extra arguments can force the full price
+    // and apply a house factor, which are not modeled. Zero without Cost.
     std::int32_t refund_amount(const std::string& type) const;
 
-    // Crew size when selling: refund divided by the side divisor, clamped to
-    // 1..5 (gamemd 00451330). Side 0 is Allied, 1 Soviet, 2 third. Zero when
-    // the type is not Crewed, the side is unknown, or the refund is zero.
-    // TODO-ORIGINAL: the captured-building divisor doubling is not modeled.
+    // Crew size when selling. Recovered from game.exe 0x0044C520
+    // (BuildingClass vtable 0x0079CBBC slot 172): the refund (type virtual
+    // +0xB8 with the owner and 0) divided by the side divisor, clamped to
+    // 1..5, zero refund included. Only a side value of 1 picks the Soviet
+    // divisor (RulesClass +0x1164); every other value picks the Allied one
+    // (+0x1160). A zero divisor returns 0. TODO-ORIGINAL: the original
+    // gates on BuildingClass +0x5B0 and a BuildingTypeClass byte at +0xAD9
+    // (read through the building's type pointer at +0x418, so likely
+    // Crewed) and doubles the divisor for a captured building (+0x5B3);
+    // this keeps the Crewed rules check as its gate and does not model
+    // capture.
     std::int32_t survivor_count(const session::world::House& house, const std::string& type) const;
 
-    // Infantry type of the sold building's crew. TODO-ORIGINAL: the original
-    // crew-type selection is not recovered; the prototype uses the side's
+    // Infantry type of the sold building's crew. TODO-ORIGINAL: the base
+    // GetCrew 0x00449FB0 can return an engineer (25 percent branch) and its
+    // full selection is not recovered; the prototype always uses the side's
     // basic infantry (Allied E1, Soviet E2, third INIT).
     const char* crew_type(const session::world::House& house) const;
 
