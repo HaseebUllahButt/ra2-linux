@@ -204,6 +204,9 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     bool ai_opening_check_=std::getenv("RA2_AI_OPENING_CHECK")!=nullptr;
     // QA probe (not for merge): per-house census and a player who stays home.
     bool census_=std::getenv("RA2_HOUSE_CENSUS")!=nullptr, passive_=std::getenv("RA2_PASSIVE_PLAYER")!=nullptr;
+    // QA probe: the player's buildings get full strength again each frame,
+    // so a long census of the computer does not end with a lost match.
+    bool immortal_=std::getenv("RA2_IMMORTAL_PLAYER")!=nullptr;
     std::map<std::uint32_t,std::set<std::uint32_t>> census_seen_;
     std::optional<std::uint32_t> first_ai_shot_;
     ui::Opponent difficulty_=ui::Opponent::Easy;
@@ -1146,6 +1149,10 @@ public:
         }
         if(motion.status!=sim::PrototypeMoveStatus::Complete)gaps_.insert(motion.detail);
         // Combat owns idle guard acquisition and uses each weapon's range.
+        if(immortal_)for(auto& e:world_.entities)if(live(e)&&e.house_id==player_&&e.kind==w::Kind::Structure) {
+            const int full=e.maximum_hp.value_or(rules_.read_integer(e.type,"Strength",0));
+            if(full>0)e.resolved_hp=full;
+        }
         auto fighting=combat_.tick(world_,frame);
         score_->combat(fighting.events);
 
