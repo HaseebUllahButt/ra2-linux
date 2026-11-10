@@ -23,7 +23,7 @@ NATIVE_SOURCES += src/app/battle.cpp src/app/battle_scene.cpp src/app/battle_ord
     src/app/battle_effects.cpp src/app/battle_help.cpp src/app/battle_setup.cpp src/app/battle_options.cpp src/app/battle_options_art.cpp src/app/battle_cursor.cpp src/ui/score_screen.cpp \
     src/sim/prototype_movement.cpp src/sim/prototype_ai.cpp src/sim/prototype_ai_team.cpp src/sim/prototype_infantry.cpp \
     src/sim/prototype_victory.cpp src/sim/prototype_production.cpp src/sim/prototype_economy.cpp \
-    src/sim/prototype_tech.cpp src/sim/prototype_repair_sell.cpp src/render/battle_radar.cpp
+    src/sim/prototype_tech.cpp src/sim/prototype_repair_sell.cpp src/sim/prototype_superweapon.cpp src/render/battle_radar.cpp
 NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
 
 build/native/%.o: %.cpp
@@ -600,7 +600,7 @@ skirmish-check: native skirmish-tests
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --autoplay --frames 20000
 	RA2_TEST_OPPONENTS=ee build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --map MP09T3.MAP --headless --autoplay --frames 30000
 
-skirmish-tests: build/battle_building_tools_test build/battle_shroud_test build/battle_score_test build/resource_render_test build/battle_status_test build/battle_formation_test build/prototype_economy_test build/battle_audio_test build/prototype_movement_test build/battle_effects_test build/battle_queue_test build/battle_radar_test build/battle_radar_world_test build/battle_help_test build/battle_setup_test build/super_weapon_option_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test
+skirmish-tests: build/battle_building_tools_test build/battle_shroud_test build/battle_score_test build/resource_render_test build/battle_status_test build/battle_formation_test build/prototype_economy_test build/battle_audio_test build/prototype_movement_test build/battle_effects_test build/battle_queue_test build/battle_radar_test build/battle_radar_world_test build/battle_help_test build/battle_setup_test build/super_weapon_option_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test build/battle_superweapons_test
 	build/resource_render_test $(TEST_GAME_DIR)
 	build/battle_status_test
 	build/battle_building_tools_test
@@ -628,6 +628,7 @@ skirmish-tests: build/battle_building_tools_test build/battle_shroud_test build/
 	build/prototype_victory_test
 	build/prototype_ai_test $(TEST_GAME_DIR)
 	build/prototype_infantry_test $(TEST_GAME_DIR)
+	build/battle_superweapons_test
 
 build/battle_building_tools_test: build/native/src/app/test_battle_building_tools.o $(PROTOTYPE_TEST_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
@@ -646,6 +647,9 @@ build/resource_render_test: build/native/src/app/test_resource_render.o $(PROTOT
 
 build/battle_status_test: build/native/src/app/test_battle_status.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/battle_superweapons_test: build/native/src/app/test_battle_superweapons.o $(PROTOTYPE_TEST_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
 
 build/battle_formation_test: build/native/src/app/test_battle_formation.o build/native/src/rules/ini_file.o
 	$(CXX) $(CXXFLAGS) $^ -o $@

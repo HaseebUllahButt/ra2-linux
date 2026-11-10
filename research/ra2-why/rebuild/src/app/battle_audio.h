@@ -15,6 +15,9 @@ public:
     BattleAudio(const BattleAudio&)=delete;
     BattleAudio& operator=(const BattleAudio&)=delete;
     void observe(const session::world::Snapshot&, std::uint64_t frame);
+    // One EVA.INI speech line, for example "EVA_NuclearMissileReady".
+    // Unknown names and headless runs are silent.
+    void speak(const std::string& eva_section);
     // Call from the event pump, including while help is open. The device queue
     // controls PCM production; simulation ticks never advance sound playback.
     void service(bool paused) noexcept;
