@@ -14,7 +14,7 @@
 //   superweapon reset, cash steal, lab tech unlock).
 // - VeterancyStruct::Add 0074FF50 (victimCost / (ownerCost * VeteranRatio),
 //   clamp VeteranCap) with rank checks 0074FF90/00750010.
-// - CellClass::CollectCrate 00481A00 (overlay data selects the bonus).
+// - CellClass::CollectCrate 00476CC0 crate pickup (overlay data selects the bonus).
 // The RA1 ancestor shows the engineer and spy shapes in
 // ref/CnC_Red_Alert/CODE/INFANTRY.CPP Per_Cell_Process.
 #include "../rules/ini_file.h"
@@ -214,7 +214,7 @@ SpyEffect spy_infiltrate(const rules::IniFile& rules, session::world::Snapshot& 
 // ---------------------------------------------------------------------------
 
 // Playable subset of the original crate powerups (CellClass::CollectCrate
-// 00481A00). Types the prototype cannot execute (squad, shroud, sonar,
+// 00476CC0 crate pickup). Types the prototype cannot execute (squad, shroud, sonar,
 // para bomb, ICBM, time quake, invulnerability, vortex, tiberium, poison)
 // fall back to money, as the original falls back when a powerup has no
 // effect. TODO-ORIGINAL: the original type order and share weights are
@@ -231,6 +231,8 @@ struct CrateRules {
     std::int32_t solo_money = 5000; // [CrateRules] SoloCrateMoney.
     double regen_minutes = 3.0;     // [CrateRules] CrateRegen.
     std::string unit_crate_type;    // [CrateRules] UnitCrateType, empty = money.
+    // Bonus multipliers, loaded from [Powerups] fourth fields.
+    double armor_crate = 1.5, speed_crate = 1.2, firepower_crate = 2.0;
     bool free_mcv = true;           // [CrateRules] FreeMCV.
     // Reads [CrateRules]; unknown bonus names throw. Absent keys keep the
     // defaults. The unit share covers Unit; the other original types fall
@@ -258,7 +260,7 @@ public:
     const Crate* find(std::uint32_t cell_index) const;
     std::size_t size() const noexcept { return crates_.size(); }
     // True when the house has more live units than the original unit crate
-    // limit (50, 00481A00 case 1).
+    // limit (50, 00476CC0 crate pickup case 1).
     static bool unit_limit_reached(const session::world::Snapshot& world,
         std::uint32_t house_id);
     // Applies the crate bonus at the cell to the collector. The collector must
@@ -270,7 +272,7 @@ public:
     // cloakable. Unit spawns one UnitCrateType unit created at the cell, or
     // falls back to money when the type is unknown or the limit is reached.
     // Explosion damages the collector. Returns the applied effect.
-    // TODO-ORIGINAL 00481A00: the original also plays sounds and animations,
+    // TODO-ORIGINAL 00476CC0 crate pickup: the original also plays sounds and animations,
     // scatters area damage, and respawns crates; not modeled here.
     struct Applied {
         CrateKind kind = CrateKind::Money;

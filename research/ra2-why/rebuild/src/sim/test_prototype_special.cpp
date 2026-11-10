@@ -85,8 +85,15 @@ sw::Entity entity(std::uint32_t id, std::uint32_t owner, const char* type, sw::K
     result.kind = kind;
     result.lifetime = sw::Lifetime::Placed;
     result.cell = cell;
+    // Live original actors carry their cell center position, which the
+    // 3D crate scan reads.
+    result.position = ra2::sim::Coord{int(cell.x) * 256 + 128, int(cell.y) * 256 + 128, 0};
     result.resolved_hp = hp;
     result.maximum_hp = max_hp;
+    // The 004783E4 pickup predicate requires the multiplier fields present
+    // at exactly 1.0 on a fresh actor.
+    result.armor_multiplier = 1.0;
+    result.firepower_multiplier = 1.0;
     result.on_map = true;
     return result;
 }
@@ -193,13 +200,19 @@ int main(int argc, char** argv) try {
         const auto gain = record_kill(rules, general, world, 1, 2);
         require(!gain.promoted, "first kill does not promote");
         require_near(gain.veterancy, 100.0 / (200.0 * 3.0), 1e-6, "GI kill gain");
-        // Five more conscripts push the GI over 1.0 -> veteran.
-        for (std::uint32_t victim = 3; victim <= 7; ++victim) {
+        // Five more conscripts push the GI over 1.0 -> veteran. Six gains
+        // of 1/6 sum to 0.9999999999999999, which FUN007133A0 compares
+        // exactly against 1.0: no promotion. The seventh kill crosses it.
+        for (std::uint32_t victim = 3; victim <= 8; ++victim) {
             world.entities.push_back(
                 entity(victim, 2, "E2", sw::Kind::Infantry, {11, 10}, 100));
             const auto step = record_kill(rules, general, world, 1, victim);
             if (victim == 7) {
-                require(step.promoted, "sixth kill promotes to veteran");
+                require(!step.promoted, "sixth kill stays below the exact veteran threshold");
+                require(step.after == Rank::Rookie, "sixth kill rank");
+            }
+            if (victim == 8) {
+                require(step.promoted, "seventh kill promotes to veteran");
                 require(step.after == Rank::Veteran, "promotion rank");
             }
         }
@@ -473,14 +486,19 @@ int main(int argc, char** argv) try {
         crates.collect(rules, world, crate_rules, 1, money_cell);
         require_near(crates.armor_bias(1), 1.5, 1e-6, "bias applies once");
 
-        // Speed and firepower biases are independent.
+        // Speed and firepower biases are independent. The shipped
+        // [Powerups] fourth field (0064D490) is Armor=1.5 and
+        // Firepower=2.0; the old 1.1 assertion was a stand-in.
+        require_near(crate_rules.armor_crate, 1.5, 1e-6, "shipped armor factor");
+        require_near(crate_rules.firepower_crate, 2.0, 1e-6,
+            "shipped firepower factor");
         require(crates.place(money_cell, CrateKind::Speed, 0, crate_rules), "place speed crate");
         crates.collect(rules, world, crate_rules, 1, money_cell);
         require_near(crates.speed_bias(1), 1.2, 1e-6, "speed bias");
         require(crates.place(money_cell, CrateKind::Firepower, 0, crate_rules),
             "place firepower crate");
         crates.collect(rules, world, crate_rules, 1, money_cell);
-        require_near(crates.firepower_bias(1), 1.1, 1e-6, "firepower bias");
+        require_near(crates.firepower_bias(1), 2.0, 1e-6, "firepower bias");
 
         // Cloak marks in radius.
         require(crates.place(money_cell, CrateKind::Cloak, 0, crate_rules), "place cloak crate");

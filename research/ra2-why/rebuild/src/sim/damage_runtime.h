@@ -1,4 +1,5 @@
 #pragma once
+#include "../rules/ini_file.h"
 #include "../session/world/world.h"
 #include "../weapons/weapons.h"
 #include "prototype_turret.h"
@@ -111,6 +112,13 @@ bool base_complete_area_damage_request(AreaDamageCursor&,std::uint32_t target_id
 }
 
 namespace ra2::sim {
+// Base 004F58A0: the victim's House asks its CountryType for an armor
+// factor by target RTTI. The country loader 004F9550 reads the five float
+// keys from the country section; a missing key or country is 1.0. The
+// BuildingType branch (+110/+10C) splits on type BuildCat==5 (Combat).
+double country_armor_multiplier(const session::world::House* house,
+    session::world::Kind kind, const std::string& type,
+    const rules::IniFile& base, const rules::IniFile& map);
 // Playable prototype only. The exact, guarded APIs above do not use these
 // fallbacks. Turreted Units turn with the original FacingClass and fire only
 // within the original facing tolerance; weapons count Burst shots with the
@@ -178,6 +186,9 @@ public:
     const std::vector<PrototypeCombatProjectile>& projectiles() const { return projectiles_; }
 private:
     rules::IniFile base_,map_,art_;
+    // Base rules with the map overrides applied. Rank ability and
+    // veterancy reads use this so map files change the damage path.
+    rules::IniFile merged_;
     OriginalDistance distance_;
     weapons::BaseBallisticAngles angles_;
     std::map<std::uint32_t,std::uint32_t> orders_;

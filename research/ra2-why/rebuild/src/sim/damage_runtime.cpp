@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 #include <cstdio>
+#include <iostream>
 #include <cstdlib>
 
 namespace ra2::sim {
@@ -243,15 +244,19 @@ bool base_complete_area_damage_request(AreaDamageCursor& cursor,std::uint32_t id
 #include "../weapons/object_damage.h"
 #include "../weapons/projectile_damage.h"
 #include "../weapons/techno_damage.h"
+#include "prototype_special.h"
 #include "prototype_turret.h"
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
 
 namespace ra2::sim {
+double country_armor_multiplier(const session::world::House*,session::world::Kind,
+    const std::string&,const rules::IniFile&,const rules::IniFile&);
 namespace {
 using session::world::Entity;
 using session::world::Snapshot;
@@ -499,11 +504,30 @@ PrototypeHit prototype_damage(Snapshot& world,std::uint32_t target_id,std::uint3
         return {false,false,"target Strength or warhead Verses is unresolved"};
     weapons::TechnoDamageInput techno{};
     techno.raw_damage=raw;
-    // TODO-ORIGINAL: Resolve missing country, veteran, immunity and special
-    // virtual state from the loaded actor instead of prototype defaults.
-    techno.house_armor_multiplier=target->house_armor_multiplier.value_or(1);
+    // Country, veteran and special state resolve from the loaded actor.
+    // The house multiplier rides on the entity; the rank armor divisor is
+    // the [General] VeteranArmor value. TODO-ORIGINAL: the invulnerability
+    // and immune virtuals still need the loaded actor state.
+    // Base 004F58A0: the owning House.country picks the armor factor by
+    // target RTTI. Resolved here from the merged rules so every creation
+    // path (setup actors and new factory products) uses the live country,
+    // not a stale per-actor default.
+    techno.house_armor_multiplier=country_armor_multiplier(
+        prototype_house(world,target->house_id),target->kind,target->type,base,map);
+    target->house_armor_multiplier=techno.house_armor_multiplier;
+    // The country Firepower key is not applied here. Country +C8
+    // FirepowerMult and +E0 ArmorMult are unused TS leftovers. UNRESOLVED:
+    // the original House +D0 initializer is not traced; setup.cpp writes
+    // 1.0 as a multiplayer stand-in, so that value is not proven live.
     techno.object_armor_multiplier=target->armor_multiplier.value_or(1);
-    techno.veteran_armor_multiplier=1;techno.attacker_present=source_id!=0;techno.warhead_present=true;
+    const auto target_abilities=load_type_abilities(base,target->type);
+    const auto target_rank=rank_of(target->veterancy.value_or(0.0));
+    techno.veteran=target_rank!=Rank::Rookie;
+    techno.elite=target_rank==Rank::Elite;
+    techno.veteran_armor=target_abilities.veteran.flag[AbilityStronger];
+    techno.elite_armor=target_abilities.elite.flag[AbilityStronger];
+    techno.veteran_armor_multiplier=VeterancyRules::load(base).veteran_armor;
+    techno.attacker_present=source_id!=0;techno.warhead_present=true;
     const auto prefix=weapons::base_techno_damage_prefix(techno);
     if (prefix.stage!=weapons::TechnoDamageStage::ObjectDamage)
         return {false,false,"prototype Techno damage needs an original effect"};
@@ -559,11 +583,48 @@ void prototype_record(const Snapshot& world,PrototypeCombatTick& report,std::uin
 }
 }
 
+// Base 004F58A0: the victim's House asks its CountryType for an armor
+// factor by target RTTI. Original branch values: RTTI 3 AircraftType reads
+// +108 ArmorAircraftMult, 0x10 InfantryType +100 ArmorInfantryMult, 0x28
+// UnitType +104 ArmorUnitsMult, and 7 BuildingType +110 ArmorDefensesMult
+// only when type BuildCat==5 (Combat), otherwise +10C ArmorBuildingsMult.
+// The country loader 004F9550 reads these five keys as floats; a missing
+// key or country leaves the factor at 1.0. The global Country +C8
+// FirepowerMult and +E0 ArmorMult are unused TS leftovers and are not read.
+double country_armor_multiplier(const session::world::House* house,
+    session::world::Kind kind,const std::string& type,
+    const rules::IniFile& base,const rules::IniFile& map) {
+    if (!house || house->country.empty()) return 1.0;
+    const char* key=kind==session::world::Kind::Aircraft ? "ArmorAircraftMult"
+        : kind==session::world::Kind::Infantry ? "ArmorInfantryMult"
+        : kind==session::world::Kind::Unit ? "ArmorUnitsMult"
+        : kind==session::world::Kind::Structure
+          ? ([](const std::string& cat) {
+                // BuildCat enum names are case-insensitive in the original
+                // readers; accept any spelling of Combat (BuildCat 5).
+                if (cat.size()!=6) return false;
+                const char combat[]="combat";
+                for (std::size_t i=0;i<cat.size();++i)
+                    if (std::tolower(static_cast<unsigned char>(cat[i]))!=combat[i]) return false;
+                return true;
+            })(prototype_string(base,map,type,"BuildCat"))
+            ? "ArmorDefensesMult" : "ArmorBuildingsMult"
+        : "";
+    if (!*key) return 1.0;
+    const auto value=prototype_double(base,map,house->country,key).value_or(1.0);
+    // 004F9550 stores each factor as a 32-bit float. The original FPU
+    // control word 00000E7F rounds toward zero on the store, so a double
+    // INI value like 0.8 lands on the binary32 value at or below it.
+    float stored=static_cast<float>(value);
+    if (static_cast<double>(stored)>value) stored=std::nextafter(stored,0.0f);
+    return static_cast<double>(stored);
+}
+
 PrototypeCombatRuntime::PrototypeCombatRuntime(const IniFile& base,const IniFile& map,
     const IniFile& art,const std::string& exe)
-    :base_(base),map_(map),art_(art),distance_(OriginalDistance::from_executable(exe)),
+    :base_(base),map_(map),art_(art),merged_(prototype_merge_rules(base,map)),
+     distance_(OriginalDistance::from_executable(exe)),
      angles_(weapons::BaseBallisticAngles::from_executable(exe)) {}
-
 PrototypeCombatRuntime::PrototypeCombatRuntime(const IniFile& base,const IniFile& mode,
     const IniFile& map,const IniFile& art,const std::string& exe)
     :PrototypeCombatRuntime(prototype_merge_rules(base,mode),map,art,exe) {}
@@ -710,7 +771,7 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             if (!prototype_alive(target) || candidate.distance>radius) continue;
             const int before=*target->resolved_hp;
             auto hit=prototype_damage(world,candidate.id,shot.source_id,raw_for(*target),
-                                      candidate.distance,*weapon,base_,map_);
+                                      candidate.distance,*weapon,merged_,map_);
             panic(*target,hit);
             if (hit.applied && !hit.destroyed && shot.source_id) struck.emplace_back(target->id,shot.source_id);
             if (!hit.missing.empty()) report.unresolved.push_back(hit.missing);
@@ -723,7 +784,7 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             // TODO-ORIGINAL: Permit a direct hit when the flat prototype's
             // impact height misses the original area distance check.
             const int before=*aimed->resolved_hp;
-            auto hit=prototype_damage(world,aimed->id,shot.source_id,raw_for(*aimed),0,*weapon,base_,map_);
+            auto hit=prototype_damage(world,aimed->id,shot.source_id,raw_for(*aimed),0,*weapon,merged_,map_);
             panic(*aimed,hit);
             if (hit.applied && !hit.destroyed && shot.source_id) struck.emplace_back(aimed->id,shot.source_id);
             if (!hit.missing.empty()) report.unresolved.push_back(hit.missing);
@@ -950,10 +1011,17 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             if (aim && !weapon->omni_fire &&
                 !base_unit_facing_ready(aim->current,aim->direction,weapon->projectile_rot)) {++it;continue;}
             const auto* house=prototype_house(world,source->house_id);
+            // Veteran and elite rank now feeds the shot: the FIREPOWER
+            // ability flag gates the [General] VeteranCombat multiplier in
+            // base_projectile_damage.
+            const auto source_abilities=load_type_abilities(merged_,source->type);
+            const auto source_rank=rank_of(source->veterancy.value_or(0.0));
             weapons::ProjectileDamageInput damage{weapon->damage,false,false,
                 house?house->firepower_multiplier.value_or(1):1,source->firepower_multiplier.value_or(1),
-                false,false,false,false,1};
-            // TODO-ORIGINAL: Resolve missing veteran abilities and country multipliers.
+                source_rank!=Rank::Rookie,source_rank==Rank::Elite,
+                source_abilities.veteran.flag[AbilityFirepower],
+                source_abilities.elite.flag[AbilityFirepower],
+                VeterancyRules::load(merged_).veteran_combat};
             const auto amount=weapons::base_projectile_damage(damage);
             if (!amount || *amount<=0) {report.unresolved.push_back("projectile damage is unresolved");++it;continue;}
             PrototypeCombatProjectile shot;shot.source_id=source->id;shot.target_id=target->id;

@@ -23,7 +23,7 @@ NATIVE_SOURCES += src/app/battle.cpp src/app/battle_scene.cpp src/app/battle_ord
     src/app/battle_effects.cpp src/app/battle_help.cpp src/app/battle_setup.cpp src/app/battle_options.cpp src/app/battle_options_art.cpp src/app/battle_cursor.cpp src/ui/score_screen.cpp \
     src/sim/prototype_aircraft.cpp src/sim/prototype_movement.cpp src/sim/prototype_ai.cpp src/sim/prototype_ai_team.cpp src/sim/prototype_infantry.cpp \
     src/sim/prototype_victory.cpp src/sim/prototype_production.cpp src/sim/prototype_economy.cpp \
-    src/sim/prototype_tech.cpp src/sim/prototype_repair_sell.cpp src/render/battle_radar.cpp
+    src/sim/prototype_tech.cpp src/sim/prototype_repair_sell.cpp src/sim/prototype_special.cpp src/render/battle_radar.cpp
 NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
 
 build/native/%.o: %.cpp
@@ -80,7 +80,7 @@ feature-headless:
 
 FS_OBJECTS = build/native/src/fs/mix_archive.o build/native/src/fs/mix_bootstrap.o build/native/src/fs/filename_hash.o
 GFX_OBJECTS = build/native/src/gfx/palette.o build/native/src/gfx/shp_decode.o
-COMBAT_RUNTIME_OBJECTS = build/native/src/weapons/unit_death.o build/native/src/weapons/detonation.o build/native/src/weapons/muzzle.o build/native/src/weapons/projectile_damage.o build/native/src/weapons/cannon_line.o build/native/src/weapons/cannon_range.o build/native/src/weapons/fire_eligibility.o build/native/src/weapons/fire_timer.o build/native/src/weapons/techno_damage.o build/native/src/weapons/weapons.o build/native/src/weapons/object_damage.o build/native/src/sim/damage_runtime.o build/native/src/sim/random.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o build/native/src/rules/ini_file.o
+COMBAT_RUNTIME_OBJECTS = build/native/src/weapons/unit_death.o build/native/src/weapons/detonation.o build/native/src/weapons/muzzle.o build/native/src/weapons/projectile_damage.o build/native/src/weapons/cannon_line.o build/native/src/weapons/cannon_range.o build/native/src/weapons/fire_eligibility.o build/native/src/weapons/fire_timer.o build/native/src/weapons/techno_damage.o build/native/src/weapons/weapons.o build/native/src/weapons/object_damage.o build/native/src/sim/damage_runtime.o build/native/src/sim/random.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o build/native/src/sim/prototype_special.o build/native/src/rules/ini_file.o
 SIM_OBJECTS = $(filter build/native/src/sim/%.o,$(NATIVE_OBJECTS)) $(COMBAT_RUNTIME_OBJECTS) $(SESSION_WORLD_OBJECTS)
 MAP_OBJECTS = build/native/src/rules/ini_file.o build/native/src/map/map_file.o build/native/src/pack/map_pack.o
 SESSION_OBJECTS = build/native/src/session/session.o build/native/src/session/map_geometry.o build/native/src/session/placement_terrain.o
@@ -538,7 +538,7 @@ weapons: build/weapons_test build/weapons_asset_test build/weapons_lobber_asset_
 	build/weapons_asset_test $(TEST_GAME_DIR)
 	build/weapons_lobber_asset_test $(TEST_GAME_DIR)
 
-build/weapons_test: build/native/src/weapons/weapons.o build/native/src/weapons/test_main.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o
+build/weapons_test: build/native/src/weapons/weapons.o build/native/src/weapons/test_main.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o build/native/src/sim/prototype_special.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/weapons_asset_test: build/native/src/weapons/asset_test.o $(FS_OBJECTS) build/native/src/rules/ini_file.o
@@ -547,13 +547,13 @@ build/weapons_asset_test: build/native/src/weapons/asset_test.o $(FS_OBJECTS) bu
 build/weapons_lobber_asset_test: build/native/src/weapons/lobber_asset_test.o $(FS_OBJECTS) build/native/src/rules/ini_file.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-build/weapons_fractional_tick_test: build/native/src/weapons/fractional_tick_test.o build/native/src/weapons/weapons.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o
+build/weapons_fractional_tick_test: build/native/src/weapons/fractional_tick_test.o build/native/src/weapons/weapons.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o build/native/src/sim/prototype_special.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/weapons_near_ground_test: build/native/src/weapons/near_ground_test.o build/native/src/weapons/weapons.o build/native/src/sim/test_inputs.o $(SIM_OBJECTS) $(MAP_OBJECTS) $(FS_OBJECTS) build/native/src/gfx/palette.o build/native/src/render/minimap.o build/native/src/render/tmp_decode.o
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
-build/weapons_area_impact_test: build/native/src/weapons/area_impact_test.o build/native/src/weapons/weapons.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o
+build/weapons_area_impact_test: build/native/src/weapons/area_impact_test.o build/native/src/weapons/weapons.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o build/native/src/sim/prototype_special.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/weapons_occupant_test: build/native/src/weapons/occupant_order_test.o build/native/src/weapons/occupant_order.o
@@ -621,7 +621,7 @@ skirmish-check: native skirmish-tests
 	# Original height checks route around cliffs. This match ends at frame 37119.
 	RA2_TEST_OPPONENTS=ee build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --map MP09T3.MAP --headless --autoplay --frames 45000
 
-skirmish-tests: build/aircraft_combat_test build/battle_building_tools_test build/battle_shroud_test build/battle_score_test build/resource_render_test build/battle_status_test build/battle_formation_test build/prototype_economy_test build/battle_audio_test build/prototype_movement_test build/battle_effects_test build/battle_queue_test build/battle_radar_test build/battle_radar_world_test build/battle_help_test build/battle_setup_test build/super_weapon_option_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/original_combat_measurements_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test
+skirmish-tests: build/aircraft_combat_test build/battle_building_tools_test build/battle_shroud_test build/battle_score_test build/resource_render_test build/battle_status_test build/battle_formation_test build/prototype_economy_test build/battle_audio_test build/prototype_movement_test build/battle_effects_test build/battle_queue_test build/battle_radar_test build/battle_radar_world_test build/battle_help_test build/battle_setup_test build/super_weapon_option_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/veteran_rules_runtime_test build/original_combat_measurements_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test
 	build/aircraft_combat_test $(TEST_GAME_DIR)
 	build/resource_render_test $(TEST_GAME_DIR)
 	build/battle_status_test
@@ -648,9 +648,17 @@ skirmish-tests: build/aircraft_combat_test build/battle_building_tools_test buil
 	build/battle_orders_test
 	build/prototype_production_test $(TEST_GAME_DIR)
 	build/prototype_combat_test $(TEST_GAME_DIR)
+	build/veteran_rules_runtime_test $(TEST_GAME_DIR)
 	build/prototype_victory_test
 	build/prototype_ai_test $(TEST_GAME_DIR)
 	build/prototype_infantry_test $(TEST_GAME_DIR)
+
+build/native/src/sim/test_veteran_rules_runtime.o: src/sim/test_veteran_rules_runtime.cpp
+	mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -I src -MMD -MP -c $< -o $@
+
+build/veteran_rules_runtime_test: build/native/src/sim/test_veteran_rules_runtime.o $(PROTOTYPE_TEST_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
 
 build/battle_building_tools_test: build/native/src/app/test_battle_building_tools.o $(PROTOTYPE_TEST_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
@@ -744,8 +752,11 @@ build/ra2-native: $(NATIVE_OBJECTS)
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
 
-test: fs rules text map pack loop gfx hook native-check skirmish-tests
+test: fs rules text map pack loop gfx hook native-check skirmish-tests crate-damage-test
 	@echo "== all layer tests passed =="
+
+crate-damage-test:
+	bash src/sim/test_crate_damage.sh
 
 fs: run-fs
 
