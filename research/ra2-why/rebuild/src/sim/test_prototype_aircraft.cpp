@@ -367,6 +367,51 @@ int main(int argc, char** argv) try {
     require_at(world, 11, 4, 4, 0);
     std::cout << "Plane move: reached the goal cell and returned to its pad\n";
 
+    // Map actors can have no occupancy_tracking value. Detach their real
+    // ground link and preserve the infantry spot of the remaining neighbour.
+    world = fixture();
+    world.entities.push_back(entity(16,1,"E1",sw::Kind::Infantry,{10,10},0,125));
+    auto mutable_actor = [&](std::uint32_t id) -> sw::Entity& {
+        return *std::find_if(world.entities.begin(),world.entities.end(),
+            [&](const auto& e){return e.id==id;});
+    };
+    mutable_actor(15).next=16;
+    mutable_actor(16).position=Coord{10*256+192,10*256+64,0};
+    auto& start=world.cells.at(key(10,10));
+    start.heads.emplace().ground_head=15;
+    start.ground_occupancy_124=0x24u;
+    PrototypeAircraft detached(rules,true);
+    require(detached.issue_move(world,15,{20,20}).status==PrototypeAircraftStatus::Complete,"linked flyer move rejected");
+    require(detached.tick(world,0).status==PrototypeAircraftStatus::Complete,"linked flyer tick rejected");
+    require(world.cells.at(key(10,10)).heads->ground_head==16 &&
+        world.cells.at(key(10,10)).ground_occupancy_124==4u &&
+        actor(world,15).next==0 && actor(world,15).occupancy_tracking==false,
+        "flying unit did not release its ground cell and preserve its neighbour");
+    // A dock pad keeps its own whole-cell bit when its aircraft takes off.
+    world=fixture();
+    mutable_actor(11).next=10;
+    auto& pad_cell=world.cells.at(key(4,4));
+    pad_cell.heads.emplace().ground_head=11;
+    pad_cell.ground_occupancy_124=0x20u;
+    PrototypeAircraft pad_detach(rules,true);
+    require(pad_detach.issue(world,11,13).status==PrototypeAircraftStatus::Complete,"pad attack rejected");
+    require(pad_detach.tick(world,0).status==PrototypeAircraftStatus::Complete,"pad detach rejected");
+    require(world.cells.at(key(4,4)).heads->ground_head==10 &&
+        world.cells.at(key(4,4)).ground_occupancy_124==0x20u,"takeoff cleared the pad occupancy");
+    // Unknown chained occupants reject the whole frame without movement.
+    world=fixture();
+    mutable_actor(15).next=9999;
+    auto& bad_cell=world.cells.at(key(10,10));
+    bad_cell.heads.emplace().ground_head=15;
+    bad_cell.ground_occupancy_124=0x20u;
+    PrototypeAircraft bad_chain(rules,true);
+    require(bad_chain.issue_move(world,15,{20,20}).status==PrototypeAircraftStatus::Complete,"bad-chain order rejected early");
+    const auto old_position=actor(world,15).position;
+    require(bad_chain.tick(world,0).status==PrototypeAircraftStatus::NeedsInput &&
+        actor(world,15).position->x==old_position->x && actor(world,15).next==9999,
+        "unknown flight ground chain changed the world");
+    std::cout<<"Flight releases ground cells, preserves neighbours and rejects unknown chains\n";
+
     // Bad orders fail cleanly and cancel stops the mission.
     require(aircraft.issue(world, 0, 13).status == PrototypeAircraftStatus::Invalid,
             "zero aircraft id was accepted");

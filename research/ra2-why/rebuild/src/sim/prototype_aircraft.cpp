@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -92,6 +93,57 @@ void apply_damage(sw::Entity& victim, std::int32_t damage) {
     // TODO-ORIGINAL: direct hit-point subtraction, not original bullets,
     // warheads or armour resolution.
     victim.resolved_hp = std::max(0, victim.resolved_hp.value_or(0) - damage);
+}
+
+// Base AircraftClass::UnmarkAllOccupationBits 005D49E0 separates flight
+// from ground occupancy. TODO-ORIGINAL: air cell lists and dock footprints
+// remain separate; this adapter only releases the old ground reservation.
+std::optional<std::string> detach_ground(sw::Snapshot& world, sw::Entity& actor) {
+    if (actor.occupancy_tracking == false) return {};
+    if (!actor.next || !actor.cell) return "aircraft ground link is unresolved";
+    const auto at = world.cells.find(key(*actor.cell));
+    // Isolated flight fixtures need no ground list. A nonzero next still
+    // requires a known list, so a damaged chain never silently disappears.
+    if (at == world.cells.end() || !at->second.heads) {
+        if (*actor.next) return "aircraft ground cell is unresolved";
+        actor.occupancy_tracking = false;
+        return {};
+    }
+    auto& cell = at->second;
+    std::vector<sw::Entity*> chain;
+    std::set<std::uint32_t> seen;
+    for (auto id = cell.heads->ground_head; id;) {
+        if (!seen.insert(id).second) return "aircraft ground chain is cyclic";
+        auto* entry = find_entity(world, id);
+        if (!entry || !entry->next) return "aircraft ground chain is unresolved";
+        chain.push_back(entry);
+        id = *entry->next;
+    }
+    const auto found = std::find(chain.begin(), chain.end(), &actor);
+    if (found == chain.end()) {
+        if (*actor.next) return "aircraft ground chain does not contain actor";
+        actor.occupancy_tracking = false;
+        return {};
+    }
+    if (!cell.ground_occupancy_124) return "aircraft ground occupancy is unresolved";
+    if (found == chain.begin()) cell.heads->ground_head = *actor.next;
+    else (*std::prev(found))->next = *actor.next;
+    // Infantry marks only its own spot. Map actors and vehicles can reserve
+    // the whole cell. Keep a shared bit when a remaining occupant uses it.
+    const auto bit = [](const sw::Entity& e) -> std::uint32_t {
+        if (e.kind == Kind::Infantry && e.position) {
+            static constexpr int x[3] = {192,64,192}, y[3] = {64,192,192};
+            for (int i=0;i<3;++i)
+                if (e.position->x%256==x[i] && e.position->y%256==y[i]) return 1u<<(i+2);
+        }
+        return 0x20u;
+    };
+    std::uint32_t keep = 0;
+    for (const auto* entry : chain) if (entry != &actor) keep |= bit(*entry);
+    *cell.ground_occupancy_124 &= ~(bit(actor) & ~keep);
+    actor.next = 0;
+    actor.occupancy_tracking = false;
+    return {};
 }
 
 PrototypeAircraftResult fail(PrototypeAircraftStatus status, std::string detail) {
@@ -455,7 +507,12 @@ std::optional<std::string> PrototypeAircraft::update(sw::Snapshot& world,
                                      std::int64_t(victim->position->y) - actor.position->y));
             // External combat: the caller pulls the trigger via fired(); the
             // aircraft only tracks and faces its target here.
-            if (external_combat_) break;
+            if (external_combat_) {
+                const auto reach = std::uint64_t(std::llround(flight.rules.range * cell_leptons));
+                if (squared_xy(*actor.position, *victim->position) > reach * reach)
+                    flight.phase = AircraftPhase::FlyToTarget;
+                break;
+            }
             if (--flight.fire_timer <= 0) {
                 if (flight.rules.ammo >= 0) --flight.ammo;
                 result.shots.push_back({actor.id, *flight.target, flight.rules.damage});
@@ -553,6 +610,8 @@ PrototypeAircraftResult PrototypeAircraft::tick(sw::Snapshot& world, std::uint32
             it = flights.erase(it);
             continue;
         }
+        if (const auto error = detach_ground(candidate, *actor))
+            return fail(PrototypeAircraftStatus::NeedsInput, *error);
         const auto error = update(candidate, flights, it->second, *actor, result);
         if (error) return fail(PrototypeAircraftStatus::NeedsInput, *error);
         // Idle airships and hover infantry keep flying without a mission.
