@@ -707,8 +707,8 @@ void check_base_plan() {
 }
 
 // Base 004F1190 resolves a defense node: the quarter around the yard with
-// the least defense value, then the kind (ground, air, naval) it needs
-// most; an empty list falls back to air. 0045EAA0 rates each defense.
+// the least defense value, then the kind it needs most; an empty list
+// falls back to the next. 0045EAA0 rates each defense.
 void check_defense_choice() {
     const auto text = [](const std::string& cap) {
         return "[General]\nAlliedBaseDefenseCounts=1,1,1\n[Sides]\nAllies=Local\nSoviets=Enemy\n"
@@ -743,14 +743,13 @@ void check_defense_choice() {
         return std::string{};
     };
     const auto rules = parse(text("MaximumBaseDefenseValue=60\n"));
-    // No defenses: every need is 0.33, so the naval list is asked first.
-    // FLAK is the only type with a naval value (AA and Verses[0] 10%).
-    require(first_defense(rules, {}) == "FLAK",
-        "The first defense of an undefended base was not the air and naval type");
-    // A FLAK in every quarter: each quarter has air 60 and naval 12; the
-    // north quarter is the first least one and needs ground most.
-    require(first_defense(rules, {{"FLAK", {20, 10}}, {"FLAK", {30, 20}}, {"FLAK", {20, 30}}, {"FLAK", {10, 20}}}) == "GUNS",
-        "A base with air defense in every quarter did not add a ground defense");
+    // No defenses: every need is 0.33, so the +11E0 list (AG weapons by
+    // Verses[0]) is asked first: GUNS. FLAK has only an air value.
+    require(first_defense(rules, {}) == "GUNS", "The first defense of an undefended base was not the ground type");
+    // A GUNS in every quarter: each quarter has +11DC 20 and +11E0 20 and
+    // no air value, so the north quarter (the first least one) needs air.
+    require(first_defense(rules, {{"GUNS", {20, 10}}, {"GUNS", {30, 20}}, {"GUNS", {20, 30}}, {"GUNS", {10, 20}}}) == "FLAK",
+        "A base with ground defense in every quarter did not add an air defense");
     // MaximumBaseDefenseValue defaults to -1 (0065B830): no type has a
     // value, so the node is removed and nothing is built.
     const auto uncapped = parse(text(""));

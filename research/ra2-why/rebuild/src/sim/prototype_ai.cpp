@@ -274,10 +274,10 @@ void PrototypeAI::make_plan(const Context& context) {
 
 // Base 0045EAA0, for an IsBaseDefense BuildingType (+138A): from the
 // Primary weapon, rate = (int)(Damage / (ROF * 0.025)) (0079D2E8). With
-// an AG projectile (+274) the ground value (+11D8) is rate * Verses[3];
-// with an AA projectile (+275) the air value (+11DC) is rate * Verses[4]
-// and the naval value (+11E0) is rate * Verses[0]. Each value is at most
-// [AI] MaximumBaseDefenseValue (Rules +9CC).
+// an AA projectile (BulletType +274) the air value (+11D8) is
+// rate * Verses[3]; with an AG projectile (+275, default yes in 004644E0)
+// value +11DC is rate * Verses[4] and value +11E0 is rate * Verses[0].
+// Each value is at most [AI] MaximumBaseDefenseValue (Rules +9CC).
 std::array<std::int32_t, 3> PrototypeAI::defense_values(const std::string& type) const {
     std::array<std::int32_t, 3> values{};
     if (!rules_.read_bool(type, "IsBaseDefense")) return values;
@@ -299,8 +299,8 @@ std::array<std::int32_t, 3> PrototypeAI::defense_values(const std::string& type)
     const auto value = [&](double product) {
         return static_cast<double>(cap) < product ? cap : static_cast<std::int32_t>(product);
     };
-    if (rules_.read_bool(projectile, "AG", true)) values[0] = value(rate * versus(3));
-    if (rules_.read_bool(projectile, "AA", false)) {
+    if (rules_.read_bool(projectile, "AA", false)) values[0] = value(rate * versus(3));
+    if (rules_.read_bool(projectile, "AG", true)) {
         values[1] = value(rate * versus(4));
         values[2] = value(rate * versus(0));
     }
@@ -312,10 +312,11 @@ std::array<std::int32_t, 3> PrototypeAI::defense_values(const std::string& type)
 // sum the defense values of the house's buildings in them (00451710,
 // 00451760, 004517B0); the quarter with the least total (the first on a
 // tie) is defended. Its need for each kind is 0.33 (+15F7C..+15F84) less
-// that kind's share of the total. The kind with the largest need (ground
-// only when it beats both others; then air only when it beats naval) gives
-// the list: 004F1E50 ground, 004F1FF0 air, 004F2190 naval. An empty list
-// falls back to air, then naval, then ground. Each list holds the
+// that kind's share of the total. The kind with the largest need (+11D8
+// only when it beats both others; then +11DC only when it beats +11E0)
+// gives the list: 004F1E50 (+11D8, air), 004F1FF0 (+11DC), 004F2190
+// (+11E0). An empty list falls back to +11DC, then +11E0, then +11D8.
+// Each list holds the
 // BuildingTypes the country owns, with a value of that kind, at the
 // house's tech level, whose prerequisites (004EF740) are in the house's
 // buildings other than IsBaseDefense types and WallTower (Rules +78C).
