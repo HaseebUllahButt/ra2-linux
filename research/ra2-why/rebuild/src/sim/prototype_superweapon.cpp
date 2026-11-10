@@ -763,13 +763,19 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
     switch (type->kind) {
         case SuperKind::Nuke: {
             // Base 1.006 FUN_0069D850 case 0 (MultiMissile) does not detonate at
-            // the click: it spawns a missile bullet (BulletTypeClass::CreateBullet
-            // 00643990 via FUN_00438B80) 20000 leptons above the target, falling at
-            // bullet speed 0x600 = 1536 leptons per frame. The blast lands only
-            // when the missile arrives, so the impact is deferred.
-            constexpr int kFallLeptons = 20000;
-            constexpr int kMissileSpeed = 0x600;
-            const auto delay = (kFallLeptons + kMissileSpeed - 1) / kMissileSpeed;
+            // the click: it passes the weapon (offset +0xA4) into CreateBullet
+            // 00463990 and spawns the missile above the target. The flight comes
+            // from the base rules weapon chain: [NukeCarrier] Speed=100 with
+            // projectile [GiantNukeUp] rising to DetonationAltitude=20000 (the
+            // rules comment: it only creates the downward one over the target),
+            // then [NukePayload] Speed=10 with projectile [GiantNukeDown] falling
+            // from DetonationAltitude=30000. The blast lands when the missile
+            // arrives, so the impact is deferred.
+            const auto carrier = !type->weapon.empty() ? type->weapon : std::string("NukeCarrier");
+            const auto rise_speed =
+                rules_.read_integer(carrier, "Speed", 100);
+            const auto rise_altitude = rules_.read_integer(
+                rules_.read_string(carrier, "Projectile", "GiantNukeUp"), "DetonationAltitude", 20000);
             // Validate the payload before the charge is consumed, so a rules
             // mistake cannot cost a launch.
             auto weapon = blast_weapon(rules_, "NukePayload");
@@ -778,6 +784,14 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
                 report.notes.push_back("nuke payload weapon is unavailable");
                 return report;
             }
+            const auto fall_speed = rules_.read_integer("NukePayload", "Speed", 10);
+            const auto fall_altitude = rules_.read_integer(
+                rules_.read_string("NukePayload", "Projectile", "GiantNukeDown"),
+                "DetonationAltitude", 30000);
+            // TODO-ORIGINAL: the vertical projectiles carry Acceleration=1; this
+            // prototype uses the constant-speed read of the rules values.
+            const auto delay = (rise_altitude + rise_speed - 1) / rise_speed +
+                (fall_altitude + fall_speed - 1) / fall_speed;
             nukes_.push_back(PendingNuke{frame + static_cast<std::uint64_t>(delay), target});
             report.notes.push_back("nuke missile in flight");
             break;
