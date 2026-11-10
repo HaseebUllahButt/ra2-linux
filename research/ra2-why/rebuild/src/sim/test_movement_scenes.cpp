@@ -224,9 +224,11 @@ int main() try {
         }
         for (unsigned i=0;i<6;++i) {
             const auto steady=steady_cells_per_frame(tracks[930+i],50,true);
-            const auto measured=i<3?0.039:0.036;
+            // Bucket by the entity type, not by order index.
+            const auto is_e1=unit(world,930+i).type=="E1";
+            const auto measured=is_e1?0.039:0.036;
             const auto error=(steady-measured)/measured;
-            if (i<3) e1_error=std::max(e1_error,std::abs(error)); else e2_error=std::max(e2_error,std::abs(error));
+            if (is_e1) e1_error=std::max(e1_error,std::abs(error)); else e2_error=std::max(e2_error,std::abs(error));
         }
         std::cout<<"scene 3 squad frames="<<frames<<" worst E1 error="<<e1_error
                  <<" worst E2 error="<<e2_error<<" (measured 0.039 and 0.036 cells/frame)\n";
