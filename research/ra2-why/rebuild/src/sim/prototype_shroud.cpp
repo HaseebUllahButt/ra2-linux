@@ -38,7 +38,7 @@ bool sight_source(const Entity& entity) {
 
 // SpySat eligibility, from MapClass grant/loss checks in FUN_004F2FC0
 // (BuildingType +1345 SpySat flag): the building must be alive (+74), not in
-// limbo (+76), and its current mission must not be 0x13 (construction).
+// limbo (+76), and its current mission must not be 0x13.
 // resolved_hp>0 stands in for the +74 alive check when present. Reveal runs
 // through 0055A120; losing the last satellite reshrouds through 00559F10.
 // This path has no power test: a powered-down satellite still grants the
