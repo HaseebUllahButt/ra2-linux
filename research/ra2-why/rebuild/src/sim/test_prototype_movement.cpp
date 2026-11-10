@@ -280,6 +280,32 @@ void original_rules_tests() {
                 "the soldier did not reach the goal of its own owner");
     }
     {
+        // Two movement owners can leave a Unit with Cell links that this
+        // owner cannot move. That must stop only the one Unit. The old code returned an error for the whole tick, each
+        // frame, so no Unit of that owner moved again (MP02T2, Brutal
+        // computer: the miner stood still from frame 22471).
+        auto world=field(30,12);PrototypeMovement movement;movement.use_rules(rules);
+        put(world,931,"MTNK",sw::Kind::Unit,1,5,3);
+        put(world,932,"MTNK",sw::Kind::Unit,1,5,8);
+        require(movement.issue(world,931,{6,3},17).status==PrototypeMoveStatus::Complete &&
+                movement.issue(world,932,{10,8},17).status==PrototypeMoveStatus::Complete,"refused transfer orders failed");
+        // After the order, a soldier of another owner is linked behind the tank in its Cell.
+        soldier(world,933,1,5,3,2);
+        world.cells.at(key(5,3)).heads->ground_head=931;
+        for (auto& e:world.entities) { if (e.id==931) e.next=933; if (e.id==933) e.next=0; }
+        unsigned frames=0;bool refused=false;
+        for (std::uint32_t frame=1;frame<=400 && !frames;++frame) {
+            const auto r=movement.tick(world,frame);
+            require(r.status==PrototypeMoveStatus::Complete,"one Unit with bad links failed the whole frame");
+            for (const auto b:r.blocked) if (b==931) refused=true;
+            for (const auto a:r.arrived) if (a==932) frames=frame;
+        }
+        std::cout<<"tank beside a Unit with bad links frames="<<frames<<'\n';
+        require(frames && same_cell(*unit(world,932).cell,{10,8}),"one tank with bad links stopped another tank");
+        require(refused && same_cell(*unit(world,931).cell,{5,3}),"the tank with bad links did not stay and report a block");
+        require(!movement.moving(931),"the refused tank kept a route it cannot follow");
+    }
+    {
         // The wait for soldiers to step aside ends after BlockagePathDelay
         // (60 frames). Here another owner keeps the soldier busy in the
         // near gap of a wall. The tank waits, then takes the far gap; it

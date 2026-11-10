@@ -590,7 +590,13 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
         if (!spots.count(id)) spots[id]=walker?spot_of(*actor->position):0;
         if (walker) read_spots(candidate,*actor->cell,spots);
         int& spot=spots[id];
-        if (!on_source(candidate,*actor,spot)) return fail(PrototypeMoveStatus::Blocked,"prototype source Unit is not linked on ground");
+        if (!on_source(candidate,*actor,spot)) {
+            // Another owner changed this Unit's Cell links. Drop its route
+            // and go on: an error here would stop every Unit of this owner
+            // on every later frame.
+            actor->locomotor_moving=false;result.blocked.push_back(id);
+            moves.erase(id);motions.erase(id);movers.erase(id);release(id);continue;
+        }
         const auto self=profile(*actor);
         const Context ctx{&movers,&claims,&soldiers,self.crusher,walker,actor->house_id,rules_?&self.ground:nullptr};
         Context strict=ctx;strict.movers=nullptr;
@@ -827,7 +833,7 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
                 // 004C9B10: Speed * country (one) * Foot +470 (one), then
                 // times the speed fraction, each truncated.
                 int budget=m.remainder+static_cast<int>(double(m.speed_value)*m.speed);
-                bool chained=false,crossing_blocked=false;
+                bool chained=false,crossing_blocked=false,refused=false;
                 const auto place=[&](int sample)->std::optional<bool> {
                     Coord next=m.end;
                     if (sample<m.samples) {
@@ -846,7 +852,12 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
                         if (self.crusher) if (const auto error=crush(*actor,entered)) { failure=fail(PrototypeMoveStatus::NeedsInput,*error);return std::nullopt; }
                         if (pass_cell(candidate,entered,id,&ctx)!=Pass::Open || !same(entered,m.to)) return false;
                         journal.cell(key(*actor->cell));journal.cell(key(entered));
-                        if (const auto error=transfer(candidate,id,*actor->cell,entered)) { failure=fail(PrototypeMoveStatus::NeedsInput,*error);return std::nullopt; }
+                        // The Cell passed the entry test but its links refuse the
+                        // transfer (two movement owners can leave it so). Give
+                        // up this step only. An error here once stopped every
+                        // later tick of this owner: the computer's miner stood
+                        // still from frame 22471 to the end of the match.
+                        if (transfer(candidate,id,*actor->cell,entered)) { refused=true;return false; }
                         relink();
                         actor=find_unit(candidate,id);actor->cell=entered;
                     }
@@ -876,6 +887,12 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
                     ++m.sample;
                 }
                 if (crossing_blocked) budget=0;
+                if (refused) {
+                    // End the track where the vehicle is. The next frame
+                    // returns it to the Cell center and plans again.
+                    m.stepping=false;release(id);
+                    if (movement) block();
+                }
                 m.remainder=m.stepping?budget:budget;
                 // Follow: move part of the way to the next sample with the
                 // remaining budget, inside the current Cell (004B22CC).
@@ -937,6 +954,7 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
         // Cell center carry on toward the next Cell in the same frame.
         // TODO-ORIGINAL: the walk locomotor and its subcells.
         int budget=movement->speed;bool moved=false,blocked=false;
+        bool dropped=false;
         while (budget>0 && !movement->path.empty()) {
             target=movement->path.front();
             if (moved && (pass_cell(candidate,target,id,&strict)!=Pass::Open || busy_corner(*actor->cell,target))) break;
@@ -974,7 +992,8 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
                     break;
                 }
                 journal.cell(key(*actor->cell));journal.cell(key(entered));
-                if (const auto error=transfer(candidate,id,*actor->cell,entered,walker?&spot:nullptr)) return fail(PrototypeMoveStatus::NeedsInput,*error);
+                // A refused transfer drops this Unit's route. The other Units go on.
+                if (transfer(candidate,id,*actor->cell,entered,walker?&spot:nullptr)) { dropped=true;break; }
                 relink();
                 actor=find_unit(candidate,id);actor->cell=entered;
             }
@@ -985,6 +1004,10 @@ PrototypeMoveResult PrototypeMovement::tick(World& world,std::uint32_t frame) {
             actor->position=next;actor->collision_virtual_position=next;moved=true;budget-=static_cast<int>(used);
             if (next.x==desired.x && next.y==desired.y && next.z==desired.z) movement->path.erase(movement->path.begin());
             else break;
+        }
+        if (dropped) {
+            actor->locomotor_moving=false;result.blocked.push_back(id);
+            moves.erase(id);movers.erase(id);continue;
         }
         if (blocked) { block();continue; }
         if (!moved) { hold();continue; }
