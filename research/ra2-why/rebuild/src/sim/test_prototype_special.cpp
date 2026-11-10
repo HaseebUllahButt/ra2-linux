@@ -488,16 +488,23 @@ int main(int argc, char** argv) try {
 
         // Speed and firepower biases are independent. The shipped
         // [Powerups] fourth field (0064D490) is Armor=1.5 and
-        // Firepower=2.0; the old 1.1 assertion was a stand-in.
+        // Firepower=2.0; the old 1.1 assertion was a stand-in. The
+        // firepower check uses an explicit four-field fixture: a bare
+        // value falls through the loader's four-field split.
         require_near(crate_rules.armor_crate, 1.5, 1e-6, "shipped armor factor");
         require_near(crate_rules.firepower_crate, 2.0, 1e-6,
             "shipped firepower factor");
+        IniFile firepower_fixture;
+        firepower_fixture.parse("[Powerups]\nFirepower=10,FIREPOWR,yes,2.0\n");
+        const auto firepower_crate_rules = CrateRules::load(firepower_fixture);
+        require_near(firepower_crate_rules.firepower_crate, 2.0, 1e-6,
+            "fixture firepower factor");
         require(crates.place(money_cell, CrateKind::Speed, 0, crate_rules), "place speed crate");
         crates.collect(rules, world, crate_rules, 1, money_cell);
         require_near(crates.speed_bias(1), 1.2, 1e-6, "speed bias");
-        require(crates.place(money_cell, CrateKind::Firepower, 0, crate_rules),
+        require(crates.place(money_cell, CrateKind::Firepower, 0, firepower_crate_rules),
             "place firepower crate");
-        crates.collect(rules, world, crate_rules, 1, money_cell);
+        crates.collect(rules, world, firepower_crate_rules, 1, money_cell);
         require_near(crates.firepower_bias(1), 2.0, 1e-6, "firepower bias");
 
         // Cloak marks in radius.
