@@ -27,10 +27,9 @@ bool held_by_friends(const sw::Snapshot& w,const sw::CellState& c,std::uint32_t 
     int guard=0;
     for(auto id=c.heads->ground_head;id;) {
         const auto e=std::find_if(w.entities.begin(),w.entities.end(),[&](const auto& item){return item.id==id;});
-        if(e==w.entities.end() || !alive(*e) || e->kind!=sw::Kind::Infantry || e->house_id!=house || ++guard>8) return false;
-        // The chain ends with next zero or absent; that is still one live
-        // friendly soldier holding the Cell.
-        if(!e->next || !*e->next) break;
+        // An absent next link is an unresolved entity, not a chain end.
+        if(e==w.entities.end() || !alive(*e) || e->kind!=sw::Kind::Infantry || e->house_id!=house || !e->next || ++guard>8) return false;
+        if(!*e->next) break;
         id=*e->next;
     }
     return true;
@@ -242,16 +241,47 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
                 if((!dx&&!dy)||x<0||y<0||x>=512||y>=512||movement_.moving(e.id)) continue;
                 ra2map::Cell target{std::uint16_t(x),std::uint16_t(y)};auto i=w.cells.find(key(target));
                 if(i==w.cells.end()) continue;
-                // Pass 0 takes an empty Cell. Pass 1 lets a driving HARV head
-                // for a Cell that only friendly soldiers hold, and lets a CMIN
-                // warp there; the soldiers step aside. Without pass 1 a full
-                // CMIN with every dock Cell occupied stayed stuck forever.
-                if(pass?(e.type!="CMIN" && !held_by_friends(w,i->second,e.house_id)):!open(i->second)) continue;
+                // Pass 0 takes an empty Cell. Pass 1, for every miner, takes a
+                // Cell that only live friendly Infantry of its House hold; the
+                // soldiers step aside. Without pass 1 a full CMIN with every
+                // dock Cell occupied stayed stuck forever.
+                if(pass?!held_by_friends(w,i->second,e.house_id):!open(i->second)) continue;
                 if(e.type=="CMIN") {
                     auto old=w.cells.find(key(*e.cell));
-                    if(old==w.cells.end() || !old->second.heads || old->second.heads->ground_head!=e.id || e.next.value_or(1)!=0) continue;
-                    old->second.heads->ground_head=0;old->second.ground_occupancy_124=0;
-                    i->second.heads->ground_head=e.id;i->second.ground_occupancy_124=32;
+                    if(old==w.cells.end() || !old->second.heads || !old->second.ground_occupancy_124 ||
+                       !i->second.ground_occupancy_124 || e.next.value_or(1)!=0) continue;
+                    // The center spot 0x20 must be free; a soldier standing on
+                    // the center keeps it.
+                    if(*i->second.ground_occupancy_124&0x20u) continue;
+                    // Splice the miner out of its old chain. Other occupants
+                    // and their occupancy bits stay untouched.
+                    auto& old_heads=*old->second.heads;
+                    if(old_heads.ground_head==e.id) old_heads.ground_head=e.next.value_or(0);
+                    else {
+                        sw::Entity* before=nullptr;
+                        for(auto id=old_heads.ground_head;id;) {
+                            auto p=std::find_if(w.entities.begin(),w.entities.end(),[&](const auto& item){return item.id==id;});
+                            if(p==w.entities.end() || !p->next) break;
+                            if(*p->next==e.id) {before=&*p;break;}
+                            id=*p->next;
+                        }
+                        if(!before) continue;
+                        before->next=e.next;
+                    }
+                    *old->second.ground_occupancy_124&=~0x20u;
+                    // Append the miner to the target chain tail and take the
+                    // center spot bit.
+                    auto& target_heads=*i->second.heads;
+                    sw::Entity* last=nullptr;bool resolved=true;
+                    for(auto id=target_heads.ground_head;id;) {
+                        auto p=std::find_if(w.entities.begin(),w.entities.end(),[&](const auto& item){return item.id==id;});
+                        if(p==w.entities.end() || !p->next) {resolved=false;break;}
+                        if(!*p->next) {last=&*p;break;}
+                        id=*p->next;
+                    }
+                    if(!resolved) continue;
+                    if(last) last->next=e.id; else target_heads.ground_head=e.id;
+                    *i->second.ground_occupancy_124|=0x20u;
                     e.cell=target;e.position=Coord{x*256+128,y*256+128,*i->second.terrain->floor_world_height};
                     bag.next=frame+1;dx=2;dy=2;
                 } else movement_.issue(w,e.id,target,original_rule_speed(rules_.read_integer(e.type,"Speed",4)));
