@@ -570,6 +570,7 @@ SuperTickReport PrototypeSuperweapons::tick(session::world::Snapshot& world, std
         nukes_.end());
     // Lightning storm strikes, one game frame at a time.
     if (!storm_ || !storm_->active) return report;
+    // FUN_0051F930 stores the deferment; FUN_00520200 counts it down.
     const auto deferment = rules_.read_integer("General", "LightningDeferment", 250);
     const auto duration = rules_.read_integer("General", "LightningStormDuration", 180);
     const auto hit_delay = rules_.read_integer("General", "LightningHitDelay", 10);
@@ -586,8 +587,13 @@ SuperTickReport PrototypeSuperweapons::tick(session::world::Snapshot& world, std
         return report;
     }
     if (frame < striking) return report;
-    // TODO-ORIGINAL: the base 1.006 storm strike path was not exported; this
-    // prototype keeps its own RNG draw pattern.
+    // Base 1.006 storm state and strike path: FUN_0051F930 starts the storm
+    // (DAT_00A51934 active, DAT_00A51878 target cell, DAT_00A51938 deferment
+    // countdown) and FUN_00520200 advances it per frame: a bolt on the target
+    // every LightningHitDelay (rules +0x13F4) and a scattered bolt every
+    // LightningScatterDelay (+0x13F8) inside LightningCellSpread (+0x13FC),
+    // keeping LightningSeparation (+0x1400) from the bolt list, via
+    // FUN_0051FC90. The scatter draw keeps this prototype's own RNG pattern.
     const auto bolt = [&](ra2map::Cell cell) {
         if (!in_map(cell)) return;
         const auto result = detonate(world, cell_center(cell), *weapon, rules_, distance_.get(),
