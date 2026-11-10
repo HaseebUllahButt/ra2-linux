@@ -355,7 +355,9 @@ std::vector<ra2map::Cell> drop_cells(ra2map::Cell target, std::size_t wanted) {
 } // namespace
 
 SuperKind superweapon_kind(std::string_view type_name) {
-    // Parse table of 006CE570, in original order.
+    // Type= name table, in base rules order (see read_superweapon_types; the
+    // base 1.006 Type parse handlers live around 006B and 0069, e.g. the
+    // launch dispatch FUN_0069D850).
     static const std::array<std::pair<SuperKind, const char*>, 12> names{{
         {SuperKind::Nuke, "MultiMissile"}, {SuperKind::IronCurtain, "IronCurtain"},
         {SuperKind::LightningStorm, "LightningStorm"}, {SuperKind::ChronoSphere, "ChronoSphere"},
@@ -464,6 +466,8 @@ void PrototypeSuperweapons::lose(std::uint32_t house, std::size_t slot) {
     state.ready = false;
     state.suspended = false;
     state.remaining = 0;
+    // Losing the sphere cancels a stale arm; the warp must not fire through it.
+    if (types_[slot].kind == SuperKind::ChronoSphere) armed_.erase(house);
 }
 
 void PrototypeSuperweapons::discharge(std::uint32_t house, std::size_t slot) {
@@ -522,7 +526,8 @@ SuperTickReport PrototypeSuperweapons::tick(session::world::Snapshot& world, std
             if (slot == index_.end()) continue;
             auto& state = item.second;
             if (!state.present) continue;
-            // SetOnHold 006CB4D0: low power pauses the clock, power resumes it.
+            // SetOnHold (base 1.006 export 0069CC60): low power pauses the
+            // clock, power resumes it. RA1 SUPER.CPP Suspend agrees.
             if (types_[slot->second].is_powered && powered_down && !state.one_time)
                 state.suspended = true;
             else if (state.suspended)
@@ -533,8 +538,42 @@ SuperTickReport PrototypeSuperweapons::tick(session::world::Snapshot& world, std
             }
         }
     }
+    // Nukes in flight move through their original phases (FUN_0045F710): a
+    // rise from the granting building until the carrier ceiling, then a fall
+    // onto the target; the floor hit detonates once and leaves the queue.
+    for (auto& pending : nukes_) {
+        if (pending.done) continue;
+        if (pending.rising) {
+            const auto flags = step_vertical_projectile(pending.rise, 255,
+                pending.rise_accel, 0, pending.rise_ceiling);
+            if (flags.above_ceiling) pending.rising = false; // Fall next frame.
+            continue;
+        }
+        const auto flags = step_vertical_projectile(pending.fall, pending.fall_cap,
+            pending.fall_accel, pending.fall_floor, pending.fall_ceiling);
+        if (!flags.at_or_below_floor) continue;
+        // The weapon section was validated at launch; it is used as stored.
+        auto weapon = blast_weapon(rules_, pending.payload_weapon);
+        if (!weapon) {
+            report.notes.push_back("nuke payload weapon is unavailable");
+            pending.done = true;
+            continue;
+        }
+        auto epicenter = cell_center(pending.target);
+        epicenter.z = pending.fall_floor;
+        const auto blast = detonate(world, epicenter, *weapon, rules_, distance_.get(),
+            invulnerable_, frame);
+        report.damaged += blast.damaged;
+        report.destroyed += blast.destroyed;
+        ++report.nukes;
+        for (const auto& missing : blast.missing) report.notes.push_back(missing);
+        pending.done = true;
+    }
+    nukes_.erase(std::remove_if(nukes_.begin(), nukes_.end(),
+        [](const PendingNuke& pending) { return pending.done; }), nukes_.end());
     // Lightning storm strikes, one game frame at a time.
     if (!storm_ || !storm_->active) return report;
+    // FUN_0051F930 stores the deferment; FUN_00520200 counts it down.
     const auto deferment = rules_.read_integer("General", "LightningDeferment", 250);
     const auto duration = rules_.read_integer("General", "LightningStormDuration", 180);
     const auto hit_delay = rules_.read_integer("General", "LightningHitDelay", 10);
@@ -551,8 +590,13 @@ SuperTickReport PrototypeSuperweapons::tick(session::world::Snapshot& world, std
         return report;
     }
     if (frame < striking) return report;
-    // TODO-ORIGINAL: the original storm strike path is LightningStorm::Strike
-    // 0053A140 and Strike2 0053A300 with its own RNG draw pattern.
+    // Base 1.006 storm state and strike path: FUN_0051F930 starts the storm
+    // (DAT_00A51934 active, DAT_00A51878 target cell, DAT_00A51938 deferment
+    // countdown) and FUN_00520200 advances it per frame: a bolt on the target
+    // every LightningHitDelay (rules +0x13F4) and a scattered bolt every
+    // LightningScatterDelay (+0x13F8) inside LightningCellSpread (+0x13FC),
+    // keeping LightningSeparation (+0x1400) from the bolt list, via
+    // FUN_0051FC90. The scatter draw keeps this prototype's own RNG pattern.
     const auto bolt = [&](ra2map::Cell cell) {
         if (!in_map(cell)) return;
         const auto result = detonate(world, cell_center(cell), *weapon, rules_, distance_.get(),
@@ -568,7 +612,7 @@ SuperTickReport PrototypeSuperweapons::tick(session::world::Snapshot& world, std
         Random rng(world.random);
         const auto half = spread / 2;
         for (int attempt = 0; attempt < 3; ++attempt) {
-            // FUN_0053A6C0 draws both offsets, then checks the separation.
+            // The original draws both offsets, then checks the separation.
             const auto dx = rng.ranged(-half, half);
             const auto dy = rng.ranged(-half, half);
             const auto x = int(storm_->target.x) + dx;
@@ -635,18 +679,37 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
             report.notes.push_back("no armed ChronoSphere for this house");
             return report;
         }
-        // TODO-ORIGINAL: the original warp pattern table DAT_00B0C038 is
-        // runtime data; this prototype uses the 3x3 block around the click.
+        // The warp fires through the source sphere: it must still be granted,
+        // charged and not suspended at the warp click. A stale arm from a lost
+        // or discharged sphere must not fire.
+        const SuperweaponState* sphere = nullptr;
+        bool sphere_found = false;
+        for (std::size_t slot = 0; slot < types_.size(); ++slot)
+            if (types_[slot].kind == SuperKind::ChronoSphere) {
+                sphere = house_state(house, types_[slot].id);
+                sphere_found = true;
+            }
+        if (!sphere_found || !sphere || !sphere->present || !sphere->ready ||
+            sphere->suspended) {
+            report.notes.push_back("the armed ChronoSphere is not granted and ready");
+            armed_.erase(house);
+            return report;
+        }
+        // The second click is the DESTINATION; the source block is the armed
+        // ChronoSphere cell (base 1.006 FUN_0069D850 case 4 reads +0x4A as the
+        // source block and the click as the landing area). This prototype uses
+        // the 3x3 block around the source.
+        const auto source = armed->second;
+        const auto destination = target;
         std::vector<ra2map::Cell> pattern;
         for (int dy = -1; dy <= 1; ++dy)
             for (int dx = -1; dx <= 1; ++dx) {
-                const int x = int(target.x) + dx, y = int(target.y) + dy;
+                const int x = int(source.x) + dx, y = int(source.y) + dy;
                 if (x < 0 || y < 0 || x >= 512 || y >= 512) continue;
                 pattern.push_back({static_cast<std::uint16_t>(x), static_cast<std::uint16_t>(y)});
             }
-        const auto destination = armed->second;
-        for (const auto& source : pattern) {
-            const auto found = world.cells.find(cell_key(source));
+        for (const auto& from : pattern) {
+            const auto found = world.cells.find(cell_key(from));
             if (found == world.cells.end() || !found->second.heads) continue;
             std::vector<std::uint32_t> occupants;
             for (auto id = found->second.heads->ground_head; id;) {
@@ -655,8 +718,8 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
                 occupants.push_back(id);
                 id = *object->next;
             }
-            const int dx = int(source.x) - int(target.x);
-            const int dy = int(source.y) - int(target.y);
+            const int dx = int(from.x) - int(source.x);
+            const int dy = int(from.y) - int(source.y);
             const int landing_x = int(destination.x) + dx;
             const int landing_y = int(destination.y) + dy;
             if (landing_x < 0 || landing_y < 0 || landing_x >= 512 || landing_y >= 512) continue;
@@ -708,22 +771,83 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
     const auto slot = index_.at(lower(type->id));
     switch (type->kind) {
         case SuperKind::Nuke: {
-            // The MultiMissile handler detonates the hardcoded NukePayload
-            // weapon at the impact Cell; the carrier weapon carries no damage.
-            auto weapon = blast_weapon(rules_, "NukePayload");
-            if (!weapon && !type->weapon.empty()) weapon = blast_weapon(rules_, type->weapon);
+            // Base 1.006 FUN_0069D850 case 0 (MultiMissile) does not detonate at
+            // the click: it passes the weapon (offset +0xA4) into CreateBullet
+            // 00463990 and spawns the missile. The missile then flies the two
+            // FUN_0045F710 phases: an upward rise with velocity 10 and speed cap
+            // 255 (binary 00448544..0044856B in the silo launch) until the
+            // carrier projectile's DetonationAltitude, then a downward payload
+            // fall (FUN_00463C50, code 00463D55..00463E75) that starts at
+            // target.z + that ceiling with velocity -1 (constant 0079D578).
+            // FUN_004BA480 / FUN_004BA4D0 are trig table lookups (quantized
+            // index into float tables at 00801DC4 / 0080FDE4), not RNG.
+            const auto carrier = !type->weapon.empty() ? type->weapon : std::string("NukeCarrier");
+            const auto carrier_projectile =
+                rules_.read_string(carrier, "Projectile", "GiantNukeUp");
+            const auto rise_accel =
+                rules_.read_integer(carrier_projectile, "Acceleration", 1);
+            const auto rise_ceiling =
+                rules_.read_integer(carrier_projectile, "DetonationAltitude", 20000);
+            // Validate the payload before the charge is consumed, so a rules
+            // mistake cannot cost a launch. The payload section is stored on the
+            // pending missile so the impact uses the same weapon that was
+            // validated at launch.
+            std::string payload_section = "NukePayload";
+            auto weapon = blast_weapon(rules_, payload_section);
+            if (!weapon && !type->weapon.empty()) {
+                payload_section = type->weapon;
+                weapon = blast_weapon(rules_, payload_section);
+            }
             if (!weapon) {
                 report.notes.push_back("nuke payload weapon is unavailable");
                 return report;
             }
-            auto epicenter = cell_center(target);
-            epicenter.z = floor_z(world, target);
-            const auto blast = detonate(world, epicenter, *weapon, rules_, distance_.get(),
-                invulnerable_, frame);
-            report.damaged = blast.damaged;
-            report.destroyed = blast.destroyed;
-            for (const auto& missing : blast.missing) report.notes.push_back(missing);
-            report.notes.push_back("TODO-ORIGINAL: missile flight and silo anim skipped");
+            const auto fall_cap = rules_.read_integer(payload_section, "Speed", 10);
+            const auto payload_projectile =
+                rules_.read_string(payload_section, "Projectile", "GiantNukeDown");
+            const auto fall_accel =
+                rules_.read_integer(payload_projectile, "Acceleration", 1);
+            const auto fall_ceiling =
+                rules_.read_integer(payload_projectile, "DetonationAltitude", 30000);
+            // Reject broken flight numbers before the charge is consumed. The
+            // rise cap is the binary constant 255 (00448544..0044856B).
+            if (fall_cap <= 0 || rise_ceiling <= 0 || fall_ceiling <= 0 ||
+                rise_accel < 0 || fall_accel < 0) {
+                report.notes.push_back("nuke flight numbers are unusable");
+                return report;
+            }
+            // The rise leaves the live granting building; fall back to its Cell
+            // floor height when the position is unresolved.
+            int launch_z = 0;
+            bool site_found = false;
+            for (const auto& building : grants_[slot]) {
+                for (const auto& entity : world.entities) {
+                    if (entity.house_id != house || entity.kind != w::Kind::Structure ||
+                        !same_id(entity.type, building))
+                        continue;
+                    const bool standing = entity.lifetime == w::Lifetime::Placed &&
+                        (!entity.resolved_hp || *entity.resolved_hp > 0);
+                    if (!standing) continue;
+                    if (entity.position) launch_z = entity.position->z;
+                    else if (entity.cell) launch_z = floor_z(world, *entity.cell);
+                    site_found = true;
+                    break;
+                }
+                if (site_found) break;
+            }
+            PendingNuke pending;
+            pending.target = target;
+            pending.payload_weapon = payload_section;
+            pending.rise = VerticalProjectileState{launch_z, 10.0};
+            pending.rise_accel = rise_accel;
+            pending.rise_ceiling = rise_ceiling;
+            pending.fall_floor = floor_z(world, target);
+            pending.fall = VerticalProjectileState{pending.fall_floor + rise_ceiling, -1.0};
+            pending.fall_cap = fall_cap;
+            pending.fall_accel = fall_accel;
+            pending.fall_ceiling = pending.fall_floor + fall_ceiling;
+            nukes_.push_back(std::move(pending));
+            report.notes.push_back("nuke missile in flight");
             break;
         }
         case SuperKind::LightningStorm: {
@@ -735,17 +859,26 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
             break;
         }
         case SuperKind::IronCurtain: {
-            // TODO-ORIGINAL: the original shields one clicked object
-            // (base 006B26D0); this prototype shields the objects in Range.
+            // Base 1.006 FUN_006B26D0 loops exactly nine DAT_00A6F248 offsets (a
+            // 3x3 block around the click) and calls every object's virtual +148
+            // with the duration from rules +0xCA4 (read at FUN_00646C60). The
+            // object handlers decide eligibility and carry no owner check:
+            // Building vtable 0079CBBC+148 -> FUN_00452E60, which stores the
+            // protection timer via FUN_006D86B0; Unit vtable 007ADDF8+148 ->
+            // FUN_004CD3F0, which kills Organic types (type+0xB47, set by the
+            // rules parse FUN_006DAF60 near lines 1940-1944) with lethal damage
+            // via +158, else stores the timer; Infantry vtable 007A3540+148 ->
+            // FUN_005091C0, lethal armor-bypassing damage via +158. The timer
+            // lives at Techno +154/+158/+15C (FUN_006D86B0).
             const auto duration = rules_.read_integer("CombatDamage", "IronCurtainDuration", 750);
-            const int reach = static_cast<int>(type->range_cells);
             for (auto& entity : world.entities) {
-                if (!alive(&entity) || entity.house_id != house || !entity.cell) continue;
+                if (!alive(&entity) || !entity.cell) continue;
                 const auto distance = std::max(std::abs(int(entity.cell->x) - int(target.x)),
                     std::abs(int(entity.cell->y) - int(target.y)));
-                if (distance > reach) continue;
+                if (distance > 1) continue;
                 if (entity.kind == w::Kind::Infantry) {
-                    // TODO-ORIGINAL: InfantryClass::IronCurtain kills infantry.
+                    // The infantry handler kills the soldier with armor-bypassing
+                    // lethal damage, whatever the owner.
                     if (unlink_entity(world, entity)) {
                         entity.resolved_hp = 0;
                         entity.active = false;
@@ -758,6 +891,22 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
                     }
                     continue;
                 }
+                if (entity.kind == w::Kind::Unit &&
+                    rules_.read_bool(entity.type, "Organic", false)) {
+                    // The unit handler kills Organic types with lethal damage.
+                    if (unlink_entity(world, entity)) {
+                        entity.resolved_hp = 0;
+                        entity.active = false;
+                        entity.in_limbo = true;
+                        entity.target_id = 0;
+                        entity.lifetime = w::Lifetime::Destroyed;
+                        ++report.destroyed;
+                    } else {
+                        report.notes.push_back("curtained organic unit has unresolved Cell links");
+                    }
+                    continue;
+                }
+                if (entity.kind != w::Kind::Unit && entity.kind != w::Kind::Structure) continue;
                 auto& until = invulnerable_[entity.id];
                 until = std::max(until, frame + static_cast<std::uint64_t>(duration));
                 ++report.shielded;
@@ -765,7 +914,10 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
             break;
         }
         case SuperKind::ChronoSphere:
-            // Arm only; the destination is stored for the ChronoWarp click.
+            // First click of the pair: this stores the SOURCE cell, the block of
+            // objects to warp (base 1.006 FUN_0069D850 case 3 stores the clicked
+            // coordinate at SuperClass+0x4A). The ChronoWarp click then gives the
+            // destination (FUN_004E68D0 copies +0x4A from the PreDependent).
             armed_[house] = target;
             break;
         case SuperKind::ParaDrop:
