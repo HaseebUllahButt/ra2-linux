@@ -365,6 +365,29 @@ void check_nuke(const IniFile& rules, const std::string& exe) {
     require(second.fired && replay_damaged == tick_damaged && replay_destroyed == tick_destroyed &&
         replay.entities[2].resolved_hp == world.entities[2].resolved_hp,
         "Nuke replay differed");
+    // Two houses launch concurrently: both missiles stay in flight and both
+    // impacts land (the pending queue must not drop a launch).
+    auto both = make_world();
+    place(both, 1, 102, "NAMISL", sw::Kind::Structure, {10, 10}, 1000);
+    place(both, 2, 101, "NAMISL", sw::Kind::Structure, {12, 10}, 1000);
+    place(both, 3, 102, "HTNK", sw::Kind::Unit, {50, 50}, 400);
+    place(both, 4, 101, "HTNK", sw::Kind::Unit, {70, 50}, 400);
+    PrototypeSuperweapons pair(rules, exe);
+    pair.update_grants(both);
+    for (int frame = 0; frame < 9000; ++frame) pair.tick(both, static_cast<std::uint64_t>(frame));
+    require(pair.fire(both, 102, "MultiSpecial", {50, 50}, 9000).fired, "First concurrent launch rejected");
+    require(pair.fire(both, 101, "MultiSpecial", {70, 50}, 9000).fired, "Second concurrent launch rejected");
+    int pair_nukes = 0, pair_destroyed = 0;
+    for (int frame = 9001; frame <= 12200; ++frame) {
+        const auto impact = pair.tick(both, static_cast<std::uint64_t>(frame));
+        pair_nukes += impact.nukes;
+        pair_destroyed += impact.destroyed;
+    }
+    require(pair_nukes == 2 && pair_destroyed == 2,
+        "Concurrent nuke launches did not both land");
+    require(both.entities[2].lifetime == sw::Lifetime::Destroyed &&
+        both.entities[3].lifetime == sw::Lifetime::Destroyed,
+        "A concurrent nuke impact was lost");
 }
 
 void check_iron_curtain(const IniFile& rules, const std::string& exe) {
@@ -476,6 +499,23 @@ void check_chrono(const IniFile& rules, const std::string& exe) {
         !stale_warp.notes.empty(), "Warp fired through a stale arm after the sphere was lost");
     require(stale.entities[1].cell && stale.entities[1].cell->x == 50,
         "Stale arm moved a tank");
+    // Low power suspends the powered sphere: the warp click is rejected while
+    // the brownout lasts.
+    auto brown = make_world();
+    place(brown, 1, 102, "GACSPH", sw::Kind::Structure, {10, 10}, 1000);
+    place(brown, 2, 102, "HTNK", sw::Kind::Unit, {50, 50}, 400);
+    PrototypeSuperweapons brown_supers(rules, exe);
+    brown_supers.update_grants(brown);
+    for (int frame = 0; frame < 6300; ++frame) brown_supers.tick(brown, static_cast<std::uint64_t>(frame));
+    (void)brown_supers.fire(brown, 102, "ChronoSphereSpecial", {50, 50}, 6300);
+    brown.houses[1].power_output = 0;
+    brown.houses[1].power_drain = 100;
+    brown_supers.tick(brown, 6301);
+    const auto brown_warp = brown_supers.fire(brown, 102, "ChronoWarpSpecial", {55, 50}, 6302);
+    require(!brown_warp.fired && brown_warp.teleported == 0 && !brown_warp.notes.empty(),
+        "Warp fired while low power suspended the sphere");
+    require(brown.entities[1].cell && brown.entities[1].cell->x == 50,
+        "Low power warp moved a tank");
 }
 
 void check_paradrop(const IniFile& rules, const std::string& exe) {
