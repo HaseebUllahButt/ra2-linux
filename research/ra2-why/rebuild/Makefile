@@ -95,6 +95,16 @@ native-check: native platform terrain-inputs scene base-move actors ui audio vox
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --map MP25MW.MAP --frames 3 --headless
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --frames 3 --headless
 
+build/extract_file: build/native/src/tools/extract_file.o $(FS_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/native/src/tools/extract_file.o: tools/extract_file.cpp
+	mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -I src -MMD -MP -c $< -o $@
+
+build/rules.ini: build/extract_file
+	build/extract_file $(TEST_GAME_DIR) RULES.INI > $@.tmp && mv $@.tmp $@
+
 actors: build/actors_test
 	build/actors_test $(TEST_GAME_DIR)
 
@@ -582,7 +592,7 @@ human-input-check: native
 
 # Compare our computer opponent with the original census logs (not part of test).
 .PHONY: ai-reference-check
-ai-reference-check: native
+ai-reference-check: native build/rules.ini
 	GAME_DIR=$(TEST_GAME_DIR) tools/ai_reference_check.sh
 
 skirmish-check: native skirmish-tests

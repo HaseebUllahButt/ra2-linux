@@ -20,8 +20,8 @@ MINUTES = (5, 10, 15, 20, 25, 30)
 FIELDS = ('structures', 'vehicles', 'infantry', 'miners', 'cash')
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Only the [BuildingTypes] ID list is read, to tell buildings from units.
-# Base RA2 building IDs are kept unchanged in this list.
-RULES = os.path.join(HERE, '..', '..', 'analysis', 'extracted', 'config', 'rulesmd.ini')
+# The list comes from the base RA2 RULES.INI, extracted by make build/rules.ini.
+RULES = os.path.join(HERE, '..', 'build', 'rules.ini')
 
 
 def building_ids(path):
@@ -34,7 +34,11 @@ def building_ids(path):
             elif inside and '=' in line:
                 ids.add(line.split('=', 1)[1].strip().upper())
     except OSError:
-        pass
+        print(f'missing building list {path}: run make build/rules.ini', file=sys.stderr)
+        sys.exit(2)
+    if not ids:
+        print(f'missing building list {path}: run make build/rules.ini', file=sys.stderr)
+        sys.exit(2)
     return ids
 
 
@@ -110,6 +114,7 @@ def fmt_min(v):
 
 
 def compare(orig_path, native_path, country, top, brief, rules):
+    bids = building_ids(rules)
     orig_all, nat_all = parse(orig_path), parse(native_path)
     use_frames = bool(orig_all) and all('frame' in s for s in orig_all) and all('frame' in s for s in nat_all)
     orig, nat = house_samples(orig_all, country), house_samples(nat_all, country)
@@ -119,14 +124,27 @@ def compare(orig_path, native_path, country, top, brief, rules):
     set_minutes(orig, use_frames)
     set_minutes(nat, use_frames)
     end = min(orig[-1]['min'], nat[-1]['min'])
-    bids = building_ids(rules)
+    # The original game ends when its human house (Americans) is beaten:
+    # no structures and no vehicles or infantry left, after it had structures.
+    defeat = None
+    had_structures = False
+    for s in orig_all:
+        if s.get('country') != 'Americans':
+            continue
+        if s.get('structures', 0) > 0:
+            had_structures = True
+        elif 'min' in s and had_structures and s.get('vehicles', 0) + s.get('infantry', 0) == 0:
+            defeat = s['min']
+            break
+    if defeat is not None:
+        end = min(end, defeat)
     diffs = []  # (score, text)
 
     rows = []
     for m in MINUTES:
         o, n = at(orig, m), at(nat, m)
         rows.append((m, o, n))
-        if not o or not n:
+        if m > end or not o or not n:
             continue
         for f in FIELDS:
             a, b = o.get(f, 0), n.get(f, 0)
@@ -160,21 +178,30 @@ def compare(orig_path, native_path, country, top, brief, rules):
         cells = []
         for m, o, n in rows:
             if m in (10, 20, 30):
-                cells.append(f'st{m} {o["structures"] if o else "-"}/{n["structures"] if n else "-"}')
+                if m > end:
+                    cells.append(f'st{m} -/-')
+                else:
+                    cells.append(f'st{m} {o["structures"] if o else "-"}/{n["structures"] if n else "-"}')
         last_o, last_n = at(orig, 30) or orig[-1], at(nat, 30) or nat[-1]
         cells.append(f'veh {last_o["vehicles"]}/{last_n["vehicles"]}')
         cells.append(f'inf {last_o["infantry"]}/{last_n["infantry"]}')
         cells.append(f'min {last_o["miners"]}/{last_n["miners"]}')
-        print('  '.join(cells) + ('  | ' + diffs[0][1] if diffs else ''))
+        tail = f'  (orig game end {defeat:.1f} min)' if defeat is not None else ''
+        print('  '.join(cells) + ('  | ' + diffs[0][1] if diffs else '') + tail)
         return 0
 
     print(f'Computer house {country}: original {orig_path} vs ours {native_path}')
     print(f'Time base: {"game frames in both logs" if use_frames else "original real seconds, native frames / 20.7"};'
           f' compared up to {end:.1f} min')
+    if defeat is not None:
+        print(f'Original human defeated at {defeat:.1f} min; compared up to {defeat:.1f} min')
     print()
     print('min  ' + ''.join(f'{f:>20}' for f in FIELDS))
     print('     ' + ''.join(f'{"orig / ours":>20}' for _ in FIELDS))
     for m, o, n in rows:
+        if m > end:
+            print(f'{m:<5}' + ''.join(f'{"-":>20}' for _ in FIELDS))
+            continue
         cells = []
         for f in FIELDS:
             a = str(o[f]) if o and f in o else '-'
