@@ -233,11 +233,13 @@ int main(int argc, char** argv) try {
     {
         PrototypeShroud shroud(40, 40);
         ra2::rules::IniFile rules;
-        rules.parse("[SAT]\nSpySat=yes\nSight=1\n[TANK]\nSight=2\n");
+        rules.parse("[SAT]\nSpySat=yes\nPowered=yes\nSight=1\n[TANK]\nSight=2\n");
         sw::Snapshot world;
         world.houses = {house(1, "Player")};
         world.entities = {actor(1, 1, "SAT", sw::Kind::Structure, 5, 5),
             actor(2, 1, "TANK", sw::Kind::Unit, 6, 6)};
+        shroud.tick(world, rules);
+        require(shroud.cell_visible_to(1, cell(39, 39)), "healthy satellite reveals the map");
 
         const auto restore = [&]() {
             auto& sat = world.entities[0];
@@ -251,7 +253,6 @@ int main(int argc, char** argv) try {
             require(!shroud.cell_visible_to(1, cell(39, 39)), why);
             require(!shroud.cell_revealed_to(1, cell(39, 39)), "loss reshrouds the explored map");
             require(shroud.cell_visible_to(1, cell(8, 6)), "tank sight stays after the loss");
-            require(shroud.cell_visible_to(1, cell(8, 6)), "tank sight covers the satellite cell");
         };
         const auto expect_full = [&](const char* why) {
             shroud.tick(world, rules);
