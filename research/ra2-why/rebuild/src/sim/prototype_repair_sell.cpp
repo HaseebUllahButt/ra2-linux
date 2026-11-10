@@ -167,7 +167,7 @@ PrototypeRepairSell::PrototypeRepairSell(const rules::IniFile& base_rules,
 
 std::int32_t PrototypeRepairSell::repair_cost_per_step(const std::string& type) const {
     // TODO-ORIGINAL: the TechnoTypeClass::Repair_Cost rounding (type virtual
-    // +0xB0, read by the base repair step FUN_0044B9B0) was not recovered.
+    // +0xB0, read by the base step path in FUN_0044B9B0) was not recovered.
     // The export has no TechnoTypeClass vtable, so the virtual target stays
     // unknown.
     // This is the visible RA1 shape with the base percent value: Cost /
@@ -194,9 +194,12 @@ std::int32_t PrototypeRepairSell::refund_amount(const std::string& type) const {
 
 std::int32_t PrototypeRepairSell::survivor_count(const session::world::House& house,
     const std::string& type) const {
-    // Base game.exe sells through IHouse::Fire_Sale 0x004EC3C0 and spawns
-    // the crew in FUN_0043F8E0, with the crew type from BuildingClass::
-    // GetCrew 0x00449FB0. The exact base count divide was not recovered, so
+    // TODO-ORIGINAL: the base sell crew path is not recovered. IHouse::
+    // Fire_Sale 0x004EC3C0 only queues mission 19 per building. FUN_0043F8E0
+    // is the random destruction-survivor spray, not a deterministic sell
+    // count; it reads a count from BuildingClass vtable 0x0079CBBC slot 172
+    // (0x0044C520, body not in the export) and the type from GetCrew
+    // 0x00449FB0 (slot 184, 25 percent engineer branch). As a stand-in,
     // crewed buildings divide the sell cost by the side divisor and clamp
     // the count to 1..5. A captured building doubles the divisor; capture
     // state is not modeled here.
@@ -369,10 +372,12 @@ PrototypeRepairSell::SellResult PrototypeRepairSell::sell(World& world, std::uin
 PrototypeRepairSell::RepairTick PrototypeRepairSell::tick(World& world, std::uint32_t game_frame) {
     RepairTick result;
     // Original interval: RepairRate minutes as frames, at least one. The
-    // base repair step FUN_0044B9B0 divides the shared frame DAT_00A40D2C by
-    // this interval and runs a step only on a zero remainder. The parser
-    // FUN_00647F40 stores RepairRate at RulesClass +0x1348 and RepairStep at
-    // +0x1334.
+    // base step path in FUN_0044B9B0 divides the shared frame DAT_00A40D2C
+    // by an interval and runs a step on a zero remainder. The interval
+    // comes from FUN_0077F110, whose conversion to minutes is not
+    // recovered; RepairRate minutes times 900 is a stand-in. The parser
+    // FUN_00647F40 stores RepairRate at RulesClass +0x1348 and RepairStep
+    // at +0x1334.
     const auto interval = static_cast<std::uint32_t>(std::max(1,
         static_cast<std::int32_t>(limits_.repair_rate_minutes * limits_.ticks_per_minute)));
     if (last_frame_) {
