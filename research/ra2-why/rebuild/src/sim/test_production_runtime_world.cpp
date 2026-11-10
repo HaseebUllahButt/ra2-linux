@@ -84,6 +84,19 @@ int main(int argc,char** argv) try {
     require(c.find("GACNST") && c.find("GACNST")->placement.foundation==18,"GACNST 4x4 from art.ini");
     require(c.find("GAPOWR")->placement.foundation==3 && c.find("GAPOWR")->power_output==200,"GAPOWR facts");
     require(c.find("GAPILE")->factory==Rtti::InfantryType && c.find("GAPILE")->power_drain==10,"GAPILE facts");
+    // Dock rules from rules.ini: the ORCA and BEAG aircraft dock at the
+    // Airforce Command Headquarters (GAAIRC) or its American variant
+    // (AMRADR); GAAIRC has NumberOfDocks=4 and UnitReload=yes.
+    auto has_dock=[&](const char* type,const char* dock) {
+        const auto* t=c.find(type); require(t,type+std::string(" in catalog"));
+        for (const auto& d:t->dock) if (d==dock) return true;
+        return false;
+    };
+    require(has_dock("ORCA","GAAIRC") && has_dock("ORCA","AMRADR"),"ORCA docks at GAAIRC and AMRADR");
+    require(has_dock("BEAG","GAAIRC") && has_dock("BEAG","AMRADR"),"BEAG docks at GAAIRC and AMRADR");
+    const auto* gaairc=c.find("GAAIRC"); require(gaairc,"GAAIRC in catalog");
+    require(gaairc->number_of_docks==4,"GAAIRC NumberOfDocks=4");
+    require(gaairc->unit_reload,"GAAIRC UnitReload=yes");
     // Wrong facing: the original asks the unit to turn first; occupancy order may change.
     {
         auto s=world(c,0x4000); auto f=flags();

@@ -67,18 +67,18 @@ bool activate(w::Snapshot& world,w::Entity& item) {
     // terminal branch 004498FD calls QueueMission(5). The adapter completes
     // activation here; its construction animation timing is still unresolved.
     if (item.kind==w::Kind::Structure && item.mission==18) item.mission=5;
-    if (item.kind==w::Kind::Unit || item.kind==w::Kind::Infantry) {
-        item.locomotor_moving=false; item.occupancy_tracking=true; item.object_field_75=1;
+    if (item.kind==w::Kind::Unit || item.kind==w::Kind::Infantry || item.kind==w::Kind::Aircraft) {
+        item.locomotor_moving=false; item.occupancy_tracking=item.kind!=w::Kind::Aircraft; item.object_field_75=1;
         item.techno_field_370=0; item.unit_field_7d=1; item.foot_field_5a1=0;
         item.mission=0; item.burst_index=0; item.hull_facing=0; item.hull_facing_raw=0;
         item.turret_facing=0; item.turret_facing_raw=0;
-        item.category.emplace(); item.category->runtime_type=item.kind==w::Kind::Unit ? 1 : 15;
+        item.category.emplace(); item.category->runtime_type=item.kind==w::Kind::Unit ? 1 : item.kind==w::Kind::Infantry ? 15 : 2;
     }
     return true;
 }
 
 const w::Entity* choose_factory(const w::Snapshot& world,const FactorySet& factories,const Catalog& catalog,
-                                std::uint32_t owner,Rtti wanted,bool naval=false) {
+                                std::uint32_t owner,Rtti wanted,bool naval=false,const TypeFacts* product=nullptr) {
     const w::Entity* fallback=nullptr;
     for (const auto& object:world.creation_order) {
         if (object.kind!=w::CreatedKind::Entity) continue;
@@ -91,6 +91,9 @@ const w::Entity* choose_factory(const w::Snapshot& world,const FactorySet& facto
         const auto state=factories.buildings.find(building->id);
         if (!type || type->factory!=wanted || state==factories.buildings.end() ||
             (wanted==Rtti::UnitType && type->placement.naval!=naval)) continue;
+        if (wanted==Rtti::AircraftType && product &&
+            (!type->unit_reload || type->number_of_docks<=0 ||
+             std::find(product->dock.begin(),product->dock.end(),building->type)==product->dock.end())) continue;
         if (state->second.primary) return building;
         fallback=building;
     }
@@ -347,18 +350,28 @@ Outcome discharge(w::Snapshot& world,FactorySet& factories,const Catalog& catalo
     Outcome result{Status::Done,{},{},{}};
     for (auto& factory:factories.factories) {
         if (!factory.object || factory.progress!=54 ||
-            (factory.slot!=1 && factory.slot!=2 && factory.slot!=3)) continue;
+            (factory.slot!=0 && factory.slot!=1 && factory.slot!=2 && factory.slot!=3)) continue;
         const bool naval=factory.slot==3;
         auto* item=entity(world,factory.object);
-        const auto wanted=factory.slot==1 ? Rtti::InfantryType : Rtti::UnitType;
-        const auto kind=factory.slot==1 ? w::Kind::Infantry : w::Kind::Unit;
+        const auto wanted=factory.slot==0 ? Rtti::AircraftType : factory.slot==1 ? Rtti::InfantryType : Rtti::UnitType;
+        const auto kind=factory.slot==0 ? w::Kind::Aircraft : factory.slot==1 ? w::Kind::Infantry : w::Kind::Unit;
         if (!item || item->kind!=kind || item->lifetime!=w::Lifetime::Created || item->house_id!=factory.house_id)
             return fail(Status::NeedsInput,"completed factory object is invalid");
-        const auto* building=choose_factory(world,factories,catalog,factory.house_id,wanted,naval);
+        const auto* building=choose_factory(world,factories,catalog,factory.house_id,wanted,naval,catalog.find(item->type));
         if (!building) { result.detail="waiting for a factory exit"; continue; }
-        const auto cell=exit_cell(world,catalog,*building,naval);
-        if (!cell) { result.detail="waiting for a clear factory exit"; continue; }
-        if (!place_exit_actor(world,*item,*cell)) return fail(Status::NeedsInput,"factory object cannot be activated");
+        if (kind==w::Kind::Aircraft) {
+            // Base RadioClass::HasFreeLink 00636EA0 controls pad space.
+            // TODO-ORIGINAL: authored docking offsets and radio messages.
+            // Aircraft do not occupy the building's ground chain.
+            item->cell=building->cell; item->layer=w::Layer::Ground;
+            item->lifetime=w::Lifetime::Placed; item->next=0;
+            item->position=sim::Coord{int(item->cell->x)*256+128,int(item->cell->y)*256+128,0};
+            if (!activate(world,*item)) return fail(Status::NeedsInput,"aircraft pad activation is unresolved");
+        } else {
+            const auto cell=exit_cell(world,catalog,*building,naval);
+            if (!cell) { result.detail="waiting for a clear factory exit"; continue; }
+            if (!place_exit_actor(world,*item,*cell)) return fail(Status::NeedsInput,"factory object cannot be activated");
+        }
         if (kind==w::Kind::Unit && item->original_type_index) {
             auto* owner=house(world,item->house_id);
             if (!owner || !owner->placed_unit_counts) return fail(Status::NeedsInput,"placed Unit counts are unknown");
@@ -599,14 +612,14 @@ Outcome tick(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,std
         const auto wanted=product_kind(factory.slot);
         if (!wanted) return fail(Status::NeedsInput,"factory slot is unknown");
         if (!choose_factory(world,factories,catalog,factory.house_id,*wanted,factory.slot==3)) needed=true;
-        if (factory.progress==54 && (factory.slot==1 || factory.slot==2 || factory.slot==3)) {
+        if (factory.progress==54 && (factory.slot==0 || factory.slot==1 || factory.slot==2 || factory.slot==3)) {
             const bool naval=factory.slot==3;
             const auto* item=entity(world,factory.object);
-            const auto expected=factory.slot==1 ? w::Kind::Infantry : w::Kind::Unit;
+            const auto expected=factory.slot==0 ? w::Kind::Aircraft : factory.slot==1 ? w::Kind::Infantry : w::Kind::Unit;
             if (!item || item->kind!=expected || item->lifetime!=w::Lifetime::Created ||
                 item->house_id!=factory.house_id) return fail(Status::NeedsInput,"completed factory object is invalid");
-            const auto* building=choose_factory(world,factories,catalog,factory.house_id,*wanted,naval);
-            if (building && exit_cell(world,catalog,*building,naval)) needed=true;
+            const auto* building=choose_factory(world,factories,catalog,factory.house_id,*wanted,naval,catalog.find(item->type));
+            if (building && (factory.slot==0 || exit_cell(world,catalog,*building,naval))) needed=true;
             else waiting_for_exit=true;
         }
         if (!factory.suspended && factory.progress<54 &&

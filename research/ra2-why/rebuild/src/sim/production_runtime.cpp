@@ -366,6 +366,7 @@ Catalog Catalog::from(const IniFile& rules,const IniFile& art,const IniFile& map
             if (const auto v=text(rules,map,id,"Prerequisite")) t.can.prerequisite=prerequisite_list(*v);
             if (const auto v=text(rules,map,id,"PrerequisiteOverride")) t.can.prerequisite_override=prerequisite_list(*v);
             bool naval=false; read_bool(rules,map,id,"Naval",naval); t.placement.naval=naval;
+            if (const auto v=text(rules,map,id,"Dock")) t.dock=IniFile::split_list(*v);
             if (rtti==Rtti::UnitType) if (const auto v=text(rules,map,id,"DeploysInto")) t.deploys_into=*v;
             if (rtti==Rtti::BuildingType) {
                 if (const auto v=text(rules,map,id,"SuperWeapon")) if (!v->empty() && !same_text(*v,"<none>")) {
@@ -393,6 +394,8 @@ Catalog Catalog::from(const IniFile& rules,const IniFile& art,const IniFile& map
                 if (const auto v=text(rules,map,id,"FreeUnit")) t.free_unit=*v;
                 bool waterbound=false; read_bool(rules,map,id,"WaterBound",waterbound);
                 t.placement.speed_type=waterbound?5:-1;                        // 00459ADE.
+                read_int(rules,map,id,"NumberOfDocks",t.number_of_docks);
+                read_bool(rules,map,id,"UnitReload",t.unit_reload);
                 read_int(rules,map,id,"AIBasePlanningSide",t.planning_side);
                 if (const auto v=text(rules,map,id,"Factory")) {                // 0046A4B0 table 007CD978.
                     static const std::pair<const char*,Rtti> kinds[]={{"BuildingType",Rtti::BuildingType},
@@ -637,7 +640,10 @@ std::uint32_t ownable(const TypeFacts& t,std::int32_t session) {          // 006
 std::optional<const w::Entity*> who_can_build(const w::Snapshot& s,const FactorySet& f,const Catalog& c,
                                               const TypeFacts& type,const w::House& h,bool needs_530,bool legal_check) {
     if (!f.flags.session_type) return std::nullopt;
-    if (type.rtti==Rtti::AircraftType) return std::nullopt;                // Dock checks 00636F10/00636EA0 not recovered.
+    const bool aircraft=type.rtti==Rtti::AircraftType;
+    if (aircraft && type.dock.empty()) return static_cast<const w::Entity*>(nullptr);
+    std::int64_t dock_capacity=0;
+    bool primary=false;
     const auto mine=ownable(type,*f.flags.session_type);
     const w::Entity* candidate=nullptr;
     for (const auto* b:house_buildings(s,h.id)) {
@@ -657,8 +663,30 @@ std::optional<const w::Entity*> who_can_build(const w::Snapshot& s,const Factory
         if (!(ownable(*bt,*f.flags.session_type)&mine)) continue;
         const bool naval_unit=type.rtti==Rtti::UnitType && type.placement.naval;
         if (naval_unit ? !bt->placement.naval : bt->placement.naval) continue;
-        if (extra->second.primary) return b;
-        candidate=b;
+        if (aircraft) {
+            if (!bt->unit_reload || bt->number_of_docks<=0 ||
+                std::find(type.dock.begin(),type.dock.end(),b->type)==type.dock.end()) continue;
+            dock_capacity+=bt->number_of_docks;
+            if (!primary || extra->second.primary) candidate=b;
+            primary=primary || extra->second.primary;
+        } else {
+            if (extra->second.primary) return b;
+            candidate=b;
+        }
+    }
+    if (aircraft) {
+        // Base RadioClass::HasFreeLink 00636EA0: a plane reserves a pad
+        // link while flying too. Base ORCA and BEAG share the same Dock list.
+        // TODO-ORIGINAL: recover per-building radio links and dock offsets.
+        std::int64_t used=0;
+        for (const auto& actor:s.entities) {
+            if (actor.house_id!=h.id || actor.kind!=w::Kind::Aircraft ||
+                actor.lifetime!=w::Lifetime::Placed || actor.active==false ||
+                actor.in_limbo==true || actor.resolved_hp.value_or(0)<=0) continue;
+            const auto* facts=facts_of(c,actor);
+            if (facts && !facts->dock.empty()) ++used;
+        }
+        if (used>=dock_capacity) return static_cast<const w::Entity*>(nullptr);
     }
     return candidate;
 }
@@ -746,6 +774,7 @@ bool tracking_add(w::House& h,const TypeFacts& t) {
     case Rtti::BuildingType: return counter_add(h.buildings_owned_5420,t.heap_index,1);
     case Rtti::UnitType: return counter_add(h.units_owned_5430,t.heap_index,1);
     case Rtti::InfantryType: return counter_add(h.infantry_owned_5440,t.heap_index,1);
+    case Rtti::AircraftType: return counter_add(h.aircraft_owned_5450,t.heap_index,1);
     default: return false;
     }
 }
