@@ -471,11 +471,18 @@ public:
                 audio_.speak(superweapon_ready_speech(type.kind));
             superweapon_was_ready_[type.id]=ready;
             if(type.kind==sim::SuperKind::Invalid)continue;
+            const auto& viewer=house(world_,player_);
             for(const auto id:enemies_) {
                 const auto* state=superweapons_->state(id,type.id);
                 const bool present=state&&state->present;
                 auto& was=superweapon_was_present_[{id,type.id}];
-                if(present&&!was)audio_.speak(superweapon_detected_speech(type.kind));
+                if(present&&!was) {
+                    const auto& owner=house(world_,id);
+                    // Base 004E5540: own and allied grants stay silent.
+                    if(!superweapon_detected_silent(player_,id,viewer.original_index,
+                        viewer.alliance_mask_5674,owner.original_index))
+                        audio_.speak(superweapon_detected_speech(type.kind));
+                }
                 was=present;
             }
         }

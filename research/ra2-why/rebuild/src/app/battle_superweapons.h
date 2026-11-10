@@ -147,6 +147,20 @@ inline std::string superweapon_launch_speech(sim::SuperKind kind) {
     default: return {};
     }
 }
+// Base 004E5540 alliance silence for the detected warnings. Silent when
+// the grant is the viewer's own, shares the viewer's original index, or
+// the viewer's alliance mask has the owner's index bit. The reverse bit
+// (the owner allied to the viewer) alone does not silence.
+inline bool superweapon_detected_silent(std::uint32_t viewer_house,
+    std::uint32_t owner_house, std::optional<std::int32_t> viewer_index,
+    std::optional<std::uint32_t> viewer_mask, std::optional<std::int32_t> owner_index) {
+    if (viewer_house == owner_house)return true;
+    if (!viewer_index || *viewer_index < 0 || !owner_index || *owner_index < 0 ||
+        *owner_index >= 32)return false;
+    if (*viewer_index == *owner_index)return true;
+    return viewer_mask && (*viewer_mask & (1u << *owner_index));
+}
+
 // An enemy house received a weapon: the detected warning. Own and allied
 // grants stay silent; the caller checks the house before speaking.
 inline std::string superweapon_detected_speech(sim::SuperKind kind) {

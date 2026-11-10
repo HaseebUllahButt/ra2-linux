@@ -80,6 +80,21 @@ int main() try {
         "EVA_ChronosphereActivated", "chrono activation speech");
     require(ra2::app::superweapon_launch_speech(SuperKind::ChronoWarp).empty(),
         "the warp half of the chrono pair stays silent");
+
+    // Base 004E5540 alliance silence, asymmetric: the viewer's mask bit
+    // silences, the owner's reverse bit alone does not.
+    using ra2::app::superweapon_detected_silent;
+    require(superweapon_detected_silent(1, 1, 0, 0, 1), "own grant is silent");
+    require(superweapon_detected_silent(1, 2, 0, 0, 0), "same index is silent");
+    require(superweapon_detected_silent(1, 2, 0, 1u << 2, 2),
+        "the viewer allied to the owner is silent");
+    require(!superweapon_detected_silent(1, 2, 0, 0, 2),
+        "a stranger's grant warns");
+    require(!superweapon_detected_silent(1, 2, 0, 0, 1) &&
+        !superweapon_detected_silent(1, 2, 1u << 0, 0, 2),
+        "the owner's reverse alliance alone does not silence");
+    require(!superweapon_detected_silent(1, 2, std::nullopt, 0, 2),
+        "an unknown viewer index warns");
     require(ra2::app::superweapon_detected_speech(SuperKind::Nuke) ==
         "EVA_NuclearSiloDetected", "nuke detected speech");
     require(ra2::app::superweapon_detected_speech(SuperKind::LightningStorm) ==
