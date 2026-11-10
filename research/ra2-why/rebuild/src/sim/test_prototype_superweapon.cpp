@@ -1,4 +1,5 @@
 #include "prototype_superweapon.h"
+#include "vertical_projectile.h"
 #include "../fs/mix_bootstrap.h"
 
 #include <algorithm>
@@ -575,6 +576,58 @@ void check_storm(const IniFile& rules, const std::string& exe) {
     require(supers.frames_left(102, "LightningStormSpecial") > 0, "Storm did not restart charge");
 }
 
+void check_vertical_projectile() {
+    // Upward silo launch: velocity 10, cap 255, acceleration 1 (FUN_00448400).
+    // The missile passes DetonationAltitude 20000 on step 190.
+    ra2::sim::VerticalProjectileState rise{0, 10.0};
+    int rise_step = 0;
+    bool crossed = false;
+    while (rise_step < 10000) {
+        ++rise_step;
+        const auto flags = ra2::sim::step_vertical_projectile(rise, 255, 1, 0, 20000);
+        if (flags.above_ceiling) { crossed = true; break; }
+    }
+    require(crossed && rise_step == 190,
+        "Upward missile did not cross 20000 on step 190");
+    require(rise.velocity == 200.0,
+        "Upward missile velocity at the crossing changed");
+
+    // Downward payload: starts at 20000 with velocity -1 (constant 0079D578 is
+    // -1.0), cap 10, acceleration 1. It reaches the floor on step 2004.
+    ra2::sim::VerticalProjectileState fall{20000, -1.0};
+    int fall_step = 0;
+    bool landed = false, fell_from_above = false;
+    while (fall_step < 100000) {
+        ++fall_step;
+        const auto flags = ra2::sim::step_vertical_projectile(fall, 10, 1, 0, 30000);
+        if (flags.at_or_below_floor) { landed = true; fell_from_above = !flags.above_ceiling; break; }
+    }
+    require(landed && fall_step == 2004,
+        "Falling missile did not reach the floor on step 2004");
+    require(fell_from_above, "Falling missile reported a false ceiling hit");
+
+    // Integer slowdown: acceleration/2 truncates; the speed never goes below 0
+    // and the velocity keeps its sign.
+    ra2::sim::VerticalProjectileState slow{1000, -20.0};
+    auto flags = ra2::sim::step_vertical_projectile(slow, 10, 3, 0, 30000);
+    require(slow.velocity == -19.0 && slow.z == 981 && !flags.at_or_below_floor,
+        "Slowdown did not use integer division (expected 20-3/2=19)");
+    flags = ra2::sim::step_vertical_projectile(slow, 10, 3, 0, 30000);
+    require(slow.velocity == -18.0, "Slowdown step two wrong");
+    // Speed below the cap accelerates up to it.
+    ra2::sim::VerticalProjectileState up{0, 5.0};
+    flags = ra2::sim::step_vertical_projectile(up, 10, 3, 0, 30000);
+    require(up.velocity == 8.0 && up.z == 8, "Acceleration step one wrong");
+    flags = ra2::sim::step_vertical_projectile(up, 10, 3, 0, 30000);
+    require(up.velocity == 10.0 && up.z == 18, "Acceleration did not clamp at the cap");
+    // A speed above the cap decays to exactly 0 and stays there.
+    ra2::sim::VerticalProjectileState zero{500, -1.0};
+    flags = ra2::sim::step_vertical_projectile(zero, 0, 3, 0, 30000);
+    require(zero.velocity == -0.0 || zero.velocity == 0.0,
+        "Slowdown did not stop at zero speed");
+    (void)flags;
+}
+
 void check_spy_plane() {
     const auto rules = fixture_rules();
     auto world = make_world();
@@ -656,6 +709,7 @@ int main(int argc, char** argv) try {
     check_chrono(rules, exe);
     check_paradrop(rules, exe);
     check_storm(rules, exe);
+    check_vertical_projectile();
     check_spy_plane();
     check_guards(rules);
     std::cout << "Super weapon spot checks passed: rules parse, charging, low power, "

@@ -793,13 +793,16 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
             const auto fall_altitude = rules_.read_integer(
                 rules_.read_string("NukePayload", "Projectile", "GiantNukeDown"),
                 "DetonationAltitude", 30000);
-            // Case 0 also draws random velocities scaled by -100.0 (FUN_004BA480
-            // / FUN_004BA4D0) for the missile, so the exact original frame count
-            // is not recoverable from the decompile alone.
-            // TODO-ORIGINAL: exact impact timing. The vertical projectiles carry
-            // Acceleration=1 and the case 0 draw applies a random -100 scaled
-            // velocity; this prototype keeps the constant-speed read of the
-            // rules values.
+            // FUN_004BA480 / FUN_004BA4D0 are trig table lookups (quantized
+            // index into float tables at 00801DC4 / 0080FDE4), not RNG. The
+            // binary code 00463D55..00463E75 (FUN_00463C50, omitted by the
+            // export as unreachable) multiplies by the constant at 0079D578,
+            // which is -1.0: the payload starts at target.z + the carrier
+            // projectile's DetonationAltitude with initial downward speed.
+            // TODO-ORIGINAL: exact impact timing (acceleration/cap phase
+            // design pending); this prototype keeps the constant-speed read
+            // of the rules values. The pure step lives in
+            // vertical_projectile.h and is not wired into fire/tick yet.
             const auto delay = (rise_altitude + rise_speed - 1) / rise_speed +
                 (fall_altitude + fall_speed - 1) / fall_speed;
             nukes_.push_back(
