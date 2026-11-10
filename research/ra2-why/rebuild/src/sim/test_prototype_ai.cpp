@@ -1014,6 +1014,20 @@ void check_harvester_ratio() {
             });
             require(harvester == (miners == 1 && cash == 11), "War factory did not keep two harvesters per refinery");
         }
+        // House +5460 counts buildings on the map: a second refinery that
+        // is still in the factory (Created) does not raise the limit.
+        if (miners != 2) continue;
+        auto extra = actor(rules, id++, computer, "REF", sw::Kind::Structure, {30, 30});
+        extra.lifetime = sw::Lifetime::Created;
+        extra.cell.reset();
+        world.entities.push_back(extra);
+        world.houses[0].cash = 11;
+        PrototypeAI policy(rules, &ai);
+        const auto orders = policy.tick(world, computer, player, 0);
+        const bool harvester = std::any_of(orders.begin(), orders.end(), [](const Order& order) {
+            return order.kind == OrderKind::Build && order.type == "MINER" && order.entity == 5;
+        });
+        require(!harvester, "A refinery in the factory raised the harvester limit");
     }
 }
 

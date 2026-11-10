@@ -614,15 +614,17 @@ void PrototypeAI::choose_products(Context& context, std::vector<skirmish::Order>
 // Harvester (Rules +10C0) and whose +189 is clear makes the first [General]
 // HarvesterUnit (Rules +9EC) its country owns, at its tech level, while it
 // has fewer of it than HarvestersPerRefinery (Rules +1414) times the first
-// two [AI] BuildRefinery types. There is no money test here.
+// two [AI] BuildRefinery types. There is no money test here. The counts
+// (00491D10) come from House +5470 and +5460, the active unit and building
+// counters (TS ActiveUQuantity and ActiveBQuantity): objects on the map. A
+// refinery or harvester that is still in a factory does not count.
 // TODO-ORIGINAL: skirmish houses have the maximum IQ, and +189 is only
-// written by 004E18C0 (clear). The counter that 00491D10 reads is taken as
-// owned objects, so a product in a factory counts.
+// written by 004E18C0 (clear).
 std::string PrototypeAI::choose_harvester(const Context& context) const {
     const auto owned = [&](const std::string& type) {
         return std::count_if(context.world.entities.begin(), context.world.entities.end(), [&](const WorldEntity& e) {
             return e.house_id == context.computer.id && equal_name(e.type, type) &&
-                (e.lifetime == Lifetime::Created || (e.lifetime == Lifetime::Placed && e.resolved_hp.value_or(0) > 0));
+                e.lifetime == Lifetime::Placed && e.resolved_hp.value_or(0) > 0;
         });
     };
     std::string harvester;
