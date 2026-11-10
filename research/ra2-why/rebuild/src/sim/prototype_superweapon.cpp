@@ -543,15 +543,8 @@ SuperTickReport PrototypeSuperweapons::tick(session::world::Snapshot& world, std
     // keeps its own pending impact; none is lost.
     for (const auto& pending : nukes_) {
         if (frame < pending.impact) continue;
-        auto weapon = blast_weapon(rules_, "NukePayload");
-        if (!weapon) {
-            // The hardcoded payload first; a WeaponType= override second.
-            for (const auto& type : types_)
-                if (type.kind == SuperKind::Nuke && !type.weapon.empty()) {
-                    weapon = blast_weapon(rules_, type.weapon);
-                    if (weapon) break;
-                }
-        }
+        // The weapon section was validated at launch; it is used as stored.
+        auto weapon = blast_weapon(rules_, pending.payload_weapon);
         if (!weapon) {
             report.notes.push_back("nuke payload weapon is unavailable");
             continue;
@@ -783,9 +776,15 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
             const auto rise_altitude = rules_.read_integer(
                 rules_.read_string(carrier, "Projectile", "GiantNukeUp"), "DetonationAltitude", 20000);
             // Validate the payload before the charge is consumed, so a rules
-            // mistake cannot cost a launch.
-            auto weapon = blast_weapon(rules_, "NukePayload");
-            if (!weapon && !type->weapon.empty()) weapon = blast_weapon(rules_, type->weapon);
+            // mistake cannot cost a launch. The payload section is stored on the
+            // pending missile so the impact uses the same weapon that was
+            // validated at launch.
+            std::string payload_section = "NukePayload";
+            auto weapon = blast_weapon(rules_, payload_section);
+            if (!weapon && !type->weapon.empty()) {
+                payload_section = type->weapon;
+                weapon = blast_weapon(rules_, payload_section);
+            }
             if (!weapon) {
                 report.notes.push_back("nuke payload weapon is unavailable");
                 return report;
@@ -803,7 +802,8 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
             // rules values.
             const auto delay = (rise_altitude + rise_speed - 1) / rise_speed +
                 (fall_altitude + fall_speed - 1) / fall_speed;
-            nukes_.push_back(PendingNuke{frame + static_cast<std::uint64_t>(delay), target});
+            nukes_.push_back(
+                PendingNuke{frame + static_cast<std::uint64_t>(delay), target, payload_section});
             report.notes.push_back("nuke missile in flight");
             break;
         }

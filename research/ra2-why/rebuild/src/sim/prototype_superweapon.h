@@ -133,8 +133,9 @@ private:
     std::map<std::uint32_t, std::uint64_t> invulnerable_;
     std::map<std::uint32_t, ra2map::Cell> armed_;
     struct PendingNuke {
-        std::uint64_t impact = 0; // Frame the missile lands.
+        std::uint64_t impact = 0;   // Frame the missile lands.
         ra2map::Cell target{};
+        std::string payload_weapon; // Weapon section validated at launch.
     };
     std::vector<PendingNuke> nukes_; // Missiles in flight, one per launch.
     std::optional<Storm> storm_;
