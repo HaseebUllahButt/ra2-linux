@@ -1049,22 +1049,30 @@ public:
             };
             // House::Find_Build_Location 004F03C0 and 005686B0: the computer wants
             // AIBaseSpacing free cells around a new building (one more for
-            // ProtectWithWall or WantsExtraSpace), then settles for none.
-            // TODO-ORIGINAL: the candidate cells (House +5614, 004513B0), the
-            // direction offsets and the BaseSpacerOfHouses cells (Cell +DC) are
-            // not modelled; the ring search stays.
+            // ProtectWithWall or WantsExtraSpace), then settles for none. Free
+            // means no building, overlay or slope, and no BaseSpacerOfHouses
+            // bit (Cell +DC) of the owner: 004510D0 sets that bit on each own
+            // building's footprint grown by AIBaseSpacing. So two buildings of
+            // one house keep at least AIBaseSpacing cells between them, and
+            // 2 * AIBaseSpacing when a free place exists.
+            // TODO-ORIGINAL: the candidate cells (House +5614, 004510D0) and
+            // the direction offsets are not modelled; the ring search stays.
             const int extra=rules_.read_bool(type,"ProtectWithWall")||rules_.read_bool(type,"WantsExtraSpace")?1:0;
-            const int S1=rules_.read_integer("AI","AIBaseSpacing",1)+extra;
+            const int spacing=rules_.read_integer("AI","AIBaseSpacing",1);
+            const int S1=spacing+extra;
             const int S2=extra;
             std::set<std::pair<int,int>> occupied;
             for (const auto& e:world_.entities) if (live(e)&&e.kind==w::Kind::Structure) {
                 const auto* found=catalog_.find(e.type);
+                const int grow=e.house_id==owner?spacing:0; // 004510D0 spacer cells
+                const auto mark=[&](int x,int y) {
+                    for (int dy=-grow;dy<=grow;++dy) for (int dx=-grow;dx<=grow;++dx) occupied.insert({x+dx,y+dy});
+                };
                 if (found) for (const auto& off:p::original_foundation_cells(found->placement.foundation))
-                    occupied.insert({e.cell->x+off.x,e.cell->y+off.y});
-                else occupied.insert({e.cell->x,e.cell->y});
+                    mark(e.cell->x+off.x,e.cell->y+off.y);
+                else mark(e.cell->x,e.cell->y);
             }
             const auto spaced=[&](int x,int y,int S) {
-                if (S==0) return true;
                 int minX=x,maxX=x,minY=y,maxY=y;
                 for (const auto& part:footprint) {
                     minX=std::min(minX,x+part.x);maxX=std::max(maxX,x+part.x);
