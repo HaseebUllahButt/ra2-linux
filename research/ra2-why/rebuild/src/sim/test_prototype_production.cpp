@@ -4,6 +4,7 @@
 #include "damage_runtime.h"
 #include "sim.h"
 #include "session/world/setup.h"
+#include "session/world/world_hash.h"
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
@@ -184,13 +185,14 @@ p::CellXY place_at_mouse(w::Snapshot& world,p::FactorySet& factories,const p::Ca
 
 // Units in the footprint block the Cell (004718B0), like the original. Only
 // that Cell turns red; the click is rejected and the product stays ready.
+// Only the House's own units count: own infantry and own vehicles block.
 int check_units_block(const w::Snapshot& world,const p::FactorySet& factories,const p::Catalog& catalog,
                       std::uint32_t house,const std::string& type,std::uint32_t product,std::uint64_t frame,
-                      bool& other_cell_legal) {
+                      bool& other_cell_legal,int& infantry_blocks,int& vehicle_blocks) {
     int checked=0;
     for (const auto& unit:world.entities) {
-        if (unit.lifetime!=w::Lifetime::Placed || !unit.cell || unit.in_limbo==true ||
-            (unit.kind!=w::Kind::Unit && unit.kind!=w::Kind::Infantry)) continue;
+        if (unit.house_id!=house || unit.lifetime!=w::Lifetime::Placed || !unit.cell ||
+            unit.in_limbo==true || (unit.kind!=w::Kind::Unit && unit.kind!=w::Kind::Infantry)) continue;
         const p::CellXY mouse{std::int16_t(unit.cell->x+1),std::int16_t(unit.cell->y+1)};
         const auto cursor=proto::placement_cursor(world,factories,catalog,house,type,mouse);
         require(cursor.has_value(),"no cursor over a unit");
@@ -207,11 +209,145 @@ int check_units_block(const w::Snapshot& world,const p::FactorySet& factories,co
         auto blocked=world; auto blocked_factories=factories;
         const auto outcome=proto::place(blocked,blocked_factories,catalog,house,type,cursor->origin,frame);
         require(outcome.status==p::Status::Rejected,type+" over a unit was not rejected: "+outcome.detail);
+        // The product stays ready for the next click.
         require(factory(blocked_factories,product) && factory(blocked_factories,product)->progress==54 &&
-                blocked.entities.size()==world.entities.size(),type+" rejected over a unit lost its product");
+                blocked.entities.size()==world.entities.size() &&
+                actor(blocked,product).lifetime==w::Lifetime::Created,
+                type+" rejected over a unit lost its product");
+        // Nothing moves: every entity Cell and position and every Cell head
+        // and occupancy count stays exactly the same after the rejection.
+        const auto& after=actor(blocked,unit.id);
+        require(after.cell && after.cell->x==unit.cell->x && after.cell->y==unit.cell->y &&
+                after.position.has_value()==unit.position.has_value() &&
+                (!after.position || (after.position->x==unit.position->x &&
+                 after.position->y==unit.position->y && after.position->z==unit.position->z)),
+                type+" rejection moved the blocking unit");
+        require(world_hash(blocked)==world_hash(world),
+                type+" rejected over a unit changed the world");
+        // The hash reads the main fields only. Compare every Cell's occupancy
+        // words and heads directly, and sweep every entity Cell and position.
+        for (const auto& [key,cell]:world.cells) {
+            const auto& after_cell=blocked.cells.at(key);
+            require(cell.ground_occupancy_124==after_cell.ground_occupancy_124 &&
+                    cell.bridge_occupancy_128==after_cell.bridge_occupancy_128,
+                    type+" rejection changed a Cell occupancy word");
+            require(cell.heads.has_value()==after_cell.heads.has_value() &&
+                    (!cell.heads || (cell.heads->ground_head==after_cell.heads->ground_head &&
+                     cell.heads->bridge_head==after_cell.heads->bridge_head)),
+                    type+" rejection changed a Cell head");
+        }
+        for (const auto& item:world.entities) {
+            const auto& after_entity=actor(blocked,item.id);
+            require(item.cell.has_value()==after_entity.cell.has_value() &&
+                    (!item.cell || (item.cell->x==after_entity.cell->x && item.cell->y==after_entity.cell->y)) &&
+                    item.position.has_value()==after_entity.position.has_value() &&
+                    (!item.position || (item.position->x==after_entity.position->x &&
+                     item.position->y==after_entity.position->y && item.position->z==after_entity.position->z)),
+                    type+" rejection moved an entity");
+        }
+        (unit.kind==w::Kind::Infantry?infantry_blocks:vehicle_blocks)+=1;
         ++checked;
     }
     return checked;
+}
+
+// Rejections that never touch the world: no ready product in the factory,
+// a far Cell outside base proximity, and the occupied yard footprint.
+void check_rejection_cases(const w::Snapshot& world,const p::FactorySet& factories,const p::Catalog& catalog,
+                           std::uint32_t house,ra2map::Cell base,const std::string& type,std::uint64_t frame) {
+    const auto before=world_hash(world);
+    // No completed product: the click is rejected before any write. The
+    // factory copy keeps its flags and inputs; only the type's own factory
+    // loses its object and progress. An empty FactorySet would lose the
+    // setup flags and prove a different failure.
+    {
+        auto no_ready=world; auto no_ready_factories=factories;
+        bool cleared=false;
+        for (auto& item:no_ready_factories.factories)
+            if (item.house_id==house && item.object_type==type) {
+                item.object=0; item.progress=0; cleared=true;
+            }
+        require(cleared,type+" has no factory state to clear");
+        const auto outcome=proto::place(no_ready,no_ready_factories,catalog,house,type,
+            {static_cast<std::int16_t>(base.x+2),static_cast<std::int16_t>(base.y+2)},frame);
+        require(outcome.status==p::Status::Rejected && outcome.detail=="no completed building",
+                "place without a ready factory was not 'no completed building': "+outcome.detail);
+        require(world_hash(no_ready)==before,"place without a ready factory changed the world");
+    }
+    // A far Cell: the grid is never legal, and the click is rejected.
+    {
+        bool found=false;
+        for (int radius=24;radius<=40 && !found;++radius)
+            for (int dy=-radius;dy<=radius && !found;++dy)
+                for (int dx=-radius;dx<=radius && !found;++dx) {
+                    if (std::max(std::abs(dx),std::abs(dy))!=radius) continue;
+                    const p::CellXY mouse{static_cast<std::int16_t>(base.x+dx),static_cast<std::int16_t>(base.y+dy)};
+                    if (mouse.x<0 || mouse.y<0 || mouse.x>=512 || mouse.y>=512) continue;
+                    const auto it=world.cells.find(std::uint32_t(mouse.y)*512+mouse.x);
+                    if (it==world.cells.end() || !it->second.allocated || !*it->second.allocated) continue;
+                    const auto cursor=proto::placement_cursor(world,factories,catalog,house,type,mouse);
+                    if (!cursor || cursor->proximity==true) continue;
+                    // Proximity is false, so the whole grid must read illegal.
+                    require(cursor->legal==false,
+                            type+" far grid is legal outside base proximity");
+                    auto far=world; auto far_factories=factories;
+                    const auto outcome=proto::place(far,far_factories,catalog,house,type,cursor->origin,frame);
+                    require(outcome.status==p::Status::Rejected,"far click was accepted: "+outcome.detail);
+                    require(world_hash(far)==before,"far click changed the world");
+                    found=true;
+                }
+        require(found,"no far Cell outside base proximity was checked");
+    }
+    // The yard's own footprint: occupied Cells, so the click is rejected.
+    {
+        const auto cursor=proto::placement_cursor(world,factories,catalog,house,type,
+            {static_cast<std::int16_t>(base.x),static_cast<std::int16_t>(base.y)});
+        require(cursor && cursor->legal==false,"grid over the yard is legal");
+        auto blocked=world; auto blocked_factories=factories;
+        const auto outcome=proto::place(blocked,blocked_factories,catalog,house,type,cursor->origin,frame);
+        require(outcome.status==p::Status::Rejected,"click on the yard was accepted: "+outcome.detail);
+        require(world_hash(blocked)==before,"click on the yard changed the world");
+    }
+}
+
+// Direct ra2::sim::production::place checks. The adapter's preflight hides
+// pre-Undo mutations, so these call the runtime place itself on a Complete
+// world copy. A footprint over an own unit must be rejected with no write,
+// even before the Undo copy.
+void check_direct_place(const w::Snapshot& world,const p::FactorySet& factories,const p::Catalog& catalog,
+                        std::uint32_t house,const std::string& type,std::uint64_t frame) {
+    const w::Entity* blocker=nullptr;
+    for (const auto& unit:world.entities) {
+        if (unit.house_id!=house || unit.lifetime!=w::Lifetime::Placed || !unit.cell ||
+            unit.in_limbo==true || (unit.kind!=w::Kind::Unit && unit.kind!=w::Kind::Infantry)) continue;
+        const auto cursor=proto::placement_cursor(world,factories,catalog,house,type,
+            {static_cast<std::int16_t>(unit.cell->x+1),static_cast<std::int16_t>(unit.cell->y+1)});
+        if (cursor && cursor->proximity==true) { blocker=&unit; break; }
+    }
+    require(blocker,"no own unit stands in a legal grid near the base");
+    auto reference=world; reference.setup_progress=w::SetupProgress::Complete;
+    const auto before=world_hash(reference);
+    const p::CellXY origin{static_cast<std::int16_t>(blocker->cell->x),static_cast<std::int16_t>(blocker->cell->y)};
+    // A ready product under the unit: rejected, and nothing moves first.
+    {
+        auto direct=world; auto direct_factories=factories;
+        direct.setup_progress=w::SetupProgress::Complete;
+        const auto outcome=p::place(direct,direct_factories,catalog,house,type,origin,frame);
+        require(outcome.status==p::Status::Rejected,"direct place over a unit was not rejected: "+outcome.detail);
+        require(world_hash(direct)==before,"direct place over a unit changed the world before its rejection");
+    }
+    // No ready product on the same occupied footprint: still no mutation.
+    {
+        auto direct=world; auto direct_factories=factories;
+        direct.setup_progress=w::SetupProgress::Complete;
+        bool cleared=false;
+        for (auto& item:direct_factories.factories)
+            if (item.house_id==house && item.object_type==type) { item.object=0; item.progress=0; cleared=true; }
+        require(cleared,type+" has no factory state to clear");
+        const auto outcome=p::place(direct,direct_factories,catalog,house,type,origin,frame);
+        require(outcome.status==p::Status::Rejected,"direct no-ready place was not rejected: "+outcome.detail);
+        require(world_hash(direct)==before,"direct no-ready place changed the world before its rejection");
+    }
 }
 
 // Clicks at the map edge: the grid is never legal and the product stays.
@@ -531,10 +667,13 @@ int main(int argc,char** argv) try {
                 sealed.random.first==before.first && sealed.random.second==before.second,
                 "blocked refinery exit changed the world or random state");
     }
+    int infantry_blocks=0,vehicle_blocks=0;
     {
         bool other_cell_legal=false;
-        require(check_units_block(world,factories,catalog,player,"GAREFN",pending_refinery,frame,other_cell_legal)>0,
+        int inf=0,veh=0;
+        require(check_units_block(world,factories,catalog,player,"GAREFN",pending_refinery,frame,other_cell_legal,inf,veh)>0,
                 "no unit stood in a refinery grid near the base");
+        infantry_blocks+=inf; vehicle_blocks+=veh;
         require(other_cell_legal,"a unit turned the whole refinery grid red");
         check_edge_clicks(world,factories,catalog,player,"GAREFN",pending_refinery,frame);
         auto near=world; auto near_factories=factories;
@@ -602,7 +741,15 @@ int main(int argc,char** argv) try {
     const auto pending_factory=build(world,factories,catalog,player,"GAWEAP",frame,false);
     {
         bool other_cell_legal=false;
-        check_units_block(world,factories,catalog,player,"GAWEAP",pending_factory,frame,other_cell_legal);
+        int inf=0,veh=0;
+        require(check_units_block(world,factories,catalog,player,"GAWEAP",pending_factory,frame,other_cell_legal,inf,veh)>0,
+                "no unit stood in a factory grid near the base");
+        infantry_blocks+=inf; vehicle_blocks+=veh;
+        require(other_cell_legal,"a unit turned the whole factory grid red");
+        require(infantry_blocks>0 && vehicle_blocks>0,
+                "own infantry and own vehicles did not both block a placement");
+        check_rejection_cases(world,factories,catalog,player,base,"GAWEAP",frame);
+        check_direct_place(world,factories,catalog,player,"GAWEAP",frame);
         check_edge_clicks(world,factories,catalog,player,"GAWEAP",pending_factory,frame);
         auto near=world; auto near_factories=factories;
         place_at_mouse(near,near_factories,catalog,player,"GAWEAP",frame,base,{-2,-1});

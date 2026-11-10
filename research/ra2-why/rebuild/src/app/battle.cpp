@@ -995,7 +995,9 @@ public:
             if (outcome.status==p::Status::Done && order.house==player_) {
                 placement_.clear();orders_.set_placement_active(false);
             }
-            if(order.house==player_)note(outcome,"Building placed.","Can't build here.");
+            // Keep note(): the gap list must track every unknown detail.
+            if(order.house==player_)note(outcome,"Building placed.",
+                placement_status(outcome.status,outcome.detail,"Building placed.","Can't build here."));
             break;
         }
         }

@@ -36,4 +36,14 @@ inline std::string production_status(sim::production::Status status,const std::s
     if(status==Status::Waiting)return "Waiting.";
     return failure;
 }
+// Placement messages: an occupied building space asks the player to move
+// the units instead of naming the check.
+inline std::string placement_status(sim::production::Status status,const std::string& detail,
+                                    const std::string& success,const std::string& failure) {
+    using Status=sim::production::Status;
+    if(status==Status::Done)return success;
+    if(detail=="building space is occupied by a unit")
+        return "Move units away from the building space.";
+    return production_status(status,success,failure);
+}
 }
