@@ -128,12 +128,13 @@ def compare(orig_path, native_path, country, top, brief, rules):
     # no structures and no vehicles or infantry left, after it had structures.
     defeat = None
     had_structures = False
+    set_minutes(orig_all, use_frames)
     for s in orig_all:
         if s.get('country') != 'Americans':
             continue
         if s.get('structures', 0) > 0:
             had_structures = True
-        elif 'min' in s and had_structures and s.get('vehicles', 0) + s.get('infantry', 0) == 0:
+        elif had_structures and s.get('vehicles', 0) + s.get('infantry', 0) == 0:
             defeat = s['min']
             break
     if defeat is not None:
@@ -182,7 +183,8 @@ def compare(orig_path, native_path, country, top, brief, rules):
                     cells.append(f'st{m} -/-')
                 else:
                     cells.append(f'st{m} {o["structures"] if o else "-"}/{n["structures"] if n else "-"}')
-        last_o, last_n = at(orig, 30) or orig[-1], at(nat, 30) or nat[-1]
+        last = min(30, end)
+        last_o, last_n = at(orig, last) or orig[-1], at(nat, last) or nat[-1]
         cells.append(f'veh {last_o["vehicles"]}/{last_n["vehicles"]}')
         cells.append(f'inf {last_o["infantry"]}/{last_n["infantry"]}')
         cells.append(f'min {last_o["miners"]}/{last_n["miners"]}')
