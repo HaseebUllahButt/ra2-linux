@@ -21,7 +21,7 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
 NATIVE_SOURCES += src/app/battle.cpp src/app/battle_scene.cpp src/app/battle_orders.cpp src/app/battle_hud.cpp src/app/hud_art.cpp src/app/battle_shroud.cpp src/sim/prototype_shroud.cpp \
     src/app/battle_audio.cpp src/audio/game_audio.cpp src/audio/audio.cpp src/audio/lookup.cpp \
     src/app/battle_effects.cpp src/app/battle_help.cpp src/app/battle_setup.cpp src/app/battle_options.cpp src/app/battle_options_art.cpp src/app/battle_cursor.cpp src/ui/score_screen.cpp \
-    src/sim/prototype_movement.cpp src/sim/prototype_ai.cpp src/sim/prototype_infantry.cpp \
+    src/sim/prototype_movement.cpp src/sim/prototype_ai.cpp src/sim/prototype_ai_team.cpp src/sim/prototype_infantry.cpp \
     src/sim/prototype_victory.cpp src/sim/prototype_production.cpp src/sim/prototype_economy.cpp \
     src/sim/prototype_tech.cpp src/sim/prototype_repair_sell.cpp src/render/battle_radar.cpp
 NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
@@ -674,7 +674,7 @@ build/prototype_combat_test: build/native/src/weapons/prototype_combat_test.o $(
 build/prototype_victory_test: build/native/src/sim/test_prototype_victory.o build/native/src/sim/prototype_victory.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-build/prototype_ai_test: build/native/src/sim/test_prototype_ai.o build/native/src/sim/prototype_ai.o $(MAP_OBJECTS) $(FS_OBJECTS)
+build/prototype_ai_test: build/native/src/sim/test_prototype_ai.o build/native/src/sim/prototype_ai.o build/native/src/sim/prototype_ai_team.o build/native/src/sim/random.o $(MAP_OBJECTS) $(FS_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 build/prototype_infantry_test: build/native/src/sim/test_prototype_infantry.o build/native/src/sim/prototype_infantry.o $(MAP_OBJECTS) $(FS_OBJECTS)
