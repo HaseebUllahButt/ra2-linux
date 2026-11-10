@@ -153,6 +153,75 @@ int main(int argc,char** argv) {
         assert(dx*dx+dy*dy<=2);
         for(const auto& e:w.entities) assert(e.resolved_hp.value_or(0)>0 && e.lifetime==sw::Lifetime::Placed);
     }
+    // Blocked dock regressions for a full CMIN. The Chrono Miner cannot
+    // drive through the guards, so it warps to a dock Cell that only live
+    // friendly Infantry of its House hold, they step aside, and it unloads.
+    // The old fallback never fired: pass 1 skipped every CMIN and the
+    // soldier chain check rejected the end of the chain, so the full CMIN
+    // stayed stuck with a full cargo.
+    {
+        rules::IniFile guarded;
+        guarded.parse("[General]\nHarvesterLoadRate=1\nHarvesterDumpRate=.01\nCloseEnough=2.25\nBlockagePathDelay=60\n"
+                      "[CMIN]\nLocomotor={4A582741-9839-11d1-B709-00A024DDAFD1}\nSpeed=4\nStorage=2\n[E2]\nSpeed=4\n[1TNK]\nSpeed=4\n"
+                      "[OverlayTypes]\n0=TIB01\n[TIB01]\nTiberium=yes\n[Tiberiums]\n0=Poor\n[Poor]\nImage=1\nValue=30\n");
+        // kind 0 enemy Infantry, 1 friendly vehicle, 2 building,
+        // 3 friendly Infantry on an impassable Cell.
+        const auto blocked=[&](int kind) {
+            auto w=fixture("CMIN",0);
+            auto& miner=w.entities[0];
+            w.cells[4*512+3].heads->ground_head=0;w.cells[4*512+3].ground_occupancy_124=0;
+            miner.cell=ra2map::Cell{6,4};miner.position=sim::Coord{6*256+128,4*256+128,0};
+            w.cells[4*512+6].heads->ground_head=1;w.cells[4*512+6].ground_occupancy_124=32;
+            std::uint32_t id=10;
+            for(int y=3;y<=5;++y) for(int x=1;x<=3;++x) if(x!=2 || y!=4) {
+                sw::Entity blocker;blocker.id=id++;blocker.house_id=kind==0?2u:1u;
+                blocker.type=kind==1?"1TNK":kind==2?"GAWALL":"E2";
+                blocker.kind=kind==1?sw::Kind::Unit:kind==2?sw::Kind::Structure:sw::Kind::Infantry;
+                blocker.lifetime=sw::Lifetime::Placed;blocker.resolved_hp=125;blocker.layer=sw::Layer::Ground;blocker.next=0;
+                blocker.cell=ra2map::Cell{std::uint16_t(x),std::uint16_t(y)};blocker.position=sim::Coord{x*256+64,y*256+64,0};
+                w.entities.push_back(blocker);
+                auto& c=w.cells[unsigned(y)*512+unsigned(x)];
+                c.heads->ground_head=blocker.id;c.ground_occupancy_124=(kind==1||kind==2)?32u:4u;
+                if(kind==3) c.unit_land_speed=0.f;
+            }
+            return w;
+        };
+        // No warp onto an enemy soldier, a vehicle, a building, or an
+        // impassable Cell: the miner stays full and every blocker keeps its
+        // Cell, chain head and occupancy bits.
+        for(int kind:{0,1,2,3}) {
+            auto w=blocked(kind);
+            sim::PrototypeEconomy economy(guarded);
+            for(unsigned frame=0;frame<3000;++frame) economy.tick(w,frame);
+            assert(*w.houses[0].cash==0);
+            assert(w.entities[0].cell && w.entities[0].cell->x==7 && w.entities[0].cell->y==4);
+            std::uint32_t id=10;
+            for(int y=3;y<=5;++y) for(int x=1;x<=3;++x) if(x!=2 || y!=4) {
+                const auto& blocker=w.entities[id-10+2];const auto& c=w.cells[unsigned(y)*512+unsigned(x)];
+                assert(blocker.id==id++ && blocker.resolved_hp.value_or(0)>0 && blocker.lifetime==sw::Lifetime::Placed);
+                assert(c.heads->ground_head==blocker.id);
+                assert(*c.ground_occupancy_124==((kind==1||kind==2)?32u:4u));
+            }
+        }
+        // A full CMIN warps to a dock Cell held by friendly soldiers. The
+        // soldier chain stays intact: the miner joins at the tail, the old
+        // Cell keeps its remaining occupants and bits, and the House gets
+        // the credits.
+        auto w=blocked(-1);
+        sim::PrototypeEconomy economy(guarded);
+        for(unsigned frame=0;frame<3000 && *w.houses[0].cash==0;++frame) economy.tick(w,frame);
+        assert(*w.houses[0].cash==2*30);
+        assert(w.entities[0].cell && w.entities[0].cell->x==1 && w.entities[0].cell->y==3);
+        const auto& dock=w.cells[3*512+1];
+        assert(dock.heads->ground_head==10);
+        const auto& guard=w.entities[2];
+        assert(guard.id==10 && guard.next && *guard.next==1);
+        assert(!w.entities[0].next || !*w.entities[0].next);
+        assert(*dock.ground_occupancy_124==(4u|0x20u));
+        const auto& vacated=w.cells[4*512+7];
+        assert(vacated.heads->ground_head==0 && *vacated.ground_occupancy_124==0);
+        for(const auto& e:w.entities) if(e.kind==sw::Kind::Infantry) assert(e.resolved_hp.value_or(0)>0 && e.lifetime==sw::Lifetime::Placed);
+    }
     // Row 7 puts the new field beyond the previous adjacent-only scan.
     for(auto type:{"CMIN","HARV"}) for(int ore_y:{4,5,7}) {
         auto nearby=fixture(type,-1);

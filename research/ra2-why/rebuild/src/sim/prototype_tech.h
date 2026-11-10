@@ -13,7 +13,10 @@ namespace ra2::sim::tech {
 
 // Per-house power. Output and drain come from live buildings: the signed
 // rules Power= value adds to output when positive and to drain when negative.
-// A snapshot house with resolved original values wins over the recount.
+// Output is health scaled and truncated: game.exe 0x00449D40 returns
+// F2I(Health/Strength * Power), drain 0x00449DD0 returns Type Power= unscaled.
+// The recount matches HouseClass::UpdatePower 0x004F2CC0. A snapshot house
+// with resolved original values wins over the recount.
 struct HousePower {
     std::int32_t output = 0, drain = 0;
     bool low() const noexcept { return output < drain; }
@@ -22,17 +25,19 @@ struct HousePower {
     double fraction() const noexcept;
 };
 
-// TODO-ORIGINAL: RA2 recomputes per-house output and drain in House AI
-// 004F2CC0; this prototype recounts from the snapshot instead.
+// TODO-ORIGINAL 0x004F2CC0: the original zeroes the output while a spy
+// blackout timer (house +0x1ec) runs; the snapshot has no blackout state yet.
+// TODO-ORIGINAL 0x00449D40: turbine upgrades (Type PowerUpgradeBonus) and
+// building powerups add to the scaled sum; not in the snapshot yet.
 HousePower house_power(const rules::IniFile& rules,
                        const session::world::Snapshot& world, std::uint32_t house_id);
 
-// Build duration multiplier (greater than one) while low on power. Base RULES.INI [General]
-// MinLowPowerProductionSpeed=.5, MaxLowPowerProductionSpeed=.8 and
-// LowPowerPenaltyModifier=1 give speeds from .8 (barely short) down to
-// .5 (blackout). Full power is 1. TODO-ORIGINAL: exact original arithmetic;
-// guide evidence is RA1 FactoryClass (CnC_Red_Alert CODE/FACTORY.CPP), which
-// divides the build rate by the clamped power fraction.
+// Build duration multiplier (greater than one) while low on power. Recovered
+// from game.exe 0x006C22A0: speed = 1 - (1 - PowerFraction 0x004E8330) *
+// LowPowerPenaltyModifier, clamped to MinLowPowerProductionSpeed (always) and
+// MaxLowPowerProductionSpeed (only when the fraction is below 1), 0.01 when
+// zero. Build frames are F2I(cost / speed) 0x0077F110; the factory clock Rate
+// is frames/54 clamped 1..255 (0x004B9EB0). Returns 1/speed. Full power is 1.
 double production_multiplier(const rules::IniFile& rules, const HousePower& power);
 
 // Powered=yes buildings stop working below full power.
