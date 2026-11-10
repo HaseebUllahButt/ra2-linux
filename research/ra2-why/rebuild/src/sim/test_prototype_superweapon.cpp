@@ -304,12 +304,20 @@ void check_nuke(const IniFile& rules, const std::string& exe) {
         "Nuke damaged the target at click time instead of on missile impact");
     require(supers.frames_left(102, "MultiSpecial") == 9000,
         "Nuke launch did not restart its charge while the missile flies");
-    // The missile flight comes from the base rules weapon chain:
-    // [NukeCarrier] Speed=100 rising to [GiantNukeUp] DetonationAltitude=20000,
-    // then [NukePayload] Speed=10 falling from [GiantNukeDown]
-    // DetonationAltitude=30000: 200 + 3000 = 3200 frames.
+    // The missile flies its original phases from the flat z0 test map: the
+    // rise (velocity 10, cap 255, acceleration 1) crosses 20000 on step 190,
+    // then the fall (velocity -1, cap 10, acceleration 1) reaches the floor on
+    // step 2004: 190 + 2004 = 2194 frames to impact.
+    int mid_damaged = 0, mid_nukes = 0;
+    for (int frame = 9001; frame <= 11193; ++frame) {
+        const auto mid = supers.tick(world, static_cast<std::uint64_t>(frame));
+        mid_damaged += mid.damaged;
+        mid_nukes += mid.nukes;
+    }
+    require(mid_damaged == 0 && mid_nukes == 0,
+        "Nuke damaged something before the missile landed");
     int tick_damaged = 0, tick_destroyed = 0, nukes = 0;
-    for (int frame = 9001; frame <= 12200; ++frame) {
+    for (int frame = 11194; frame <= 11194; ++frame) {
         const auto impact = supers.tick(world, static_cast<std::uint64_t>(frame));
         tick_damaged += impact.damaged;
         tick_destroyed += impact.destroyed;
@@ -336,16 +344,16 @@ void check_nuke(const IniFile& rules, const std::string& exe) {
     in_flight.entities[0].lifetime = sw::Lifetime::Destroyed;
     flight.update_grants(in_flight);
     int flight_destroyed = 0, flight_nukes = 0;
-    for (int frame = 9001; frame <= 12200; ++frame) {
+    for (int frame = 9001; frame <= 11194; ++frame) {
         const auto impact = flight.tick(in_flight, static_cast<std::uint64_t>(frame));
         flight_destroyed += impact.destroyed;
         flight_nukes += impact.nukes;
     }
     require(flight_nukes == 1 && flight_destroyed == 1,
         "Losing the silo cancelled a nuke already in flight");
-    // The recharge clock runs while the missile flies: 3200 charge frames passed.
+    // The recharge clock runs while the missile flies: 2194 charge frames passed.
     require(!supers.ready(102, "MultiSpecial") &&
-        supers.frames_left(102, "MultiSpecial") == 9000 - 3200,
+        supers.frames_left(102, "MultiSpecial") == 9000 - 2194,
         "Nuke did not restart its charge");
     // The same launch replays identically.
     auto replay = make_world();
@@ -358,7 +366,7 @@ void check_nuke(const IniFile& rules, const std::string& exe) {
     for (int frame = 0; frame < 9000; ++frame) again.tick(replay, static_cast<std::uint64_t>(frame));
     const auto second = again.fire(replay, 102, "MultiSpecial", {50, 50}, 9000);
     int replay_damaged = 0, replay_destroyed = 0;
-    for (int frame = 9001; frame <= 12200; ++frame) {
+    for (int frame = 9001; frame <= 11194; ++frame) {
         const auto impact = again.tick(replay, static_cast<std::uint64_t>(frame));
         replay_damaged += impact.damaged;
         replay_destroyed += impact.destroyed;
@@ -379,7 +387,7 @@ void check_nuke(const IniFile& rules, const std::string& exe) {
     require(pair.fire(both, 102, "MultiSpecial", {50, 50}, 9000).fired, "First concurrent launch rejected");
     require(pair.fire(both, 101, "MultiSpecial", {70, 50}, 9000).fired, "Second concurrent launch rejected");
     int pair_nukes = 0, pair_destroyed = 0;
-    for (int frame = 9001; frame <= 12200; ++frame) {
+    for (int frame = 9001; frame <= 11194; ++frame) {
         const auto impact = pair.tick(both, static_cast<std::uint64_t>(frame));
         pair_nukes += impact.nukes;
         pair_destroyed += impact.destroyed;
@@ -422,10 +430,12 @@ void check_iron_curtain(const IniFile& rules, const std::string& exe) {
     for (int frame = 9001; frame <= 13500; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
     const auto nuke = supers.fire(world, 102, "MultiSpecial", {50, 50}, 13500);
     require(nuke.fired, "Second nuke was not charged");
-    for (int frame = 13501; frame <= 16000; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
-    require(supers.fire(world, 102, "IronCurtainSpecial", {50, 50}, 16000).fired,
+    // The nuke impact lands 2194 frames after the click (15694); the third
+    // curtain is ready at 13500, so refresh inside the 750 frame window.
+    for (int frame = 13501; frame <= 15600; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
+    require(supers.fire(world, 102, "IronCurtainSpecial", {50, 50}, 15600).fired,
         "Third Iron Curtain was not charged");
-    for (int frame = 16001; frame <= 16700; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
+    for (int frame = 15601; frame <= 15694; ++frame) supers.tick(world, static_cast<std::uint64_t>(frame));
     require(world.entities[1].lifetime == sw::Lifetime::Placed &&
         world.entities[1].resolved_hp == 400, "Nuke hurt a curtained tank");
     require(chain_ok(world), "Iron Curtain deaths broke the Cell chains");

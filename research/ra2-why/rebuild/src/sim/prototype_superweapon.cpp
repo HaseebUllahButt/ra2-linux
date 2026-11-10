@@ -538,29 +538,39 @@ SuperTickReport PrototypeSuperweapons::tick(session::world::Snapshot& world, std
             }
         }
     }
-    // Nukes in flight land when their missiles arrive (FUN_0069D850 case 0
-    // spawns the bullet; the blast follows on a later frame). Every launch
-    // keeps its own pending impact; none is lost.
-    for (const auto& pending : nukes_) {
-        if (frame < pending.impact) continue;
+    // Nukes in flight move through their original phases (FUN_0045F710): a
+    // rise from the granting building until the carrier ceiling, then a fall
+    // onto the target; the floor hit detonates once and leaves the queue.
+    for (auto& pending : nukes_) {
+        if (pending.done) continue;
+        if (pending.rising) {
+            const auto flags = step_vertical_projectile(pending.rise, 255,
+                pending.rise_accel, 0, pending.rise_ceiling);
+            if (flags.above_ceiling) pending.rising = false; // Fall next frame.
+            continue;
+        }
+        const auto flags = step_vertical_projectile(pending.fall, pending.fall_cap,
+            pending.fall_accel, pending.fall_floor, pending.fall_ceiling);
+        if (!flags.at_or_below_floor) continue;
         // The weapon section was validated at launch; it is used as stored.
         auto weapon = blast_weapon(rules_, pending.payload_weapon);
         if (!weapon) {
             report.notes.push_back("nuke payload weapon is unavailable");
+            pending.done = true;
             continue;
         }
         auto epicenter = cell_center(pending.target);
-        epicenter.z = floor_z(world, pending.target);
+        epicenter.z = pending.fall_floor;
         const auto blast = detonate(world, epicenter, *weapon, rules_, distance_.get(),
             invulnerable_, frame);
         report.damaged += blast.damaged;
         report.destroyed += blast.destroyed;
         ++report.nukes;
         for (const auto& missing : blast.missing) report.notes.push_back(missing);
+        pending.done = true;
     }
     nukes_.erase(std::remove_if(nukes_.begin(), nukes_.end(),
-        [frame](const PendingNuke& pending) { return frame >= pending.impact; }),
-        nukes_.end());
+        [](const PendingNuke& pending) { return pending.done; }), nukes_.end());
     // Lightning storm strikes, one game frame at a time.
     if (!storm_ || !storm_->active) return report;
     // FUN_0051F930 stores the deferment; FUN_00520200 counts it down.
@@ -763,18 +773,21 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
         case SuperKind::Nuke: {
             // Base 1.006 FUN_0069D850 case 0 (MultiMissile) does not detonate at
             // the click: it passes the weapon (offset +0xA4) into CreateBullet
-            // 00463990 and spawns the missile above the target. The flight comes
-            // from the base rules weapon chain: [NukeCarrier] Speed=100 with
-            // projectile [GiantNukeUp] rising to DetonationAltitude=20000 (the
-            // rules comment: it only creates the downward one over the target),
-            // then [NukePayload] Speed=10 with projectile [GiantNukeDown] falling
-            // from DetonationAltitude=30000. The blast lands when the missile
-            // arrives, so the impact is deferred.
+            // 00463990 and spawns the missile. The missile then flies the two
+            // FUN_0045F710 phases: an upward rise with velocity 10 and speed cap
+            // 255 (binary 00448544..0044856B in the silo launch) until the
+            // carrier projectile's DetonationAltitude, then a downward payload
+            // fall (FUN_00463C50, code 00463D55..00463E75) that starts at
+            // target.z + that ceiling with velocity -1 (constant 0079D578).
+            // FUN_004BA480 / FUN_004BA4D0 are trig table lookups (quantized
+            // index into float tables at 00801DC4 / 0080FDE4), not RNG.
             const auto carrier = !type->weapon.empty() ? type->weapon : std::string("NukeCarrier");
-            const auto rise_speed =
-                rules_.read_integer(carrier, "Speed", 100);
-            const auto rise_altitude = rules_.read_integer(
-                rules_.read_string(carrier, "Projectile", "GiantNukeUp"), "DetonationAltitude", 20000);
+            const auto carrier_projectile =
+                rules_.read_string(carrier, "Projectile", "GiantNukeUp");
+            const auto rise_accel =
+                rules_.read_integer(carrier_projectile, "Acceleration", 1);
+            const auto rise_ceiling =
+                rules_.read_integer(carrier_projectile, "DetonationAltitude", 20000);
             // Validate the payload before the charge is consumed, so a rules
             // mistake cannot cost a launch. The payload section is stored on the
             // pending missile so the impact uses the same weapon that was
@@ -789,24 +802,51 @@ SuperLaunchReport PrototypeSuperweapons::fire(session::world::Snapshot& world, s
                 report.notes.push_back("nuke payload weapon is unavailable");
                 return report;
             }
-            const auto fall_speed = rules_.read_integer("NukePayload", "Speed", 10);
-            const auto fall_altitude = rules_.read_integer(
-                rules_.read_string("NukePayload", "Projectile", "GiantNukeDown"),
-                "DetonationAltitude", 30000);
-            // FUN_004BA480 / FUN_004BA4D0 are trig table lookups (quantized
-            // index into float tables at 00801DC4 / 0080FDE4), not RNG. The
-            // binary code 00463D55..00463E75 (FUN_00463C50, omitted by the
-            // export as unreachable) multiplies by the constant at 0079D578,
-            // which is -1.0: the payload starts at target.z + the carrier
-            // projectile's DetonationAltitude with initial downward speed.
-            // TODO-ORIGINAL: exact impact timing (acceleration/cap phase
-            // design pending); this prototype keeps the constant-speed read
-            // of the rules values. The pure step lives in
-            // vertical_projectile.h and is not wired into fire/tick yet.
-            const auto delay = (rise_altitude + rise_speed - 1) / rise_speed +
-                (fall_altitude + fall_speed - 1) / fall_speed;
-            nukes_.push_back(
-                PendingNuke{frame + static_cast<std::uint64_t>(delay), target, payload_section});
+            const auto fall_cap = rules_.read_integer(payload_section, "Speed", 10);
+            const auto payload_projectile =
+                rules_.read_string(payload_section, "Projectile", "GiantNukeDown");
+            const auto fall_accel =
+                rules_.read_integer(payload_projectile, "Acceleration", 1);
+            const auto fall_ceiling =
+                rules_.read_integer(payload_projectile, "DetonationAltitude", 30000);
+            // Reject broken flight numbers before the charge is consumed. The
+            // rise cap is the binary constant 255 (00448544..0044856B).
+            if (fall_cap <= 0 || rise_ceiling <= 0 || fall_ceiling <= 0 ||
+                rise_accel < 0 || fall_accel < 0) {
+                report.notes.push_back("nuke flight numbers are unusable");
+                return report;
+            }
+            // The rise leaves the live granting building; fall back to its Cell
+            // floor height when the position is unresolved.
+            int launch_z = 0;
+            bool site_found = false;
+            for (const auto& building : grants_[slot]) {
+                for (const auto& entity : world.entities) {
+                    if (entity.house_id != house || entity.kind != w::Kind::Structure ||
+                        !same_id(entity.type, building))
+                        continue;
+                    const bool standing = entity.lifetime == w::Lifetime::Placed &&
+                        (!entity.resolved_hp || *entity.resolved_hp > 0);
+                    if (!standing) continue;
+                    if (entity.position) launch_z = entity.position->z;
+                    else if (entity.cell) launch_z = floor_z(world, *entity.cell);
+                    site_found = true;
+                    break;
+                }
+                if (site_found) break;
+            }
+            PendingNuke pending;
+            pending.target = target;
+            pending.payload_weapon = payload_section;
+            pending.rise = VerticalProjectileState{launch_z, 10.0};
+            pending.rise_accel = rise_accel;
+            pending.rise_ceiling = rise_ceiling;
+            pending.fall_floor = floor_z(world, target);
+            pending.fall = VerticalProjectileState{pending.fall_floor + rise_ceiling, -1.0};
+            pending.fall_cap = fall_cap;
+            pending.fall_accel = fall_accel;
+            pending.fall_ceiling = pending.fall_floor + fall_ceiling;
+            nukes_.push_back(std::move(pending));
             report.notes.push_back("nuke missile in flight");
             break;
         }

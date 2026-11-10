@@ -1,4 +1,5 @@
 #pragma once
+#include "vertical_projectile.h"
 #include "../rules/ini_file.h"
 #include "../session/world/world.h"
 #include <cstdint>
@@ -132,10 +133,19 @@ private:
     std::map<std::uint32_t, std::map<std::string, SuperweaponState>> houses_;
     std::map<std::uint32_t, std::uint64_t> invulnerable_;
     std::map<std::uint32_t, ra2map::Cell> armed_;
+    // One launched nuke: an upward rise from the live granting building, then
+    // a downward payload fall onto the target (FUN_0045F710 phases; the
+    // binary FUN_00463C50 code 00463D55..00463E75 starts the fall at
+    // target.z + the carrier ceiling with velocity -1).
     struct PendingNuke {
-        std::uint64_t impact = 0;   // Frame the missile lands.
+        bool rising = true;
+        VerticalProjectileState rise{};
+        VerticalProjectileState fall{};
         ra2map::Cell target{};
         std::string payload_weapon; // Weapon section validated at launch.
+        int rise_accel = 1, rise_ceiling = 0;
+        int fall_cap = 1, fall_accel = 1, fall_floor = 0, fall_ceiling = 0;
+        bool done = false;
     };
     std::vector<PendingNuke> nukes_; // Missiles in flight, one per launch.
     std::optional<Storm> storm_;
