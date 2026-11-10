@@ -1,5 +1,7 @@
 #include "damage_runtime.h"
 #include "../loop/profile.h"
+#include <algorithm>
+#include <array>
 #include <map>
 #include <set>
 #include <cstdio>
@@ -461,7 +463,17 @@ bool prototype_unlink(Snapshot& w,Entity& victim) {
             }
         }
     }
-    if (links.empty()) return false;
+    // Base flight mission: aircraft are unlinked from their Cell while
+    // flying. Flight unlinks them and clears Foot +5A0 occupancy tracking,
+    // so an unlinked victim with no tracking is already off the map. Only
+    // the known flying types take this path; every other rejection stands.
+    if (links.empty()) {
+        static const std::array<const char*,4> flying{{"ORCA","BEAG","ZEP","JUMPJET"}};
+        if (*victim.next!=0 || victim.occupancy_tracking.value_or(true) ||
+            std::find_if(flying.begin(),flying.end(),[&](const char* type){
+                return victim.type==type;})==flying.end()) return false;
+        return true;
+    }
     for (auto* link:links) *link=*victim.next;
     victim.next=0;
     // TODO-ORIGINAL: Replace with Unit Mark(0), its Cell setup, and reserved
@@ -920,7 +932,12 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             // Base 006FB890: a turreted Unit with a target turns its turret
             // toward that target every frame, also while out of range.
             const auto aim=turret_aim(*source,*target,weapon->omni_fire,static_cast<std::int32_t>(frame));
-            const int d=distance_.between(*source->position,*target->position);
+            // AircraftClass::IsCloseEnoughToAttack (006C5070) delegates to
+            // weapon eligibility. Flight missions use ground separation here,
+            // so a bomber can reach a ground target below its cruise height.
+            // TODO-ORIGINAL: recover the complete aircraft range override.
+            const bool flying=prototype_air_target(base_,map_,world,*source);
+            const int d=distance_.between(*source->position,*target->position,flying);
             if (d>weapon->range) {report.out_of_range.emplace_back(source->id,target->id);++it;continue;}
             // TODO-ORIGINAL: Replace these direct range and targeting checks
             // with the full mission, eligibility, terrain and elevation paths.

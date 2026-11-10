@@ -432,6 +432,36 @@ void fire_gate_test(const rules::IniFile& rules,const rules::IniFile& art,const 
     check(aa_fired,"AA weapon did not fire at an airborne Aircraft target");
     std::cout<<"Fire gate blocks new Aircraft shots only, AA vs AG targets passed\n";
 }
+// Flight unlinks flying aircraft from their Cells and clears occupancy
+// tracking. A death must accept such an actor and still reject every other
+// unlink case.
+void unlinked_aircraft_death_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+    rules::IniFile map;
+    const auto build=[&](const char* type,world::Kind kind,bool tracking) {
+        auto w=make_world("HTNK",type,world::Kind::Unit,kind,400,150);
+        w.entities[1].next=0; // no Cell link: the flight mission unlinked it
+        w.entities[1].occupancy_tracking=tracking;
+        w.cells.at(50*512+54).heads->ground_head=3; // only the tree is linked
+        return w;
+    };
+    auto flying=build("ORCA",world::Kind::Aircraft,false);
+    sim::PrototypeCombatRuntime ok(rules,map,art,exe);
+    const auto death=ok.destroy_house(flying,102,0);
+    check(death.destroyed==1 && death.unresolved.empty() &&
+        flying.entities[1].lifetime==world::Lifetime::Destroyed,
+        "unlinked flying ORCA death was rejected");
+    auto tracked=build("ORCA",world::Kind::Aircraft,true);
+    sim::PrototypeCombatRuntime tracked_runtime(rules,map,art,exe);
+    check(tracked_runtime.destroy_house(tracked,102,0).destroyed==0 &&
+        tracked.entities[1].lifetime==world::Lifetime::Placed,
+        "unlinked actor with occupancy tracking died");
+    auto grounded=build("HTNK",world::Kind::Unit,false);
+    sim::PrototypeCombatRuntime ground_runtime(rules,map,art,exe);
+    check(ground_runtime.destroy_house(grounded,102,0).destroyed==0 &&
+        grounded.entities[1].lifetime==world::Lifetime::Placed,
+        "unlinked non-flying actor died");
+    std::cout<<"Unlinked flying aircraft death accepted, other unlink rejections kept\n";
+}
 // A small base: house 101 owns the yard and Rhinos, house 102 owns the
 // soldiers. Each object has its own Cell link.
 struct Piece { std::uint32_t id,house; const char* type; world::Kind kind; int x,y; };
@@ -684,6 +714,7 @@ int main(int argc,char** argv) {
         }
         std::cout<<"TeamDelays="<<rules.read_string("General","TeamDelays")<<'\n';
         fire_gate_test(rules,art,std::string(argv[1])+"/game.exe");
+        unlinked_aircraft_death_test(rules,art,std::string(argv[1])+"/game.exe");
         air_ground_test(rules,art,std::string(argv[1])+"/game.exe");
         fallen_house_test(rules,art,std::string(argv[1])+"/game.exe",files);
         tank_test(rules,art,std::string(argv[1])+"/game.exe");
