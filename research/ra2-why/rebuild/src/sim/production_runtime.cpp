@@ -987,7 +987,7 @@ Outcome start_production(w::Snapshot& snapshot,FactorySet& factories,const Catal
             // type joins the +40 queue. The click is refused when Rules +0xE8
             // (default 30, 0072C27F) or the build limit is reached. FUN_004F4F30
             // re-checks the limit against CountTotal 004B9E40 (object + queued).
-            if (factory->queued.size()>=queue_limit)
+            if (factory->queued.size()+std::size_t(factory->object!=0)>=queue_limit)
                 return fail(Status::Rejected,"queue limit reached");
             if (t->can.build_limit<0 &&
                 std::abs(t->can.build_limit)<=count_total(*factory,t->id))
@@ -1053,14 +1053,19 @@ Outcome cancel_production(w::Snapshot& snapshot,FactorySet& factories,const Cata
     auto* factory=factory_in_slot(factories,owner,slot_of(*t));
     if (!factory) return fail(Status::Rejected,"no product to cancel");
     // FactoryClass::RemoveOneFromQueue 004B9DF0: a right click removes the
-    // first queued entry of this type. Queued items cost nothing to cancel.
-    if (!factory->object || factory->object_type!=type) {
+    // first queued entry of this type, even when the active object is the
+    // same type. Queued items cost nothing to cancel. Only a click with an
+    // empty queue cancels the active product.
+    {
         auto& queue=factory->queued;
         const auto item=std::find(queue.begin(),queue.end(),type);
-        if (item==queue.end()) return fail(Status::Rejected,"no product to cancel");
-        queue.erase(item);
-        return Outcome{Status::Done,{},0,{}};
+        if (item!=queue.end()) {
+            queue.erase(item);
+            return Outcome{Status::Done,{},0,{}};
+        }
     }
+    if (!factory->object || factory->object_type!=type)
+        return fail(Status::Rejected,"no product to cancel");
     auto* h=house_of(snapshot,owner);
     const auto* item=entity_of(snapshot,factory->object);
     if (!h || !h->cash || !item || item->lifetime!=w::Lifetime::Created)
@@ -1379,17 +1384,20 @@ Outcome tick(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::u
     if (!runtime_ready(snapshot)) return fail(Status::NeedsInput,"setup is not complete");
     // This tick writes House records, and the queue advance can create the
     // next queued object. Edit the Snapshot in place and restore its Houses
-    // and Entities on failure instead of copying every Cell.
+    // on failure instead of copying every Cell. The Entity backups are lazy:
+    // they are taken only when the queue advance is about to create an object.
     struct Restore {
-        w::Snapshot& world; std::vector<w::House> houses; std::vector<w::Entity> entities;
-        std::vector<w::CreatedObject> creation_order; bool keep=false;
+        w::Snapshot& world; std::vector<w::House> houses;
+        std::optional<std::vector<w::Entity>> entities;
+        std::optional<std::vector<w::CreatedObject>> creation_order; bool keep=false;
         ~Restore() {
             if (!keep) {
-                world.houses=std::move(houses); world.entities=std::move(entities);
-                world.creation_order=std::move(creation_order);
+                world.houses=std::move(houses);
+                if (entities) world.entities=std::move(*entities);
+                if (creation_order) world.creation_order=std::move(*creation_order);
             }
         }
-    } restore{snapshot,snapshot.houses,snapshot.entities,snapshot.creation_order};
+    } restore{snapshot,snapshot.houses,std::nullopt,std::nullopt};
     auto& s=snapshot; auto f=factories;
     // House::AI 004E41B4 -> Recalc_Power 004F2CC0 for skirmish sessions.
     for (auto& [id,dirty]:f.power_dirty) {
@@ -1444,6 +1452,10 @@ Outcome tick(w::Snapshot& snapshot,FactorySet& factories,const Catalog& c,std::u
     for (auto& factory:f.factories) {
         if (factory.object || factory.queued.empty() ||
             (factory.interval!=0 && !factory.suspended)) continue;
+        // The advance is the first entity write of this tick; take the lazy
+        // backups only now.
+        if (!restore.entities) restore.entities=snapshot.entities;
+        if (!restore.creation_order) restore.creation_order=snapshot.creation_order;
         const auto* t=c.find(factory.queued.front());
         if (!t) return fail(Status::NeedsInput,"queued type unresolved");
         auto* h=house_of(s,factory.house_id);

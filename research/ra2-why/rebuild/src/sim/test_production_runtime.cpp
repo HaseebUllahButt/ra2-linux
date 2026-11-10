@@ -259,21 +259,35 @@ void self_test() {
         require(cancel_production(world,factories,catalog,1,"LTD",0).status==Status::Done,
             "right click removes the last queued LTD");
         require(factories.factories.back().queued.empty(),"the LTD queue is empty");
-        // The whole infantry queue is one pool: 29 GI clicks plus one
-        // Engineer-style type fill it to 30 (reference: 29 GIs queued, the
-        // Engineer icon took 1, 29 + 1 = 30).
-        for (int click=0;click<29;++click)
+        // The whole infantry queue is one pool of 30 including the active
+        // object: 28 GI clicks plus one Engineer-style type fill it to
+        // 29 queued + 1 active = 30 (reference: 29 GIs queued, the Engineer
+        // icon took 1, 29 + 1 = 30).
+        for (int click=0;click<28;++click)
             require(begin_production(world,factories,catalog,1,"E1",0).status==Status::Done,
                 "queue click accepted");
         require(begin_production(world,factories,catalog,1,"E2",0).status==Status::Done,
-            "the mixed type takes the 30th queue slot");
-        require(factories.factories.front().queued.size()==30,"the queue holds 30 items");
-        require(factories.factories.front().queued.back()=="E2","the 30th entry is the mixed type");
+            "the mixed type takes the 30th slot");
+        require(factories.factories.front().queued.size()==29,"the queue holds 29 queued items");
+        require(factories.factories.front().queued.back()=="E2","the last entry is the mixed type");
         require(*world.houses.front().cash==5000,"queued items cost nothing");
         require(begin_production(world,factories,catalog,1,"E1",0).status==Status::Rejected,
-            "click 32 is refused at the queue limit");
+            "click 31 is refused at the queue limit");
         require(begin_production(world,factories,catalog,1,"E2",0).status==Status::Rejected,
-            "click 33 for the mixed type is refused too");
+            "click 32 for the mixed type is refused too");
+        // A same-type right click removes a queued entry and keeps the active
+        // object and the cash.
+        const auto active_before=factories.factories.front().object;
+        require(cancel_production(world,factories,catalog,1,"E1",0).status==Status::Done,
+            "same-type right click removes a queued GI");
+        require(*world.houses.front().cash==5000 &&
+            factories.factories.front().object==active_before &&
+            factories.factories.front().queued.size()==28,
+            "same-type cancel keeps the active object and the cash");
+        // A tick with no pending queue advance leaves the entities untouched.
+        const auto entities_before=world.entities.size();
+        require(tick(world,factories,catalog,1).status==Status::Done,"tick with a full queue");
+        require(world.entities.size()==entities_before,"no pending queue means no entity copy");
         // Run the GI factory to completion, then the queue advances.
         std::uint64_t frame=0;
         for (frame=1;factories.factories.front().progress!=54 && frame<=2000;++frame)
@@ -286,19 +300,18 @@ void self_test() {
           done.suspended=true; done.progress=0; done.interval=0; done.timer_duration=0; }
         require(tick(world,factories,catalog,++frame).status==Status::Done,"advance tick");
         require(factories.factories.front().object && factories.factories.front().object_type=="E1" && factories.factories.front().progress==0 &&
-            factories.factories.front().balance==200 && factories.factories.front().queued.size()==29 &&
+            factories.factories.front().balance==200 && factories.factories.front().queued.size()==27 &&
             world.houses.front().infantry_owned_5440->at(0)==2,
             "the idle factory started the next queued GI");
-        // Right click cancels the active GI first: full refund, queue kept.
-        require(cancel_production(world,factories,catalog,1,"E1",0).status==Status::Done,
-            "right click cancels the active GI");
-        require(*world.houses.front().cash==4800 &&
-            factories.factories.front().queued.size()==29,
-            "active GI cancel at stage 0 refunds nothing and keeps the queue");
-        // A second right click removes one from the queue.
+        // A right click on the building icon removes a queued GI first.
         require(cancel_production(world,factories,catalog,1,"E1",0).status==Status::Done,
             "right click removes a queued GI");
-        require(factories.factories.front().queued.size()==28 &&
+        require(*world.houses.front().cash==4800 &&
+            factories.factories.front().queued.size()==26,
+            "queued GI cancel refunds nothing");
+        require(cancel_production(world,factories,catalog,1,"E1",0).status==Status::Done,
+            "right click removes the next queued GI");
+        require(factories.factories.front().queued.size()==25 &&
             *world.houses.front().cash==4800,"queued GI cancel refunds nothing");
     }
     naval_cases();
