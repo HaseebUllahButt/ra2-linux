@@ -441,7 +441,7 @@ public:
     void queue(Order order) {pending_.push_back(std::move(order));}
     void status(std::string message) {status_.set(std::move(message),clock_.now_ms());}
     // --- Playable super weapons (Part 2) ---------------------------------
-    std::vector<SuperweaponEntry> superweapon_panel_entries() const {
+    std::vector<SuperweaponEntry> superweapon_entries_for_player() const {
         return superweapon_entries(superweapon_types_,*superweapons_,player_,
             superweapons_blocked_,[this](const std::string& type){return name(type);});
     }
@@ -476,32 +476,34 @@ public:
         for(const auto& note:report.notes)gaps_.insert(note);
         return report.fired;
     }
-    // Sidebar pick and target clicks. Returns true when the input belonged
+    // A sidebar pick of a granted weapon starts the target flow. The cameo
+    // shows the charge clock; only a ready weapon accepts the click.
+    void superweapon_pick(const std::string& section) {
+        const auto* type=superweapon_type(section);
+        if(!type)return;
+        const auto entries=superweapon_entries_for_player();
+        const auto found=std::find_if(entries.begin(),entries.end(),
+            [&](const SuperweaponEntry& item){return item.section==section;});
+        if(found==entries.end())return;
+        const auto& entry=*found;
+        if(!entry.ready) {
+            status(entry.suspended?name(section)+" is on hold: low power.":
+                name(section)+" is not ready.");
+            return;
+        }
+        superweapon_selected_=section;
+        if(type->kind==sim::SuperKind::ChronoSphere) {
+            superweapon_flow_=SuperweaponFlow::ChronoSource;
+            status("Select the unit to teleport. Right click cancels.");
+        } else {
+            superweapon_flow_=SuperweaponFlow::ChooseTarget;
+            status("Select target for "+name(section)+". Right click cancels.");
+        }
+    }
+    // Target clicks for a picked weapon. Returns true when the input belonged
     // to the super weapon flow and is consumed.
     bool superweapon_input(const Input& input) {
-        if(superweapon_flow_==SuperweaponFlow::None) {
-            if(input.kind!=InputKind::Button||!input.pressed||input.key!=SDL_BUTTON_LEFT||
-                input.x>=BattleHud::sidebar_x||input.y>=BattleHud::command_bar_y)return false;
-            const auto entries=superweapon_panel_entries();
-            const auto row=SuperweaponPanel::row_at(input.x,input.y,entries.size());
-            if(!row)return false;
-            const auto& entry=entries[*row];
-            if(!entry.ready) {
-                status(entry.suspended?entry.name+" is on hold: low power.":
-                    entry.name+" is not ready.");
-                return true;
-            }
-            superweapon_selected_=entry.section;
-            const auto* type=superweapon_type(entry.section);
-            if(type&&type->kind==sim::SuperKind::ChronoSphere) {
-                superweapon_flow_=SuperweaponFlow::ChronoSource;
-                status("Select the unit to teleport. Right click cancels.");
-            } else {
-                superweapon_flow_=SuperweaponFlow::ChooseTarget;
-                status("Select target for "+name(entry.section)+". Right click cancels.");
-            }
-            return true;
-        }
+        if(superweapon_flow_==SuperweaponFlow::None)return false;
         if(input.kind==InputKind::Button&&input.pressed&&input.key==SDL_BUTTON_RIGHT) {
             superweapon_flow_=SuperweaponFlow::None;chrono_source_.reset();status("");
             return true;
@@ -535,33 +537,6 @@ public:
             chrono_source_.reset();
         }
         return true;
-    }
-    void draw_superweapon_panel() {
-        if(help_visible_||options_.visible()||show_score_)return;
-        const auto entries=superweapon_panel_entries();
-        if(entries.empty())return;
-        const auto panel=SuperweaponPanel{};
-        rectangle(frame_,panel.x-2,panel.y-2,panel.width+4,SuperweaponPanel::height(entries.size())+2,{0,0,0});
-        const auto* font=hud_.font();
-        for(std::size_t i=0;i<entries.size();++i) {
-            const auto& entry=entries[i];
-            const std::string clock=entry.ready?"READY":entry.suspended?"HOLD":
-                std::to_string(entry.frames_left/900)+":"+
-                std::to_string((entry.frames_left/15)%60+100).substr(1,2);
-            const std::array<std::uint8_t,3> color=entry.ready?
-                std::array<std::uint8_t,3>{70,255,90}:std::array<std::uint8_t,3>{224,230,192};
-            if(font) {
-                const std::string line=entry.name;
-                hud_text(frame_,*font,line,panel.x,panel.y+int(i)*SuperweaponPanel::row_height,
-                    {color[0],color[1],color[2],255});
-                const int width=hud_text_width(*font,clock);
-                hud_text(frame_,*font,clock,panel.x+panel.width-width,
-                    panel.y+int(i)*SuperweaponPanel::row_height,{color[0],color[1],color[2],255});
-            } else {
-                rectangle(frame_,panel.x,panel.y+int(i)*SuperweaponPanel::row_height,
-                    panel.width,SuperweaponPanel::row_height-2,color);
-            }
-        }
     }
     int factory_slot(const p::TypeFacts& type) const {
         return type.rtti==p::Rtti::BuildingType?(type.build_cat==5?5:4):
@@ -691,7 +666,14 @@ public:
             if (input.pressed && (input.key==SDL_BUTTON_LEFT || input.key==SDL_BUTTON_RIGHT)) {
                 refresh_hud();
                 const auto action=hud_.handle_click(input.x,input.y,hud_state_);
-                if(action.kind==HudActionKind::Build && !victory_.settled()) {
+                if(action.kind==HudActionKind::Build && !victory_.settled() &&
+                    superweapon_type(action.type)) {
+                    // A granted super weapon cameo: left click starts the
+                    // target flow, right click is ignored.
+                    if(input.key==SDL_BUTTON_RIGHT)return;
+                    building_tool_=BuildingTool::None;
+                    superweapon_pick(action.type);
+                } else if(action.kind==HudActionKind::Build && !victory_.settled()) {
                     building_tool_=BuildingTool::None;
                     const auto* type=catalog_.find(action.type);
                     if(!type)return;
@@ -1597,6 +1579,10 @@ public:
             choice.queued=build_queue_.count(type)+active_count(type);
             hud_state_.choices.push_back(std::move(choice));
         }
+        // Granted super weapons join the Defenses tab of the cameo grid:
+        // the cameo shows the charge clock, and only a ready weapon clicks.
+        for(const auto& entry:superweapon_entries_for_player())
+            hud_state_.choices.push_back(superweapon_choice(entry));
         hud_state_.choices=sidebar_choices_.update(hud_state_.choices);
         hud_state_.camera={camera_x_,camera_y_,BattleHud::sidebar_x,BattleHud::command_bar_y};
         hud_state_.map_width=terrain_.width;hud_state_.map_height=terrain_.height;
@@ -1681,7 +1667,7 @@ public:
         }
         shroud_.mask_scene(frame_,world_,player_,[this](ra2map::Cell c){return shroud_anchor(c);},
             camera_x_,camera_y_,{0,0,BattleHud::sidebar_x,BattleHud::command_bar_y});
-        refresh_hud();draw_superweapon_panel();hud_.draw(frame_,hud_state_);
+        refresh_hud();hud_.draw(frame_,hud_state_);
         if(show_score_ && score_image_) {
             const auto& score=*score_image_;
             for(int y=0;y<frame_.height;++y)for(int x=0;x<frame_.width;++x) {

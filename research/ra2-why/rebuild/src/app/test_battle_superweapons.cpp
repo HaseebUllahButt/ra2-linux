@@ -169,18 +169,28 @@ int main() try {
         chrono_world.entities[1].cell->y == landing.y,
         "the source tank did not arrive at the second click");
 
-    // Panel layout: rows are hit only inside the panel, on the left edge as
-    // the original places the special weapon buttons.
-    using ra2::app::SuperweaponPanel;
-    require(SuperweaponPanel::x == 0, "the panel sits on the left screen edge");
-    require(!SuperweaponPanel::row_at(SuperweaponPanel::x - 1, SuperweaponPanel::y, 1),
-        "left of the panel misses");
-    require(SuperweaponPanel::row_at(SuperweaponPanel::x + 5, SuperweaponPanel::y + 5, 1) == 0u,
-        "the first row hits");
-    require(!SuperweaponPanel::row_at(SuperweaponPanel::x + 5,
-        SuperweaponPanel::y + SuperweaponPanel::row_height, 1), "past the last row misses");
+    // Sidebar cameo entries: the section id is the choice type, the charge
+    // clock shows as progress, and only a ready weapon is enabled.
+    ra2::app::SuperweaponEntry charging;
+    charging.section = "ChronoSphereSpecial";charging.name = "Chronosphere";
+    charging.frames_left = 3150;charging.recharge_frames = 6300;
+    const auto cameo = ra2::app::superweapon_choice(charging);
+    require(cameo.type == "ChronoSphereSpecial" && cameo.category == ra2::app::BuildCategory::Defenses,
+        "the cameo uses the section id under Defenses");
+    require(!cameo.enabled && !cameo.held && cameo.progress == 500,
+        "a charging cameo is disabled at half charge");
+    charging.ready = true;charging.frames_left = 0;
+    require(ra2::app::superweapon_choice(charging).enabled &&
+        ra2::app::superweapon_choice(charging).progress == 1000,
+        "a ready cameo is enabled at full charge");
+    charging.ready = false;charging.suspended = true;
+    require(ra2::app::superweapon_choice(charging).held,
+        "a low power hold shows as held");
+    require(ra2::app::is_superweapon_pick(chrono_types, "ChronoSphereSpecial") &&
+        !ra2::app::is_superweapon_pick(chrono_types, "GAPILL"),
+        "click routing tells super weapon sections from build types");
 
-    std::cout << "battle_superweapons checks passed: speech names, option gate, entries, panel\n";
+    std::cout << "battle_superweapons checks passed: speech names, option gate, entries, sidebar\n";
     return 0;
 } catch (const std::exception& error) {
     std::cerr << "test_battle_superweapons: " << error.what() << '\n';

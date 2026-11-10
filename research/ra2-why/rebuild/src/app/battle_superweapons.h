@@ -15,6 +15,7 @@
 // entries in the base export index; the sim header cites them from the YR
 // decomp and marks them unverified against this dump.
 #include "../sim/prototype_superweapon.h"
+#include "battle_hud.h"
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -139,22 +140,27 @@ inline std::string superweapon_launch_speech(sim::SuperKind kind) {
     }
 }
 
-// Special weapon buttons on the left screen edge, as the original places
-// them (RA2 sidebar has no free rows: tabs, the 2x10 cameo grid and the
-// power bar fill it). One row per granted weapon. The draw code lives in
-// battle.cpp; this is the layout.
-struct SuperweaponPanel {
-    static constexpr int x = 0, y = 24, width = 150, row_height = 15;
-    static int height(std::size_t rows) {
-        return rows ? int(rows) * row_height + 4 : 0;
-    }
-    // Row index of a click inside the panel, else nullopt.
-    static std::optional<std::size_t> row_at(int px, int py, std::size_t rows) {
-        if (px < x || px >= x + width || py < y) return {};
-        const std::size_t row = std::size_t(py - y) / row_height;
-        if (row >= rows || py >= y + height(rows)) return {};
-        return row;
-    }
-};
+// Sidebar cameo entry for one granted weapon (battle_hud.h BuildChoice).
+// The section id is the choice type, so the root can route the click. The
+// charge clock shows as the production progress; only a ready weapon is
+// enabled, and a low power hold shows as held.
+inline BuildChoice superweapon_choice(const SuperweaponEntry& entry) {
+    BuildChoice choice;
+    choice.type = entry.section;
+    choice.name = entry.name;
+    choice.enabled = entry.ready;
+    choice.progress = entry.ready || entry.recharge_frames <= 0 ? 1000 :
+        1000 * (entry.recharge_frames - entry.frames_left) / entry.recharge_frames;
+    choice.held = entry.suspended;
+    choice.category = BuildCategory::Defenses;
+    return choice;
+}
+
+// True when the type names a super weapon section, not a rules build type.
+inline bool is_superweapon_pick(const std::vector<sim::SuperweaponType>& types,
+                                const std::string& type) {
+    for (const auto& item : types) if (item.id == type) return true;
+    return false;
+}
 
 } // namespace ra2::app
