@@ -21,7 +21,7 @@ NATIVE_SOURCES = src/app/platform.cpp src/app/main.cpp src/app/terrain_inputs.cp
 NATIVE_SOURCES += src/app/battle.cpp src/app/battle_scene.cpp src/app/battle_orders.cpp src/app/battle_hud.cpp src/app/hud_art.cpp src/app/battle_shroud.cpp src/sim/prototype_shroud.cpp \
     src/app/battle_audio.cpp src/audio/game_audio.cpp src/audio/audio.cpp src/audio/lookup.cpp \
     src/app/battle_effects.cpp src/app/battle_help.cpp src/app/battle_setup.cpp src/app/battle_options.cpp src/app/battle_options_art.cpp src/app/battle_cursor.cpp src/ui/score_screen.cpp \
-    src/sim/prototype_movement.cpp src/sim/prototype_ai.cpp src/sim/prototype_infantry.cpp \
+    src/sim/prototype_movement.cpp src/sim/prototype_ai.cpp src/sim/prototype_ai_team.cpp src/sim/prototype_infantry.cpp \
     src/sim/prototype_victory.cpp src/sim/prototype_production.cpp src/sim/prototype_economy.cpp \
     src/sim/prototype_tech.cpp src/sim/prototype_repair_sell.cpp src/render/battle_radar.cpp
 NATIVE_OBJECTS = $(patsubst %.cpp,build/native/%.o,$(NATIVE_SOURCES))
@@ -94,6 +94,16 @@ native-check: native platform terrain-inputs scene base-move actors ui audio vox
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --map ALL01T.MAP --frames 3 --headless
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --map MP25MW.MAP --frames 3 --headless
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --frames 3 --headless
+
+build/extract_file: build/native/src/tools/extract_file.o $(FS_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/native/src/tools/extract_file.o: tools/extract_file.cpp
+	mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -I src -MMD -MP -c $< -o $@
+
+build/rules.ini: build/extract_file
+	build/extract_file $(TEST_GAME_DIR) RULES.INI > $@.tmp && mv $@.tmp $@
 
 actors: build/actors_test
 	build/actors_test $(TEST_GAME_DIR)
@@ -580,6 +590,11 @@ PROTOTYPE_TEST_OBJECTS = $(filter-out build/native/src/app/main.o,$(NATIVE_OBJEC
 human-input-check: native
 	tools/test_human_input.sh $(abspath build/ra2-native) $(FEATURE_GAME_DIR)
 
+# Compare our computer opponent with the original census logs (not part of test).
+.PHONY: ai-reference-check
+ai-reference-check: native build/rules.ini
+	GAME_DIR=$(TEST_GAME_DIR) tools/ai_reference_check.sh
+
 skirmish-check: native skirmish-tests
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --frames 3
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --autoplay --frames 20000
@@ -674,7 +689,7 @@ build/prototype_combat_test: build/native/src/weapons/prototype_combat_test.o $(
 build/prototype_victory_test: build/native/src/sim/test_prototype_victory.o build/native/src/sim/prototype_victory.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-build/prototype_ai_test: build/native/src/sim/test_prototype_ai.o build/native/src/sim/prototype_ai.o $(MAP_OBJECTS) $(FS_OBJECTS)
+build/prototype_ai_test: build/native/src/sim/test_prototype_ai.o build/native/src/sim/prototype_ai.o build/native/src/sim/prototype_ai_team.o build/native/src/sim/random.o $(MAP_OBJECTS) $(FS_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -ldl -o $@
 
 build/prototype_infantry_test: build/native/src/sim/test_prototype_infantry.o build/native/src/sim/prototype_infantry.o $(MAP_OBJECTS) $(FS_OBJECTS)

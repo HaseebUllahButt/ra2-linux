@@ -1,4 +1,4 @@
-#include "prototype_ai.h"
+#include "prototype_ai_internal.h"
 #include "../loop/profile.h"
 
 #include <algorithm>
@@ -12,267 +12,6 @@
 #include <utility>
 
 namespace ra2::sim {
-namespace {
-using WorldEntity = session::world::Entity;
-using WorldHouse = session::world::House;
-using WorldKind = session::world::Kind;
-using session::world::Lifetime;
-using rules::IniFile;
-
-bool equal_name(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        auto upper = [](char c) { return c >= 'a' && c <= 'z' ? c - ('a' - 'A') : c; };
-        if (upper(a[i]) != upper(b[i])) return false;
-    }
-    return true;
-}
-
-bool contains(const std::vector<std::string>& names, std::string_view name) {
-    return std::any_of(names.begin(), names.end(), [&](const auto& item) { return equal_name(item, name); });
-}
-
-bool live(const WorldEntity& entity) {
-    return entity.id != 0 && entity.lifetime == Lifetime::Placed && entity.cell &&
-        entity.resolved_hp.value_or(0) > 0 && entity.active.value_or(false) &&
-        !entity.in_limbo.value_or(true) && entity.on_map != false;
-}
-
-bool registered(const IniFile& rules, const char* registry, const std::string& type) {
-    const auto* section = rules.find_section(registry);
-    return section && std::any_of(section->entries.begin(), section->entries.end(),
-        [&](const auto& item) { return equal_name(item.value, type); });
-}
-
-bool yard(const IniFile& rules, const WorldEntity& entity) {
-    return entity.kind == WorldKind::Structure && rules.read_bool(entity.type, "ConstructionYard");
-}
-
-bool mcv(const IniFile& rules, const WorldEntity& entity) {
-    const auto building = rules.read_string(entity.type, "DeploysInto");
-    return entity.kind == WorldKind::Unit && registered(rules, "BuildingTypes", building) &&
-        rules.read_bool(building, "ConstructionYard");
-}
-
-bool ground_weapon(const IniFile& rules, const std::string& type) {
-    const auto weapon = rules.read_string(type, "Primary");
-    const auto projectile = rules.read_string(weapon, "Projectile");
-    // TODO-ORIGINAL: Only direct, positive primary ground damage is considered.
-    // Secondary selection, special weapons and air/naval tactics need original AI.
-    return rules.read_integer(weapon, "Damage") > 0 && !rules.read_bool(weapon, "LimboLaunch") &&
-        !projectile.empty() && rules.find_section(projectile) && rules.read_bool(projectile, "AG", true);
-}
-
-bool fighter(const IniFile& rules, const WorldEntity& entity) {
-    return entity.kind == WorldKind::Unit && rules.read_integer(entity.type, "Speed") > 0 &&
-        !rules.read_bool(entity.type, "Naval") && !rules.read_bool(entity.type, "Harvester") &&
-        !rules.read_bool(entity.type, "Weeder") && !mcv(rules, entity) && ground_weapon(rules, entity.type);
-}
-
-std::optional<std::int32_t> side_index(const IniFile& rules, const WorldHouse& house) {
-    if (house.side_index) return house.side_index;
-    const auto* sides = rules.find_section("Sides");
-    if (!sides) return {};
-    const auto side = rules.read_string(house.country, "Side");
-    for (std::size_t i = 0; i < sides->entries.size(); ++i) {
-        const auto& entry = sides->entries[i];
-        if (equal_name(entry.key, side) || contains(IniFile::split_list(entry.value), house.country))
-            return static_cast<std::int32_t>(i);
-    }
-    return {};
-}
-
-using Actors = std::vector<const WorldEntity*>;
-
-bool owns(const Actors& buildings, std::string_view type) {
-    return std::any_of(buildings.begin(), buildings.end(),
-        [&](const WorldEntity* entity) { return equal_name(entity->type, type); });
-}
-
-bool prerequisite(const IniFile& rules, const Actors& buildings, const std::string& name) {
-    constexpr std::array<const char*, 6> groups{{"Power", "Factory", "Barracks", "Radar", "Tech", "Proc"}};
-    for (const auto* group : groups) {
-        if (!equal_name(name, group)) continue;
-        for (const auto& type : rules.read_list("General", std::string("Prerequisite") + group))
-            if (owns(buildings, type)) return true;
-        return false;
-    }
-    return owns(buildings, name);
-}
-
-// No cash means no money test: the original pays a building in stages
-// while it is made (004B9300), and 004E9660 picks the next base node
-// without a money test. 004E9C90 tests Available_Money >= cost for units.
-bool buildable(const IniFile& rules, const WorldHouse& house, const Actors& actors,
-               const Actors& buildings, const std::string& type, std::optional<std::int64_t> cash,
-               bool plan_node = false) {
-    const auto cost = rules.read_integer(type, "Cost", -1);
-    const auto tech = rules.read_integer(type, "TechLevel", -1);
-    // TODO-ORIGINAL: This is a conservative policy filter, not House::Can_Build.
-    // The production runtime remains responsible for the final legality check.
-    // Prototype games use level ten when the house has no resolved tech level.
-    // A base plan node had its tech test in 004EF890 (TechLevel <= House
-    // +11C, so -1 passes), and 004E9660 makes no other: a map that sets
-    // TechLevel=-1 on its shipyard still gets one in the computer's plan.
-    const bool tech_ok = plan_node || (tech >= 0 && tech <= house.tech_level.value_or(10));
-    if (cost <= 0 || (cash && cost > *cash) || !tech_ok ||
-        !contains(rules.read_list(type, "Owner"), house.country)) return false;
-    const auto required = rules.read_list(type, "RequiredHouses");
-    if ((!required.empty() && !contains(required, house.country)) ||
-        contains(rules.read_list(type, "ForbiddenHouses"), house.country)) return false;
-    if ((rules.read_bool(type, "RequiresStolenAlliedTech") && !house.stolen_tech_205.value_or(false)) ||
-        (rules.read_bool(type, "RequiresStolenSovietTech") && !house.stolen_tech_204.value_or(false))) return false;
-    const auto limit = rules.read_integer(type, "BuildLimit");
-    // Negative limits need historical counters, so this policy avoids them.
-    if (limit < 0) return false;
-    const auto count = std::count_if(actors.begin(), actors.end(),
-        [&](const WorldEntity* entity) { return equal_name(entity->type, type); });
-    if (limit > 0 && count >= limit) return false;
-    const auto overrides = rules.read_list(type, "PrerequisiteOverride");
-    for (const auto& name : overrides) if (prerequisite(rules, buildings, name)) return true;
-    for (const auto& name : rules.read_list(type, "Prerequisite"))
-        if (!prerequisite(rules, buildings, name)) return false;
-    return true;
-}
-
-const WorldEntity* factory(const IniFile& rules, const Actors& buildings, const char* kind, bool naval = false) {
-    const auto found = std::find_if(buildings.begin(), buildings.end(), [&](const WorldEntity* entity) {
-        return equal_name(rules.read_string(entity->type, "Factory"), kind) &&
-            rules.read_bool(entity->type, "Naval") == naval;
-    });
-    return found == buildings.end() ? nullptr : *found;
-}
-
-skirmish::Order order(skirmish::OrderKind kind, std::uint32_t house, const WorldEntity& entity,
-                      std::string type = {}) {
-    skirmish::Order result;
-    result.kind = kind;
-    result.house = house;
-    result.entity = entity.id;
-    result.type = std::move(type);
-    result.cell = *entity.cell;
-    return result;
-}
-
-std::uint64_t distance(ra2map::Cell from, ra2map::Cell to) {
-    const auto dx = static_cast<std::int64_t>(from.x) - to.x;
-    const auto dy = static_cast<std::int64_t>(from.y) - to.y;
-    return static_cast<std::uint64_t>(dx * dx + dy * dy);
-}
-} // namespace
-
-
-namespace {
-using Trigger = PrototypeAI::Trigger;
-
-// AI.INI lines keep empty fields, so IniFile::split_list does not fit here.
-std::vector<std::string> fields(std::string_view value) {
-    std::vector<std::string> result;
-    for (;;) {
-        const auto comma = value.find(',');
-        result.emplace_back(IniFile::trim(value.substr(0, comma)));
-        if (comma == std::string_view::npos) return result;
-        value.remove_prefix(comma + 1);
-    }
-}
-
-std::int32_t number(const std::string& text, std::int32_t fallback = 0) {
-    return IniFile::integer_value(text).value_or(fallback);
-}
-
-// The 64 hex digits store four {int, comparator} pairs as little-endian bytes.
-// The original reads only the first pair (TSpp AITriggerTypeClass::Data).
-std::int32_t hex_word(const std::string& text, std::size_t word) {
-    std::uint32_t result = 0;
-    for (std::size_t byte = 0; byte < 4; ++byte) {
-        const auto at = (word * 4 + byte) * 2;
-        if (at + 2 > text.size()) return 0;
-        const auto digit = [](char c) -> std::uint32_t {
-            return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 :
-                c >= 'A' && c <= 'F' ? c - 'A' + 10 : 0;
-        };
-        result |= ((digit(text[at]) << 4) | digit(text[at + 1])) << (byte * 8);
-    }
-    return static_cast<std::int32_t>(result);
-}
-
-// TSpp AITriggerComparatorType: <, <=, ==, >=, >, !=.
-bool compare(std::int64_t value, std::int32_t operand, std::int32_t comparator) {
-    switch (comparator) {
-    case 0: return value < operand;
-    case 1: return value <= operand;
-    case 2: return value == operand;
-    case 3: return value >= operand;
-    case 4: return value > operand;
-    case 5: return value != operand;
-    default: return false;
-    }
-}
-
-bool none(std::string_view name) { return name.empty() || equal_name(name, "<none>"); }
-
-// Rules lists such as TeamDelays and TotalAITeamCap are hardest first.
-std::int32_t by_difficulty(const IniFile& rules, const char* key, PrototypeAI::Difficulty level,
-                           std::int32_t fallback) {
-    const auto values = rules.read_list("General", key);
-    const auto index = static_cast<std::size_t>(2 - static_cast<std::int32_t>(level));
-    return index < values.size() ? number(values[index], fallback) : fallback;
-}
-
-// ScriptTypes quarry numbers, as used by the map trigger prototype.
-bool quarry(const IniFile& rules, std::int32_t kind, const WorldEntity& entity) {
-    const auto& type = entity.type;
-    switch (kind) {
-    case 2: return entity.kind == WorldKind::Structure;
-    case 3: return entity.kind == WorldKind::Unit && rules.read_bool(type, "Harvester");
-    case 4: return entity.kind == WorldKind::Infantry;
-    case 5: return entity.kind == WorldKind::Unit && !rules.read_bool(type, "Harvester");
-    case 6: return entity.kind == WorldKind::Structure && !none(rules.read_string(type, "Factory"));
-    case 7: return entity.kind == WorldKind::Structure && !none(rules.read_string(type, "Primary"));
-    case 9: return entity.kind == WorldKind::Structure && rules.read_integer(type, "Power") > 0;
-    case 11: return entity.kind == WorldKind::Structure && rules.read_bool(type, "Capturable");
-    default: return true;
-    }
-}
-
-const char* factory_kind(const IniFile& rules, const std::string& type) {
-    if (registered(rules, "InfantryTypes", type)) return "InfantryType";
-    if (registered(rules, "VehicleTypes", type)) return "UnitType";
-    if (registered(rules, "AircraftTypes", type)) return "AircraftType";
-    return nullptr;
-}
-
-std::uint32_t chebyshev(ra2map::Cell a, ra2map::Cell b) {
-    const auto dx = std::abs(static_cast<std::int32_t>(a.x) - b.x);
-    const auto dy = std::abs(static_cast<std::int32_t>(a.y) - b.y);
-    return static_cast<std::uint32_t>(std::max(dx, dy));
-}
-
-constexpr std::int32_t frames_per_second = 15; // 006B7AD0 case 5 multiplier
-constexpr std::int32_t move_timeout_frames = 1800;
-} // namespace
-
-struct PrototypeAI::Context {
-    const session::world::Snapshot& world;
-    const WorldHouse& computer;
-    const WorldHouse& player;
-    std::int32_t frame = 0;
-    std::optional<std::int32_t> side;
-    Actors actors, buildings, enemies;
-    std::int64_t cash = 0;
-    bool enemy_available = false;
-    std::optional<ra2map::Cell> own_centre, enemy_centre; // Base House +53BC
-    std::map<std::uint32_t, const WorldEntity*> own; // live own actors by ID
-    std::map<std::uint32_t, const WorldEntity*> targets; // live legal enemy targets
-    std::vector<std::uint32_t> busy; // factories that got a build order in this decision
-
-    std::int64_t count(std::uint32_t house, const std::string& type) const {
-        return std::count_if(world.entities.begin(), world.entities.end(), [&](const WorldEntity& e) {
-            return e.house_id == house && live(e) && equal_name(e.type, type);
-        });
-    }
-};
-
 PrototypeAI::PrototypeAI(const rules::IniFile& base_rules, const rules::IniFile* base_ai, Difficulty difficulty)
     : rules_(base_rules), difficulty_(difficulty) {
     if (!base_ai) return;
@@ -286,7 +25,7 @@ PrototypeAI::PrototypeAI(const rules::IniFile& base_rules, const rules::IniFile*
     };
     for (const auto& id : ids("TaskForces")) {
         TaskForce force{id, {}};
-        // TODO-ORIGINAL: TaskForceClass holds six entries in this prototype.
+        // TaskForceClass holds six entries; Team +84 counts six types.
         for (int i = 0; i < 6; ++i) {
             const auto parts = fields(ai.read_string(id, std::to_string(i)));
             if (parts.size() >= 2 && number(parts[0]) > 0 && !parts[1].empty())
@@ -314,11 +53,24 @@ PrototypeAI::PrototypeAI(const rules::IniFile& base_rules, const rules::IniFile*
         team.tech_level = ai.read_integer(id, "TechLevel");
         team.priority = ai.read_integer(id, "Priority", 5);
         team.base_defense = ai.read_bool(id, "IsBaseDefense");
+        team.guard_slower = ai.read_bool(id, "GuardSlower");
+        team.recruiter = ai.read_bool(id, "Recruiter");
+        team.autocreate = ai.read_bool(id, "Autocreate");
+        team.prebuild = ai.read_bool(id, "Prebuild");
+        team.reinforce = ai.read_bool(id, "Reinforce");
+        team.whiner = ai.read_bool(id, "Whiner");
+        team.aggressive = ai.read_bool(id, "Aggressive");
+        team.loose_recruit = ai.read_bool(id, "LooseRecruit");
+        team.suicide = ai.read_bool(id, "Suicide");
+        team.annoyance = ai.read_bool(id, "Annoyance");
+        team.recruitable = ai.read_bool(id, "AreTeamMembersRecruitable", true);
+        team.only_target_house_enemy = ai.read_bool(id, "OnlyTargetHouseEnemy");
         team_types_.push_back(std::move(team));
     }
     const auto has_team = [&](const std::string& id) {
         return std::any_of(team_types_.begin(), team_types_.end(), [&](const TeamType& t) { return t.id == id; });
     };
+    for (const auto& team : team_types_) authored_autocreate_.push_back(team.autocreate);
     if (const auto* section = ai.find_section("AITriggerTypes")) for (const auto& entry : section->entries) {
         // ID=Name,Team1,House,TechLevel,Condition,Object,Data,Weight,Min,Max,
         //    Skirmish,Unused,Side,BaseDefense,Team2,Easy,Normal,Hard
@@ -354,12 +106,18 @@ void PrototypeAI::reset() noexcept {
     computer_house_ = player_house_ = 0;
     next_build_ = next_attack_ = next_team_ = 0;
     teams_.clear();
+    members_.clear();
+    ai_started_ = false;
+    choice_ = {};
+    choice_product_ = {};
     base_centres_.clear();
     plan_.clear();
     naval_ = true; // 004E18C0
     weights_.clear();
     for (const auto& trigger : triggers_) weights_.push_back(trigger.weight);
-    seed_ = 1;
+    for (std::size_t i = 0; i < team_types_.size() && i < authored_autocreate_.size(); ++i)
+        team_types_[i].autocreate = authored_autocreate_[i];
+    rng_ = Random(1);
 }
 
 void PrototypeAI::placement_failed(std::uint32_t house, const std::string& type) {
@@ -384,15 +142,16 @@ std::optional<double> PrototypeAI::trigger_weight(const std::string& id) const {
 std::vector<PrototypeAI::TeamView> PrototypeAI::teams() const {
     std::vector<TeamView> result;
     for (const auto& team : teams_)
-        result.push_back({team_types_[team.type].id, triggers_[team.trigger].id, team.members, team.forming, team.line});
+        result.push_back({team_types_[team.type].id, team.trigger < triggers_.size() ? triggers_[team.trigger].id : std::string{},
+            team.members, !team.moving, team.line, team.queued.object, team.queued.cell});
     return result;
 }
 
-// TODO-ORIGINAL: A private linear congruential stream keeps the shared world
-// random state untouched. The original draws from the scenario Randomizer.
+// The original Random_Pick (006388A0) on a private stream. TODO-ORIGINAL:
+// the original draws from the shared scenario Randomizer; this stream keeps
+// the shared world random state untouched.
 std::uint32_t PrototypeAI::random(std::uint32_t low, std::uint32_t high) {
-    seed_ = seed_ * 1103515245u + 12345u;
-    return low + (seed_ >> 8) % (high - low + 1);
+    return static_cast<std::uint32_t>(rng_.ranged(static_cast<std::int32_t>(low), static_cast<std::int32_t>(high)));
 }
 
 namespace {
@@ -510,76 +269,248 @@ void PrototypeAI::make_plan(const Context& context) {
         const auto at = random(3, static_cast<std::uint32_t>(plan.size() - 1));
         plan.insert(plan.begin() + at + 1, std::string{});
     }
-    plan_ = std::move(plan);
+    plan_.clear();
+    for (auto& type : plan) plan_.push_back({std::move(type), std::nullopt});
+}
+
+// Base 0045EAA0, for an IsBaseDefense BuildingType (+138A): from the
+// Primary weapon, rate = (int)(Damage / (ROF * 0.025)) (0079D2E8). With
+// an AA projectile (BulletType +274) the air value (+11D8) is
+// rate * Verses[3]; with an AG projectile (+275, default yes in 004644E0)
+// value +11DC is rate * Verses[4] and value +11E0 is rate * Verses[0].
+// Each value is at most [AI] MaximumBaseDefenseValue (Rules +9CC).
+std::array<std::int32_t, 3> PrototypeAI::defense_values(const std::string& type) const {
+    std::array<std::int32_t, 3> values{};
+    if (!rules_.read_bool(type, "IsBaseDefense")) return values;
+    const auto weapon = rules_.read_string(type, "Primary");
+    if (none(weapon) || !rules_.find_section(weapon)) return values;
+    const auto rof = rules_.read_integer(weapon, "ROF");
+    if (rof <= 0) return values; // TODO-ORIGINAL: the original divides by zero here.
+    const double damage = rules_.read_integer(weapon, "Damage");
+    const auto rate = static_cast<std::int32_t>(damage / (static_cast<double>(rof) * 0.025));
+    const auto projectile = rules_.read_string(weapon, "Projectile");
+    const auto verses = IniFile::split_list(rules_.read_string(rules_.read_string(weapon, "Warhead"), "Verses"));
+    const auto versus = [&](std::size_t armor) {
+        if (armor >= verses.size()) return 1.0;
+        auto text = verses[armor];
+        if (!text.empty() && text.back() == '%') text.pop_back();
+        return IniFile::double_value(text).value_or(100.0) / 100.0;
+    };
+    const auto cap = rules_.read_integer("AI", "MaximumBaseDefenseValue", -1);
+    const auto value = [&](double product) {
+        return static_cast<double>(cap) < product ? cap : static_cast<std::int32_t>(product);
+    };
+    if (rules_.read_bool(projectile, "AA", false)) values[0] = value(rate * versus(3));
+    if (rules_.read_bool(projectile, "AG", true)) {
+        values[1] = value(rate * versus(4));
+        values[2] = value(rate * versus(0));
+    }
+    return values;
+}
+
+// Base 004F1190 for a defense node of the plan (the cell list argument is
+// empty). The four quarters around House +5640 (the yard Cell at deploy)
+// sum the defense values of the house's buildings in them (00451710,
+// 00451760, 004517B0); the quarter with the least total (the first on a
+// tie) is defended. Its need for each kind is 0.33 (+15F7C..+15F84) less
+// that kind's share of the total. The kind with the largest need (+11D8
+// only when it beats both others; then +11DC only when it beats +11E0)
+// gives the list: 004F1E50 (+11D8, air), 004F1FF0 (+11DC), 004F2190
+// (+11E0). An empty list falls back to +11DC, then +11E0, then +11D8.
+// Each list holds the
+// BuildingTypes the country owns, with a value of that kind, at the
+// house's tech level, whose prerequisites (004EF740) are in the house's
+// buildings other than IsBaseDefense types and WallTower (Rules +78C).
+// One entry is taken as is; more are weighted by value + 10000 / cost.
+// TODO-ORIGINAL: the place search 004F03C0 (a zero Cell fails the node)
+// is left to the caller, and upgrades (Building +4C0) do not add values.
+std::string PrototypeAI::defense_choice(const Context& context) {
+    std::array<std::array<std::int64_t, 3>, 4> quarters{};
+    const auto centre = context.own_centre;
+    std::vector<std::string> owned;
+    const auto tower = rules_.read_string("General", "WallTower");
+    for (const auto* building : context.buildings) {
+        if (!rules_.read_bool(building->type, "IsBaseDefense") && !equal_name(building->type, tower))
+            owned.push_back(building->type);
+        if (!centre || !building->cell) continue;
+        const int dx = building->cell->x - centre->x, dy = building->cell->y - centre->y;
+        if (!dx && !dy) continue;
+        // 004BA600 is atan2 on floats; the 16-bit direction is 0 at north
+        // and grows clockwise (0079B630 pi/2, 0079B628 -65536/2pi).
+        const double angle = std::atan2(static_cast<float>(-dy), static_cast<float>(dx));
+        const auto direction = static_cast<std::uint16_t>(static_cast<std::int32_t>((angle - 1.5707963267948966) *
+            -10430.060040584269));
+        const auto quarter = ((direction >> 13) + 1) >> 1 & 3;
+        const auto values = defense_values(building->type);
+        for (std::size_t k = 0; k < 3; ++k) quarters[quarter][k] += values[k];
+    }
+    std::size_t chosen = 0;
+    std::int64_t least = 999999;
+    for (std::size_t q = 0; q < 4; ++q) {
+        const auto total = quarters[q][0] + quarters[q][1] + quarters[q][2];
+        if (total < least) { least = total; chosen = q; }
+    }
+    std::array<float, 3> need{};
+    for (std::size_t k = 0; k < 3; ++k)
+        need[k] = 0.33f - (least == 0 ? 0.0f : static_cast<float>(quarters[chosen][k]) / static_cast<float>(least));
+    std::array<std::vector<std::string>, 3> lists;
+    if (const auto* registry = rules_.find_section("BuildingTypes"))
+        for (const auto& entry : registry->entries) {
+            const auto& type = entry.value;
+            if (!contains(rules_.read_list(type, "Owner"), context.computer.country) ||
+                rules_.read_integer(type, "TechLevel", -1) > context.computer.tech_level.value_or(10) ||
+                !plan_prerequisites(rules_, type, owned, owned.size())) continue;
+            const auto values = defense_values(type);
+            for (std::size_t k = 0; k < 3; ++k) if (values[k] > 0) lists[k].push_back(type);
+        }
+    std::size_t kind = need[0] <= need[1] || need[0] <= need[2] ? (need[1] <= need[2] ? 2 : 1) : 0;
+    if (lists[kind].empty()) {
+        if (!lists[1].empty()) kind = 1;
+        else if (!lists[2].empty()) kind = 2;
+        else if (!lists[0].empty()) kind = 0;
+        else return {};
+    }
+    const auto& list = lists[kind];
+    if (list.size() == 1) return list.front();
+    std::vector<std::int64_t> weights;
+    std::int64_t sum = 0;
+    for (const auto& type : list) {
+        const auto cost = rules_.read_integer(type, "Cost");
+        weights.push_back(defense_values(type)[kind] + (cost > 0 ? 10000 / cost : 0));
+        sum += weights.back();
+    }
+    if (sum <= 0) return {};
+    const auto roll = random(1, static_cast<std::uint32_t>(sum));
+    std::int64_t walk = 0;
+    for (std::size_t n = 0; n < list.size(); ++n)
+        if ((walk += weights[n]) >= roll) return list[n];
+    return {};
+}
+
+// Base 004F5D30 (the wall pick for the defense node at index `node`).
+// The wall type is the first [AI] ConcreteWalls entry (Rules +900) whose
+// AIBasePlanningSide (+5EC) is the house's side or -1. The search goes
+// back from node - 1 to the first built node (0042C0A0) whose type has
+// ProtectWithWall (+13E5) and is not the wall type. Around that building
+// (Location Cell X, Y; foundation width W 00458930 and height H 00458940)
+// wall nodes with Cells go in right after its node: (X-1+i, Y-1) and
+// (X-1+i, Y+H) for i = 1..W, (X-1, Y-1+j) and (X+W, Y-1+j) for j = 1..H,
+// then the corners (X-1, Y-1), (X+W, Y-1), (X-1, Y+H) and (X+W, Y+H)
+// (004F7270). Each insert goes at the same place, so the last is first.
+// Returns false when no building is found.
+bool PrototypeAI::plan_walls(const Context& context, std::size_t node) {
+    std::string wall;
+    for (const auto& type : rules_.read_list("AI", "ConcreteWalls")) {
+        const auto side = rules_.read_integer(type, "AIBasePlanningSide", -1);
+        if (side == -1 || side == context.side.value_or(0)) {
+            wall = type;
+            break;
+        }
+    }
+    for (auto i = static_cast<std::ptrdiff_t>(node) - 1; i >= 0; --i) {
+        const auto& type = plan_[static_cast<std::size_t>(i)].type;
+        if (type.empty() || equal_name(type, wall) || !rules_.read_bool(type, "ProtectWithWall")) continue;
+        // Our nodes name a type, not a Cell: node i stands for the k-th
+        // building of its type, k = the nodes of that type up to i.
+        const auto rank = std::count_if(plan_.begin(), plan_.begin() + i + 1,
+            [&](const PlanNode& item) { return equal_name(item.type, type) && !item.cell; });
+        const WorldEntity* building = nullptr;
+        std::int64_t seen = 0;
+        for (const auto* entity : context.buildings)
+            if (equal_name(entity->type, type) && entity->cell && ++seen == rank) {
+                building = entity;
+                break;
+            }
+        if (!building) continue;
+        std::int32_t width = 1, height = 1;
+        const auto foundation = rules_.read_string(type, "Foundation");
+        if (const auto x = foundation.find_first_of("xX"); x != std::string::npos) {
+            width = std::max(1, number(foundation.substr(0, x), 1));
+            height = std::max(1, number(foundation.substr(x + 1), 1));
+        }
+        const std::int32_t left = building->cell->x - 1, top = building->cell->y - 1;
+        const auto at = plan_.begin() + i + 1;
+        std::vector<PlanNode> ring;
+        const auto add = [&](std::int32_t x, std::int32_t y) {
+            if (x < 0 || y < 0) return;
+            ring.push_back({wall, ra2map::Cell{static_cast<std::uint16_t>(x), static_cast<std::uint16_t>(y)}});
+        };
+        for (std::int32_t n = 1; n <= width; ++n) {
+            add(left + n, top);
+            add(left + n, top + height + 1);
+        }
+        for (std::int32_t n = 1; n <= height; ++n) {
+            add(left, top + n);
+            add(left + width + 1, top + n);
+        }
+        add(left, top);
+        add(left + width + 1, top);
+        add(left, top + height + 1);
+        add(left + width + 1, top + height + 1);
+        plan_.insert(at, ring.rbegin(), ring.rend());
+        return true;
+    }
+    return false;
 }
 
 // Base 004E9660 chooses the next building of the base plan. 0042C3D0
 // gives the first node that is not built; then:
 //  - a Naval node (BuildingType +ADA) is removed while House +138 is
 //    clear, and 0042C3D0 is asked once more;
-//  - a defense node (-1) is resolved by 004F1190; when that fails, the
-//    node is removed and nothing is chosen this time;
+//  - a defense node (-1) first draws 006388A0(0, 99). Below
+//    AIPickWallDefensePercent (Rules +BCC, by AIDifficulty +C8) the wall
+//    pick 004F5D30 runs; when it succeeds the defense node is removed and
+//    nothing is chosen this time. Else 004F1190 (defense_choice) resolves
+//    the node; when that fails, the node is removed and nothing is chosen;
 //  - when free power (+52D0 - +15F88) is below the drain (+52D4) plus
 //    the node's drain (+C6C), a power node goes in front of the node and
 //    nothing is chosen this time. BuildConst types and types without a
 //    drain are exempt;
 //  - else the node type becomes the building to make (+553C).
-// TODO-ORIGINAL: the AIPickWallDefensePercent walls (Rules +BC8, 004F5D30),
-// node -3 (004F2350), the upgrade path (+C20) and the replacement skip of
-// 0042C3D0 (node +8, 004F64C0) are not modelled. House +15F88 is zero
+// A wall node (with a Cell) is built (0042C000) when the Cell holds the
+// wall overlay (+1215, +BEC) or any building.
+// TODO-ORIGINAL: our game cannot place a wall building (it becomes an
+// overlay), so a wall node counts as built and the walls are not made.
+// Node -3 (004F2350), the upgrade path (+C20) and the replacement skip
+// of 0042C3D0 (node +8, 004F64C0) are not modelled. House +15F88 is zero
 // (004E18C0) and is taken as zero.
 std::string PrototypeAI::plan_build(const Context& context) {
     const auto unbuilt = [&]() {
         for (std::size_t i = 0; i < plan_.size(); ++i) {
-            const auto& type = plan_[i];
+            const auto& type = plan_[i].type;
             if (type.empty()) return i;
+            if (plan_[i].cell) continue; // a wall node, see above
             const auto nodes = std::count_if(plan_.begin(), plan_.begin() + static_cast<std::ptrdiff_t>(i) + 1,
-                [&](const std::string& item) { return equal_name(item, type); });
+                [&](const PlanNode& item) { return equal_name(item.type, type) && !item.cell; });
             if (std::count_if(context.buildings.begin(), context.buildings.end(),
                     [&](const WorldEntity* e) { return equal_name(e->type, type); }) < nodes) return i;
         }
         return plan_.size();
     };
     auto i = unbuilt();
-    if (i < plan_.size() && !naval_ && !plan_[i].empty() && rules_.read_bool(plan_[i], "Naval")) {
+    if (i < plan_.size() && !naval_ && !plan_[i].type.empty() && rules_.read_bool(plan_[i].type, "Naval")) {
         plan_.erase(plan_.begin() + static_cast<std::ptrdiff_t>(i));
         i = unbuilt();
     }
     if (i == plan_.size()) return {};
-    if (plan_[i].empty()) {
-        // 004F1E50: IsBaseDefense types with a ground value that the
-        // country owns, at its tech level, whose prerequisites are in
-        // the house's other buildings. The pick is weighted by the type
-        // value plus 10000 / cost.
-        // TODO-ORIGINAL: the air and naval lists (004F1FF0, 004F2190)
-        // and the threat quadrant choice are not modelled, and the type
-        // value (BuildingType +11D8, 0045EAA0) is taken as zero.
-        std::vector<std::string> owned;
-        for (const auto* building : context.buildings)
-            if (!rules_.read_bool(building->type, "IsBaseDefense")) owned.push_back(building->type);
-        std::vector<std::pair<std::string, std::int64_t>> options;
-        std::int64_t sum = 0;
-        if (const auto* registry = rules_.find_section("BuildingTypes"))
-            for (const auto& entry : registry->entries) {
-                const auto& type = entry.value;
-                const auto cost = rules_.read_integer(type, "Cost");
-                if (!rules_.read_bool(type, "IsBaseDefense") || cost <= 0 ||
-                    !contains(rules_.read_list(type, "Owner"), context.computer.country) ||
-                    rules_.read_integer(type, "TechLevel", -1) > context.computer.tech_level.value_or(10) ||
-                    !ground_weapon(rules_, type) || !plan_prerequisites(rules_, type, owned, owned.size())) continue;
-                options.emplace_back(type, 10000 / cost);
-                sum += 10000 / cost;
-            }
-        if (options.empty() || sum <= 0) {
+    if (plan_[i].type.empty()) {
+        if (static_cast<std::int32_t>(random(0, 99)) <
+                by_difficulty(rules_, "AIPickWallDefensePercent", difficulty_, 0) &&
+            plan_walls(context, i)) {
+            const auto defense = std::find_if(plan_.begin(), plan_.end(), [](const PlanNode& node) {
+                return node.type.empty() && !node.cell;
+            });
+            if (defense != plan_.end()) plan_.erase(defense);
+            return {};
+        }
+        auto pick = defense_choice(context);
+        if (pick.empty()) {
             plan_.erase(plan_.begin() + static_cast<std::ptrdiff_t>(i));
             return {};
         }
-        const auto roll = random(1, static_cast<std::uint32_t>(sum));
-        std::int64_t walk = 0;
-        for (const auto& [type, weight] : options)
-            if ((walk += weight) >= roll) { plan_[i] = type; break; }
+        plan_[i].type = std::move(pick);
     }
-    const auto type = plan_[i];
+    const auto type = plan_[i].type;
     const auto drain = std::max<std::int64_t>(0, -static_cast<std::int64_t>(rules_.read_integer(type, "Power")));
     if (drain > 0 && !contains(rules_.read_list("AI", "BuildConst"), type)) {
         std::int64_t output = 0, used = 0;
@@ -605,7 +536,7 @@ std::string PrototypeAI::plan_build(const Context& context) {
                     power = rules_.read_string("General", "NodRegularPower");
             }
             if (registered(rules_, "BuildingTypes", power)) {
-                plan_.insert(plan_.begin() + static_cast<std::ptrdiff_t>(i), power);
+                plan_.insert(plan_.begin() + static_cast<std::ptrdiff_t>(i), PlanNode{power, std::nullopt});
                 return {};
             }
         }
@@ -613,386 +544,179 @@ std::string PrototypeAI::plan_build(const Context& context) {
     return type;
 }
 
-bool PrototypeAI::condition(const Context& context, const Trigger& trigger) const {
-    const auto& object = trigger.condition_object;
-    // Base 0041C990: without a selected enemy, only unconditional and
-    // own-house count conditions can qualify for defense creation.
-    if (!context.enemy_available && trigger.condition != -1 && trigger.condition != 1) return false;
-    switch (trigger.condition) {
-    case -1: return true;
-    case 0: return !object.empty() && compare(context.count(context.player.id, object), trigger.number, trigger.comparator);
-    case 1: return !object.empty() && compare(context.count(context.computer.id, object), trigger.number, trigger.comparator);
-    case 2: case 3: {
-        // Base 0041C990: yellow uses a reserve below 100; red below zero.
-        std::int64_t output = 0, drain = 0;
-        for (const auto& entity : context.world.entities) {
-            if (entity.house_id != context.player.id || entity.kind != WorldKind::Structure || !live(entity)) continue;
-            const auto power = rules_.read_integer(entity.type, "Power");
-            if (power > 0) output += power;
-            else drain -= static_cast<std::int64_t>(power);
+// Base 006BD870 (GetTaskForceMissingMemberTypes): each TaskForce entry
+// repeated by its count, less one entry for each member's type.
+std::vector<std::string> PrototypeAI::missing_types(const Context& context, const Team& team) const {
+    std::vector<std::string> result;
+    const auto* force = task_force(team_types_[team.type]);
+    if (!force) return result;
+    for (const auto& [count, name] : force->members)
+        for (std::int32_t i = 0; i < count; ++i) result.push_back(name);
+    for (const auto id : team.members) {
+        const auto found = context.own.find(id);
+        if (found == context.own.end()) continue;
+        const auto at = std::find_if(result.begin(), result.end(),
+            [&](const std::string& name) { return equal_name(name, found->second->type); });
+        if (at != result.end()) result.erase(at);
+    }
+    return result;
+}
+
+// The AI production choices, one per factory kind, each kept until its
+// product leaves the factory (House +5540 vehicles, +5544 infantry,
+// +5548 aircraft). The factory building (0044B480) starts the choice when
+// it has no product and the house has at least 11 credits. The product
+// leaving or being abandoned (004B97C0) clears the choice.
+void PrototypeAI::choose_products(Context& context, std::vector<skirmish::Order>& result) {
+    static constexpr std::array<const char*, 3> registries{{"VehicleTypes", "InfantryTypes", "AircraftTypes"}};
+    static constexpr std::array<WorldKind, 3> kinds{{WorldKind::Unit, WorldKind::Infantry, WorldKind::Aircraft}};
+    static constexpr std::array<const char*, 3> factory_kinds{{"UnitType", "InfantryType", "AircraftType"}};
+    const auto& world = context.world;
+    const auto house = context.computer.id;
+    // A product in a factory is a Created object of the house.
+    const auto in_factory = [&](std::size_t k) -> const WorldEntity* {
+        for (const auto& e : world.entities)
+            if (e.house_id == house && e.kind == kinds[k] && e.lifetime == Lifetime::Created) return &e;
+        return nullptr;
+    };
+    for (std::size_t k = 0; k < 3; ++k) {
+        auto& choice = choice_[k];
+        if (!choice.empty() && choice_product_[k]) {
+            const auto product = std::find_if(world.entities.begin(), world.entities.end(),
+                [&](const WorldEntity& e) { return e.id == choice_product_[k]; });
+            if (product == world.entities.end() || product->lifetime != Lifetime::Created) {
+                choice.clear();
+                choice_product_[k] = 0;
+            }
         }
-        output = context.player.power_output.value_or(static_cast<std::int32_t>(output));
-        drain = context.player.power_drain.value_or(static_cast<std::int32_t>(drain));
-        return output - drain < (trigger.condition == 2 ? 100 : 0);
-    }
-    case 4: return compare(context.player.cash.value_or(0), trigger.number, trigger.comparator);
-    case 7: {
-        if (object.empty()) return false;
-        std::int64_t total = 0;
-        // TODO-ORIGINAL: Civilian houses are the [Sides] entry that holds Neutral.
-        for (const auto& house : context.world.houses)
-            if (equal_name(house.country, "Neutral") || equal_name(house.country, "Special"))
-                total += context.count(house.id, object);
-        return compare(total, trigger.number, trigger.comparator);
-    }
-    // TODO-ORIGINAL: 5/6 super weapon charge still needs its live timer state.
-    default: return false;
+        // 004E4110 calls each choice function every frame; they return 15,
+        // which it ignores.
+        if (choice.empty()) {
+            choice = k == 0 ? choose_harvester(context) : std::string{};
+            if (choice.empty()) choice = choose_product(context, registries[k], kinds[k]);
+        }
+        if (choice.empty() || choice_product_[k]) continue;
+        // 0044B480: the factory starts the choice; a Naval vehicle needs a
+        // Naval factory and a land vehicle a land one.
+        if (const auto* product = in_factory(k)) {
+            if (equal_name(product->type, choice)) choice_product_[k] = product->id;
+            continue;
+        }
+        if (context.cash < 11) continue;
+        const auto* plant = factory(rules_, context.buildings, factory_kinds[k], k == 0 && rules_.read_bool(choice, "Naval"));
+        if (!plant || std::find(context.busy.begin(), context.busy.end(), plant->id) != context.busy.end()) continue;
+        result.push_back(order(skirmish::OrderKind::Build, house, *plant, choice));
+        context.busy.push_back(plant->id);
     }
 }
 
-void PrototypeAI::select_team(const Context& context) {
-    const auto cap = by_difficulty(rules_, "TotalAITeamCap", difficulty_, 30);
-    const auto max_defense = by_difficulty(rules_, "MaximumAIDefensiveTeams", difficulty_, 2);
-    const auto total = static_cast<std::int32_t>(teams_.size());
-    auto defensive = static_cast<std::int32_t>(std::count_if(teams_.begin(), teams_.end(),
-        [&](const Team& team) { return team_types_[team.type].base_defense; }));
-    // Base 006BED50: at the cap, release the least-priority defense team
-    // if defense teams occupy at least half the team's slots.
-    bool enough_defense = max_defense < defensive;
-    if (total >= cap) {
-        if (defensive < total / 2) return;
-        auto release = teams_.end();
-        for (auto it = teams_.begin(); it != teams_.end(); ++it)
-            if (team_types_[it->type].base_defense &&
-                (release == teams_.end() || team_types_[it->type].priority < team_types_[release->type].priority))
-                release = it;
-        if (release == teams_.end()) return;
-        teams_.erase(release);
-        --defensive;
-        enough_defense = true;
-    }
-    const bool need_defense = rules_.read_bool("General", "UseMinDefenseRule") &&
-        defensive < by_difficulty(rules_, "MinimumAIDefensiveTeams", difficulty_, 0);
-    const auto type_index = [&](const std::string& id) {
-        for (std::size_t i = 0; i < team_types_.size(); ++i) if (team_types_[i].id == id) return i;
-        return team_types_.size();
+// Base 004E9C90 opening: a computer house whose IQ (+194) is at least [IQ]
+// Harvester (Rules +10C0) and whose +189 is clear makes the first [General]
+// HarvesterUnit (Rules +9EC) its country owns, at its tech level, while it
+// has fewer of it than HarvestersPerRefinery (Rules +1414) times the first
+// two [AI] BuildRefinery types. There is no money test here. The counts
+// (00491D10) come from House +5470 and +5460, the active unit and building
+// counters (TS ActiveUQuantity and ActiveBQuantity): objects on the map. A
+// refinery or harvester that is still in a factory does not count.
+// TODO-ORIGINAL: skirmish houses have the maximum IQ, and +189 is only
+// written by 004E18C0 (clear).
+std::string PrototypeAI::choose_harvester(const Context& context) const {
+    const auto owned = [&](const std::string& type) {
+        return std::count_if(context.world.entities.begin(), context.world.entities.end(), [&](const WorldEntity& e) {
+            return e.house_id == context.computer.id && equal_name(e.type, type) &&
+                e.lifetime == Lifetime::Placed && e.resolved_hp.value_or(0) > 0;
+        });
     };
-    const auto team_ready = [&](std::size_t type) {
-        const auto& team = team_types_[type];
-        const auto existing = std::count_if(teams_.begin(), teams_.end(), [&](const Team& t) { return t.type == type; });
-        // Base 0041C990 and 004F35F0: negative Max means no limit.
-        if (team.max >= 0 && existing >= team.max) return false;
-        const auto force = std::find_if(task_forces_.begin(), task_forces_.end(),
-            [&](const TaskForce& f) { return f.id == team.task_force; });
-        if (force == task_forces_.end()) return false;
-        // Base 004F3630 asks each member type for a factory with
-        // FindFactory(allowOccupied, requirePower, requireCanBuild=false).
-        // In a skirmish (00A3D298 set) a missing factory rejects the team,
-        // even if idle units of that type exist. Prerequisites are not
-        // checked here; production checks them when a member is requested.
-        // TODO-ORIGINAL: the requirePower factory test is not modelled.
-        for (const auto& [count, type_name] : force->members) {
-            (void)count;
-            const auto* kind = factory_kind(rules_, type_name);
-            if (!kind || !factory(rules_, context.buildings, kind, rules_.read_bool(type_name, "Naval")))
-                return false;
+    std::string harvester;
+    for (const auto& type : rules_.read_list("General", "HarvesterUnit"))
+        if (registered(rules_, "VehicleTypes", type) && contains(rules_.read_list(type, "Owner"), context.computer.country)) {
+            harvester = type;
+            break;
         }
-        return true;
-    };
-    std::vector<std::pair<std::size_t, std::int64_t>> choices;
-    std::int64_t sum = 0;
-    bool exclusive = false;
-    for (std::size_t i = 0; i < triggers_.size(); ++i) {
-        const auto& trigger = triggers_[i];
-        const bool enabled = difficulty_ == Difficulty::Easy ? trigger.easy :
-            difficulty_ == Difficulty::Normal ? trigger.normal : trigger.hard;
-        if (!trigger.skirmish || !enabled) continue;
-        if (!equal_name(trigger.house, "<all>") && !equal_name(trigger.house, context.computer.country)) continue;
-        if (trigger.side != 0 && (!context.side || *context.side + 1 != trigger.side)) continue;
-        if (trigger.tech_level > context.computer.tech_level.value_or(10)) continue;
-        const auto first = type_index(trigger.team1);
-        if (first == team_types_.size() || !team_ready(first) || !condition(context, trigger)) continue;
-        const auto second = trigger.team2.empty() ? team_types_.size() : type_index(trigger.team2);
-        // Base 0041C990 checks both teams before the weighted selection.
-        // A mixed pair counts as offensive, regardless of the trigger flag.
-        if (second != team_types_.size() && !team_ready(second)) continue;
-        const bool defense = team_types_[first].base_defense &&
-            (second == team_types_.size() || team_types_[second].base_defense);
-        if (((need_defense || !context.enemy_available) && !defense) || (enough_defense && defense)) continue;
-        // Weight 5000 marks urgent triggers. Once one matches, only those count.
-        const auto weight = static_cast<std::int64_t>(weights_[i]);
-        if (weight == 5000 && !exclusive) { exclusive = true; choices.clear(); sum = 0; }
-        else if (exclusive && weight != 5000) continue;
-        if (weight <= 0) continue;
-        choices.emplace_back(i, weight);
-        sum += weight;
-    }
-    if (choices.empty()) return;
-    const auto roll = random(1, static_cast<std::uint32_t>(std::min<std::int64_t>(sum, 0x7fffffff)));
-    std::int64_t walk = 0;
-    std::size_t picked = choices.back().first;
-    for (const auto& [index, weight] : choices) {
-        walk += weight;
-        if (roll <= walk) { picked = index; break; }
-    }
-    std::vector<std::size_t> types{type_index(triggers_[picked].team1)};
-    if (!triggers_[picked].team2.empty()) {
-        const auto second = type_index(triggers_[picked].team2);
-        if (second != team_types_.size() && team_ready(second)) types.push_back(second);
-    }
-    // A forming team of the same type blocks the pick, as in the original.
-    for (const auto& team : teams_)
-        if (team.forming && std::find(types.begin(), types.end(), team.type) != types.end()) return;
-    for (const auto type : types) {
-        Team team;
-        team.type = type;
-        team.trigger = picked;
-        team.created = context.frame;
-        teams_.push_back(std::move(team));
-    }
+    if (harvester.empty()) return {};
+    const auto refineries = rules_.read_list("AI", "BuildRefinery");
+    std::int64_t refinery_count = 0;
+    for (std::size_t i = 0; i < std::min<std::size_t>(2, refineries.size()); ++i) refinery_count += owned(refineries[i]);
+    if (rules_.read_integer(harvester, "TechLevel", -1) > context.computer.tech_level.value_or(10) ||
+        owned(harvester) >= rules_.read_integer("General", "HarvestersPerRefinery") * refinery_count ||
+        !buildable(rules_, context.computer, context.actors, context.buildings, harvester, std::nullopt)) return {};
+    return harvester;
 }
 
-void PrototypeAI::fill_teams(Context& context, std::vector<skirmish::Order>* result) {
-    // Recruit free units first, in ascending ID order.
-    std::vector<std::uint32_t> taken;
-    for (const auto& team : teams_) taken.insert(taken.end(), team.members.begin(), team.members.end());
-    std::vector<std::string> wanted; // missing member types in team order
-    for (auto& team : teams_) {
-        if (!team.forming) continue;
+// Base 004E9C90 (VehicleTypes), 004EA1B0 (InfantryTypes) and 004EA4D0
+// (AircraftTypes), after the harvester test:
+//  - every team of the house that is (Reinforce and not IsFullStrength)
+//    or (neither IsForcedActive nor IsHasBeen) adds its missing members
+//    (006BD870) of this kind, and keeps the least CreationFrame (+50) of
+//    the teams that want each type;
+//  - each free object of the type that 004C8D00 calls recruitable takes
+//    one request away;
+//  - of the wanted types that 004E3660 allows and whose cost is at most
+//    Available_Money, the one wanted by the oldest team is taken with
+//    FillEarliestTeamProbability (Rules +105C, by AIDifficulty) percent;
+//    else a random type of the list kept from the last increase of the
+//    greatest request count. Ties keep the lowest registry index.
+std::string PrototypeAI::choose_product(const Context& context, const char* registry, WorldKind kind) {
+    const auto* section = rules_.find_section(registry);
+    if (!section) return {};
+    std::vector<std::string> types;
+    for (const auto& entry : section->entries) types.push_back(entry.value);
+    std::vector<std::int32_t> wanted(types.size(), 0);
+    std::vector<std::int64_t> earliest(types.size(), std::numeric_limits<std::int32_t>::max());
+    const auto index = [&](const std::string& name) {
+        for (std::size_t i = 0; i < types.size(); ++i) if (equal_name(types[i], name)) return i;
+        return types.size();
+    };
+    for (const auto& team : teams_) {
         const auto& type = team_types_[team.type];
-        const auto force = std::find_if(task_forces_.begin(), task_forces_.end(),
-            [&](const TaskForce& f) { return f.id == type.task_force; });
-        if (force == task_forces_.end()) continue;
-        bool full = true;
-        for (const auto& [count, name] : force->members) {
-            auto have = std::count_if(team.members.begin(), team.members.end(), [&](std::uint32_t id) {
-                const auto found = context.own.find(id);
-                return found != context.own.end() && equal_name(found->second->type, name);
-            });
-            for (const WorldEntity* entity : context.actors) {
-                if (have >= count) break;
-                if (entity->kind == WorldKind::Structure || !equal_name(entity->type, name) ||
-                    std::find(taken.begin(), taken.end(), entity->id) != taken.end()) continue;
-                team.members.push_back(entity->id);
-                taken.push_back(entity->id);
-                ++have;
-            }
-            if (have < count) { full = false; wanted.push_back(name); }
-        }
-        std::sort(team.members.begin(), team.members.end());
-        if (full) { team.forming = false; team.line = 0; team.wait_until = context.frame; }
-    }
-    // One legal request per factory per build decision. Production decides the rest.
-    if (!result) return;
-    auto busy = context.busy;
-    for (const auto& name : wanted) {
-        const auto* kind = factory_kind(rules_, name);
-        if (!kind) continue;
-        const auto* plant = factory(rules_, context.buildings, kind, rules_.read_bool(name, "Naval"));
-        if (!plant || std::find(busy.begin(), busy.end(), plant->id) != busy.end() ||
-            !buildable(rules_, context.computer, context.actors, context.buildings, name, context.cash)) continue;
-        result->push_back(order(skirmish::OrderKind::Build, context.computer.id, *plant, name));
-        context.cash -= rules_.read_integer(name, "Cost");
-        busy.push_back(plant->id);
-    }
-}
-
-void PrototypeAI::finish(Team& team) {
-    // Base 006B7770 (TeamClass destructor): every AI trigger whose first
-    // team is this TeamType gets the success delta when script action 49
-    // set +83, else the failure delta.
-    const bool success = team.succeeded;
-    const auto delta = rules_.read_double("General",
-        success ? "AITriggerSuccessWeightDelta" : "AITriggerFailureWeightDelta", success ? 20.0 : -50.0);
-    for (std::size_t i = 0; i < triggers_.size(); ++i) {
-        if (triggers_[i].team1 != team_types_[team.type].id) continue;
-        weights_[i] = std::max(triggers_[i].minimum, std::min(triggers_[i].maximum, weights_[i] + delta));
-    }
-    team.members.clear();
-    team.forming = false;
-    team.guarding = false;
-    team.line = std::numeric_limits<std::int32_t>::max();
-}
-
-void PrototypeAI::run_teams(Context& context, std::vector<skirmish::Order>& result) {
-    const auto& building_list = [&]() {
-        std::vector<std::string> names;
-        if (const auto* section = rules_.find_section("BuildingTypes"))
-            for (const auto& entry : section->entries) names.push_back(entry.value);
-        return names;
-    }();
-    // Base 006BDAA0/006BDDB0: a point `cells` away from `from`, in the
-    // direction of `toward`. TODO-ORIGINAL: the binary facing step is not
-    // modelled, so the angle is not quantized.
-    const auto gather_point = [&](ra2map::Cell from, ra2map::Cell toward, bool random_direction, std::int32_t cells) {
-        const double fx = from.x * 256.0 + 128, fy = from.y * 256.0 + 128;
-        // A random facing is a byte shifted into a signed 16-bit facing,
-        // then turned into radians as (facing - 0x3FFF) * -2pi/65536.
-        const double angle = random_direction ?
-            (static_cast<std::int16_t>(random(0, 255) << 8) - 0x3fff) * (-2 * 3.14159265358979323846 / 65536) :
-            std::atan2(-(toward.y * 256.0 + 128 - fy), toward.x * 256.0 + 128 - fx);
-        const double x = fx + std::cos(angle) * cells * 256.0, y = fy - std::sin(angle) * cells * 256.0;
-        const auto clamp = [](double v) { return static_cast<std::uint16_t>(std::clamp(std::floor(v / 256), 0.0, 65535.0)); };
-        return ra2map::Cell{clamp(x), clamp(y)};
-    };
-    for (auto& team : teams_) {
-        if (team.forming || team.guarding || team.members.empty() || context.frame < team.wait_until) continue;
-        const auto script_at = std::find(script_ids_.begin(), script_ids_.end(), team_types_[team.type].script);
-        if (script_at == script_ids_.end()) { finish(team); continue; }
-        const auto& steps = scripts_[static_cast<std::size_t>(script_at - script_ids_.begin())];
-        // Base game.exe 006BAA60 (TeamClass::FetchALeader): use the
-        // greatest LeadershipRating, keeping the first member on a tie.
-        auto leader = team.members.front();
-        for (const auto id : team.members)
-            if (rules_.read_integer(context.own.at(id)->type, "LeadershipRating", 5) >
-                rules_.read_integer(context.own.at(leader)->type, "LeadershipRating", 5))
-                leader = id;
-        const auto centre = *context.own.at(leader)->cell;
-        const auto send = [&](skirmish::OrderKind kind, std::uint32_t target, ra2map::Cell cell) {
-            for (const auto id : team.members) {
-                auto item = order(kind, context.computer.id, *context.own.at(id));
-                item.target = target;
-                item.cell = cell;
-                result.push_back(std::move(item));
-            }
-        };
-        const auto nearest = [&](const std::map<std::uint32_t, const WorldEntity*>& pool, auto&& match) {
-            const WorldEntity* best = nullptr;
-            auto range = std::numeric_limits<std::uint64_t>::max();
-            for (const auto& [id, entity] : pool) {
-                (void)id;
-                if (!match(*entity)) continue;
-                const auto d = distance(centre, *entity->cell);
-                if (d < range) { best = entity; range = d; }
-            }
-            return best;
-        };
-        const auto building_named = [&](std::int32_t argument) {
-            const auto index = static_cast<std::size_t>(argument & 0xffff);
-            return index < building_list.size() ? building_list[index] : std::string{};
-        };
-        for (int guard = 0; guard < 16; ++guard) {
-            if (team.line < 0 || team.line >= static_cast<std::int32_t>(steps.size())) { finish(team); break; }
-            const auto step = steps[static_cast<std::size_t>(team.line)];
-            bool yield = false;
-            switch (step.action) {
-            case 0: { // Attack quarry until none of that kind is left.
-                if (team.target && !context.targets.count(team.target)) team.target = 0;
-                if (!team.target) {
-                    const auto* target = nearest(context.targets,
-                        [&](const WorldEntity& e) { return quarry(rules_, step.argument, e); });
-                    if (!target) { ++team.line; break; }
-                    team.target = target->id;
-                }
-                send(skirmish::OrderKind::Attack, team.target, *context.targets.at(team.target)->cell);
-                yield = true;
-                break;
-            }
-            case 46: { // Attack one enemy structure of a [BuildingTypes] index.
-                if (team.target && !context.targets.count(team.target)) { team.target = 0; ++team.line; break; }
-                if (!team.target) {
-                    const auto name = building_named(step.argument);
-                    const auto* target = nearest(context.targets, [&](const WorldEntity& e) {
-                        return e.kind == WorldKind::Structure && equal_name(e.type, name);
-                    });
-                    if (!target) { ++team.line; break; }
-                    team.target = target->id;
-                }
-                send(skirmish::OrderKind::Attack, team.target, *context.targets.at(team.target)->cell);
-                yield = true;
-                break;
-            }
-            case 47: case 58: { // Move to an enemy (47) or own (58) structure type.
-                if (!team.moving) {
-                    const auto name = building_named(step.argument);
-                    const auto& pool = step.action == 47 ? context.targets : context.own;
-                    const auto* goal = nearest(pool, [&](const WorldEntity& e) {
-                        return e.kind == WorldKind::Structure && equal_name(e.type, name);
-                    });
-                    if (!goal) { ++team.line; break; }
-                    team.goal = *goal->cell;
-                    team.moving = true;
-                    team.deadline = context.frame + move_timeout_frames;
-                    send(skirmish::OrderKind::Move, 0, team.goal);
-                    yield = true;
-                    break;
-                }
-                // TODO-ORIGINAL: arrival uses a three-cell box, not TeamClass coordinates.
-                const bool arrived = std::all_of(team.members.begin(), team.members.end(), [&](std::uint32_t id) {
-                    return chebyshev(*context.own.at(id)->cell, team.goal) <= 3;
-                });
-                if (arrived || context.frame >= team.deadline) { team.moving = false; ++team.line; break; }
-                yield = true;
-                break;
-            }
-            case 49: // Base 006B7AD0 case 0x31: register success (+83) and go on.
-                team.succeeded = true;
-                ++team.line;
-                break;
-            case 53: case 54: { // Gather near the enemy base (53) or outside the own base (54).
-                if (!team.moving) {
-                    // Base 006BDAA0 (53): with no selected enemy, or an enemy
-                    // whose base centre is unset, the step is complete. The
-                    // point is AISafeDistance cells from the enemy centre,
-                    // toward the own centre (the leader when that is unset).
-                    // Base 006BDDB0 (54): the point is AISafeDistance cells
-                    // from the own centre toward the enemy centre, or in a
-                    // random direction when no enemy is selected.
-                    // No visibility test is made on the enemy centre.
-                    ra2map::Cell from{}, toward{};
-                    bool random_direction = false;
-                    if (step.action == 53) {
-                        if (!context.enemy_available || !context.enemy_centre) { ++team.line; break; }
-                        from = *context.enemy_centre;
-                        toward = context.own_centre ? *context.own_centre : centre;
-                    } else {
-                        // TODO-ORIGINAL: an unset own centre is Coord zero.
-                        from = context.own_centre ? *context.own_centre : centre;
-                        if (context.enemy_available) toward = context.enemy_centre.value_or(ra2map::Cell{});
-                        else random_direction = true;
-                    }
-                    team.goal = gather_point(from, toward, random_direction,
-                        rules_.read_integer("General", "AISafeDistance", 20));
-                    team.moving = true;
-                    team.deadline = context.frame + move_timeout_frames;
-                    send(skirmish::OrderKind::Move, 0, team.goal);
-                    yield = true;
-                    break;
-                }
-                // Base 006BA1A0 uses RelaxedStray for 53 and 54, Stray otherwise.
-                // TODO-ORIGINAL: no regroup on the leader first, no
-                // NearbyLocation free Cell search; the move timeout is local.
-                const auto stray = rules_.read_double("General", "RelaxedStray", 3.0);
-                const bool arrived = std::all_of(team.members.begin(), team.members.end(), [&](std::uint32_t id) {
-                    return static_cast<double>(distance(*context.own.at(id)->cell, team.goal)) <= stray * stray;
-                });
-                if (arrived || context.frame >= team.deadline) { team.moving = false; ++team.line; break; }
-                yield = true;
-                break;
-            }
-            case 5: // Guard area.
-                // Base 006B7AD0 case 5 starts the team timer (+58) with
-                // argument * 15 frames (+60). The step ends when it expires.
-                // TODO-ORIGINAL: the guard mission (006B9F40) is not run.
-                if (!team.moving) {
-                    team.moving = true;
-                    team.wait_until = context.frame + std::max(step.argument, 1) * frames_per_second;
-                    yield = true;
-                } else { team.moving = false; ++team.line; }
-                break;
-            case 6: team.line = step.argument - 1; break; // Jump; lines count from one.
-            case 11: team.guarding = true; yield = true; break; // Take a new mission and hold.
-            default:
-                // TODO-ORIGINAL: transport, super weapon and the other
-                // ScriptClass actions are skipped.
-                ++team.line;
-                break;
-            }
-            if (yield || team.line == std::numeric_limits<std::int32_t>::max()) break;
+        if (!((type.reinforce && !team.full) || (!team.forced_active && !team.has_been))) continue;
+        for (const auto& name : missing_types(context, team)) {
+            const auto at = index(name);
+            if (at == types.size()) continue;
+            ++wanted[at];
+            earliest[at] = std::min(earliest[at], team.created);
         }
     }
-    teams_.erase(std::remove_if(teams_.begin(), teams_.end(),
-        [](const Team& team) { return !team.forming && team.members.empty(); }), teams_.end());
+    for (const auto* entity : context.actors) {
+        if (entity->kind != kind || !recruitable(context, *entity)) continue;
+        const auto at = index(entity->type);
+        if (at < types.size() && wanted[at] > 0) --wanted[at];
+    }
+    std::vector<std::size_t> list;
+    std::int32_t most = -1;
+    std::size_t best = types.size();
+    std::int64_t best_frame = std::numeric_limits<std::int32_t>::max();
+    for (std::size_t i = 0; i < types.size(); ++i) {
+        if (wanted[i] <= 0 ||
+            !buildable(rules_, context.computer, context.actors, context.buildings, types[i], context.cash)) continue;
+        if (most == -1 || most < wanted[i]) {
+            list.clear();
+            most = wanted[i];
+        }
+        list.push_back(i);
+        if (best == types.size() || earliest[i] < best_frame) {
+            best_frame = earliest[i];
+            best = i;
+        }
+    }
+    const auto roll = static_cast<double>(random(0, 0x7ffffffe)) * 4.656612877414201e-10;
+    if (roll < by_difficulty(rules_, "FillEarliestTeamProbability", difficulty_, 0) * 0.01)
+        return best < types.size() ? types[best] : std::string{};
+    if (list.empty()) return {};
+    return types[list[random(0, static_cast<std::uint32_t>(list.size() - 1))]];
+}
+
+// Base 004C8D00 (Is_Recruitable for a house): owned by the house, not in
+// limbo, in no team, in a mission whose [Mission] Recruitable is set
+// (00594DB0) and with Techno +379 set.
+// TODO-ORIGINAL: the caller owns missions. A miner is taken to be in
+// Harvest (Recruitable=no); other units are in a recruitable mission.
+bool PrototypeAI::recruitable(const Context& context, const WorldEntity& entity) const {
+    if (entity.house_id != context.computer.id || entity.kind == WorldKind::Structure) return false;
+    if (rules_.read_bool(entity.type, "Harvester")) return false;
+    for (const auto& team : teams_)
+        if (std::find(team.members.begin(), team.members.end(), entity.id) != team.members.end()) return false;
+    return true;
 }
 
 std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& world,
@@ -1012,7 +736,7 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
         (last_frame_ && game_frame < *last_frame_)) reset();
     if (last_frame_ == game_frame) return result;
     if (computer_house_ != computer_house_id) {
-        seed_ = 0x9e3779b9u ^ computer_house_id;
+        rng_ = Random(0x9e3779b9u ^ computer_house_id);
         // The house timer runs from game start, not from the first AI tick.
         next_team_ = first_team_frame(rules_, difficulty_, computer->original_index.value_or(0));
     }
@@ -1022,12 +746,11 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
     const bool teams_on = uses_ai_ini();
     const bool build_due = game_frame >= next_build_;
     const bool attack_due = game_frame >= next_attack_;
-    const bool team_due = teams_on && game_frame >= next_team_;
-    if (!build_due && !attack_due && !team_due) return result;
+    // Without AI.INI the old policy keeps its decision clocks. With it,
+    // HouseAI (004E4110) and TeamClass::AI (006B7AD0) run every frame.
+    if (!teams_on && !build_due && !attack_due) return result;
     if (build_due) next_build_ = static_cast<std::int64_t>(game_frame) + build_interval_frames;
     if (attack_due) next_attack_ = static_cast<std::int64_t>(game_frame) + attack_interval_frames;
-    if (team_due) next_team_ = static_cast<std::int64_t>(game_frame) +
-        std::max(1, by_difficulty(rules_, "TeamDelays", difficulty_, 2000));
 
     Context context{world, *computer, *player, game_frame, side_index(rules_, *computer), {}, {}, {}, 0, false, {}, {}, {}, {}, {}};
     auto& actors = context.actors;
@@ -1083,95 +806,103 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
     if (const auto found = base_centres_.find(player_house_id); found != base_centres_.end())
         context.enemy_centre = found->second;
 
-    // Drop dead members. Base 006B7AD0 deletes a team with no members once
-    // it has been launched, or, in a multiplayer game, once it is older than
-    // DissolveUnfilledTeamDelay frames.
-    const auto dissolve = rules_.read_integer("General", "DissolveUnfilledTeamDelay", 5000);
-    for (auto& team : teams_) {
-        team.members.erase(std::remove_if(team.members.begin(), team.members.end(),
-            [&](std::uint32_t id) { return !context.own.count(id); }), team.members.end());
-        if (team.members.empty() && (!team.forming || dissolve < game_frame - team.created)) finish(team);
-    }
-    teams_.erase(std::remove_if(teams_.begin(), teams_.end(),
-        [](const Team& team) { return !team.forming && team.members.empty(); }), teams_.end());
-    if (team_due) select_team(context);
-
-    if (build_due) {
-        if (std::none_of(buildings.begin(), buildings.end(), [&](const WorldEntity* e) { return yard(rules_, *e); })) {
-            for (const WorldEntity* entity : actors) if (mcv(rules_, *entity)) {
-                result.push_back(order(skirmish::OrderKind::Deploy, computer_house_id, *entity));
-                break;
-            }
+    // TODO-ORIGINAL: the computer's MCV deploys on the build clock; the
+    // original unit AI deploys it.
+    if (build_due && std::none_of(buildings.begin(), buildings.end(), [&](const WorldEntity* e) { return yard(rules_, *e); })) {
+        for (const WorldEntity* entity : actors) if (mcv(rules_, *entity)) {
+            result.push_back(order(skirmish::OrderKind::Deploy, computer_house_id, *entity));
+            break;
         }
-        auto& cash = context.cash;
-        if (teams_on) {
-            // Base 004F5BE0 makes the plan (004EF890) once, when the house
-            // first gets a base centre and has no nodes.
-            if (plan_.empty() && std::any_of(buildings.begin(), buildings.end(),
-                    [&](const WorldEntity* e) { return yard(rules_, *e); })) make_plan(context);
-            // 004E9660 runs only while +553C is -1. Exit_Object (00440520
-            // case 6) and abandon (004B97C0) clear it, so no new building
-            // is chosen while one is in the factory: a Created structure.
-            const bool producing = std::any_of(world.entities.begin(), world.entities.end(), [&](const WorldEntity& e) {
-                return e.house_id == computer_house_id && e.kind == WorldKind::Structure && e.lifetime == Lifetime::Created;
-            });
-            std::string next;
-            if (const auto* construction = factory(rules_, buildings, "BuildingType"); construction && !producing) {
-                next = plan_build(context);
-                if (!next.empty() && registered(rules_, "BuildingTypes", next) &&
-                    buildable(rules_, *computer, actors, buildings, next, std::nullopt, true))
-                    result.push_back(order(skirmish::OrderKind::Build, computer_house_id, *construction, next));
-            }
-            // Base 004E9C90 (the war factory choice, while +5540 is -1):
-            // a computer house whose IQ (+194) is at least [IQ] Harvester
-            // (Rules +10C0) and whose +189 is clear makes the first
-            // [General] HarvesterUnit (Rules +9EC) its country owns, at its
-            // tech level, while it has fewer of it than
-            // HarvestersPerRefinery (Rules +1414) times the first two
-            // [AI] BuildRefinery types. There is no money test here.
-            // TODO-ORIGINAL: skirmish houses have the maximum IQ, and +189
-            // is only written by 004E18C0 (clear). The counter that
-            // 00491D10 reads is taken as owned objects, so a product in a
-            // factory counts.
-            const auto owned = [&](const std::string& type) {
-                return std::count_if(world.entities.begin(), world.entities.end(), [&](const WorldEntity& e) {
-                    return e.house_id == computer_house_id && equal_name(e.type, type) &&
-                        (e.lifetime == Lifetime::Created || (e.lifetime == Lifetime::Placed && e.resolved_hp.value_or(0) > 0));
-                });
-            };
-            std::string harvester;
-            for (const auto& type : rules_.read_list("General", "HarvesterUnit"))
-                if (registered(rules_, "VehicleTypes", type) && contains(rules_.read_list(type, "Owner"), computer->country)) {
-                    harvester = type;
-                    break;
-                }
-            const auto refineries = rules_.read_list("AI", "BuildRefinery");
-            std::int64_t refinery_count = 0;
-            for (std::size_t i = 0; i < std::min<std::size_t>(2, refineries.size()); ++i) refinery_count += owned(refineries[i]);
-            const auto* plant = factory(rules_, buildings, "UnitType");
-            if (plant && !harvester.empty() &&
-                rules_.read_integer(harvester, "TechLevel", -1) <= computer->tech_level.value_or(10) &&
-                owned(harvester) < rules_.read_integer("General", "HarvestersPerRefinery") * refinery_count &&
-                buildable(rules_, *computer, actors, buildings, harvester, std::nullopt)) {
-                result.push_back(order(skirmish::OrderKind::Build, computer_house_id, *plant, harvester));
-                context.busy.push_back(plant->id);
-            }
-            // QA trace, only with RA2_AI_PLAN_DEBUG set: one line every 1800 frames.
-            if (std::getenv("RA2_AI_PLAN_DEBUG") && game_frame % 1800 < build_interval_frames) {
-                std::cerr << "AIPLAN frame=" << game_frame << " house=" << computer_house_id << " cash=" << cash
-                          << " producing=" << producing << " next=" << (next.empty() ? "-" : next)
-                          << " naval=" << naval_ << " refineries=" << refinery_count
-                          << " harvesters=" << (harvester.empty() ? 0 : owned(harvester)) << " plan=";
-                for (const auto& node : plan_) std::cerr << (node.empty() ? "?" : node) << ',';
-                std::cerr << " have=";
-                for (const auto* b : buildings) std::cerr << b->type << ',';
-                std::cerr << '\n';
-            }
-        } else if (const auto* construction = factory(rules_, buildings, "BuildingType")) {
+    }
+    if (teams_on) house_ai(context, result);
+    else old_policy(context, build_due, attack_due, result);
+    return result;
+}
+
+// Base HouseAI 004E4110 for a computer house, in its order: the team
+// timer and picker, the enemy choice, then production; and after it the
+// Logic pass that runs TeamClass::AI (006B7AD0) for every team.
+void PrototypeAI::house_ai(Context& context, std::vector<skirmish::Order>& result) {
+    const auto frame = context.frame;
+    const auto house = context.computer.id;
+    // Base 004F4070 makes the plan (004EF890) and sets +136, +13A and +13B
+    // once, when the house first has a base centre.
+    if (plan_.empty() && std::any_of(context.buildings.begin(), context.buildings.end(),
+            [&](const WorldEntity* e) { return yard(rules_, *e); })) {
+        make_plan(context);
+        ai_started_ = true;
+    }
+    // A member that died or left the map leaves its team (006B8FB0).
+    for (auto& team : teams_)
+        for (const auto id : std::vector<std::uint32_t>(team.members))
+            if (!context.own.count(id)) remove_member(context, team, id);
+    for (auto it = members_.begin(); it != members_.end();)
+        it = context.own.count(it->first) ? std::next(it) : members_.erase(it);
+    // The team timer (+5684): when it expires the picker runs, each picked
+    // TeamType makes one team (006BEC80, which keeps Max), and the timer
+    // restarts with TeamDelays (Rules +E34) by AIDifficulty.
+    if (frame >= next_team_) {
+        for (const auto& [type, trigger] : pick_teams(context)) {
+            const auto max = team_types_[type].max;
+            if (max >= 0 && max <= team_count(type)) continue;
+            make_team(context, type, trigger);
+        }
+        next_team_ = static_cast<std::int64_t>(frame) + std::max(1, by_difficulty(rules_, "TeamDelays", difficulty_, 2000));
+    }
+    // Production mode +12C is 0 in a skirmish: 004E9660 (buildings), then
+    // 004E9C90, 004EA1B0 and 004EA4D0 (units), every frame.
+    // 004E9660 runs only while +553C is -1. Exit_Object (00440520 case 6)
+    // and abandon (004B97C0) clear it, so no new building is chosen while
+    // one is in the factory: a Created structure.
+    const bool producing = std::any_of(context.world.entities.begin(), context.world.entities.end(), [&](const WorldEntity& e) {
+        return e.house_id == house && e.kind == WorldKind::Structure && e.lifetime == Lifetime::Created;
+    });
+    std::string next;
+    if (const auto* construction = factory(rules_, context.buildings, "BuildingType"); construction && !producing) {
+        next = plan_build(context);
+        if (!next.empty() && registered(rules_, "BuildingTypes", next) &&
+            buildable(rules_, context.computer, context.actors, context.buildings, next, std::nullopt, true))
+            result.push_back(order(skirmish::OrderKind::Build, house, *construction, next));
+    }
+    choose_products(context, result);
+    // QA trace, only with RA2_AI_PLAN_DEBUG set: one line every 1800 frames.
+    if (std::getenv("RA2_AI_PLAN_DEBUG") && frame % 1800 == 0) {
+        std::cerr << "AIPLAN frame=" << frame << " house=" << house << " cash=" << context.cash
+                  << " producing=" << producing << " next=" << (next.empty() ? "-" : next)
+                  << " naval=" << naval_ << " units=" << (choice_[0].empty() ? "-" : choice_[0])
+                  << " infantry=" << (choice_[1].empty() ? "-" : choice_[1]) << " teams=" << teams_.size() << " plan=";
+        for (const auto& node : plan_)
+            if (!node.cell) std::cerr << (node.type.empty() ? "?" : node.type) << ',';
+            else if (&node == &plan_.front() || !(&node)[-1].cell) std::cerr << node.type << "-ring,";
+        std::cerr << " have=";
+        for (const auto* b : context.buildings) std::cerr << b->type << ',';
+        std::cerr << " making=";
+        for (const auto& e : context.world.entities)
+            if (e.house_id == house && e.lifetime == Lifetime::Created) std::cerr << e.type << ':' << e.id << ',';
+        std::cerr << " teams:";
+        for (const auto& t : teams_)
+            std::cerr << ' ' << team_types_[t.type].id << '/' << t.members.size() << (t.moving ? 'M' : 'F') << t.line;
+        std::cerr << '\n';
+    }
+    // Logic: TeamClass::AI for each team, oldest first.
+    for (std::size_t i = 0; i < teams_.size(); ++i)
+        if (!teams_[i].dead) team_ai(context, teams_[i], result);
+    teams_.erase(std::remove_if(teams_.begin(), teams_.end(), [](const Team& team) { return team.dead; }), teams_.end());
+}
+
+// The old policy without AI.INI: a fixed four-building opening, the
+// cheapest tank, and every fighter at the closest enemy.
+void PrototypeAI::old_policy(Context& context, bool build_due, bool attack_due, std::vector<skirmish::Order>& result) {
+    const auto& computer = context.computer;
+    const auto computer_house_id = computer.id;
+    const auto& actors = context.actors;
+    const auto& buildings = context.buildings;
+    auto& cash = context.cash;
+    if (build_due) {
+        if (const auto* construction = factory(rules_, buildings, "BuildingType")) {
             const auto& side = context.side;
             std::int64_t power = 0;
             for (const WorldEntity* building : buildings) power += rules_.read_integer(building->type, "Power");
-            // Old policy without AI.INI: a fixed four-building opening.
             for (const char* role : {"BuildPower", "BuildBarracks", "BuildRefinery", "BuildWeapons"}) {
                 const auto types = rules_.read_list("AI", role);
                 const bool have = std::any_of(types.begin(), types.end(),
@@ -1182,7 +913,7 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
                     if (planning_side && rules_.read_integer(type, "AIBasePlanningSide", -1) != -1 &&
                         (!side || rules_.read_integer(type, "AIBasePlanningSide") != *side)) continue;
                     if (!registered(rules_, "BuildingTypes", type) ||
-                        !buildable(rules_, *computer, actors, buildings, type, cash)) continue;
+                        !buildable(rules_, computer, actors, buildings, type, cash)) continue;
                     result.push_back(order(skirmish::OrderKind::Build, computer_house_id, *construction, type));
                     cash -= rules_.read_integer(type, "Cost");
                     break;
@@ -1190,8 +921,7 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
                 if (!result.empty() && result.back().kind == skirmish::OrderKind::Build) break;
             }
         }
-        if (teams_on) fill_teams(context, &result);
-        else if (const auto* weapons = factory(rules_, buildings, "UnitType")) {
+        if (const auto* weapons = factory(rules_, buildings, "UnitType")) {
             std::string selected;
             auto selected_cost = std::numeric_limits<std::int32_t>::max();
             if (const auto* vehicles = rules_.find_section("VehicleTypes")) for (const auto& entry : vehicles->entries) {
@@ -1202,7 +932,7 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
                     rules_.read_integer(type, "Speed") <= 0 || rules_.read_integer(type, "Strength") <= 0 ||
                     rules_.read_bool(type, "Naval") || rules_.read_bool(type, "Harvester") ||
                     rules_.read_bool(type, "Weeder") || !rules_.read_string(type, "DeploysInto").empty() ||
-                    !ground_weapon(rules_, type) || !buildable(rules_, *computer, actors, buildings, type, cash)) continue;
+                    !ground_weapon(rules_, type) || !buildable(rules_, computer, actors, buildings, type, cash)) continue;
                 const auto cost = rules_.read_integer(type, "Cost");
                 if (cost < selected_cost || (cost == selected_cost && type < selected)) {
                     selected = type;
@@ -1211,16 +941,12 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
             }
             if (!selected.empty()) result.push_back(order(skirmish::OrderKind::Build, computer_house_id, *weapons, selected));
         }
-    } else if (teams_on) {
-        fill_teams(context, nullptr); // Recruit finished products between build decisions.
     }
-
-    if (attack_due && teams_on) run_teams(context, result);
-    else if (attack_due) for (const WorldEntity* entity : actors) {
+    if (attack_due) for (const WorldEntity* entity : actors) {
         if (!fighter(rules_, *entity)) continue;
         const WorldEntity* target = nullptr;
         auto nearest = std::numeric_limits<std::uint64_t>::max();
-        for (const WorldEntity* enemy : enemies) {
+        for (const WorldEntity* enemy : context.enemies) {
             const auto range = distance(*entity->cell, *enemy->cell);
             if (range < nearest) { target = enemy; nearest = range; }
         }
@@ -1231,7 +957,6 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
             result.push_back(std::move(attack));
         }
     }
-    return result;
 }
 
 } // namespace ra2::sim

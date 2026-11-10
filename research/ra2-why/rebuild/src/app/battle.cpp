@@ -204,7 +204,12 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     std::uint32_t human_product_=0;
     bool ai_opening_check_=std::getenv("RA2_AI_OPENING_CHECK")!=nullptr;
     // QA probe (not for merge): per-house census and a player who stays home.
+    // RA2_PASSIVE_PLAYER=1: the player builds but does not attack.
+    // RA2_PASSIVE_PLAYER=2: the player builds Power Plant, Ore Refinery, Barracks
+    // and War Factory once and nothing else, as in the original reference runs.
     bool census_=std::getenv("RA2_HOUSE_CENSUS")!=nullptr, passive_=std::getenv("RA2_PASSIVE_PLAYER")!=nullptr;
+    bool passive_four_=passive_ && std::string(std::getenv("RA2_PASSIVE_PLAYER"))=="2";
+    std::set<std::string> passive_built_;
     // QA probe: the player's buildings get full strength again each frame,
     // so a long census of the computer does not end with a lost match.
     bool immortal_=std::getenv("RA2_IMMORTAL_PLAYER")!=nullptr;
@@ -273,6 +278,11 @@ public:
             // (House +C8: 0 hardest) to its purifier count when it unloads ore.
             economy_.set_virtual_purifiers(enemies_[i],sim::PrototypeEconomy::virtual_purifiers(rules_,
                 level==ui::Opponent::Hard?0:level==ui::Opponent::Medium?1:2));
+            // Base 0065E8C0: at the start each computer house gets
+            // MultiplayerAICM[difficulty] percent of its money (Brutal 400).
+            for(auto& h:world_.houses) if(h.id==enemies_[i] && h.cash)
+                *h.cash+=sim::PrototypeEconomy::start_money_bonus(rules_,
+                    level==ui::Opponent::Hard?0:level==ui::Opponent::Medium?1:2,*h.cash);
         }
         ai_targets_.assign(enemies_.size(),0);
         if(!ai_.uses_ai_ini())throw std::runtime_error("Base AI.INI has no usable team triggers");
@@ -1037,20 +1047,67 @@ public:
                 for (const auto& part:footprint) if (dock.count({x+part.x,y+part.y})) return true;
                 return false;
             };
-            // The rings of near buildings overlap. A cell that failed once in
-            // this search fails again, so each cell is tried once.
-            std::set<std::pair<int,int>> tried;
-            for (const auto base:bases) {
-                for (int radius=2;radius<=12 && !placed;++radius) for (int dy=-radius;dy<=radius && !placed;++dy)
-                    for (int dx=-radius;dx<=radius && !placed;++dx) {
-                        if (std::max(std::abs(dx),std::abs(dy))!=radius) continue;
-                        if (!tried.insert({int(base.x)+dx,int(base.y)+dy}).second) continue;
-                        if (closes_dock(int(base.x)+dx,int(base.y)+dy)) continue;
-                        const p::CellXY cell{std::int16_t(int(base.x)+dx),std::int16_t(int(base.y)+dy)};
-                        // place() checks proximity before its first write.
-                        placed=proto::place(world_,factories_,catalog_,owner,type,cell,frame).status==p::Status::Done;
+            // House::Find_Build_Location 004F03C0 and 005686B0: the computer wants
+            // AIBaseSpacing free cells around a new building (one more for
+            // ProtectWithWall or WantsExtraSpace), then settles for none. Free
+            // means no building, overlay or slope, and no BaseSpacerOfHouses
+            // bit (Cell +DC) of the owner: 004510D0 sets that bit on each own
+            // building's footprint grown by AIBaseSpacing. So two buildings of
+            // one house keep at least AIBaseSpacing cells between them, and
+            // 2 * AIBaseSpacing when a free place exists.
+            // TODO-ORIGINAL: the candidate cells (House +5614, 004510D0) and
+            // the direction offsets are not modelled; the ring search stays.
+            const int extra=rules_.read_bool(type,"ProtectWithWall")||rules_.read_bool(type,"WantsExtraSpace")?1:0;
+            const int spacing=rules_.read_integer("AI","AIBaseSpacing",1);
+            const int S1=spacing+extra;
+            const int S2=extra;
+            std::set<std::pair<int,int>> occupied;
+            for (const auto& e:world_.entities) if (live(e)&&e.kind==w::Kind::Structure) {
+                const auto* found=catalog_.find(e.type);
+                const int grow=e.house_id==owner?spacing:0; // 004510D0 spacer cells
+                const auto mark=[&](int x,int y) {
+                    for (int dy=-grow;dy<=grow;++dy) for (int dx=-grow;dx<=grow;++dx) occupied.insert({x+dx,y+dy});
+                };
+                if (found) for (const auto& off:p::original_foundation_cells(found->placement.foundation))
+                    mark(e.cell->x+off.x,e.cell->y+off.y);
+                else mark(e.cell->x,e.cell->y);
+            }
+            const auto spaced=[&](int x,int y,int S) {
+                int minX=x,maxX=x,minY=y,maxY=y;
+                for (const auto& part:footprint) {
+                    minX=std::min(minX,x+part.x);maxX=std::max(maxX,x+part.x);
+                    minY=std::min(minY,y+part.y);maxY=std::max(maxY,y+part.y);
+                }
+                for (int cy=minY-S;cy<=maxY+S;++cy) for (int cx=minX-S;cx<=maxX+S;++cx) {
+                    if (occupied.count({cx,cy})) return false;
+                    const auto it=world_.cells.find(std::uint32_t(cy)*512+std::uint32_t(cx));
+                    if (it!=world_.cells.end() && it->second.terrain) {
+                        if (it->second.terrain->overlay_type_index.value_or(-1)!=-1) return false;
+                        if (it->second.terrain->ramp_index.value_or(0)!=0) return false;
                     }
-                if(placed)break;
+                }
+                return true;
+            };
+            // The rings of near buildings overlap. A cell that failed once in
+            // this search fails again, so each cell is tried once. The set is
+            // cleared between the two passes for the computer: a cell skipped
+            // in the tight pass must be tried in the loose pass.
+            for (int pass=0;pass<(is_enemy(owner)?2:1) && !placed;++pass) {
+                const int S=pass==0?S1:S2;
+                std::set<std::pair<int,int>> tried;
+                for (const auto base:bases) {
+                    for (int radius=2;radius<=12 && !placed;++radius) for (int dy=-radius;dy<=radius && !placed;++dy)
+                        for (int dx=-radius;dx<=radius && !placed;++dx) {
+                            if (std::max(std::abs(dx),std::abs(dy))!=radius) continue;
+                            if (!tried.insert({int(base.x)+dx,int(base.y)+dy}).second) continue;
+                            if (closes_dock(int(base.x)+dx,int(base.y)+dy)) continue;
+                            if (is_enemy(owner) && !spaced(int(base.x)+dx,int(base.y)+dy,S)) continue;
+                            const p::CellXY cell{std::int16_t(int(base.x)+dx),std::int16_t(int(base.y)+dy)};
+                            // place() checks proximity before its first write.
+                            placed=proto::place(world_,factories_,catalog_,owner,type,cell,frame).status==p::Status::Done;
+                        }
+                    if(placed)break;
+                }
             }
             if(placed)auto_place_wait_.erase({owner,type});
             else wait={bases.size(),frame+auto_place_retry_frames};
@@ -1104,7 +1161,7 @@ public:
                 break;
             }
         }
-        if (frame==1 && !ai_opening_check_) {
+        if (frame==1 && !ai_opening_check_ && !passive_four_) {
             for (const auto& e:world_.entities) if (e.house_id==player_&&fighter(e)) {
                 autoplay_unit_=e.id;autoplay_start_=e.position;center(e);
                 const auto a=anchor(e);
@@ -1138,6 +1195,11 @@ public:
             std::vector<std::string>{"GAPOWR","GAREFN","GAPILE"}:allied?
             std::vector<std::string>{"GAPOWR","GAPILE","GAREFN","GAWEAP"}:
             std::vector<std::string>{"NAPOWR","NAHAND","NAREFN","NAWEAP"};
+        if(passive_four_) {
+            for(const auto& type:plan)if(has(type))passive_built_.insert(type);
+            for(const auto& type:plan)if(!passive_built_.count(type)) {queue({OrderKind::Build,player_,0,0,type,{}});break;}
+            return;
+        }
         for(const auto& type:plan) if(!has(type)) {queue({OrderKind::Build,player_,0,0,type,{}});break;}
         if(ai_opening_check_)return;
         std::size_t foot=0;
@@ -1287,16 +1349,21 @@ public:
             for(const auto& h:world_.houses) {
                 if(h.id!=player_ && !is_enemy(h.id))continue;
                 int st=0,un=0,inf=0,air=0,miners=0,new_st=0,new_un=0;
+                std::map<std::string,int> types; // Sorted, as in the original census tool.
                 auto& seen=census_seen_[h.id];
                 for(const auto& e:world_.entities)if(e.house_id==h.id&&live(e)&&e.kind!=w::Kind::Terrain) {
                     if(e.kind==w::Kind::Structure)++st;else if(e.kind==w::Kind::Infantry)++inf;
                     else if(e.kind==w::Kind::Aircraft)++air;else ++un;
                     if(e.type=="HARV"||e.type=="CMIN")++miners;
+                    ++types[e.type];
                     if(seen.insert(e.id).second){if(e.kind==w::Kind::Structure)++new_st;else ++new_un;}
                 }
                 std::cerr<<"CENSUS frame="<<frame<<" house="<<h.id<<" country="<<h.country
                     <<" cash="<<h.cash.value_or(0)<<" structures="<<st<<" vehicles="<<un<<" infantry="<<inf
-                    <<" aircraft="<<air<<" miners="<<miners<<" new_structures="<<new_st<<" new_units="<<new_un<<'\n';
+                    <<" aircraft="<<air<<" miners="<<miners<<" new_structures="<<new_st<<" new_units="<<new_un<<" types=";
+                bool first=true;
+                for(const auto& [type,count]:types){std::cerr<<(first?"":",")<<type<<':'<<count;first=false;}
+                std::cerr<<'\n';
             }
         }
         if(victory_.settled()) {
@@ -1519,7 +1586,8 @@ public:
         }
         if(args_.human_input_check && human_stage_<13)
             throw std::runtime_error("Human input check did not reach result and menu; stage="+std::to_string(human_stage_));
-        if(args_.autoplay && (!autoplay_deployed_||!autoplay_moved_||!moved||!fired||!impacts||!built||!infantry||
+        // A passive player never attacks, so only the normal autoplay must finish this loop.
+        if(args_.autoplay && !passive_ && (!autoplay_deployed_||!autoplay_moved_||!moved||!fired||!impacts||!built||!infantry||
             !ai_orders||!victory_.settled()))throw std::runtime_error("Autoplay did not complete the required match loop");
     }
 };
@@ -1547,6 +1615,10 @@ int run_prototype_battle(const BattleOptions& requested) {
             args.setup.opponents[slot++].opponent=*level=='h'?ui::Opponent::Hard:*level=='m'?ui::Opponent::Medium:ui::Opponent::Easy;
         }
     }
+    // Regression hook: the start unit count of the original reference runs (UnitCount=10).
+    if(const char* units=std::getenv("RA2_TEST_UNIT_COUNT"))args.setup.unit_count=std::atoi(units);
+    // Regression hook: the reference runs have Super Weapons off (RA2_TEST_SUPER_WEAPONS=0).
+    if(const char* super=std::getenv("RA2_TEST_SUPER_WEAPONS"))args.setup.super_weapons=std::string(super)!="0";
     auto assets=w::BaseBattleAssets::load(args.game_directory,args.map,args.setup.map_archive.value_or(""));
     // Merge the rules while the world is set up. Both only read the loaded
     // rules; overlay_rules keeps the result for the Battle's own request.
