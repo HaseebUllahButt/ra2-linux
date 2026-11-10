@@ -29,7 +29,6 @@ IniFile synthetic_rules() {
         "RefundPercent=50%\n"
         "AlliedSurvivorDivisor=500\n"
         "SovietSurvivorDivisor=250\n"
-        "ThirdSurvivorDivisor=750\n"
         "[Sides]\nGDI=AlliedCountry\nNod=SovietCountry\n"
         "[AlliedCountry]\nSide=GDI\n"
         "[SovietCountry]\nSide=Nod\n"
@@ -38,6 +37,7 @@ IniFile synthetic_rules() {
         "[BARE]\nCost=2000\nStrength=1000\nCrewed=no\n"
         "[PRICY]\nCost=6000\nStrength=1000\nCrewed=yes\n"
         "[TINY]\nCost=10\nStrength=1000\nCrewed=no\n"
+        "[FREE]\nCost=0\nStrength=1000\nCrewed=yes\n"
         "[E1]\nStrength=125\n"
         "[E2]\nStrength=100\n");
     return rules;
@@ -123,8 +123,8 @@ void check_rules_load() {
     require(limits.repair_percent == 0.15 &&
             std::abs(limits.repair_rate_minutes - 0.016) < 1e-6 &&
             limits.repair_step == 8 && limits.refund_percent == 0.5 &&
-            limits.allied_survivor_divisor == 500 && limits.soviet_survivor_divisor == 250 &&
-            limits.third_survivor_divisor == 750, "Rules load lost an authored value");
+            limits.allied_survivor_divisor == 500 && limits.soviet_survivor_divisor == 250,
+        "Rules load lost an authored value");
     bool threw = false;
     try {
         IniFile broken;
@@ -155,6 +155,12 @@ void check_money_math(const IniFile& rules, const IniFile& art) {
     require(sell.survivor_count(allied, "BARE") == 0, "Uncrewed building dropped crew");
     require(std::string(sell.crew_type(allied)) == "E1" &&
             std::string(sell.crew_type(soviet)) == "E2", "Crew infantry type changed");
+    // Base 0x0044C520: only a side value of 1 uses the Soviet divisor. A
+    // third-side house (2) uses the Allied divisor: 1000 / 500 = 2.
+    const sw::House third = house(4, "AlliedCountry", 0, 2);
+    require(sell.survivor_count(third, "WORKS") == 2, "Third side did not use the Allied divisor");
+    // Zero refund still clamps to 1 crew: 0 / 500 = 0, clamp to 1.
+    require(sell.survivor_count(allied, "FREE") == 1, "Zero refund crew clamp changed");
     // Side fallback through the [Sides] list when the house has no index.
     const sw::House no_index = house(3, "SovietCountry", 0);
     require(sell.survivor_count(no_index, "WORKS") == 4, "Side lookup ignored the country side");
@@ -339,8 +345,6 @@ void check_real_data(const char* game_dir) {
     require(limits.allied_survivor_divisor == 500 &&
             limits.soviet_survivor_divisor == 250,
         "Base RULES.INI survivor divisors changed");
-    require(limits.third_survivor_divisor == 0,
-        "Base RULES.INI gained a third survivor divisor");
 
     PrototypeRepairSell sell(rules, &art);
     // GAWEAP Cost 2000, Strength 1000; GAPILE Cost 500, Strength 500.

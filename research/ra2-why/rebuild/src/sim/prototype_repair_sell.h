@@ -16,11 +16,8 @@ struct PrototypeRepairSellRules {
     double refund_percent = 0.0;      // [General] RefundPercent: sell refund as a share of Cost.
     std::int32_t allied_survivor_divisor = 0; // [General] AlliedSurvivorDivisor.
     std::int32_t soviet_survivor_divisor = 0; // [General] SovietSurvivorDivisor.
-    std::int32_t third_survivor_divisor = 0;  // [General] ThirdSurvivorDivisor; the base
-                                              // RULES.INI omits it and the base parser
-                                              // reads no third divisor. Zero means a
-                                              // third-side crew is never spawned unless
-                                              // the rules author a value.
+    // The base game has no third survivor divisor; only a side value of 1
+    // uses the Soviet divisor, every other side value uses the Allied one.
     std::int32_t ticks_per_minute = 900;      // Original TICKS_PER_MINUTE.
 
     // Pass the loaded base RULES.INI, with any intended map overrides applied.
@@ -56,17 +53,15 @@ public:
     // and apply a house factor, which are not modeled. Zero without Cost.
     std::int32_t refund_amount(const std::string& type) const;
 
-    // Crew size when selling. TODO-ORIGINAL: no deterministic base sell
-    // count is proven. FUN_0043F8E0 is the random destruction-survivor
-    // spray (random gate, one roll per foundation cell); it reads a count
-    // from the BuildingClass virtual at vtable 0x0079CBBC slot 172
-    // (0x0044C520, body not in the export) and the crew type from GetCrew
-    // (slot 184, 0x00449FB0, which has a 25 percent engineer branch). This
-    // keeps the RA1 divisor shape with the parsed [General] divisors as a
-    // stand-in: refund divided by the side divisor, clamped to 1..5. Side 0
-    // is Allied, 1 Soviet, 2 third. Zero when the type is not Crewed, the
-    // side is unknown, or the refund is zero. TODO-ORIGINAL: the captured-
-    // building divisor doubling is not modeled.
+    // Crew size when selling. Recovered from game.exe 0x0044C520
+    // (BuildingClass vtable 0x0079CBBC slot 172): the refund (type virtual
+    // +0xB8 with the owner and 0) divided by the side divisor, clamped to
+    // 1..5, zero refund included. Only a side value of 1 picks the Soviet
+    // divisor (RulesClass +0x1164); every other value picks the Allied one
+    // (+0x1160). A zero divisor returns 0. TODO-ORIGINAL: the original
+    // gates on BuildingClass +0x5B0 and House +0xAD9 and doubles the
+    // divisor for a captured building (+0x5B3); this keeps the Crewed
+    // rules check as its gate and does not model capture.
     std::int32_t survivor_count(const session::world::House& house, const std::string& type) const;
 
     // Infantry type of the sold building's crew. TODO-ORIGINAL: the base

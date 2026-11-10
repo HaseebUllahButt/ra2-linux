@@ -31,10 +31,10 @@ WorldHouse* find_house(World& world, std::uint32_t id) {
     return it == world.houses.end() ? nullptr : &*it;
 }
 
-// Original side order: 0 Allied, 1 Soviet, 2 third. Base game.exe reads the
-// House side and picks a [General] divisor; the parser FUN_00647F40 stores
-// AlliedSurvivorDivisor at RulesClass +0x1160 and SovietSurvivorDivisor at
-// +0x1164. The base game has no third divisor.
+// Original side order: 0 Allied, 1 Soviet, 2 third. Base game.exe 0x0044C520
+// picks the Soviet divisor (RulesClass +0x1164) only for a side value of 1;
+// every other value picks the Allied divisor (+0x1160). The parser
+// FUN_00647F40 reads both divisors; there is no third divisor.
 std::optional<std::int32_t> house_side(const WorldHouse& house, const rules::IniFile& rules) {
     if (house.side_index) return house.side_index;
     const auto* sides = rules.find_section("Sides");
@@ -143,11 +143,9 @@ PrototypeRepairSellRules PrototypeRepairSellRules::load(const rules::IniFile& ru
     result.refund_percent = rules.read_double("General", "RefundPercent", -1.0);
     result.allied_survivor_divisor = rules.read_integer("General", "AlliedSurvivorDivisor", 0);
     result.soviet_survivor_divisor = rules.read_integer("General", "SovietSurvivorDivisor", 0);
-    // The base RULES parser FUN_00647F40 reads only the Allied and Soviet
-    // survivor divisors (+0x1160 and +0x1164). The installed base RULES.INI
-    // has no ThirdSurvivorDivisor key. Read one only when the rules author
-    // it; otherwise a third-side house spawns no crew.
-    result.third_survivor_divisor = rules.read_integer("General", "ThirdSurvivorDivisor", 0);
+    // The RULES parser FUN_00647F40 reads only the Allied and Soviet
+    // survivor divisors (+0x1160 and +0x1164). The installed RULES.INI has
+    // no third divisor and the count body 0x0044C520 reads none.
     if (result.repair_percent <= 0.0 || result.repair_percent > 1.0)
         throw std::runtime_error("Missing or invalid [General] RepairPercent");
     if (result.repair_rate_minutes <= 0.0)
@@ -198,25 +196,21 @@ std::int32_t PrototypeRepairSell::refund_amount(const std::string& type) const {
 
 std::int32_t PrototypeRepairSell::survivor_count(const session::world::House& house,
     const std::string& type) const {
-    // TODO-ORIGINAL: the base sell crew path is not recovered. IHouse::
-    // Fire_Sale 0x004EC3C0 only queues mission 19 per building. FUN_0043F8E0
-    // is the random destruction-survivor spray, not a deterministic sell
-    // count; it reads a count from BuildingClass vtable 0x0079CBBC slot 172
-    // (0x0044C520, body not in the export) and the type from GetCrew
-    // 0x00449FB0 (slot 184, 25 percent engineer branch). As a stand-in,
-    // crewed buildings divide the sell cost by the side divisor and clamp
-    // the count to 1..5. A captured building doubles the divisor; capture
-    // state is not modeled here.
+    // Recovered from game.exe 0x0044C520 (BuildingClass vtable 0x0079CBBC
+    // slot 172): the refund (type virtual +0xB8 with the owner and 0)
+    // divided by the side divisor, clamped to 1..5, zero refund included.
+    // Only a side value of 1 picks the Soviet divisor; every other value
+    // picks the Allied one. A zero divisor returns 0. TODO-ORIGINAL: the
+    // original gates on BuildingClass +0x5B0 and House +0xAD9 and doubles
+    // the divisor for a captured building (+0x5B3); this keeps the Crewed
+    // rules check as its gate and does not model capture.
     if (!rules_.read_bool(type, "Crewed")) return 0;
-    const auto refund = refund_amount(type);
-    if (refund <= 0) return 0;
     const auto side = house_side(house, rules_);
     if (!side) return 0;
-    const auto divisor = *side == 0 ? limits_.allied_survivor_divisor
-        : *side == 1 ? limits_.soviet_survivor_divisor
-        : *side == 2 ? limits_.third_survivor_divisor : 0;
+    const auto divisor = *side == 1 ? limits_.soviet_survivor_divisor
+        : limits_.allied_survivor_divisor;
     if (divisor <= 0) return 0;
-    const auto count = refund / divisor;
+    const auto count = refund_amount(type) / divisor;
     return count < 1 ? 1 : count > 5 ? 5 : count;
 }
 
