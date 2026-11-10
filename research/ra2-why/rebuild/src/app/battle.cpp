@@ -28,6 +28,7 @@
 #include "../sim/prototype_ai.h"
 #include "../sim/prototype_economy.h"
 #include "../sim/prototype_movement.h"
+#include "../sim/prototype_aircraft.h"
 #include "../sim/prototype_production.h"
 #include "../sim/prototype_tech.h"
 #include "../sim/prototype_victory.h"
@@ -108,6 +109,7 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     p::FactorySet factories_;
     sim::PrototypeMovement movement_;
     sim::PrototypeCombatRuntime combat_;
+    sim::PrototypeAircraft aircraft_;
     sim::PrototypeEconomy economy_;
     BattleBuildingTools building_tools_;
     BuildingTool building_tool_=BuildingTool::None;
@@ -227,13 +229,16 @@ public:
          rules_(overlay_rules(overlay_rules(assets.rules(),assets.battle_rules()),assets.map_ini())),
          catalog_(p::Catalog::from(rules_,assets.art_ini(),assets.map_ini())),
          combat_(assets.rules(),assets.battle_rules(),assets.map_ini(),assets.art_ini(),
-                 (args.game_directory/"game.exe").string()),economy_(rules_),building_tools_(rules_,assets.art_ini()),ai_(rules_),
+                 (args.game_directory/"game.exe").string()),aircraft_(rules_,true),economy_(rules_),building_tools_(rules_,assets.art_ini()),ai_(rules_),
          window_(window),scene_(scene),terrain_(terrain),geometry_(render::MapGeometry::from_ini(assets.map_ini())),
          clock_(clock),player_(world_.houses.at(0).id),enemy_(world_.houses.at(1).id),orders_(player_),cursor_(files),effects_(files),
          audio_(files,rules_,player_,rules_.read_string(world_.houses.at(0).country,"Side")=="GDI"?"Allied":"Russian",
                 !args.headless,16*frame_delay_ticks(args)) {
         if(const auto labels=assets_.read_asset("RA2.CSF"))labels_.parse(labels->data(),labels->size());
         movement_.use_rules(rules_);
+        combat_.set_fire_gate([this](const w::Entity& actor) {
+            return !flies(actor) || aircraft_.ready_to_fire(actor.id);
+        });
         sidebar_choices_.use_rules(rules_,house(world_,player_).side_index.value_or(-1));
         score_assets_=ui::ScoreAssets::load(files,labels_);
         for(const auto& h:world_.houses)
@@ -399,8 +404,11 @@ public:
             },[this](BattlePoint p){return cell_at(p);}};
     }
     bool miner(const w::Entity& e) const {return rules_.read_bool(e.type,"Harvester");}
+    bool flies(const w::Entity& e) const {
+        return e.type=="ORCA" || e.type=="BEAG" || e.type=="ZEP" || e.type=="JUMPJET";
+    }
     bool fighter(const w::Entity& e) const {
-        return live(e) && (e.kind==w::Kind::Unit || e.kind==w::Kind::Infantry) &&
+        return live(e) && (e.kind==w::Kind::Unit || e.kind==w::Kind::Infantry || e.kind==w::Kind::Aircraft) &&
             !miner(e) && !rules_.read_string(e.type,"Primary").empty();
     }
     void queue(Order order) {pending_.push_back(std::move(order));}
@@ -955,6 +963,12 @@ public:
         case OrderKind::Move:
             if (miner(*e)) {status("Miners harvest automatically.");break;}
             combat_.stop(world_,order.entity);attacks_.erase(order.entity);
+            if (flies(*e)) {
+                manual_moves_.erase(order.entity);
+                const auto result=aircraft_.issue_move(world_,order.entity,order.cell);
+                if(order.house==player_)status(result.status==sim::PrototypeAircraftStatus::Complete?"Moving.":"Cannot fly there.");
+                break;
+            }
             {
                 const auto goal=formation_cell(order.cell,order.entity);
                 const auto move=movement_.issue(world_,order.entity,goal,
@@ -965,6 +979,12 @@ public:
             break;
         case OrderKind::Attack:
             manual_moves_.erase(order.entity);
+            if (flies(*e)) {
+                if(combat_.can_attack(world_,order.entity,order.target) &&
+                    aircraft_.issue(world_,order.entity,order.target).status==sim::PrototypeAircraftStatus::Complete)
+                    combat_.attack(world_,order.entity,order.target);
+                break;
+            }
             if (combat_.attack(world_,order.entity,order.target)) {
                 const auto prior=attacks_.find(order.entity);
                 if(prior==attacks_.end()||prior->second!=order.target)movement_.cancel(world_,order.entity);
@@ -973,6 +993,7 @@ public:
             break;
         case OrderKind::Stop:
             manual_moves_.erase(order.entity);
+            if(flies(*e))aircraft_.issue_move(world_,order.entity,*e->cell);
             movement_.cancel(world_,order.entity);combat_.stop(world_,order.entity);attacks_.erase(order.entity);break;
         case OrderKind::Deploy: {
             manual_moves_.erase(order.entity);
@@ -1253,6 +1274,17 @@ public:
         for(const auto& h:world_.houses)cash_before[h.id]=h.cash.value_or(0);
         economy_.tick(world_,frame);
         for(const auto& h:world_.houses)score_->harvest(h.id,cash_before[h.id],h.cash.value_or(0));
+        // RA1 AIRCRAFT.CPP separates flight missions from weapon fire.
+        // Base RA2 AircraftClass::Reload 006C8290 owns finite ammunition.
+        // Flight advances first; shared combat reports actual shots below.
+        for(const auto& actor:world_.entities)
+            if(live(actor) && flies(actor) && !aircraft_.active(actor.id))
+                aircraft_.issue_move(world_,actor.id,*actor.cell);
+        if(aircraft_.active_count()) {
+            const auto flight=aircraft_.tick(world_,frame);
+            moved+=flight.moved.size();
+            if(flight.status!=sim::PrototypeAircraftStatus::Complete)gaps_.insert(flight.detail);
+        }
         const auto motion=movement_.tick(world_,frame);
         moved+=motion.moved.size();
         for(const auto id:motion.blocked)movement_.cancel(world_,id);
@@ -1274,6 +1306,7 @@ public:
         score_->combat(fighting.events);
 
         for(const auto& event:fighting.events) {
+            if(event.kind==sim::PrototypeCombatEventKind::Shot)aircraft_.fired(event.source_id);
             if(ai_opening_check_ && !first_ai_shot_ && event.kind==sim::PrototypeCombatEventKind::Shot &&
                 is_enemy(event.source_house) && event.target_house==player_) {
                 first_ai_shot_=frame;
@@ -1294,6 +1327,7 @@ public:
         for(const auto& detail:fighting.unresolved)gaps_.insert(detail);
         std::set<std::uint32_t> approach;
         for(const auto& [source,target]:fighting.out_of_range) {
+            if(const auto* actor=find(world_,source);actor && flies(*actor))continue;
             approach.insert(source);
             if(frame%15 || (movement_.moving(source)&&frame%90))continue;
             const auto* e=find(world_,source);const auto* goal=find(world_,target);
@@ -1302,7 +1336,7 @@ public:
         }
         for(const auto& [source,home]:fighting.guard_return) {
             const auto* e=find(world_,source);
-            if(!e||!live(*e)||miner(*e)||e->kind==w::Kind::Structure||home.x<0||home.y<0)continue;
+            if(!e||!live(*e)||flies(*e)||miner(*e)||e->kind==w::Kind::Structure||home.x<0||home.y<0)continue;
             const ra2map::Cell goal{std::uint16_t(home.x/256),std::uint16_t(home.y/256)};
             const auto route=movement_.issue(world_,source,goal,
                 sim::original_rule_speed(rules_.read_integer(e->type,"Speed",4)));

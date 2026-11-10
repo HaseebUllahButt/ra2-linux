@@ -74,16 +74,21 @@ sw::Snapshot fixture() {
     // off and the tank never shoots back in this one-sided test.
     enemy.human_controlled = true;
     world.houses = {player, enemy};
-    for (int y = 0; y <= 40; ++y) for (int x = 0; x <= 40; ++x)
-        world.cells[key(x, y)].terrain =
-            original_default_terrain_cell({static_cast<std::uint16_t>(x),
-                                           static_cast<std::uint16_t>(y)});
+    for (int y=0;y<=40;++y) for (int x=0;x<=40;++x) {
+        auto& cell=world.cells[key(x,y)];
+        cell.allocated=true;
+        cell.heads.emplace();
+        cell.ground_occupancy_124=0;
+        cell.cell_flag_100=false;
+        cell.terrain=original_default_terrain_cell({std::uint16_t(x),std::uint16_t(y)});
+        cell.terrain->floor_world_height=0;
+    }
     world.entities = {
         entity(10, 1, "GAAIRC", sw::Kind::Structure, {4, 4}, 0, 600),
         entity(11, 1, "ORCA", sw::Kind::Aircraft, {4, 4}, 0, 150),
         entity(12, 1, "BEAG", sw::Kind::Aircraft, {4, 4}, 0, 200),
         entity(13, 2, "HTNK", sw::Kind::Unit, {20, 20}, 0, 10000),
-        entity(14, 2, "ZEP", sw::Kind::Unit, {30, 30}, 750, 2000),
+        entity(14, 1, "ZEP", sw::Kind::Unit, {30, 30}, 750, 2000),
         entity(15, 1, "JUMPJET", sw::Kind::Infantry, {10, 10}, 500, 125),
     };
     // Link the pad and the ground actors into their cells like the original.
@@ -129,52 +134,32 @@ void plane_pass(PrototypeAircraft& flight, PrototypeCombatRuntime& combat, sw::S
             name + " attack order failed");
     require(combat.attack(world, plane, target), name + " combat order rejected");
 
-    // No shot may leave the gun before the Attack phase arms the plane.
-    for (std::uint64_t guard = 0; guard < 4000; ++guard) {
-        const auto step = flight.tick(world, frame);
-        require(step.status == PrototypeAircraftStatus::Complete,
-                name + " flight frame failed: " + step.detail);
-        require(step.shots.empty(), name + " flight dealt direct damage");
-        const auto tick = combat.tick(world, frame);
-        require(count_events(tick, PrototypeCombatEventKind::Shot, plane, true) == 0,
-                name + " fired before its Attack phase");
-        ++frame;
-        if (flight.phase(plane) == AircraftPhase::Attack &&
-            flight.ready_to_fire(plane)) break;
-    }
-
-    // Exactly one ammo point leaves the magazine through the combat runtime.
-    std::size_t shots = 0;
-    for (std::uint64_t guard = 0; guard < 2000; ++guard) {
-        const auto step = flight.tick(world, frame);
-        require(step.status == PrototypeAircraftStatus::Complete,
-                name + " flight frame failed: " + step.detail);
-        require(step.shots.empty(), name + " flight dealt direct damage");
-        const auto tick = combat.tick(world, frame);
-        const auto fired = count_events(tick, PrototypeCombatEventKind::Shot, plane, true);
-        for (std::size_t i = 0; i < fired; ++i) flight.fired(plane);
+    std::size_t shots = 0, damage_events = 0;
+    const auto hp = actor(world,target).resolved_hp;
+    for (std::uint64_t guard = 0; guard < 8000; ++guard) {
+        const auto before = actor(world,target).resolved_hp;
+        const auto step = flight.tick(world,frame);
+        require(step.status == PrototypeAircraftStatus::Complete, name + " flight failed: " + step.detail);
+        require(step.shots.empty() && actor(world,target).resolved_hp == before,
+                name + " flight bypassed shared damage");
+        const bool ready = flight.ready_to_fire(plane);
+        const auto tick = combat.tick(world,frame++);
+        const auto fired = count_events(tick,PrototypeCombatEventKind::Shot,plane,true);
+        require(ready || fired == 0,name + " fired outside Attack phase");
         shots += fired;
         total_shots += fired;
-        total_damage_events += count_events(tick, PrototypeCombatEventKind::Damage, target, false);
-        ++frame;
-        if (shots >= 1) break;
-        if (guard == 1999) throw std::runtime_error(name +
-            " did not fire one shot in range" + diagnostics(combat.tick(world, frame)));
+        damage_events += count_events(tick,PrototypeCombatEventKind::Damage,target,false);
+        total_damage_events += count_events(tick,PrototypeCombatEventKind::Damage,target,false);
+        for (std::size_t i=0;i<fired;++i) flight.fired(plane);
+        require(shots <= 1,name + " fired more than one ammo point per pass");
+        if (fired) require(flight.ammo(plane) == 0,name + " did not spend its ammo");
+        if (shots && flight.phase(plane) == AircraftPhase::Docked && flight.ammo(plane) == 1) {
+            require(damage_events > 0 && actor(world,target).resolved_hp < hp,
+                    name + " shared combat caused no damage");
+            return;
+        }
     }
-    require(shots == 1, name + " did not fire exactly one shot");
-    require(flight.ammo(plane) && *flight.ammo(plane) == 0,
-            name + " did not spend exactly one ammo point");
-
-    // Fly home, dock, and reload on the owned pad.
-    for (std::uint64_t guard = 0; guard < 8000; ++guard) {
-        const auto step = flight.tick(world, frame);
-        require(step.status == PrototypeAircraftStatus::Complete,
-                name + " return frame failed: " + step.detail);
-        ++frame;
-        if (flight.phase(plane) == AircraftPhase::Docked &&
-            flight.ammo(plane) && *flight.ammo(plane) >= 1) return;
-    }
-    throw std::runtime_error(name + " never docked and reloaded");
+    throw std::runtime_error(name + " did not complete firing, return and reload");
 }
 
 // One hover case: fire from cruise height, never land, never dock.
@@ -224,58 +209,26 @@ int main(int argc, char** argv) try {
     const auto rules = load("RULES.INI");
     const auto art = load("ART.INI");
 
-    auto world = fixture();
-    PrototypeAircraft flight(rules, true);
-    PrototypeCombatRuntime combat(rules, {}, art, game_dir + "/game.exe");
-    // The fire gate: a flying type only pulls the trigger while its flight
-    // mission is in the Attack phase with ammo left.
-    combat.set_fire_gate([&](const sw::Entity& e) {
-        return (e.id != 11 && e.id != 12 && e.id != 14 && e.id != 15) ||
-            flight.ready_to_fire(e.id);
-    });
-
-    std::size_t total_shots = 0, total_damage_events = 0;
-    std::uint64_t frame = 0;
-    const int hp_before = actor(world, 13).resolved_hp ? *actor(world, 13).resolved_hp : 0;
-    std::vector<std::string> failures;
-    const auto run_case = [&](const char* name, const auto& body) {
-        try { body(); std::cout << name << ": cycle complete\n"; }
-        catch (const std::exception& error) {
-            failures.emplace_back(std::string(name) + ": " + error.what());
-            std::cout << name << ": FAILED: " << error.what() << "\n";
+    for (const auto id : {11u,12u,14u,15u}) {
+        auto world = fixture();
+        PrototypeAircraft flight(rules,true);
+        PrototypeCombatRuntime combat(rules,{},art,game_dir + "/game.exe");
+        combat.set_fire_gate([&](const sw::Entity& e) {
+            return (e.id!=11 && e.id!=12 && e.id!=14 && e.id!=15) || flight.ready_to_fire(e.id);
+        });
+        std::size_t shots=0,damage=0;
+        std::uint64_t frame=0;
+        const auto name=actor(world,id).type;
+        if(id==11 || id==12) {
+            plane_pass(flight,combat,world,id,13,frame,shots,damage,name);
+            plane_pass(flight,combat,world,id,13,frame,shots,damage,name);
+            require(shots==2,name + " did not complete two attack runs");
+        } else {
+            hover_case(flight,combat,world,id,13,id==14?750:500,frame,shots,damage,name);
+            require(damage>0,name + " shared combat caused no damage");
         }
-    };
-
-    run_case("ORCA", [&] {
-        plane_pass(flight, combat, world, 11, 13, frame, total_shots, total_damage_events, "ORCA");
-        plane_pass(flight, combat, world, 11, 13, frame, total_shots, total_damage_events, "ORCA");
-    });
-    run_case("BEAG", [&] {
-        plane_pass(flight, combat, world, 12, 13, frame, total_shots, total_damage_events, "BEAG");
-        plane_pass(flight, combat, world, 12, 13, frame, total_shots, total_damage_events, "BEAG");
-    });
-    run_case("ZEP", [&] {
-        hover_case(flight, combat, world, 14, 13, 750, frame, total_shots,
-                   total_damage_events, "ZEP");
-    });
-    run_case("JUMPJET", [&] {
-        hover_case(flight, combat, world, 15, 13, 500, frame, total_shots,
-                   total_damage_events, "JUMPJET");
-    });
-
-    const auto& tank = actor(world, 13);
-    if (!failures.empty()) {
-        require(tank.resolved_hp && *tank.resolved_hp < hp_before,
-                "combat events did not damage the target");
-        for (const auto& failure : failures) std::cerr << failure << "\n";
-        return 1;
+        std::cout<<name<<": flight and shared damage cycle passed\n";
     }
-    require(total_shots >= 6, "the four aircraft did not complete their firing cycles");
-    require(tank.resolved_hp && *tank.resolved_hp < hp_before,
-            "combat events did not damage the target");
-    std::cout << "HTNK: lost " << (hp_before - *tank.resolved_hp)
-              << " HP through " << total_damage_events << " combat events\n";
-    std::cout << "GAAIRC: pad held both plane cycles\n";
     return 0;
 } catch (const std::exception& error) {
     std::cerr << "aircraft combat test failed: " << error.what() << "\n";
