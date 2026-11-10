@@ -1106,7 +1106,7 @@ public:
                 break;
             }
         }
-        if (frame==1 && !ai_opening_check_) {
+        if (frame==1 && !ai_opening_check_ && !passive_four_) {
             for (const auto& e:world_.entities) if (e.house_id==player_&&fighter(e)) {
                 autoplay_unit_=e.id;autoplay_start_=e.position;center(e);
                 const auto a=anchor(e);
@@ -1531,7 +1531,8 @@ public:
         }
         if(args_.human_input_check && human_stage_<13)
             throw std::runtime_error("Human input check did not reach result and menu; stage="+std::to_string(human_stage_));
-        if(args_.autoplay && (!autoplay_deployed_||!autoplay_moved_||!moved||!fired||!impacts||!built||!infantry||
+        // A passive player never attacks, so only the normal autoplay must finish this loop.
+        if(args_.autoplay && !passive_ && (!autoplay_deployed_||!autoplay_moved_||!moved||!fired||!impacts||!built||!infantry||
             !ai_orders||!victory_.settled()))throw std::runtime_error("Autoplay did not complete the required match loop");
     }
 };
@@ -1559,6 +1560,10 @@ int run_prototype_battle(const BattleOptions& requested) {
             args.setup.opponents[slot++].opponent=*level=='h'?ui::Opponent::Hard:*level=='m'?ui::Opponent::Medium:ui::Opponent::Easy;
         }
     }
+    // Regression hook: the start unit count of the original reference runs (UnitCount=10).
+    if(const char* units=std::getenv("RA2_TEST_UNIT_COUNT"))args.setup.unit_count=std::atoi(units);
+    // Regression hook: the reference runs have Super Weapons off (RA2_TEST_SUPER_WEAPONS=0).
+    if(const char* super=std::getenv("RA2_TEST_SUPER_WEAPONS"))args.setup.super_weapons=std::string(super)!="0";
     auto assets=w::BaseBattleAssets::load(args.game_directory,args.map,args.setup.map_archive.value_or(""));
     // Merge the rules while the world is set up. Both only read the loaded
     // rules; overlay_rules keeps the result for the Battle's own request.

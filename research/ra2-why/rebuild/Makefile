@@ -580,6 +580,11 @@ PROTOTYPE_TEST_OBJECTS = $(filter-out build/native/src/app/main.o,$(NATIVE_OBJEC
 human-input-check: native
 	tools/test_human_input.sh $(abspath build/ra2-native) $(FEATURE_GAME_DIR)
 
+# Compare our computer opponent with the original census logs (not part of test).
+.PHONY: ai-reference-check
+ai-reference-check: native
+	GAME_DIR=$(TEST_GAME_DIR) tools/ai_reference_check.sh
+
 skirmish-check: native skirmish-tests
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --frames 3
 	build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --headless --autoplay --frames 20000
