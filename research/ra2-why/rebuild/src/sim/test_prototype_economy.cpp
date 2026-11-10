@@ -143,6 +143,36 @@ int main(int argc,char** argv) {
         assert(dx*dx+dy*dy<=2);
         for(const auto& e:w.entities) assert(e.resolved_hp.value_or(0)>0 && e.lifetime==sw::Lifetime::Placed);
     }
+    // Same blocked dock with a full CMIN. The Chrono Miner cannot drive
+    // through the guards, so it warps to a dock Cell that friendly soldiers
+    // hold, they step aside, and it unloads. The old fallback never fired:
+    // the soldier chain check rejected the end of the chain, so the full
+    // CMIN stayed stuck with a full cargo.
+    {
+        rules::IniFile guarded;
+        guarded.parse("[General]\nHarvesterLoadRate=1\nHarvesterDumpRate=.01\nCloseEnough=2.25\nBlockagePathDelay=60\n"
+                      "[CMIN]\nLocomotor={4A582741-9839-11d1-B709-00A024DDAFD1}\nSpeed=4\nStorage=2\n[E2]\nSpeed=4\n"
+                      "[OverlayTypes]\n0=TIB01\n[TIB01]\nTiberium=yes\n[Tiberiums]\n0=Poor\n[Poor]\nImage=1\nValue=30\n");
+        auto w=fixture("CMIN",0);
+        auto& miner=w.entities[0];
+        w.cells[4*512+3].heads->ground_head=0;w.cells[4*512+3].ground_occupancy_124=0;
+        miner.cell=ra2map::Cell{6,4};miner.position=sim::Coord{6*256+128,4*256+128,0};
+        w.cells[4*512+6].heads->ground_head=1;w.cells[4*512+6].ground_occupancy_124=32;
+        std::uint32_t id=10;
+        for(int y=3;y<=5;++y) for(int x=1;x<=3;++x) if(x!=2 || y!=4) {
+            sw::Entity guard;guard.id=id++;guard.house_id=1;guard.type="E2";guard.kind=sw::Kind::Infantry;
+            guard.lifetime=sw::Lifetime::Placed;guard.resolved_hp=125;guard.layer=sw::Layer::Ground;guard.next=0;
+            guard.cell=ra2map::Cell{std::uint16_t(x),std::uint16_t(y)};guard.position=sim::Coord{x*256+64,y*256+64,0};
+            w.entities.push_back(guard);
+            w.cells[unsigned(y)*512+unsigned(x)].heads->ground_head=guard.id;w.cells[unsigned(y)*512+unsigned(x)].ground_occupancy_124=4;
+        }
+        sim::PrototypeEconomy economy(guarded);
+        for(unsigned frame=0;frame<3000 && *w.houses[0].cash==0;++frame) economy.tick(w,frame);
+        assert(*w.houses[0].cash==2*30);
+        const int dx=int(w.entities[0].cell->x)-2,dy=int(w.entities[0].cell->y)-4;
+        assert(dx*dx+dy*dy<=2);
+        for(const auto& e:w.entities) if(e.kind==sw::Kind::Infantry) assert(e.resolved_hp.value_or(0)>0 && e.lifetime==sw::Lifetime::Placed);
+    }
     // Row 7 puts the new field beyond the previous adjacent-only scan.
     for(auto type:{"CMIN","HARV"}) for(int ore_y:{4,5,7}) {
         auto nearby=fixture(type,-1);

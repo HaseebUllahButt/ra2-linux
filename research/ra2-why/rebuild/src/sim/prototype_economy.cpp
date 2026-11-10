@@ -27,7 +27,10 @@ bool held_by_friends(const sw::Snapshot& w,const sw::CellState& c,std::uint32_t 
     int guard=0;
     for(auto id=c.heads->ground_head;id;) {
         const auto e=std::find_if(w.entities.begin(),w.entities.end(),[&](const auto& item){return item.id==id;});
-        if(e==w.entities.end() || !alive(*e) || e->kind!=sw::Kind::Infantry || e->house_id!=house || !e->next || ++guard>8) return false;
+        if(e==w.entities.end() || !alive(*e) || e->kind!=sw::Kind::Infantry || e->house_id!=house || ++guard>8) return false;
+        // The chain ends with next zero or absent; that is still one live
+        // friendly soldier holding the Cell.
+        if(!e->next || !*e->next) break;
         id=*e->next;
     }
     return true;
@@ -239,7 +242,11 @@ void PrototypeEconomy::tick(sw::Snapshot& w,std::uint32_t frame) {
                 if((!dx&&!dy)||x<0||y<0||x>=512||y>=512||movement_.moving(e.id)) continue;
                 ra2map::Cell target{std::uint16_t(x),std::uint16_t(y)};auto i=w.cells.find(key(target));
                 if(i==w.cells.end()) continue;
-                if(pass?e.type=="CMIN" || !held_by_friends(w,i->second,e.house_id):!open(i->second)) continue;
+                // Pass 0 takes an empty Cell. Pass 1 lets a driving HARV head
+                // for a Cell that only friendly soldiers hold, and lets a CMIN
+                // warp there; the soldiers step aside. Without pass 1 a full
+                // CMIN with every dock Cell occupied stayed stuck forever.
+                if(pass?(e.type!="CMIN" && !held_by_friends(w,i->second,e.house_id)):!open(i->second)) continue;
                 if(e.type=="CMIN") {
                     auto old=w.cells.find(key(*e.cell));
                     if(old==w.cells.end() || !old->second.heads || old->second.heads->ground_head!=e.id || e.next.value_or(1)!=0) continue;
