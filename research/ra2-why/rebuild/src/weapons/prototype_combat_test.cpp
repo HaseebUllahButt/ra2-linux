@@ -414,13 +414,14 @@ void fire_gate_test(const rules::IniFile& rules,const rules::IniFile& art,const 
     check(guard.tick(idle,0).fired==0 && idle.entities[0].target_id==0,
         "false gate idle scan fired or acquired a target");
     // AA weapons hit airborne Aircraft targets; AG-only weapons are rejected.
-    // The rules table decides: the Flak Cannon projectile (FlakProj) is
-    // AA-only and reaches an airborne target. The Intruder missile
-    // (AirToGroundMissile) is AG-only and must not.
-    check(rules.read_string("FlakProj","AA")=="yes" &&
-        rules.read_string("FlakProj","AG")=="no","FlakProj is no longer AA-only");
-    check(rules.read_string("AirToGroundMissile","AA")=="no" &&
-        rules.read_string("AirToGroundMissile","AG")=="yes","AirToGroundMissile is no longer AG-only");
+    // prototype_target_weapon reads projectile AA/AG. The Intruder missile
+    // (AirToGroundMissile) is AG-only: an Aircraft at z=750 over floor 0 is
+    // airborne, so can_attack must reject it. The Flak Cannon projectile
+    // (FlakProj) is AA-only and must reach it.
+    auto ag_only=make_world("ORCA","ZEP",world::Kind::Aircraft,world::Kind::Aircraft,150,2000);
+    ag_only.entities[1].position->z=750;
+    sim::PrototypeCombatRuntime no_aa(rules,map,art,exe);
+    check(!no_aa.can_attack(ag_only,1,2),"AG-only weapon accepted an airborne Aircraft target");
     auto air=make_world("NAFLAK","ZEP",world::Kind::Structure,world::Kind::Aircraft,400,2000);
     air.entities[1].position->z=750;
     sim::PrototypeCombatRuntime aa(rules,map,art,exe);
