@@ -569,6 +569,10 @@ Outcome place(w::Snapshot& world,FactorySet& factories,const Catalog& catalog,st
     return transaction(world,factories,[&](w::Snapshot& candidate,FactorySet& next) {
         auto result=ra2::sim::production::place(candidate,next,catalog,house_id,type,cell,frame);
         if (result.status==Status::Done && result.entity) {
+            // Wall unlimbo writes an overlay and retires its temporary
+            // building. Do not activate it as a permanent structure.
+            const auto* product=catalog.find(type);
+            if (product && product->wall) return result;
             auto* building=entity(candidate,*result.entity);
             if (!building || !activate(candidate,*building)) return fail(Status::NeedsInput,"building is incomplete");
             const auto* building_type=catalog.find(building->type);

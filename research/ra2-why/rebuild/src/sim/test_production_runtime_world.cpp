@@ -139,6 +139,43 @@ int main(int argc,char** argv) try {
     require(*s.houses[0].power_drain==10,"barracks drain");
     require(option(options(s,f,c,1),"E1")==CanBuild::Can,"GI buildable");
     produce(s,f,c,"E1",frame);
+    // A wall: the GAWALL overlay index is the [OverlayTypes] position of the
+    // same name. place() writes the overlay and the owner on the Cell and
+    // clears the factory product like any placed building.
+    {
+        const ra2::sim::production::CellXY yard_at{std::int16_t(yard->cell->x),std::int16_t(yard->cell->y)};
+        const auto gawall=c.find("GAWALL");
+        require(gawall && gawall->wall,"GAWALL is a wall type");
+        int overlay=-1;
+        for (std::size_t i=0;i<c.overlay_names.size();++i) if (c.overlay_names[i]=="GAWALL") overlay=int(i);
+        require(overlay>=0,"GAWALL has an overlay entry");
+        produce(s,f,c,"GAWALL",frame);
+        const auto wall_product=[&]{ for (const auto& x:f.factories) if (x.house_id==1 && x.slot==5) return &x; return (const FactoryState*)nullptr; };
+        const auto* factory=wall_product();
+        require(factory && factory->object && factory->progress==54,"wall product waits in the factory");
+        const ra2::sim::production::CellXY at{std::int16_t(yard_at.x+5),std::int16_t(yard_at.y+5)};
+        expect(place(s,f,c,1,"GAWALL",at,frame),Status::Done,"place wall");
+        // The wall becomes an overlay only: no live Structure stays on the map.
+        for (const auto& e:s.entities)
+            require(!(e.type=="GAWALL" && e.kind==w::Kind::Structure && e.lifetime==w::Lifetime::Placed),
+                "a wall left a live Structure behind");
+        auto& cell=s.cells.at(std::uint32_t(at.y)*512+std::uint32_t(at.x));
+        require(cell.terrain && *cell.terrain->overlay_type_index==overlay,"wall overlay written on the Cell");
+        require(cell.wall_owner && *cell.wall_owner==1,"wall owner written on the Cell");
+        factory=wall_product(); // place() may move the factory vector.
+        require(factory && !factory->object && factory->object_type.empty() && factory->progress==0 && factory->suspended,
+            "factory product cleared after the wall placement");
+        // An occupied Cell rejects the wall and keeps the product.
+        produce(s,f,c,"GAWALL",frame);
+        const auto* second=[&]{ for (const auto& x:f.factories) if (x.house_id==1 && x.slot==5) return &x; return (const FactoryState*)nullptr; }();
+        require(second && second->object,"second wall product waits in the factory");
+        (void)second;
+        const auto before=s.entities.size();
+        expect(place(s,f,c,1,"GAWALL",{yard_at.x,yard_at.y},frame),Status::Rejected,
+            "wall on the yard is rejected");
+        require(s.entities.size()==before,"a rejected wall placement changes nothing");
+        expect(place(s,f,c,1,"GAWALL",at,frame),Status::Rejected,"wall on its own wall is rejected");
+    }
     std::cout<<"cash left "<<*s.houses[0].cash<<", frame "<<frame<<'\n';
     require(w::validate(s),"snapshot stays valid");
     std::cout<<"Connected production run: "<<checks<<" checks passed\n";

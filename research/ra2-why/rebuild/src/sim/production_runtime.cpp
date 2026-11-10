@@ -458,7 +458,8 @@ Catalog Catalog::from(const IniFile& rules,const IniFile& art,const IniFile& map
     read_int(rules,map,"General","AINavalYardAdjacency",c.naval_yard_adjacency);
     // OverlayType Wall: constructor 005DC5A0 clears it, the reader sets it.
     for (const auto& name:registry(rules,map,"OverlayTypes")) {
-        bool wall=false; read_bool(rules,map,name,"Wall",wall); c.overlay_wall.push_back(wall);
+        bool wall=false; read_bool(rules,map,name,"Wall",wall);
+        c.overlay_names.push_back(name); c.overlay_wall.push_back(wall);
     }
     for (const char* k:{"BuildSpeed","MinLowPowerProductionSpeed","MaxLowPowerProductionSpeed","LowPowerPenaltyModifier",
                         "MultipleFactory","WallBuildSpeedCoefficient"})
@@ -829,9 +830,12 @@ std::optional<Outcome> unlimbo_failure(const w::Snapshot& s,const Catalog& c,std
     // Permit base radar foundations and the factory bookkeeping below.
     // Base C export 00438CE0 sets radio link capacity in the constructor.
     // Other aircraft factories still require recovery of their dock behavior.
+    // A Wall=yes building places like a 1x1 building and then becomes its
+    // wall overlay (0042C000 reads Cell +44 against the type's overlay
+    // frame): the checks below are the normal Can_Enter_Cell ones.
     const bool base_radar=t->id=="AMRADR" || t->id=="GAAIRC";
-    if ((t->factory==Rtti::AircraftType && !base_radar) || t->placement.to_overlay || t->wall)
-        return fail(Status::Unsupported,"dock, wall and overlay building unlimbo is not recovered");
+    if ((t->factory==Rtti::AircraftType && !base_radar) || t->placement.to_overlay)
+        return fail(Status::Unsupported,"dock and overlay building unlimbo is not recovered");
     const auto ok=legal(s,c,*t,origin);                                    // Can_Enter_Cell 004453B0.
     if (!ok) return fail(Status::NeedsInput,"placement cells unresolved");
     if (!*ok) {
@@ -855,6 +859,29 @@ Outcome unlimbo_building(w::Snapshot& s,FactorySet& f,const Catalog& c,std::uint
     auto* b=entity_of(s,id);
     const auto* t=facts_of(c,*b);
     auto* h=house_of(s,b->house_id);
+    // A Wall=yes building never becomes a Structure: it becomes its wall
+    // overlay on each foundation Cell (0042C000 reads Cell +44 against the
+    // type's overlay frame). The temporary building retires; no structure
+    // chain, no active-building counters. The overlay index is the
+    // [OverlayTypes] position of the same name, as Catalog::overlay_names.
+    if (t->wall) {
+        int overlay=-1;
+        for (std::size_t i=0;i<c.overlay_names.size();++i)
+            if (same_text(c.overlay_names[i],t->id)) { overlay=std::int32_t(i); break; }
+        if (overlay<0) return fail(Status::NeedsInput,"wall type has no overlay");
+        for (const auto cell:footprint(origin,t->placement.foundation)) {
+            const auto key=cell_key(cell); if (!key || !s.cells.count(*key)) continue;
+            w::Undo::save_cell(s,*key);
+            auto& state=s.cells.at(*key);
+            if (!state.terrain) return fail(Status::NeedsInput,"wall cell terrain unresolved");
+            state.terrain->overlay_type_index=overlay;
+            state.wall_owner=h->id;
+            state.overlay_data_11e=0;
+        }
+        b=entity_of(s,id);
+        b->lifetime=w::Lifetime::Destroyed; b->on_map=false; b->object_field_76=1;
+        return Outcome{Status::Done,{},0,{}}; // no Structure survives
+    }
     for (const auto cell:footprint(origin,t->placement.foundation)) {       // Mark(PUT) 005D4160, Place_Down 0054AB70.
         const auto key=cell_key(cell); if (!key || !s.cells.count(*key)) continue;
         if (!link(s,*key,id,true)) return fail(Status::NeedsInput,"cell chain unresolved");

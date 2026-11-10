@@ -28,7 +28,7 @@ public:
     enum class Difficulty : std::int32_t { Easy = 0, Normal = 1, Hard = 2 };
 
     explicit PrototypeAI(const rules::IniFile& base_rules, const rules::IniFile* base_ai = nullptr,
-                         Difficulty difficulty = Difficulty::Easy);
+                         Difficulty difficulty = Difficulty::Easy, const rules::IniFile* base_art = nullptr);
 
     static constexpr std::int32_t build_interval_frames = 90;
     static constexpr std::int32_t attack_interval_frames = 45;
@@ -70,6 +70,10 @@ public:
         for (const auto& node : plan_) names.push_back(node.type);
         return names;
     }
+    // A wall node that the plan asks to build: the type and the Cell to
+    // place it at. The caller places the finished wall at that Cell.
+    struct WallRequest { std::string type; ra2map::Cell cell; };
+    std::optional<WallRequest> wall_request() const { return wall_request_; }
     // The Cell of each node (House +55F8 node +4); only wall nodes have one.
     std::vector<std::optional<ra2map::Cell>> base_plan_cells() const {
         std::vector<std::optional<ra2map::Cell>> cells;
@@ -232,6 +236,8 @@ private:
     // name; empty for a defense node, -1) and +4 the Cell.
     struct PlanNode { std::string type; std::optional<ra2map::Cell> cell; };
     std::vector<PlanNode> plan_;
+    std::optional<WallRequest> wall_request_;
+    const rules::IniFile* art_ = nullptr; // ART.INI: real building foundations.
     bool super_weapons_ = true;     // 00A3D2C3
     bool naval_ = true;             // House +138
     // House +5540, +5544, +5548: the vehicle, infantry and aircraft to make
