@@ -482,13 +482,25 @@ static LRESULT UIAPI listbox_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 }
 
 /* ================= Combo box (first version: drop-down list, owner-draw) ================= */
-typedef struct { HWND lb; int dropped; HFONT font; int item_h; int sel_h; RECT drop; int captured; } cb_state;
+typedef struct { HWND lb; int dropped; HFONT font; int item_h; int sel_h; RECT drop; int captured, resizing; } cb_state;
 enum { CBS_SIMPLE = 1, CBS_DROPDOWN = 2, CBS_DROPDOWNLIST = 3, CBS_OWNERDRAWFIXED = 0x10, CBS_OWNERDRAWVARIABLE = 0x20,
        CBS_SORT = 0x100, CBS_HASSTRINGS = 0x200 };
 enum { CBN_SELCHANGE = 1, CBN_DBLCLK = 2, CBN_SETFOCUS = 3, CBN_KILLFOCUS = 4, CBN_DROPDOWN = 7, CBN_CLOSEUP = 8,
        CBN_SELENDOK = 9, CBN_SELENDCANCEL = 10 };
 static cb_state *cbs(ui_win *w) { if (!w->ctl) w->ctl = calloc(1, sizeof(cb_state)); return w->ctl; }
 static void cb_notify(ui_win *w, UINT code) { notify_parent(w, code); }
+/* Wine COMBO_Size: drop-down combos always have the text area height plus 2 * 2 border pixels */
+static void cb_fix_height(ui_win *w)
+{
+    cb_state *s = cbs(w);
+    if (!s->lb || s->resizing || (w->style & 3) == 1 /* CBS_SIMPLE */) return;
+    int want = s->sel_h + 4, cur = w->wr.bottom - w->wr.top;
+    if (cur == want) return;
+    s->resizing = 1;
+    HWND h = w->h;
+    ui_SetWindowPos(h, 0, 0, 0, w->wr.right - w->wr.left, want, SWP_NOZORDER | SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOREDRAW);
+    if ((w = ui_get(h))) cbs(w)->resizing = 0;
+}
 static void cb_show_drop(ui_win *w, int show)
 {
     cb_state *s = cbs(w);
@@ -523,6 +535,10 @@ static LRESULT UIAPI combo_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     cb_state *s = cbs(w);
     ui_win *lb = ui_get(s->lb);
     switch (msg) {
+    case WM_NCCREATE:                         /* Wine COMBO_NCCreate: the combo itself has no border or scroll bars */
+        w->style &= ~(WS_BORDER | WS_HSCROLL | WS_VSCROLL);
+        w->exstyle &= ~WS_EX_CLIENTEDGE;
+        return ui_DefWindowProcA(h, msg, wp, lp);
     case WM_CREATE: {
         DWORD ls = 0x40000000u | 0x80000000u | WS_BORDER | WS_VSCROLL | LBS_NOTIFY;   /* hidden popup list */
         ls &= ~WS_CHILD;
@@ -535,13 +551,21 @@ static LRESULT UIAPI combo_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         s = cbs(w); s->lb = l;
         ui_win *lw = ui_get(l);
         if (lw) { lbs(lw)->combo = 1; lbs(lw)->owner = ui_handle(w->parent); lw->id = w->id; }
+        /* Wine COMBO_Create / CBGetTextAreaHeight: the text height comes from the DC font
+           (no font yet: system font). Owner-drawn combos ask the parent with itemID -1 (text area)
+           and itemID 0 (list items). The text area height is 2 + the answer. */
+        int th; { HDC dc = ui_GetDC(h); LONG tm[16] = {0}; ui_GetTextMetricsA(dc, tm); ui_ReleaseDC(h, dc); th = (int)tm[0] + 4; }   /* combo_get_text_height */
+        if (!(w = ui_get(h))) return -1;
+        cbs(w)->sel_h = th;
         if (w->style & (CBS_OWNERDRAWFIXED | CBS_OWNERDRAWVARIABLE)) {
-            MEASUREITEMSTRUCT mi = { ODT_COMBOBOX, w->id, (UINT)-1, (UINT)(w->cr.right - w->cr.left), 13, 0 };
+            MEASUREITEMSTRUCT mi = { ODT_COMBOBOX, w->id, (UINT)-1, (UINT)(w->cr.right - w->cr.left), (UINT)(th - 2), 0 };
             ui_send(w->parent, WM_MEASUREITEM, w->id, (LPARAM)&mi);
-            if ((w = ui_get(h))) cbs(w)->sel_h = (int)mi.itemHeight;
-            mi.itemID = 0; mi.itemHeight = 13;
-            if ((w = ui_get(h))) ui_send(w->parent, WM_MEASUREITEM, w->id, (LPARAM)&mi);
-            if (lw && ui_get(l)) lbs(lw)->item_h = mi.itemHeight ? (int)mi.itemHeight : 13;
+            if ((w = ui_get(h))) cbs(w)->sel_h = 2 + (int)mi.itemHeight;
+            if (w && (w->style & CBS_OWNERDRAWFIXED)) {
+                mi.itemID = 0; mi.itemHeight = (UINT)th;
+                ui_send(w->parent, WM_MEASUREITEM, w->id, (LPARAM)&mi);
+                if (lw && ui_get(l)) lbs(lw)->item_h = mi.itemHeight ? (int)mi.itemHeight : th;
+            }
         }
         return 0;
     }
@@ -552,7 +576,7 @@ static LRESULT UIAPI combo_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         if ((w = ui_get(h)) && (w->style & (CBS_OWNERDRAWFIXED | CBS_OWNERDRAWVARIABLE)) && (lb = ui_get(cbs(w)->lb))) {
             int cur = (int)ui_send(lb, 0x188, 0, 0);
             DRAWITEMSTRUCT d = { ODT_COMBOBOX, w->id, (UINT)cur, ODA_DRAWENTIRE, ODS_COMBOBOXEDIT, h, dc,
-                                 { 3, 3, w->cr.right - w->cr.left - 3 - 16, w->cr.bottom - w->cr.top - 3 }, 0 };
+                                 { 3, 3, w->cr.right - w->cr.left - 2 - 17 - 1, 2 + cbs(w)->sel_h - 1 }, 0 };
             if (cur >= 0) d.itemData = (DWORD)ui_send(lb, 0x199, (WPARAM)cur, 0);
             if (ui_focus() == w && !cbs(w)->dropped) d.itemState |= ODS_SELECTED | ODS_FOCUS;
             if (w->style & WS_DISABLED) d.itemState |= ODS_DISABLED;
@@ -563,7 +587,13 @@ static LRESULT UIAPI combo_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     }
     case WM_ERASEBKGND: return 1;
     case WM_GETDLGCODE: return DLGC_WANTARROWS | DLGC_WANTCHARS;
-    case WM_SETFONT: s->font = wp; if (lb) ui_send(lb, WM_SETFONT, wp, 0); if (lp) ui_InvalidateRect(h, NULL, 1); return 0;
+    case WM_SETFONT:                                             /* Wine COMBO_Font */
+        s->font = wp;
+        if (!(w->style & (CBS_OWNERDRAWFIXED | CBS_OWNERDRAWVARIABLE))) { int tm[20]; ui_font_tm(wp, tm); s->sel_h = tm[0] + 4; }
+        if (lb) ui_send(lb, WM_SETFONT, wp, lp);
+        if ((w = ui_get(h))) cb_fix_height(w);
+        if (lp) ui_InvalidateRect(h, NULL, 1);
+        return 0;
     case WM_GETFONT: return (LRESULT)s->font;
     case WM_SETFOCUS: ui_InvalidateRect(h, NULL, 1); cb_notify(w, CBN_SETFOCUS); return 0;
     case WM_KILLFOCUS: cb_show_drop(w, 0); if ((w = ui_get(h))) { ui_InvalidateRect(h, NULL, 1); cb_notify(w, CBN_KILLFOCUS); } return 0;
@@ -644,8 +674,10 @@ static LRESULT UIAPI combo_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         return 1;
     }
     case 0x153:                                                  /* CB_SETITEMHEIGHT */
-        if ((int)wp == -1) s->sel_h = (int)lp; else if (lb) lbs(lb)->item_h = (int)lp;
+        if ((int)wp == -1) { s->sel_h = (int)lp + 2; cb_fix_height(w); if (!(w = ui_get(h))) return 0; }
+        else if (lb) lbs(lb)->item_h = (int)lp;
         ui_InvalidateRect(h, NULL, 1); return 0;
+    case WM_SIZE: cb_fix_height(w); return 0;
     case 0x154: return (int)wp == -1 ? s->sel_h : (lb ? lbs(lb)->item_h : 13);
     case 0x157: return s->dropped;                               /* CB_GETDROPPEDSTATE */
     case 0x158: return lb ? ui_send(lb, 0x1a2, wp, lp) : -1;     /* CB_FINDSTRINGEXACT */
@@ -851,6 +883,9 @@ static LRESULT UIAPI progress_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     if (!w->ctl) { int *p = calloc(4, sizeof(int)); p[1] = 100; p[3] = 10; w->ctl = p; }
     int *p = w->ctl;   /* min, max, pos, step */
     switch (msg) {
+    case WM_NCCREATE:                         /* Wine comctl32 progress: always a static edge */
+        w->exstyle = (w->exstyle & ~(WS_EX_CLIENTEDGE | WS_EX_WINDOWEDGE)) | WS_EX_STATICEDGE;
+        return ui_DefWindowProcA(h, msg, wp, lp);
     case 0x401: { int o = MAKELONG(p[0], p[1]); p[0] = LOWORD(lp); p[1] = HIWORD(lp); ui_InvalidateRect(h, NULL, 1); return o; }
     case 0x402: { int o = p[2]; p[2] = (int)wp; ui_InvalidateRect(h, NULL, 1); return o; }
     case 0x403: { int o = p[2]; p[2] += (int)wp; ui_InvalidateRect(h, NULL, 1); return o; }
