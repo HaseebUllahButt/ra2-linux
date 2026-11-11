@@ -15,10 +15,10 @@ using session::world::Lifetime;
 
 constexpr double rank_veteran_value = 1.0; // 0074FF90 threshold.
 constexpr double rank_elite_value = 2.0;   // 00750010 threshold.
-// TODO-ORIGINAL 00481A00: the explosion crate damage is a runtime table
+// TODO-ORIGINAL 00476CC0 crate pickup: the explosion crate damage is a runtime table
 // entry (CrateData); the default here is a playable stand-in.
 constexpr std::int32_t crate_explosion_damage = 400;
-// TODO-ORIGINAL 00481A00: the armor crate multiplier is CrateData/256; the
+// TODO-ORIGINAL 00476CC0 crate pickup: the armor crate multiplier is CrateData/256; the
 // default here follows the [General] VeteranArmor shape as a stand-in.
 constexpr double crate_armor_multiplier = 1.5;
 constexpr double crate_speed_multiplier = 1.2;
@@ -135,7 +135,7 @@ Abilities read_ability_list(const IniFile& rules, std::string_view type,
     return result;
 }
 
-// One promotion step of the original veterancy crate (00481A00 case 14):
+// One promotion step of the original veterancy crate (00476CC0 crate pickup case 14):
 // veteran becomes elite, rookie becomes veteran, negative resets.
 void promote_one_step(WorldEntity& entity) {
     const double value = entity.veterancy.value_or(0.0);
@@ -148,9 +148,30 @@ void promote_one_step(WorldEntity& entity) {
 }
 
 // Crate area test: cell distance below the radius, like the original lepton
-// distance against CrateRadius (00481A00 armor/speed/firepower cases).
+// distance against CrateRadius (00476CC0 crate pickup armor/speed/firepower cases).
+// Base 004783E4 firepower case and the armor case beside it: the
+// integer 3D distance from the crate cell center (cell*256+128, the
+// cell floor height) to the object coords must be strictly less than
+// the CrateRadius leptons at Rules 0+1394.
 bool within_crate_radius(const ra2map::Cell& a, const ra2map::Cell& b, double radius) {
     return std::sqrt(static_cast<double>(cell_distance_squared(a, b))) < radius;
+}
+
+// Integer 3D crate distance in leptons, crate cell center and floor.
+int crate_distance_leptons(const WorldSnapshot& world, const ra2map::Cell& crate,
+    const sim::Coord& pos) {
+    const auto index = static_cast<std::uint32_t>(crate.y * 512 + crate.x);
+    int floor = 0;
+    const auto it = world.cells.find(index);
+    if (it != world.cells.end() && it->second.terrain && it->second.terrain->floor_world_height) {
+        floor = *it->second.terrain->floor_world_height;
+    }
+    const long long dx = 256LL * crate.x + 128 - pos.x;
+    const long long dy = 256LL * crate.y + 128 - pos.y;
+    const long long dz = floor - pos.z;
+    // FIDELITY GAP: the original distance routine is not traced; this
+    // std::sqrt stand-in may differ from it by one lepton at boundaries.
+    return static_cast<int>(std::sqrt(double(dx * dx + dy * dy + dz * dz)));
 }
 
 void consume_entity(WorldSnapshot& world, std::uint32_t id) {
@@ -187,7 +208,9 @@ TypeAbilities load_type_abilities(const IniFile& rules, std::string_view type) {
 }
 
 Rank rank_of(double veterancy) noexcept {
-    veterancy += 1e-9;
+    // Base FUN007133A0: exactly 1 <= value < 2 is Veteran. Base 00713420:
+    // exactly 2 <= value is Elite. No epsilon: the original compares the
+    // stored double directly.
     if (veterancy >= rank_elite_value) return Rank::Elite;
     if (veterancy >= rank_veteran_value) return Rank::Veteran;
     return Rank::Rookie;
@@ -510,6 +533,30 @@ SpyEffect spy_infiltrate(const IniFile& rules, WorldSnapshot& world, SpyInfiltra
 // Crates
 // ---------------------------------------------------------------------------
 
+
+// Base 0064D490: Powerups entries split by commas; the fourth field is
+// the power-up factor, stored as a double in DAT_00851080. A trailing
+// percent sign divides by 100 (FUN_00784130 checks for 0x25).
+double powerup_factor(const rules::IniFile& rules, std::string_view name,
+    double fallback) {
+    const auto value = rules.read_string("Powerups", name, "");
+    if (value.empty()) return fallback;
+    const auto fields = rules::IniFile::split_list(value);
+    if (fields.size() < 4) return fallback;
+    auto text = fields[3];
+    bool percent = false;
+    if (!text.empty() && text.back() == '%') {
+        percent = true;
+        text.pop_back();
+    }
+    try {
+        const double parsed = std::stod(std::string(text));
+        return percent ? parsed / 100.0 : parsed;
+    } catch (const std::exception&) {
+        return fallback;
+    }
+}
+
 CrateRules CrateRules::load(const IniFile& rules) {
     CrateRules result;
     // RA1 CONST.CPP share defaults; the RA2 table is a runtime table.
@@ -525,6 +572,9 @@ CrateRules CrateRules::load(const IniFile& rules) {
     result.regen_minutes = rules.read_double("CrateRules", "CrateRegen", result.regen_minutes);
     result.unit_crate_type = rules.read_string("CrateRules", "UnitCrateType");
     result.free_mcv = rules.read_bool("CrateRules", "FreeMCV", result.free_mcv);
+    result.armor_crate = powerup_factor(rules, "Armor", result.armor_crate);
+    result.speed_crate = powerup_factor(rules, "Speed", result.speed_crate);
+    result.firepower_crate = powerup_factor(rules, "Firepower", result.firepower_crate);
     if (equal_name(result.unit_crate_type, "none")) result.unit_crate_type.clear();
     if (result.radius <= 0.0 || result.crate_maximum < 0 || result.crate_minimum < 0 ||
         result.regen_minutes < 0.0)
@@ -588,7 +638,7 @@ bool CrateState::unit_limit_reached(const WorldSnapshot& world, std::uint32_t ho
         if (entity.house_id == house_id && entity.kind == session::world::Kind::Unit &&
             entity.lifetime != Lifetime::Destroyed)
             ++units;
-    return units > 50; // 00481A00 case 1.
+    return units > 50; // 00476CC0 crate pickup case 1.
 }
 
 std::int32_t CrateState::money_fallback(const IniFile& rules, WorldSnapshot& world,
@@ -596,7 +646,7 @@ std::int32_t CrateState::money_fallback(const IniFile& rules, WorldSnapshot& wor
     const auto* collector = find_entity(world, collector_id, "collector");
     auto* house = find_house(world, collector->house_id);
     if (!house) throw std::invalid_argument("collector house is unknown");
-    // 00481A00 money case: random amount; SoloCrateMoney in solo play.
+    // 00476CC0 crate pickup money case: random amount; SoloCrateMoney in solo play.
     sim::Random rng(world.random);
     const auto credits = rng.ranged(0, 900);
     world.random = rng.state();
@@ -627,7 +677,7 @@ CrateState::Applied CrateState::collect(const IniFile& rules, WorldSnapshot& wor
             money_fallback(rules, world, collector_id, crate_rules, applied);
             break;
         case CrateKind::Unit: {
-            // 00481A00 unit case: too many units falls back to money.
+            // 00476CC0 crate pickup unit case: too many units falls back to money.
             if (unit_limit_reached(world, collector->house_id) ||
                 crate_rules.unit_crate_type.empty()) {
                 money_fallback(rules, world, collector_id, crate_rules, applied);
@@ -648,7 +698,7 @@ CrateState::Applied CrateState::collect(const IniFile& rules, WorldSnapshot& wor
             break;
         }
         case CrateKind::HealBase:
-            // 00481A00 heal base case: all objects of the collector's house.
+            // 00476CC0 crate pickup heal base case: all objects of the collector's house.
             for (auto& entity : world.entities) {
                 if (entity.house_id != collector->house_id ||
                     !live_entity(entity) || !entity.maximum_hp) continue;
@@ -659,28 +709,52 @@ CrateState::Applied CrateState::collect(const IniFile& rules, WorldSnapshot& wor
         case CrateKind::Armor:
         case CrateKind::Speed:
         case CrateKind::Firepower: {
-            // 00481A00 area cases: every live techno in radius with a 1.0
+            // 00476CC0 crate pickup area cases: every live techno in radius with a 1.0
             // bias gains the crate multiplier.
-            const double multiplier = kind == CrateKind::Armor ? crate_armor_multiplier
-                : kind == CrateKind::Speed ? crate_speed_multiplier
-                : crate_firepower_multiplier;
+            const double multiplier = kind == CrateKind::Armor ? crate_rules.armor_crate
+                : kind == CrateKind::Speed ? crate_rules.speed_crate
+                : crate_rules.firepower_crate;
             for (auto& entity : world.entities) {
                 if (!live_entity(entity) || !entity.cell) continue;
+                // Cell presence does not guarantee coords; an object
+                // without a position is not in the original scan list.
+                if (!entity.position) continue;
+                // A loaded upgraded actor keeps its own multiplier; the
+                // crate never rewrites an existing bonus.
+                if ((kind == CrateKind::Armor && entity.armor_multiplier &&
+                     *entity.armor_multiplier != 1.0) ||
+                    (kind == CrateKind::Firepower && entity.firepower_multiplier &&
+                     *entity.firepower_multiplier != 1.0))
+                    continue;
                 if (entity.kind != session::world::Kind::Unit && entity.kind != session::world::Kind::Infantry &&
                     entity.kind != session::world::Kind::Structure) continue;
-                if (!within_crate_radius(*entity.cell, crate_cell, crate_rules.radius))
+                if (crate_distance_leptons(world, crate_cell, *entity.position) >=
+                    static_cast<int>(crate_rules.radius * 256.0))
                     continue;
                 auto& biases = biases_[entity.id];
                 double& bias = kind == CrateKind::Armor ? biases.armor
                     : kind == CrateKind::Speed ? biases.speed : biases.firepower;
                 if (bias != 1.0) continue;
                 bias = multiplier;
+                // The damage path reads the resolved entity fields, so the
+                // armor and firepower crates write them directly.
+                // The original requires the field to be exactly 1.0
+                // and multiplies the factor into it (004783E4).
+                if (kind == CrateKind::Armor) {
+                    if (entity.armor_multiplier.value_or(1.0) != 1.0) continue;
+                    entity.armor_multiplier = multiplier *
+                        entity.armor_multiplier.value_or(1.0);
+                } else if (kind == CrateKind::Firepower) {
+                    if (entity.firepower_multiplier.value_or(1.0) != 1.0) continue;
+                    entity.firepower_multiplier = multiplier *
+                        entity.firepower_multiplier.value_or(1.0);
+                }
                 applied.affected.push_back(entity.id);
             }
             break;
         }
         case CrateKind::Veterancy: {
-            // 00481A00 veterancy case: one rank for trainable technos in radius.
+            // 00476CC0 crate pickup veterancy case: one rank for trainable technos in radius.
             for (auto& entity : world.entities) {
                 if (!live_entity(entity) || !entity.cell) continue;
                 if (entity.kind == session::world::Kind::Structure) continue;
@@ -695,7 +769,7 @@ CrateState::Applied CrateState::collect(const IniFile& rules, WorldSnapshot& wor
             break;
         }
         case CrateKind::Cloak: {
-            // 00481A00 cloak case: technos in radius become cloakable.
+            // 00476CC0 crate pickup cloak case: technos in radius become cloakable.
             for (auto& entity : world.entities) {
                 if (!live_entity(entity) || !entity.cell) continue;
                 if (entity.kind != session::world::Kind::Unit && entity.kind != session::world::Kind::Infantry &&
@@ -708,7 +782,7 @@ CrateState::Applied CrateState::collect(const IniFile& rules, WorldSnapshot& wor
             break;
         }
         case CrateKind::Explosion: {
-            // 00481A00 explosion case: the collector takes the crate damage.
+            // 00476CC0 crate pickup explosion case: the collector takes the crate damage.
             // TODO-ORIGINAL: the original also scatters five area explosions.
             auto* mutable_collector = find_entity(world, collector_id, "collector");
             mutable_collector->resolved_hp = std::max(

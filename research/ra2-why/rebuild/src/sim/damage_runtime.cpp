@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 #include <cstdio>
+#include <iostream>
 #include <cstdlib>
 
 namespace ra2::sim {
@@ -243,15 +244,19 @@ bool base_complete_area_damage_request(AreaDamageCursor& cursor,std::uint32_t id
 #include "../weapons/object_damage.h"
 #include "../weapons/projectile_damage.h"
 #include "../weapons/techno_damage.h"
+#include "prototype_special.h"
 #include "prototype_turret.h"
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
 
 namespace ra2::sim {
+double country_armor_multiplier(const session::world::House*,session::world::Kind,
+    const std::string&,const rules::IniFile&,const rules::IniFile&);
 namespace {
 using session::world::Entity;
 using session::world::Snapshot;
@@ -395,7 +400,20 @@ std::optional<double> prototype_verse(const IniFile& base,const IniFile& map,
     const auto verses=IniFile::split_list(prototype_string(base,map,weapon.warhead,"Verses"));
     const auto index=static_cast<std::size_t>(name-names.begin());
     if (index>=verses.size()) return {};
-    return IniFile::double_value(verses[index]);
+    // Base 00720B1C..00720B53 reads each Verses entry separately. Percent
+    // entries use atoi, then multiply by 0.01 under the game's x87 control
+    // word. This differs from the general INI floating-point reader.
+    const auto& value=verses[index];
+    const auto percent=value.find('%');
+    if (percent!=std::string::npos) {
+        const auto integer=IniFile::integer_value(value.substr(0,percent));
+        if (!integer) return {};
+        return fp::multiply(*integer,0.01);
+    }
+    char* end=nullptr;
+    const auto result=std::strtod(value.c_str(),&end);
+    if (end==value.c_str() || !std::isfinite(result)) return {};
+    return result;
 }
 const session::world::House* prototype_house(const Snapshot& w,std::uint32_t id) {
     auto it=std::find_if(w.houses.begin(),w.houses.end(),[id](const auto& h){return h.id==id;});
@@ -499,11 +517,30 @@ PrototypeHit prototype_damage(Snapshot& world,std::uint32_t target_id,std::uint3
         return {false,false,"target Strength or warhead Verses is unresolved"};
     weapons::TechnoDamageInput techno{};
     techno.raw_damage=raw;
-    // TODO-ORIGINAL: Resolve missing country, veteran, immunity and special
-    // virtual state from the loaded actor instead of prototype defaults.
-    techno.house_armor_multiplier=target->house_armor_multiplier.value_or(1);
+    // Country, veteran and special state resolve from the loaded actor.
+    // The house multiplier rides on the entity; the rank armor divisor is
+    // the [General] VeteranArmor value. TODO-ORIGINAL: the invulnerability
+    // and immune virtuals still need the loaded actor state.
+    // Base 004F58A0: the owning House.country picks the armor factor by
+    // target RTTI. Resolved here from the merged rules so every creation
+    // path (setup actors and new factory products) uses the live country,
+    // not a stale per-actor default.
+    techno.house_armor_multiplier=country_armor_multiplier(
+        prototype_house(world,target->house_id),target->kind,target->type,base,map);
+    target->house_armor_multiplier=techno.house_armor_multiplier;
+    // The country Firepower key is not applied here. Country +C8
+    // FirepowerMult and +E0 ArmorMult are unused TS leftovers. UNRESOLVED:
+    // the original House +D0 initializer is not traced; setup.cpp writes
+    // 1.0 as a multiplayer stand-in, so that value is not proven live.
     techno.object_armor_multiplier=target->armor_multiplier.value_or(1);
-    techno.veteran_armor_multiplier=1;techno.attacker_present=source_id!=0;techno.warhead_present=true;
+    const auto target_abilities=load_type_abilities(base,target->type);
+    const auto target_rank=rank_of(target->veterancy.value_or(0.0));
+    techno.veteran=target_rank!=Rank::Rookie;
+    techno.elite=target_rank==Rank::Elite;
+    techno.veteran_armor=target_abilities.veteran.flag[AbilityStronger];
+    techno.elite_armor=target_abilities.elite.flag[AbilityStronger];
+    techno.veteran_armor_multiplier=VeterancyRules::load(base).veteran_armor;
+    techno.attacker_present=source_id!=0;techno.warhead_present=true;
     const auto prefix=weapons::base_techno_damage_prefix(techno);
     if (prefix.stage!=weapons::TechnoDamageStage::ObjectDamage)
         return {false,false,"prototype Techno damage needs an original effect"};
@@ -559,11 +596,48 @@ void prototype_record(const Snapshot& world,PrototypeCombatTick& report,std::uin
 }
 }
 
+// Base 004F58A0: the victim's House asks its CountryType for an armor
+// factor by target RTTI. Original branch values: RTTI 3 AircraftType reads
+// +108 ArmorAircraftMult, 0x10 InfantryType +100 ArmorInfantryMult, 0x28
+// UnitType +104 ArmorUnitsMult, and 7 BuildingType +110 ArmorDefensesMult
+// only when type BuildCat==5 (Combat), otherwise +10C ArmorBuildingsMult.
+// The country loader 004F9550 reads these five keys as floats; a missing
+// key or country leaves the factor at 1.0. The global Country +C8
+// FirepowerMult and +E0 ArmorMult are unused TS leftovers and are not read.
+double country_armor_multiplier(const session::world::House* house,
+    session::world::Kind kind,const std::string& type,
+    const rules::IniFile& base,const rules::IniFile& map) {
+    if (!house || house->country.empty()) return 1.0;
+    const char* key=kind==session::world::Kind::Aircraft ? "ArmorAircraftMult"
+        : kind==session::world::Kind::Infantry ? "ArmorInfantryMult"
+        : kind==session::world::Kind::Unit ? "ArmorUnitsMult"
+        : kind==session::world::Kind::Structure
+          ? ([](const std::string& cat) {
+                // BuildCat enum names are case-insensitive in the original
+                // readers; accept any spelling of Combat (BuildCat 5).
+                if (cat.size()!=6) return false;
+                const char combat[]="combat";
+                for (std::size_t i=0;i<cat.size();++i)
+                    if (std::tolower(static_cast<unsigned char>(cat[i]))!=combat[i]) return false;
+                return true;
+            })(prototype_string(base,map,type,"BuildCat"))
+            ? "ArmorDefensesMult" : "ArmorBuildingsMult"
+        : "";
+    if (!*key) return 1.0;
+    const auto value=prototype_double(base,map,house->country,key).value_or(1.0);
+    // 004F9550 stores each factor as a 32-bit float. The original FPU
+    // control word 00000E7F rounds toward zero on the store, so a double
+    // INI value like 0.8 lands on the binary32 value at or below it.
+    float stored=static_cast<float>(value);
+    if (static_cast<double>(stored)>value) stored=std::nextafter(stored,0.0f);
+    return static_cast<double>(stored);
+}
+
 PrototypeCombatRuntime::PrototypeCombatRuntime(const IniFile& base,const IniFile& map,
     const IniFile& art,const std::string& exe)
-    :base_(base),map_(map),art_(art),distance_(OriginalDistance::from_executable(exe)),
+    :base_(base),map_(map),art_(art),merged_(prototype_merge_rules(base,map)),
+     distance_(OriginalDistance::from_executable(exe)),
      angles_(weapons::BaseBallisticAngles::from_executable(exe)) {}
-
 PrototypeCombatRuntime::PrototypeCombatRuntime(const IniFile& base,const IniFile& mode,
     const IniFile& map,const IniFile& art,const std::string& exe)
     :PrototypeCombatRuntime(prototype_merge_rules(base,mode),map,art,exe) {}
@@ -579,28 +653,56 @@ bool PrototypeCombatRuntime::can_attack(const session::world::Snapshot& world,
     // TODO-ORIGINAL: Resolve alliances beyond matching House IDs.
     if (!prototype_alive(source) || !prototype_alive(target) || source->house_id==target->house_id)
         return false;
+    // The target gate blocks the pair before any weapon or verse checks.
+    if (target_gate_ && !target_gate_(world,*source,*target)) return false;
     const auto weapon=prototype_target_weapon(base_,map_,art_,world,*source,*target);
     if (!weapon) return false;
     const auto verse=prototype_verse(base_,map_,*weapon,*target);
     return verse && std::isfinite(*verse) && *verse>0;
 }
 std::optional<PrototypeCombatRuntime::TurretAim> PrototypeCombatRuntime::turret_aim(
-    session::world::Entity& source,const session::world::Entity& target,bool omni_fire,std::int32_t frame) {
-    // Base 006FB890 turret branch for UnitType +AAB Turret. OmniFire (+107)
-    // weapons leave the turret alone. TODO-ORIGINAL: TurretSpins, locked
-    // turrets, hull aim for Units without a turret, and the idle return to
-    // the hull or move destination (006FB98E) are not reproduced here.
-    if (source.kind!=session::world::Kind::Unit || omni_fire || !source.position || !target.position ||
-        !prototype_bool(base_,map_,source.type,"Turret") ||
-        prototype_bool(base_,map_,source.type,"TurretSpins")) return {};
+    session::world::Entity& source,const session::world::Entity& target,std::int32_t frame) {
+    // Base 006FB890 Unit aim update. It runs every frame for a Unit with a
+    // target, independent of the 00704DF0 fire gate: the OmniFire (+107)
+    // skip and the UnitType +BB1/+BB0 skips live in the fire gate only and
+    // never suppress this update. The gate reads the Unit +2F8 turret
+    // FacingClass when the type +AAB Turret byte is set and the +2E0 hull
+    // FacingClass otherwise, and compares it with the 005D2730 target
+    // direction every frame.
+    // TODO-ORIGINAL: locked turrets and the idle return to the hull or move
+    // destination (006FB98E) are not reproduced here.
+    if (source.kind!=session::world::Kind::Unit ||
+        !source.position || !target.position) return {};
     const auto dx=static_cast<long long>(target.position->x)-source.position->x;
     const auto dy=static_cast<long long>(target.position->y)-source.position->y;
     if (std::abs(dx)>100000 || std::abs(dy)>100000 || (!dx && !dy)) return {};
     // Base 005D2730 GetTargetDirection uses the same atan2 arithmetic.
     const auto direction=angles_.heading(static_cast<int>(dx),static_cast<int>(dy));
-    // Base 006FA5AD: the turret ROT is the Techno type ROT (+638).
-    const auto rot=base_facing_rot(prototype_int(base_,map_,source.type,"ROT").value_or(0));
+    if (!prototype_bool(base_,map_,source.type,"Turret")) {
+        // FUN_006fb890 turretless branch (006FB92F..006FB989): the gate reads
+        // the unrotated +2E0 hull FacingClass. The original re-issues
+        // Set_Desired(direction) only when the hull Current already equals
+        // the target direction, so driving and aim rotation stay with the
+        // locomotor and no rotation state is needed here.
+        const auto hull=source.hull_facing_raw.value_or(0);
+        return TurretAim{hull,direction};
+    }
+    // Turret aim. Base 006FA5AD: the turret ROT is the Techno type ROT
+    // (+638). A TurretSpins turret never aims; FUN_006fb890 instead advances
+    // its quantized facing by 8 raw steps each tick through Set_Current.
+    const auto spins=prototype_bool(base_,map_,source.type,"TurretSpins");
     const auto shown=source.turret_facing_raw.value_or(source.hull_facing_raw.value_or(0));
+    if (spins) {
+        // FUN_006FB9B1..006FB9CB spinning branch: round the raw facing to the
+        // 0-255 facing byte (shr 7, inc, shr 1), add 8 (one of the 32 facing
+        // steps) and scale back with shl 8 through Set_Current (004B8B10).
+        const auto q=static_cast<std::uint16_t>(((shown>>7)+1)/2&0xff)+8;
+        const auto spun=static_cast<std::uint16_t>(q*0x100);
+        source.turret_facing_raw=spun;
+        return TurretAim{spun,direction};
+    }
+    // Base 006FA5AD: Set_Desired(direction) on the +2F8 FacingClass.
+    const auto rot=base_facing_rot(prototype_int(base_,map_,source.type,"ROT").value_or(0));
     auto state=turrets_.find(source.id);
     if (state==turrets_.end() || state->second.facing.rot!=rot || state->second.written!=shown) {
         TurretState fresh;fresh.facing.rot=rot;base_facing_set_current(fresh.facing,shown,frame);
@@ -613,13 +715,19 @@ std::optional<PrototypeCombatRuntime::TurretAim> PrototypeCombatRuntime::turret_
     source.turret_facing_raw=current;source.turret_facing=static_cast<int>(current>>8);
     return TurretAim{current,direction};
 }
+
 bool PrototypeCombatRuntime::attack(session::world::Snapshot& world,std::uint32_t source_id,std::uint32_t target_id) {
     if (!can_attack(world,source_id,target_id)) return false;
     auto* source=prototype_find(world,source_id);
     guard_orders_.erase(source_id);guard_place_.erase(source_id);
+    // Infantry SetTarget 00502470 keeps its firing action when the target
+    // is unchanged. Repeated orders must not restart the firing animation.
+    const auto previous=orders_.find(source_id);
+    if (previous==orders_.end() || previous->second!=target_id) infantry_fire_.erase(source_id);
     orders_[source_id]=target_id;source->target_id=target_id;return true;
 }
 void PrototypeCombatRuntime::stop(session::world::Snapshot& world,std::uint32_t source_id) {
+    infantry_fire_.erase(source_id);
     guard_orders_.erase(source_id);guard_place_.erase(source_id);
     orders_.erase(source_id);
     if (auto* source=prototype_find(world,source_id)) source->target_id=0;
@@ -714,7 +822,7 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             if (raw_for(*target)>0 && invulnerable_ && invulnerable_(target->id,frame)) continue;
             const int before=*target->resolved_hp;
             auto hit=prototype_damage(world,candidate.id,shot.source_id,raw_for(*target),
-                                      candidate.distance,*weapon,base_,map_);
+                                      candidate.distance,*weapon,merged_,map_);
             panic(*target,hit);
             if (hit.applied && !hit.destroyed && shot.source_id) struck.emplace_back(target->id,shot.source_id);
             if (!hit.missing.empty()) report.unresolved.push_back(hit.missing);
@@ -729,7 +837,7 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             const int before=*aimed->resolved_hp;
             const bool shielded=raw_for(*aimed)>0 && invulnerable_ && invulnerable_(aimed->id,frame);
             auto hit=shielded?PrototypeHit{}:prototype_damage(world,aimed->id,shot.source_id,
-                raw_for(*aimed),0,*weapon,base_,map_);
+                raw_for(*aimed),0,*weapon,merged_,map_);
             panic(*aimed,hit);
             if (hit.applied && !hit.destroyed && shot.source_id) struck.emplace_back(aimed->id,shot.source_id);
             if (!hit.missing.empty()) report.unresolved.push_back(hit.missing);
@@ -915,9 +1023,13 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
     for (auto it=orders_.begin();it!=orders_.end();) {
         auto* source=prototype_find(world,it->first);auto* target=prototype_find(world,it->second);
         if (!prototype_alive(source) || !prototype_alive(target)) {
+            infantry_fire_.erase(it->first);
             if (source) source->target_id=0;
             it=orders_.erase(it);continue;
         }
+        // The target gate pauses a rejected active order: it keeps its
+        // order, takes no shot and asks no approach.
+        if (target_gate_ && !target_gate_(world,*source,*target)) {++it;continue;}
         // Base flight mission: a source without permission to fire keeps its
         // order, takes no shot and asks no approach. Weapon timing, damage
         // and in-flight projectiles stay shared with the ground prototype.
@@ -935,31 +1047,70 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
                     report.unresolved.push_back("weapon or target armor is unresolved");
                 source->target_id=0;it=orders_.erase(it);continue;
             }
-            // Base 006FB890: a turreted Unit with a target turns its turret
-            // toward that target every frame, also while out of range.
-            const auto aim=turret_aim(*source,*target,weapon->omni_fire,static_cast<std::int32_t>(frame));
+            // Base 006FB890: a turreted Unit with a target updates its
+            // turret toward that target every frame, also while out of
+            // range. A Unit without a turret keeps its hull facing here:
+            // the original re-issues Set_Desired only on the hull branch
+            // and leaves drive rotation to the locomotor.
+            const auto aim=turret_aim(*source,*target,static_cast<std::int32_t>(frame));
             // AircraftClass::IsCloseEnoughToAttack (006C5070) delegates to
             // weapon eligibility. Flight missions use ground separation here,
             // so a bomber can reach a ground target below its cruise height.
             // TODO-ORIGINAL: recover the complete aircraft range override.
             const bool flying=prototype_air_target(base_,map_,world,*source);
             const int d=distance_.between(*source->position,*target->position,flying);
-            if (d>weapon->range) {report.out_of_range.emplace_back(source->id,target->id);++it;continue;}
+            if (d>weapon->range) {infantry_fire_.erase(source->id);report.out_of_range.emplace_back(source->id,target->id);++it;continue;}
             // TODO-ORIGINAL: Replace these direct range and targeting checks
             // with the full mission, eligibility, terrain and elevation paths.
             // TODO-ORIGINAL: An unknown timer starts ready in this prototype.
             const weapons::FireTimer timer{source->weapon_timer_start_frame.value_or(-1),
                                            source->weapon_timer_duration.value_or(0)};
             if (!weapons::base_fire_timer_ready(timer,static_cast<int>(frame))) {++it;continue;}
-            // Base 00704DF0..00704E8E: FIRE_FACING until the turret is close
-            // enough. OmniFire weapons skip the check.
-            if (aim && !weapon->omni_fire &&
+            // Base 00704DF0..00704E8E: FIRE_FACING until the aiming facing is
+            // close enough. That facing is the turret for a turreted Unit and
+            // the hull for a Unit without one, as in RA1 UnitClass::Can_Fire.
+            // The gate skips OmniFire (+107) weapons and UnitType +BB1/+BB0;
+            // the art loader sets those flags at 0070AD93 and 0070AD79 from
+            // the Image section keys LargeVisceroid and SmallVisceroid, and
+            // the type constructor 0070A67F clears both by default. The
+            // skips restrict firing only; the 006FB890 aim update above
+            // still runs.
+            const auto gate_image=prototype_string(base_,map_,source->type,"Image");
+            const auto gate_image_name=gate_image.empty()?source->type:gate_image;
+            const bool facing_skip=weapon->omni_fire ||
+                art_.read_bool(gate_image_name,"LargeVisceroid",false) ||
+                art_.read_bool(gate_image_name,"SmallVisceroid",false);
+            if (aim && !facing_skip &&
                 !base_unit_facing_ready(aim->current,aim->direction,weapon->projectile_rot)) {++it;continue;}
+            if (source->kind==session::world::Kind::Infantry) {
+                // 00507530 starts FireUp/FireProne when CanFire is ready,
+                // then fires at the type's art-defined stage (+B9C/+BA0).
+                // Both firing sequences advance one stage per game frame.
+                const auto image=prototype_string(base_,map_,source->type,"Image");
+                const auto& image_name=image.empty()?source->type:image;
+                const auto key=prone_.count(source->id)?"FireProne":"FireUp";
+                const int stage=art_.read_integer(image_name,key,0);
+                if (stage<0) {report.unresolved.push_back("negative infantry firing stage");++it;continue;}
+                auto pending=infantry_fire_.find(source->id);
+                if (pending==infantry_fire_.end() || pending->second.target!=target->id) {
+                    pending=infantry_fire_.insert_or_assign(source->id,
+                        InfantryFire{target->id,frame+static_cast<std::uint64_t>(stage)}).first;
+                }
+                if (frame<pending->second.fire_frame) {++it;continue;}
+                infantry_fire_.erase(pending);
+            }
             const auto* house=prototype_house(world,source->house_id);
+            // Veteran and elite rank now feeds the shot: the FIREPOWER
+            // ability flag gates the [General] VeteranCombat multiplier in
+            // base_projectile_damage.
+            const auto source_abilities=load_type_abilities(merged_,source->type);
+            const auto source_rank=rank_of(source->veterancy.value_or(0.0));
             weapons::ProjectileDamageInput damage{weapon->damage,false,false,
                 house?house->firepower_multiplier.value_or(1):1,source->firepower_multiplier.value_or(1),
-                false,false,false,false,1};
-            // TODO-ORIGINAL: Resolve missing veteran abilities and country multipliers.
+                source_rank!=Rank::Rookie,source_rank==Rank::Elite,
+                source_abilities.veteran.flag[AbilityFirepower],
+                source_abilities.elite.flag[AbilityFirepower],
+                VeterancyRules::load(merged_).veteran_combat};
             const auto amount=weapons::base_projectile_damage(damage);
             if (!amount || *amount<=0) {report.unresolved.push_back("projectile damage is unresolved");++it;continue;}
             PrototypeCombatProjectile shot;shot.source_id=source->id;shot.target_id=target->id;
@@ -971,11 +1122,16 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
                 // The muzzle uses the present turret facing, which can still
                 // be up to the fire tolerance away from the target.
                 const auto turret=aim?aim->current:angles_.heading(static_cast<int>(dx),static_cast<int>(dy));
-                // TODO-ORIGINAL: Resolve unknown hull facing and turret offset.
+                // UnitType +63C TurretOffset, loaded by the art loader at
+                // 0x6DD9BB from the unit Image section of art.ini. The muzzle
+                // transform translates the fire FLH by it.
+                const auto image=prototype_string(base_,map_,source->type,"Image").empty()
+                    ?source->type:prototype_string(base_,map_,source->type,"Image");
+                const int turret_offset=art_.read_integer(image,"TurretOffset",0);
                 const auto fallback_hull=(static_cast<std::uint32_t>(source->hull_facing.value_or(0))&255u)<<8;
                 const auto hull=source->hull_facing_raw.value_or(static_cast<std::uint16_t>(fallback_hull));
                 const auto muzzle=weapons::base_flat_unit_muzzle({*source->position,hull,turret,
-                    weapon->fire_flh,0,source->burst_index.value_or(0),true});
+                    weapon->fire_flh,turret_offset,source->burst_index.value_or(0),true});
                 if (!muzzle) {report.unresolved.push_back("Unit muzzle is unresolved");++it;continue;}
                 const auto delta_x=static_cast<long long>(target->position->x)-muzzle->x;
                 const auto delta_y=static_cast<long long>(target->position->y)-muzzle->y;

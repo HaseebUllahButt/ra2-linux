@@ -403,6 +403,8 @@ std::optional<PrototypeBattle> prototype_battle(BaseBattleAssets& assets,
         // TODO-ORIGINAL: replace these multiplayer House defaults with its load phase.
         house.constructor_complete=true; house.human_controlled=i<options.players.size() && options.players[i].human;
         house.house_flag_135=false; house.observer_flag_13d=false; house.tech_level=10;
+        // UNRESOLVED: the original House +D0 (firepower) initializer is not
+        // traced; 1.0 is a stand-in, not proven live initialization.
         house.power_output=0; house.power_drain=0; house.reload_multiplier=1.0; house.firepower_multiplier=1.0;
         house.stolen_tech_204=false; house.stolen_tech_205=false;
         house.stolen_mask_208=0; house.stolen_mask_20c=0; house.stolen_mask_210=0; house.stolen_mask_214=0;

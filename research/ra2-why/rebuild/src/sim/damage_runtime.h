@@ -1,4 +1,5 @@
 #pragma once
+#include "../rules/ini_file.h"
 #include "../session/world/world.h"
 #include "../weapons/weapons.h"
 #include "prototype_turret.h"
@@ -111,6 +112,13 @@ bool base_complete_area_damage_request(AreaDamageCursor&,std::uint32_t target_id
 }
 
 namespace ra2::sim {
+// Base 004F58A0: the victim's House asks its CountryType for an armor
+// factor by target RTTI. The country loader 004F9550 reads the five float
+// keys from the country section; a missing key or country is 1.0. The
+// BuildingType branch (+110/+10C) splits on type BuildCat==5 (Combat).
+double country_armor_multiplier(const session::world::House* house,
+    session::world::Kind kind, const std::string& type,
+    const rules::IniFile& base, const rules::IniFile& map);
 // Playable prototype only. The exact, guarded APIs above do not use these
 // fallbacks. Turreted Units turn with the original FacingClass and fire only
 // within the original facing tolerance; weapons count Burst shots with the
@@ -169,6 +177,15 @@ public:
     void set_fire_gate(std::function<bool(const session::world::Entity&)> gate) {
         fire_gate_=std::move(gate);
     }
+    // The target gate controls permission per source-target pair. An empty
+    // gate keeps the previous behavior. A false result blocks can_attack,
+    // idle guard acquisition, retaliation and the active orders loop. A
+    // rejected active order pauses: it keeps its order, takes no shot and
+    // asks no approach. In-flight projectiles are unchanged.
+    void set_target_gate(std::function<bool(const session::world::Snapshot&,
+        const session::world::Entity&,const session::world::Entity&)> gate) {
+        target_gate_=std::move(gate);
+    }
     void stop(session::world::Snapshot&,std::uint32_t source_id);
     // Caller-set invulnerability check (base RA2 Iron Curtain only). The
     // callback supplies the current protection state each frame. Base
@@ -189,9 +206,18 @@ public:
     const std::vector<PrototypeCombatProjectile>& projectiles() const { return projectiles_; }
 private:
     rules::IniFile base_,map_,art_;
+    // Base rules with the map overrides applied. Rank ability and
+    // veterancy reads use this so map files change the damage path.
+    rules::IniFile merged_;
     OriginalDistance distance_;
     weapons::BaseBallisticAngles angles_;
     std::map<std::uint32_t,std::uint32_t> orders_;
+    // Infantry firing animation started after the weapon became ready.
+    struct InfantryFire { std::uint32_t target; std::uint64_t fire_frame; };
+    std::map<std::uint32_t,InfantryFire> infantry_fire_;
+    // Per source-target permission gate. Empty keeps the previous behavior.
+    std::function<bool(const session::world::Snapshot&,
+        const session::world::Entity&,const session::world::Entity&)> target_gate_;
     Invulnerability invulnerable_; // Caller-set; empty means everyone is vulnerable.
     // Targets found by the idle threat scan or kept after retaliation.
     // Base 006D31E0 Threat_Range: Guard uses GuardRange or the weapon range,
@@ -206,6 +232,8 @@ private:
     std::vector<PrototypeCombatProjectile> projectiles_;
     // Original Unit +2F8 turret FacingClass. The world keeps only the shown
     // raw facing; a different shown facing restarts this state from it.
+    // A Unit without a turret never rotates here: the 00704DF0 gate reads
+    // the unrotated +2E0 hull facing (FUN_006FB890 turretless branch).
     struct TurretAim { std::uint16_t current, direction; };
     struct TurretState { BaseFacing facing; std::uint16_t written=0; };
     std::map<std::uint32_t,TurretState> turrets_;
@@ -213,6 +241,6 @@ private:
     // Flight mission fire permission. Empty means every placed source fires.
     std::function<bool(const session::world::Entity&)> fire_gate_;
     std::optional<TurretAim> turret_aim(session::world::Entity& source,
-        const session::world::Entity& target,bool omni_fire,std::int32_t frame);
+        const session::world::Entity& target,std::int32_t frame);
 };
 }
