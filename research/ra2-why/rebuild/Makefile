@@ -533,10 +533,14 @@ build/weapons_%_cases: build/native/src/weapons/%_test.o $(COMBAT_RUNTIME_OBJECT
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 .PHONY: weapons
-weapons: build/weapons_test build/weapons_asset_test build/weapons_lobber_asset_test
+weapons: build/weapons_test build/weapons_asset_test build/weapons_lobber_asset_test build/homing_speed_test
 	RA2_GAME_DIR=$(TEST_GAME_DIR) build/weapons_test
 	build/weapons_asset_test $(TEST_GAME_DIR)
 	build/weapons_lobber_asset_test $(TEST_GAME_DIR)
+	build/homing_speed_test $(TEST_GAME_DIR)/game.exe --self-test
+
+build/homing_speed_test: build/native/src/weapons/homing_speed_test.o build/native/src/weapons/homing_speed.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/weapons_test: build/native/src/weapons/weapons.o build/native/src/weapons/test_main.o build/native/src/sim/combat.o build/native/src/sim/target.o build/native/src/sim/distance.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
