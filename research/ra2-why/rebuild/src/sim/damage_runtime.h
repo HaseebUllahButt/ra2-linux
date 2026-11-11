@@ -201,6 +201,9 @@ private:
     OriginalDistance distance_;
     weapons::BaseBallisticAngles angles_;
     std::map<std::uint32_t,std::uint32_t> orders_;
+    // Infantry firing animation started after the weapon became ready.
+    struct InfantryFire { std::uint32_t target; std::uint64_t fire_frame; };
+    std::map<std::uint32_t,InfantryFire> infantry_fire_;
     // Per source-target permission gate. Empty keeps the previous behavior.
     std::function<bool(const session::world::Snapshot&,
         const session::world::Entity&,const session::world::Entity&)> target_gate_;

@@ -400,7 +400,20 @@ std::optional<double> prototype_verse(const IniFile& base,const IniFile& map,
     const auto verses=IniFile::split_list(prototype_string(base,map,weapon.warhead,"Verses"));
     const auto index=static_cast<std::size_t>(name-names.begin());
     if (index>=verses.size()) return {};
-    return IniFile::double_value(verses[index]);
+    // Base 00720B1C..00720B53 reads each Verses entry separately. Percent
+    // entries use atoi, then multiply by 0.01 under the game's x87 control
+    // word. This differs from the general INI floating-point reader.
+    const auto& value=verses[index];
+    const auto percent=value.find('%');
+    if (percent!=std::string::npos) {
+        const auto integer=IniFile::integer_value(value.substr(0,percent));
+        if (!integer) return {};
+        return fp::multiply(*integer,0.01);
+    }
+    char* end=nullptr;
+    const auto result=std::strtod(value.c_str(),&end);
+    if (end==value.c_str() || !std::isfinite(result)) return {};
+    return result;
 }
 const session::world::House* prototype_house(const Snapshot& w,std::uint32_t id) {
     auto it=std::find_if(w.houses.begin(),w.houses.end(),[id](const auto& h){return h.id==id;});
@@ -707,9 +720,11 @@ bool PrototypeCombatRuntime::attack(session::world::Snapshot& world,std::uint32_
     if (!can_attack(world,source_id,target_id)) return false;
     auto* source=prototype_find(world,source_id);
     guard_orders_.erase(source_id);guard_place_.erase(source_id);
+    infantry_fire_.erase(source_id);
     orders_[source_id]=target_id;source->target_id=target_id;return true;
 }
 void PrototypeCombatRuntime::stop(session::world::Snapshot& world,std::uint32_t source_id) {
+    infantry_fire_.erase(source_id);
     guard_orders_.erase(source_id);guard_place_.erase(source_id);
     orders_.erase(source_id);
     if (auto* source=prototype_find(world,source_id)) source->target_id=0;
@@ -999,6 +1014,7 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
     for (auto it=orders_.begin();it!=orders_.end();) {
         auto* source=prototype_find(world,it->first);auto* target=prototype_find(world,it->second);
         if (!prototype_alive(source) || !prototype_alive(target)) {
+            infantry_fire_.erase(it->first);
             if (source) source->target_id=0;
             it=orders_.erase(it);continue;
         }
@@ -1034,7 +1050,7 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             // TODO-ORIGINAL: recover the complete aircraft range override.
             const bool flying=prototype_air_target(base_,map_,world,*source);
             const int d=distance_.between(*source->position,*target->position,flying);
-            if (d>weapon->range) {report.out_of_range.emplace_back(source->id,target->id);++it;continue;}
+            if (d>weapon->range) {infantry_fire_.erase(source->id);report.out_of_range.emplace_back(source->id,target->id);++it;continue;}
             // TODO-ORIGINAL: Replace these direct range and targeting checks
             // with the full mission, eligibility, terrain and elevation paths.
             // TODO-ORIGINAL: An unknown timer starts ready in this prototype.
@@ -1057,6 +1073,23 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
                 art_.read_bool(gate_image_name,"SmallVisceroid",false);
             if (aim && !facing_skip &&
                 !base_unit_facing_ready(aim->current,aim->direction,weapon->projectile_rot)) {++it;continue;}
+            if (source->kind==session::world::Kind::Infantry) {
+                // 00507530 starts FireUp/FireProne when CanFire is ready,
+                // then fires at the type's art-defined stage (+B9C/+BA0).
+                // Both firing sequences advance one stage per game frame.
+                const auto image=prototype_string(base_,map_,source->type,"Image");
+                const auto& image_name=image.empty()?source->type:image;
+                const auto key=prone_.count(source->id)?"FireProne":"FireUp";
+                const int stage=art_.read_integer(image_name,key,0);
+                if (stage<0) {report.unresolved.push_back("negative infantry firing stage");++it;continue;}
+                auto pending=infantry_fire_.find(source->id);
+                if (pending==infantry_fire_.end() || pending->second.target!=target->id) {
+                    pending=infantry_fire_.insert_or_assign(source->id,
+                        InfantryFire{target->id,frame+static_cast<std::uint64_t>(stage)}).first;
+                }
+                if (frame<pending->second.fire_frame) {++it;continue;}
+                infantry_fire_.erase(pending);
+            }
             const auto* house=prototype_house(world,source->house_id);
             // Veteran and elite rank now feeds the shot: the FIREPOWER
             // ability flag gates the [General] VeteranCombat multiplier in

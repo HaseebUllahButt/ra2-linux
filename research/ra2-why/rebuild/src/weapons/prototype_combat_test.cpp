@@ -243,7 +243,9 @@ void cyclic_link_test(const rules::IniFile& rules,const rules::IniFile& art,cons
     w.cells.at(50*512+54).heads->ground_head=0;w.cells.at(50*512+52).heads->ground_head=2;
     sim::PrototypeCombatRuntime combat(rules,map,art,exe);
     check(combat.attack(w,1,2),"cycle test attack rejected");
-    const auto r=combat.tick(w,0);
+    combat.tick(w,0);
+    combat.tick(w,1);
+    const auto r=combat.tick(w,2);
     check(!r.unresolved.empty() && w.entities[1].resolved_hp==1 &&
           w.cells.at(50*512+52).heads->ground_head==2 && w.entities[2].next==2,
           "cyclic death chain changed");
@@ -520,6 +522,21 @@ void submarine_land_gate_test(const rules::IniFile& rules,const rules::IniFile& 
     w.entities[0].type="HTNK";
     check(sim::naval_target_allowed(rules,w,w.entities[0],w.entities[1],100),
           "land target rule blocked a tank");
+}
+void conscript_armor_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+    rules::IniFile map;
+    auto w=make_world("E2","E2",world::Kind::Infantry,world::Kind::Infantry,125,125);
+    sim::PrototypeCombatRuntime combat(rules,map,art,exe);
+    check(combat.attack(w,1,2),"conscript attack rejected");
+    std::vector<int> damage;
+    for (unsigned frame=0;frame<100 && damage.size()<2;++frame) {
+        const auto tick=combat.tick(w,frame);
+        for (const auto& event:tick.events)
+            if (event.kind==sim::PrototypeCombatEventKind::Damage && event.target_id==2)
+                damage.push_back(event.hp_before-event.hp_after);
+    }
+    check(damage.size()==2 && damage[0]==11 && damage[1]==7,
+          "conscript damage differs from the original standing and prone hits");
 }
 // Flight unlinks flying aircraft from their Cells and clears occupancy
 // tracking. A death must accept such an actor and still reject every other
@@ -931,6 +948,7 @@ int main(int argc,char** argv) {
         fire_gate_test(rules,art,std::string(argv[1])+"/game.exe");
         target_gate_test(rules,art,std::string(argv[1])+"/game.exe");
         submarine_land_gate_test(rules,art,std::string(argv[1])+"/game.exe");
+        conscript_armor_test(rules,art,std::string(argv[1])+"/game.exe");
         unlinked_aircraft_death_test(rules,art,std::string(argv[1])+"/game.exe");
         air_ground_test(rules,art,std::string(argv[1])+"/game.exe");
         fallen_house_test(rules,art,std::string(argv[1])+"/game.exe",files);

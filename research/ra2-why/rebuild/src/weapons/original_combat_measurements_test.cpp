@@ -163,41 +163,42 @@ void tank_duel_test(const rules::IniFile& rules,const rules::IniFile& art,const 
     std::cout<<"Rhino kill band check: sim="<<rhino.kill<<" measured about 293\n";
     check(rhino.kill>=285 && rhino.kill<=299,"Rhino kill time differs from the measured 14.1 s");
 }
-// GI vs GI: about 12 hits about 1.06 s (21.9 frames) apart. The
-// reference records only bar pixels (about 1 of 8 per hit). The exact
-// per-hit HP values below are rule-derived, not measured: warhead SA
-// over none armor gives 15 standing, and ProneDamage=70% gives 10 prone.
+// Controlled original runs: two stationary GIs two cells apart, with
+// first hit at frame 3 and later hits 22..24 frames apart. The original
+// sampler starts one frame before the native loop. The older click test
+// includes an unknown order/setup delay.
 void gi_prone_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
     const int hp=rules.read_integer("E1","Strength");
     const auto gi=duel(rules,art,exe,"E1",world::Kind::Infantry,"E1",world::Kind::Infantry,2,hp);
     std::cout<<"GI->GI prone: hits="<<gi.damage.size()<<" gap="<<gap(gi.damage)<<" frames kill="
              <<gi.kill<<" first-hit="<<gi.per_hit.front()<<"\n";
     check(gi.damage.size()==12,"GI needed a different hit count than the measured 12");
-    check(gap(gi.damage)>=20 && gap(gi.damage)<=24,"GI reload differs from the measured 1.06 s");
+    check(gi.damage.front()==2,"GI first firing stage differs from the controlled original");
+    for (std::size_t i=1;i<gi.damage.size();++i)
+        check(gi.damage[i]-gi.damage[i-1]>=22 && gi.damage[i]-gi.damage[i-1]<=24,
+              "GI firing gap differs from the controlled original");
     check(gi.per_hit.front()==15,"rule-derived first standing GI hit changed");
     for (std::size_t i=1;i<gi.per_hit.size();++i)
         check(gi.per_hit[i]==10,"rule-derived prone GI hit changed");
-    // Measured kill 13.35 s from the order; 40 ms bar sampling bounds the
-    // fall to about 269-285 frames.
-    std::cout<<"GI kill band check: sim="<<gi.kill<<" measured about 277\n";
-    check(gi.kill>=269 && gi.kill<=285,"GI kill time differs from the measured 13.35 s");
+    std::cout<<"GI controlled original kills: 253, 256, 256 frames; native="<<gi.kill<<"\n";
 }
-// Conscript vs Conscript side by side: the reference records about 7-8
-// visible 1-of-8-pixel bar steps, about 3.1 s (64 frames) per step, and
-// a kill about 22 s (about 455 frames) after the order. The step
-// cadence was noisy, so the exact per-hit HP values are not asserted;
-// only the kill window and the per-hit cap are.
+// Controlled original runs: stationary Conscripts two cells apart. First
+// hit is frame 7, gaps are 31..33, and damage is 11 then 7 when prone.
 void conscript_prone_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
     const int hp=rules.read_integer("E2","Strength");
     const auto conscript=duel(rules,art,exe,"E2",world::Kind::Infantry,"E2",world::Kind::Infantry,2,hp);
     std::cout<<"Conscript->Conscript prone: kill="<<conscript.kill<<" frames, hits="
-             <<conscript.damage.size()<<" (measured kill about 455, about 7-8 bar steps)\n";
-    // The measured 22 s has about 40 ms sampling (about 1 frame), but the
-    // step cadence was noisy and the reference does not pin the exact
-    // distance beyond side by side, so the window is wider than sampling.
-    check(conscript.kill>=430 && conscript.kill<=480,
-          "Conscript kill time differs from the measured 22 s (about 455 frames)");
-    for (int hit:conscript.per_hit) check(hit>0 && hit<=16,"Conscript hit lost the measured 1-of-8-pixel step");
+             <<conscript.damage.size()<<" (controlled original kills: 547, 550, 552)\n";
+    check(conscript.damage.size()==18 && conscript.damage.front()==6,
+          "Conscript hit count or first firing stage differs from the controlled original");
+    for (std::size_t i=1;i<conscript.damage.size();++i)
+        check(conscript.damage[i]-conscript.damage[i-1]>=31 &&
+              conscript.damage[i]-conscript.damage[i-1]<=33,
+              "Conscript firing gap differs from the controlled original");
+    check(conscript.per_hit.front()==11,"Conscript standing damage differs from the original");
+    for (std::size_t i=1;i+1<conscript.per_hit.size();++i)
+        check(conscript.per_hit[i]==7,"Conscript prone damage differs from the original");
+    check(conscript.per_hit.back()==2,"Conscript final damage differs from the original");
 }
 // Pillbox vs GI: 4 bursts about 1.2 s (25 frames) apart, the GI falls
 // at 4.3-4.5 s (about 91 frames) after the order.
