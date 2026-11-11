@@ -213,6 +213,24 @@ int main(int argc, char** argv) {
     if (argc > 1) game_exe = std::string(argv[1]) + "/game.exe";
     const auto base = parse(base_rules);
     const rules::IniFile empty = parse("");
+    // The same random draw must feed both the normal and promoted delay.
+    auto reload_delay = [&](double rank, const char* abilities) {
+        auto w = make_world();
+        w.entities[0].veterancy = rank;
+        const auto overrides = parse(std::string("[General]\nVeteranROF=0.5\n[SRC]\n") + abilities + "\n");
+        sim::PrototypeCombatRuntime runtime(base, overrides, empty, game_exe);
+        check(runtime.attack(w, 1, 2), "reload attack rejected");
+        const auto report = runtime.tick(w, 0);
+        check(report.fired == 1 && report.unresolved.empty(), "reload shot failed");
+        return w.entities[0].weapon_timer_duration.value_or(-1);
+    };
+    const int normal_delay = reload_delay(0.0, "VeteranAbilities=ROF");
+    check(reload_delay(1.0, "VeteranAbilities=ROF") == normal_delay / 2,
+          "veteran ROF did not shorten the firing delay");
+    check(reload_delay(2.0, "EliteAbilities=ROF") == normal_delay / 2,
+          "elite ROF did not shorten the firing delay");
+    check(reload_delay(1.0, "EliteAbilities=ROF") == normal_delay,
+          "elite ROF changed veteran firing delay");
     const int base_damage = damage_after_tick(base, empty);
     check(base_damage == 110, "base VeteranCombat did not reach the damage event");
     const auto map = parse("[General]\nVeteranCombat=1.5\n");

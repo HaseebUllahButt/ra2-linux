@@ -1163,7 +1163,11 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             if (in_burst.in_burst) delay=in_burst.needs_random?rng.ranged(3,5):in_burst.delay;
             else {
                 const weapons::SingleShotDelayInput reload{weapon->rof,
-                    house?house->reload_multiplier.value_or(1):1,false,false,false,false,1};
+                    house?house->reload_multiplier.value_or(1):1,
+                    source_rank!=Rank::Rookie,source_rank==Rank::Elite,
+                    source_abilities.veteran.flag[AbilityRof],
+                    source_abilities.elite.flag[AbilityRof],
+                    VeterancyRules::load(merged_).veteran_rof};
                 delay=weapons::base_single_shot_unit_delay(reload,rng);
             }
             source->burst_index=burst_index%weapon->burst;
