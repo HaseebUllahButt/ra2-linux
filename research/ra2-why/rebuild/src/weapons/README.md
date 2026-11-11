@@ -141,6 +141,11 @@ launches, 1,024 arc proposals, 256 fire events, 96 impact checks, 1,024 damage r
 connected launch uses a resolved branch stub. Terrain trace and impact height
 are resolved stubs.
 
+`BaseHomingSpeed` reproduces the non-arcing homing projectile speed stage at
+0045F8FF through 0045FB0A. It uses the base executable's square-root table and
+does not yet steer or move a projectile. `verify_homing_speed_x86.py` compares
+its state and velocity bits with the original instructions.
+
 The live-world adapters are in `sim/damage_runtime.h`. The ground collision
 adapter follows the session snapshot's Cell +E4 head and shared Object +30
 links. Its resolver supplies original collision flags, virtual positions and
