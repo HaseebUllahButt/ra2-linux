@@ -625,7 +625,9 @@ skirmish-check: native skirmish-tests
 	# Original height checks route around cliffs. This match ends at frame 37119.
 	RA2_TEST_OPPONENTS=ee build/ra2-native --game-dir $(TEST_GAME_DIR) --skirmish --map MP09T3.MAP --headless --autoplay --frames 45000
 
+skirmish-tests: build/kill_promotion_test
 skirmish-tests: build/aircraft_combat_test build/damage_invulnerability_test build/battle_building_tools_test build/battle_shroud_test build/battle_score_test build/resource_render_test build/battle_status_test build/battle_formation_test build/prototype_economy_test build/battle_audio_test build/prototype_movement_test build/battle_effects_test build/battle_queue_test build/battle_radar_test build/battle_radar_world_test build/battle_help_test build/battle_setup_test build/super_weapon_option_test build/battle_cursor_test build/battle_hud_test build/battle_orders_test build/prototype_production_test build/prototype_combat_test build/veteran_rules_runtime_test build/original_combat_measurements_test build/prototype_victory_test build/prototype_ai_test build/prototype_infantry_test build/battle_superweapons_test
+	build/kill_promotion_test $(TEST_GAME_DIR)/game.exe
 	build/aircraft_combat_test $(TEST_GAME_DIR)
 	build/damage_invulnerability_test $(TEST_GAME_DIR)
 	build/resource_render_test $(TEST_GAME_DIR)
@@ -729,6 +731,9 @@ original-combat-measurements: build/original_combat_measurements_test
 	build/original_combat_measurements_test $(TEST_GAME_DIR)
 
 build/original_combat_measurements_test: build/native/src/weapons/original_combat_measurements_test.o $(PROTOTYPE_TEST_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
+
+build/kill_promotion_test: build/native/src/sim/test_kill_promotion.o $(PROTOTYPE_TEST_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
 
 build/prototype_combat_test: build/native/src/weapons/prototype_combat_test.o $(PROTOTYPE_TEST_OBJECTS)
