@@ -3,19 +3,20 @@
 # usage: tools/run.sh <out-dir> "<steps>"
 #   steps: "w 40; c 832 304; m X Y; s name; k KEYSYM; ..." (w wait s, c click, m move, s screenshot, k key)
 # env: UI=0 (no ra2ui.dll, real Wine user32), DDRAW=b (Wine ddraw, default) | n (game folder ddraw.dll)
-#      LIFT=1 (also load rc.dll with RC_ON), RA2UI_TRACE=1, WDEBUG (WINEDEBUG channels)
+#      LIFT=1 (also load rc.dll with RC_ON), RA2UI_TRACE=1, WDEBUG (WINEDEBUG channels), UIBUILD=build-dev
 # Own Wine prefix (build/prefix, a copy of ../../build/prefix) and own hidden display, so other helpers'
 # games are not touched. SLOT=0..2 picks display :78+SLOT and prefix build/prefix<SLOT> (one game per slot).
 H=$(cd "$(dirname "$0")/.." && pwd); R=$(cd "$H/../.." && pwd)
 SLOT=${SLOT:-0}; PFX=$H/build/prefix; [ "$SLOT" != 0 ] && PFX=$H/build/prefix$SLOT
 [ -d "$PFX" ] || cp -a "$H/build/prefix" "$PFX"
-[ -z "$UI_LOCKED" ] && exec env UI_LOCKED=1 flock /tmp/ra2ui-slot$SLOT.lock "$0" "$@"
+[ -z "$UI_LOCKED" ] && exec env UI_LOCKED=1 flock -o /tmp/ra2ui-slot$SLOT.lock "$0" "$@"   # -o: Xvfb and wineserver must not inherit the lock
 OUT=$(mkdir -p "$1" && cd "$1" && pwd)
 DNUM=$((78 + SLOT))
 export DISPLAY=:$DNUM WINEPREFIX=$PFX WINEDEBUG=${WDEBUG:--all}
 export WINEDLLOVERRIDES="ddraw=${DDRAW:-b};winepulse.drv,winealsa.drv=d"
 export PULSE_SERVER=unix:/nonexistent PIPEWIRE_REMOTE=/nonexistent ALSA_CARD=none SDL_AUDIODRIVER=dummy
-export RA2UI_LOG=$OUT/ui.log RC_LOG=$OUT/rc.log WINEPATH="$H/build"
+UIB=$H/${UIBUILD:-build}   # UIBUILD=build-dev runs the second build
+export RA2UI_LOG=$OUT/ui.log RC_LOG=$OUT/rc.log WINEPATH="$UIB"
 pgrep -u "$USER" -f "Xvfb :$DNUM" >/dev/null || { Xvfb :$DNUM -screen 0 1024x768x24 -nolisten tcp >/dev/null 2>&1 & sleep 2; }
 wineserver -k 2>/dev/null; sleep 1
 wine reg add 'HKCU\Software\Wine\Drivers' /v Audio /t REG_SZ /d '' /f >/dev/null 2>&1
@@ -26,7 +27,7 @@ if [ "${UI:-1}" = 0 ]; then
   GPID=$!
 else
   [ -n "$LIFT" ] && export RA2UI_ALSO_LOAD="$(winepath -w "$R/build/win/rc.dll")"
-  nice -n 10 wine "$R/build/win/rclaunch.exe" game.exe "$H/build/ra2ui.dll" > "$OUT/wine.log" 2>&1 &
+  nice -n 10 wine "$R/build/win/rclaunch.exe" game.exe "$UIB/ra2ui.dll" > "$OUT/wine.log" 2>&1 &
   GPID=$!
 fi
 sleep 5

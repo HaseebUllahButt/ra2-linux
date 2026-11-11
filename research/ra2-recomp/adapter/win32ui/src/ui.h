@@ -209,6 +209,11 @@ HWND ui_sdl_native(void *sdl);
 #include "ui_api.inc"
 #undef UIFN
 
+/* GDI fonts (defwnd.c): metrics measured from Wine */
+HFONT ui_create_font(int height, int weight, const char *face);
+void ui_font_tm(HGDIOBJ font, int tm[20]);   /* tmHeight .. tmCharSet, TEXTMETRICA order */
+HGDIOBJ ui_dc_font(HDC dc);
+
 /* text helpers */
 char *ui_strdup(const char *s);
 int ui_stricmp(const char *a, const char *b);

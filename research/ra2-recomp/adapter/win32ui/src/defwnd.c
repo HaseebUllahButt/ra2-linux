@@ -96,7 +96,7 @@ HDC UIAPI ui_GetDC(HWND h)
 {
     for (unsigned i = 1; i < 64; i++) if (!dcs[i].used) {
         memset(&dcs[i], 0, sizeof dcs[i]);
-        dcs[i].used = 1; dcs[i].h = h; dcs[i].text = 0; dcs[i].bk = 0xffffff; dcs[i].bkmode = 2; dcs[i].gmode = 1;
+        dcs[i].used = 1; dcs[i].h = h; dcs[i].text = 0; dcs[i].bk = 0xffffff; dcs[i].bkmode = 2; dcs[i].gmode = 1; dcs[i].font = 0x00f0000du;
         return 0x00d10000u | i;
     }
     ui_fatal("win32ui: out of device contexts");
@@ -111,7 +111,14 @@ DWORD UIAPI ui_GetBkColor(HDC dc) { DC_OR_DIE("GetBkColor"); return d->bk; }
 INT UIAPI ui_SetBkMode(HDC dc, INT m) { DC_OR_DIE("SetBkMode"); INT o = d->bkmode; d->bkmode = m; return o; }
 INT UIAPI ui_GetBkMode(HDC dc) { DC_OR_DIE("GetBkMode"); return d->bkmode; }
 INT UIAPI ui_SetGraphicsMode(HDC dc, INT m) { DC_OR_DIE("SetGraphicsMode"); INT o = d->gmode; d->gmode = m; return o; }
-HGDIOBJ UIAPI ui_SelectObject(HDC dc, HGDIOBJ o) { DC_OR_DIE("SelectObject"); HGDIOBJ old = d->font; d->font = o; return old ? old : 0x00f00000u; }
+HGDIOBJ UIAPI ui_SelectObject(HDC dc, HGDIOBJ o)
+{
+    DC_OR_DIE("SelectObject");
+    unsigned k = o & 0xffff;
+    int is_font = (o & 0xffff0000u) == 0x00e00000u || ((o & 0xffff0000u) == 0x00f00000u && k >= 10 && k <= 17 && k != 15);
+    if (!is_font) return 0x00f00000u;   /* brushes, pens, bitmaps: not tracked */
+    HGDIOBJ old = d->font; d->font = o; return old;
+}
 BOOL UIAPI ui_TextOutA(HDC dc, INT x, INT y, const char *s, INT n)
 {
     DC_OR_DIE("TextOutA");
@@ -124,44 +131,86 @@ BOOL UIAPI ui_SetViewportOrgEx(HDC dc, INT x, INT y, POINT *old) { DC_OR_DIE("Se
 INT UIAPI ui_SaveDC(HDC dc) { DC_OR_DIE("SaveDC"); return 1; }
 BOOL UIAPI ui_RestoreDC(HDC dc, INT i) { DC_OR_DIE("RestoreDC"); (void)i; return 1; }
 BOOL UIAPI ui_ModifyWorldTransform(HDC dc, const void *x, DWORD m) { DC_OR_DIE("ModifyWorldTransform"); (void)x; (void)m; return 1; }
+#include "wine_metrics.inc"
 INT UIAPI ui_GetDeviceCaps(HDC dc, INT i)
 {
     (void)dc;
-    switch (i) {
-    case 8: return ui_GetSystemMetrics(SM_CXSCREEN);   /* HORZRES */
-    case 10: return ui_GetSystemMetrics(SM_CYSCREEN);  /* VERTRES */
-    case 12: return 16;                                /* BITSPIXEL */
-    case 14: return 1;                                 /* PLANES */
-    case 88: case 90: return 96;                       /* LOGPIXELSX/Y */
-    }
+    if (i == 8) return ui_GetSystemMetrics(SM_CXSCREEN);    /* HORZRES */
+    if (i == 10) return ui_GetSystemMetrics(SM_CYSCREEN);   /* VERTRES */
+    if (i >= 0 && i < 120) return wine_caps[i];
     ui_log("GetDeviceCaps(%d): 0", i);
     return 0;
 }
-BOOL UIAPI ui_GetTextMetricsA(HDC dc, void *tm)
+/* ---- GDI objects: fonts keep their LOGFONT values; metrics come from the Wine table ---- */
+typedef struct { int used; int height, weight; char face[32]; } ui_font;
+static ui_font fonts[512];
+static DWORD next_obj = 0x00e10000;
+HFONT UIAPI ui_CreateFontIndirectA(const void *lf)
+{
+    for (unsigned i = 1; i < 512; i++) if (!fonts[i].used) {
+        ui_font *f = &fonts[i]; memset(f, 0, sizeof *f); f->used = 1; f->weight = 400;
+        if (lf) {
+            const BYTE *b = lf; int32_t h, w; memcpy(&h, b, 4); memcpy(&w, b + 16, 4);
+            f->height = h; if (w) f->weight = w;
+            memcpy(f->face, b + 28, 31); f->face[31] = 0;
+        }
+        return 0x00e00000u | i;
+    }
+    ui_fatal("win32ui: out of font objects");
+}
+HFONT ui_create_font(int height, int weight, const char *face)
+{
+    BYTE lf[60] = {0}; int32_t h = height, w = weight;
+    memcpy(lf, &h, 4); memcpy(lf + 16, &w, 4);
+    snprintf((char *)lf + 28, 32, "%s", face ? face : "");
+    return ui_CreateFontIndirectA(lf);
+}
+/* the 20 TEXTMETRIC values of a font handle (stock object, our font, or 0 = system font) */
+void ui_font_tm(HGDIOBJ obj, int tm[20])
+{
+    char stock[12] = "#13"; const char *face = stock; int h = 0, w = 0;
+    if ((obj & 0xffff0000u) == 0x00f00000u) snprintf(stock, sizeof stock, "#%u", obj & 0xffff);
+    else if ((obj & 0xffff0000u) == 0x00e00000u && (obj & 0xffff) < 512 && fonts[obj & 0xffff].used) {
+        ui_font *f = &fonts[obj & 0xffff]; face = f->face; h = f->height; w = f->weight;
+    }
+    int best = -1, bestscore = 1 << 30, n = (int)(sizeof wine_fonts / sizeof wine_fonts[0]);
+    for (int pass = 0; pass < 2 && best < 0; pass++)
+        for (int i = 0; i < n; i++) {
+            if (ui_stricmp(wine_fonts[i].face, pass ? "" : face)) continue;
+            if (face[0] == '#') { best = i; break; }
+            int want = h ? h : -11;
+            int dh = wine_fonts[i].h - want; if (dh < 0) dh = -dh;
+            int dw = wine_fonts[i].w - (w >= 550 ? 700 : 400); if (dw < 0) dw = -dw;
+            int sc = dh * 1000 + dw;
+            if ((wine_fonts[i].h < 0) != (want < 0)) sc += 100000;
+            if (sc < bestscore) { bestscore = sc; best = i; }
+        }
+    if (best < 0) best = 0;
+    for (int k = 0; k < 20; k++) tm[k] = wine_fonts[best].tm[k];
+}
+HGDIOBJ ui_dc_font(HDC dc) { ui_dc *d = get_dc(dc); return d ? d->font : 0; }
+BOOL UIAPI ui_GetTextMetricsA(HDC dc, void *out)
 {
     DC_OR_DIE("GetTextMetricsA");
-    /* MS Sans Serif 8 at 96 dpi, as reported by Wine (checked later against Wine) */
-    LONG *t = tm; memset(tm, 0, 56);
-    t[0] = 13; t[1] = 11; t[2] = 2; t[3] = 0; t[4] = 0; t[5] = 5; t[6] = 11; t[7] = 400;
+    int tm[20]; ui_font_tm(d->font, tm);
+    BYTE *b = out; memset(b, 0, 56);
+    for (int i = 0; i < 11; i++) { int32_t v = tm[i]; memcpy(b + 4 * i, &v, 4); }
+    for (int i = 0; i < 9; i++) b[44 + i] = (BYTE)tm[11 + i];
     return 1;
 }
-static DWORD next_obj = 0x00e00010;
-HFONT UIAPI ui_CreateFontIndirectA(const void *lf) { (void)lf; return next_obj++; }
 HBRUSH UIAPI ui_CreateSolidBrush(DWORD c) { (void)c; return next_obj++; }
-BOOL UIAPI ui_DeleteObject(HGDIOBJ o) { return o != 0; }
+BOOL UIAPI ui_DeleteObject(HGDIOBJ o)
+{
+    if ((o & 0xffff0000u) == 0x00e00000u && (o & 0xffff) < 512) fonts[o & 0xffff].used = 0;
+    return o != 0;
+}
 HGDIOBJ UIAPI ui_GetStockObject(INT i) { return 0x00f00000u + (DWORD)i; }
 HBITMAP UIAPI ui_CreateDIBSection(HDC dc, const void *bmi, UINT usage, void **bits, uint32_t sec, DWORD off)
 {
     (void)dc; (void)bmi; (void)usage; (void)bits; (void)sec; (void)off;
     UI_UNIMPL("CreateDIBSection");
 }
-DWORD UIAPI ui_GetSysColor(INT i)
-{
-    static const DWORD c[] = { 0xc8d0d4, 0x6ba53a, 0x6a240a, 0x808080, 0xc8d0d4, 0xffffff, 0x000000, 0x000000,
-                               0x000000, 0xffffff, 0xc8d0d4, 0xc8d0d4, 0x808080, 0x6a240a, 0xffffff, 0xc8d0d4,
-                               0x808080, 0x808080, 0x000000, 0xc8d0d4, 0xffffff, 0x404040, 0xc8d0d4, 0x000000, 0xe1ffff };
-    return i >= 0 && i < (INT)(sizeof c / sizeof c[0]) ? c[i] : 0;
-}
+DWORD UIAPI ui_GetSysColor(INT i) { return i >= 0 && i < 31 ? wine_color[i] : 0; }
 
 /* ---- message boxes: logged, answered without a window ---- */
 static INT answer(UINT type)

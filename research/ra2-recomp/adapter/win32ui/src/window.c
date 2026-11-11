@@ -202,51 +202,35 @@ static void origin(ui_win *w, POINT *p)   /* screen position of the client origi
 void ui_client_to_screen(ui_win *w, POINT *p) { POINT o; origin(w, &o); p->x += o.x; p->y += o.y; }
 void ui_screen_to_client(ui_win *w, POINT *p) { POINT o; origin(w, &o); p->x -= o.x; p->y -= o.y; }
 
-/* ---- non-client metrics (Wine defaults, checked against Wine later) ---- */
+/* ---- metrics: measured from Wine 11 (tools/probe/probe_metrics.c, reports/wine-metrics.txt) ---- */
+#include "wine_metrics.inc"
 INT UIAPI ui_GetSystemMetrics(INT i)
 {
-    switch (i) {
-    case SM_CXSCREEN: return ui_desktop()->wr.right;
-    case SM_CYSCREEN: return ui_desktop()->wr.bottom;
-    case SM_CXVSCROLL: case SM_CYHSCROLL: return 16;
-    case SM_CYCAPTION: return 19;
-    case SM_CXBORDER: case SM_CYBORDER: return 1;
-    case SM_CXDLGFRAME: case SM_CYDLGFRAME: return 3;
-    case SM_CXICON: case SM_CYICON: return 32;
-    case SM_CXCURSOR: case SM_CYCURSOR: return 32;
-    case SM_CYMENU: return 19;
-    case SM_CXFRAME: case SM_CYFRAME: return 4;
-    case SM_CXEDGE: case SM_CYEDGE: return 2;
-    case SM_CXDOUBLECLK: case SM_CYDOUBLECLK: return 4;
-    case 19: return 1;          /* SM_MOUSEPRESENT */
-    case 23: return 0;          /* SM_SWAPBUTTON */
-    case 43: return 3;          /* SM_CMOUSEBUTTONS */
-    case 75: return 1;          /* SM_MOUSEWHEELPRESENT */
-    case 16: return ui_desktop()->wr.right;                       /* SM_CXFULLSCREEN */
-    case 17: return ui_desktop()->wr.bottom - 19;                 /* SM_CYFULLSCREEN */
-    case 0x1000: return 0;      /* SM_REMOTESESSION */
-    }
+    if (i == SM_CXSCREEN || i == 16 || i == 78) return ui_desktop()->wr.right;
+    if (i == SM_CYSCREEN || i == 79) return ui_desktop()->wr.bottom;
+    if (i >= 0 && i < 100) return wine_sm[i];
+    if (i == 0x1000 || i == 0x1001 || i == 0x1002 || i == 0x1003) return 0;
     ui_log("GetSystemMetrics(%d): unknown index, returning 0", i);
     return 0;
 }
+/* Wine's adjust_window_rect (win32u/defwnd.c) with Wine's default non-client metrics:
+   border width 1, padded border 0, caption 25, small caption 17, menu 18. */
 static void nc_size(DWORD style, DWORD ex, RECT *r)
 {
-    int fx = 0, fy = 0;
-    if ((style & WS_THICKFRAME)) fx = fy = ui_GetSystemMetrics(SM_CXFRAME);
-    else if ((ex & WS_EX_DLGMODALFRAME) || ((style & WS_DLGFRAME) && !(style & WS_BORDER)) || (style & WS_CAPTION) == WS_CAPTION)
-        fx = fy = ui_GetSystemMetrics(SM_CXDLGFRAME);
-    else if (style & WS_BORDER) fx = fy = 1;
-    if ((ex & WS_EX_DLGMODALFRAME) && (style & WS_BORDER) && !(style & WS_DLGFRAME) && !(style & WS_THICKFRAME)) fx = fy = 3;
-    r->left -= fx; r->right += fx; r->top -= fy; r->bottom += fy;
-    if ((style & WS_CAPTION) == WS_CAPTION) r->top -= ui_GetSystemMetrics(SM_CYCAPTION);
+    int adjust = 0;
+    if ((ex & (WS_EX_STATICEDGE | WS_EX_DLGMODALFRAME)) == WS_EX_STATICEDGE) adjust = 1;
+    else if ((ex & WS_EX_DLGMODALFRAME) || (style & (WS_THICKFRAME | WS_DLGFRAME))) adjust = 2;
+    if (style & WS_THICKFRAME) adjust += 1;
+    if ((style & (WS_BORDER | WS_DLGFRAME)) || (ex & WS_EX_DLGMODALFRAME)) adjust++;
+    r->left -= adjust; r->top -= adjust; r->right += adjust; r->bottom += adjust;
+    if ((style & WS_CAPTION) == WS_CAPTION) r->top -= (ex & 0x80 /* WS_EX_TOOLWINDOW */) ? 18 : 26;
     if (ex & WS_EX_CLIENTEDGE) { r->left -= 2; r->top -= 2; r->right += 2; r->bottom += 2; }
-    if (ex & WS_EX_STATICEDGE) { r->left -= 1; r->top -= 1; r->right += 1; r->bottom += 1; }
 }
 BOOL UIAPI ui_AdjustWindowRectEx(RECT *r, DWORD style, BOOL menu, DWORD ex)
 {
     if (!r) return 0;
     nc_size(style, ex, r);
-    if (menu) r->top -= ui_GetSystemMetrics(SM_CYMENU);
+    if (menu) r->top -= 19;
     return 1;
 }
 BOOL UIAPI ui_AdjustWindowRect(RECT *r, DWORD style, BOOL menu) { return ui_AdjustWindowRectEx(r, style, menu, 0); }
@@ -256,6 +240,9 @@ static void calc_client(ui_win *w)
     nc_size(w->style, w->exstyle, &nc);
     w->cr.left = w->wr.left - nc.left; w->cr.top = w->wr.top - nc.top;
     w->cr.right = w->wr.right - nc.right; w->cr.bottom = w->wr.bottom - nc.bottom;
+    /* Wine's default WM_NCCALCSIZE also removes the scroll bars */
+    if ((w->style & WS_VSCROLL) && w->cr.right - w->cr.left >= 17) w->cr.right -= 17;
+    if ((w->style & WS_HSCROLL) && w->cr.bottom - w->cr.top >= 17) w->cr.bottom -= 17;
     if (w->cr.right < w->cr.left) w->cr.right = w->cr.left;
     if (w->cr.bottom < w->cr.top) w->cr.bottom = w->cr.top;
 }
@@ -316,7 +303,11 @@ HWND ui_create(DWORD ex, const char *clsname, const char *name, DWORD style, INT
     if (cy < 0) cy = 0;
     ui_win *w = alloc_win();
     w->cls = c; w->style = style & ~WS_VISIBLE; w->exstyle = ex; w->owner = owner; w->inst = inst;
-    if ((style & (WS_CHILD | WS_POPUP)) == 0) w->style |= WS_CAPTION | WS_CLIPSIBLINGS;  /* overlapped */
+    if ((w->style & (WS_CHILD | WS_POPUP)) != WS_CHILD) {        /* Wine create_window style fixes */
+        w->style |= WS_CLIPSIBLINGS;
+        if (!(w->style & WS_POPUP)) w->style |= WS_CAPTION;
+    }
+    if ((w->style & (WS_DLGFRAME | WS_THICKFRAME)) && !(w->style & (WS_CHILD | WS_POPUP))) w->exstyle |= WS_EX_WINDOWEDGE;
     if (style & WS_CHILD) w->id = menu;
     w->proc = c->proc; w->text = ui_strdup(IS_INTRESOURCE(name) ? "" : name);
     w->tid = 0;

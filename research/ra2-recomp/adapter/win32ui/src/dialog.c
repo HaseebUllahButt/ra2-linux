@@ -21,7 +21,7 @@ typedef struct {
 } dlg_item;
 typedef struct {
     int ex; DWORD style, exstyle, helpid; int n; INT x, y, cx, cy;
-    char cls[64]; char title[256]; int has_font; int pt; char font[64];
+    char cls[64]; char title[256]; int has_font; int pt, weight; char font[64];
     const BYTE *items;
 } dlg_tmpl;
 static const BYTE *wstr(const BYTE *p, char *out, int n, int *ord)
@@ -61,7 +61,7 @@ static void parse_tmpl(const BYTE *t, dlg_tmpl *d)
     p = wstr(p, d->title, sizeof d->title, NULL);
     if (d->style & DS_SETFONT) {
         d->has_font = 1; d->pt = *(const WORD *)p; p += 2;
-        if (d->ex) p += 4;
+        if (d->ex) { d->weight = *(const WORD *)p; p += 4; }
         p = wstr(p, d->font, sizeof d->font, NULL);
     }
     d->items = p;
@@ -162,7 +162,7 @@ static HWND create_indirect(HINSTANCE inst, const void *tmpl, HWND owner, DLGPRO
         if (modal_owner) *modal_owner = owner;
         if (o && !(o->style & WS_DISABLED)) { disabled_owner = owner; ui_EnableWindow(owner, 0); }
     }
-    HFONT font = t.has_font ? ui_CreateFontIndirectA(NULL) : 0;
+    HFONT font = t.has_font ? ui_create_font(-muldiv(t.pt, 96, 72), t.weight ? t.weight : 400, t.font) : 0;
     ui_trace("dialog create class=%s style=%08x %d,%d %dx%d items=%d", t.cls, t.style, pos.x, pos.y, sz.cx, sz.cy, t.n);
     HWND h = ui_create(t.exstyle, t.cls, t.title, t.style & ~WS_VISIBLE, pos.x, pos.y, sz.cx, sz.cy, owner, 0, inst, NULL, 1);
     if (!h) { if (disabled_owner) ui_EnableWindow(disabled_owner, 1); return 0; }
