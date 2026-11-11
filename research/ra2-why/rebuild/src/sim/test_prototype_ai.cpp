@@ -88,6 +88,7 @@ sw::Snapshot start(const IniFile& rules, const Faction& faction) {
     world.entities[5].lifetime = sw::Lifetime::Destroyed;
     world.entities[5].resolved_hp = 0;
     world.random.first = 13;
+    world.random.second = 116;
     world.random.table[4] = 0x12345678;
     return world;
 }
@@ -268,7 +269,7 @@ void add_yard(const IniFile& rules, sw::Snapshot& world) {
 }
 
 // Every frame from `from` to `to`, inclusive; all orders in frame order.
-std::vector<Order> frames(PrototypeAI& policy, const sw::Snapshot& world, std::int32_t from, std::int32_t to) {
+std::vector<Order> frames(PrototypeAI& policy, sw::Snapshot& world, std::int32_t from, std::int32_t to) {
     std::vector<Order> result;
     for (auto frame = from; frame <= to; ++frame) {
         auto orders = policy.tick(world, computer, player, frame);
@@ -303,10 +304,10 @@ void check_base_teams(const IniFile& installed_rules, const IniFile& ai, const F
     require(policy.uses_ai_ini() && policy.difficulty() == level, "Base AI.INI was not loaded");
     require(policy.trigger_count() > 80 && policy.trigger_weight("0CA6621C-G") == 40.0,
         "Base AITriggerTypes were not parsed with their authored weights");
+    auto replay_world = world;
     const auto first = policy.tick(world, computer, player, at(rules, policy) + 0);
-    require(same_orders(first, replay.tick(world, computer, player, at(rules, replay) + 0)), "Team choice was not deterministic");
-    require(world.houses[0].cash == before.houses[0].cash && world.entities.size() == before.entities.size() &&
-        world.random.first == before.random.first, "Team policy changed the shared world");
+    require(same_orders(first, replay.tick(replay_world, computer, player, at(rules, replay) + 0)), "Team choice was not deterministic");
+    require(world.houses[0].cash == before.houses[0].cash && world.entities.size() == before.entities.size(), "Team policy changed house or actor state");
     const auto teams = policy.teams();
     require(!teams.empty(), "Computer did not pick a base AI.INI team");
     const std::size_t enabled_field = level == PrototypeAI::Difficulty::Easy ? 15 :
@@ -610,6 +611,74 @@ void check_original_trigger_gates() {
     PrototypeAI no_limit(rules, &unlimited);
     no_limit.tick(world, computer, player, at(rules, no_limit) + 0);
     require(no_limit.teams().size() == 1, "Negative team Max prevented all creation");
+}
+
+void check_shared_team_random() {
+    const auto rules = parse(yard_rules("[General]\nTeamDelays=10,10,10\n[InfantryTypes]\n0=GI\n[BARR]\nFactory=InfantryType\n"));
+    const auto ai = parse(
+        "[TaskForces]\n0=TF\n[TF]\n0=1,GI\n[TeamTypes]\n0=A\n1=GROUND\n"
+        "[A]\nTaskForce=TF\nMax=5\n[GROUND]\nTaskForce=TF\nMax=5\n"
+        "[AITriggerTypes]\nA=First,A,<all>,0,-1,<none>,0,1,1,100,1,0,0,0,<none>,1,1,1\n"
+        "B=Ground,GROUND,<all>,0,-1,<none>,0,1,1,100,1,0,0,0,<none>,1,1,1\n");
+    sw::Snapshot world;
+    world.houses = {house(computer, "Local", false), house(player, "Enemy", true), house(300, "Local", false)};
+    world.entities = {actor(rules, 5, computer, "BARR", sw::Kind::Structure, {4,4}),
+        actor(rules, 6, 300, "BARR", sw::Kind::Structure, {6,6}),
+        actor(rules, 20, player, "BASE", sw::Kind::Structure, {40,40})};
+    add_yard(rules, world);
+    world.entities.push_back(actor(rules, 8, 300, "YARD", sw::Kind::Structure, {8,8}));
+    world.random.table[0] = 127; // Rejected by [1,100].
+    world.random.table[1] = 99;  // Accepted: 100.
+    world.random.table[2] = 1;   // [1,2] selects the ground team.
+    const auto initial = world.random;
+    const auto same_state = [](const auto& a, const auto& b) {
+        return a.first == b.first && a.second == b.second && a.table == b.table;
+    };
+    PrototypeAI first(rules, &ai), second(rules, &ai);
+    first.tick(world, computer, player, 9);
+    ra2::sim::Random before_timer(initial);
+    before_timer.ranged(0, 0x7ffffffe); // Infantry production also uses the match ring.
+    require(first.teams().empty() && same_state(world.random, before_timer.state()),
+        "Before expiry, expected only the infantry production draw");
+    world.random = initial;
+    first.tick(world, computer, player, 10);
+    require(first.teams().size() == 1 && first.teams()[0].team_type == "GROUND",
+        "Shared match values did not select the ground team");
+    ra2::sim::Random expected(initial);
+    require(expected.ranged(1,100) == 100 && expected.ranged(1,2) == 2,
+        "Synthetic shared ring has wrong team values");
+    expected.ranged(0, 0x7ffffffe);
+    require(same_state(world.random, expected.state()), "Team choice lost rejection draws or changed draw order");
+    const auto after_first = world.random;
+    first.tick(world, computer, player, 10);
+    first.reset();
+    require(same_state(world.random, after_first), "Repeated frame or reset changed match random state");
+    // Another house continues at draw four. It must not seed a house stream.
+    second.tick(world, 300, player, 10);
+    expected.ranged(1,100); expected.ranged(1,2); expected.ranged(0, 0x7ffffffe);
+    require(second.teams().size() == 1 && second.teams()[0].team_type == "A" &&
+        same_state(world.random, expected.state()), "Second house did not continue the shared match sequence");
+    // A match-system draw between houses changes the next team choice.
+    auto replay_world = world;
+    replay_world.random = initial;
+    ra2::sim::Random other(replay_world.random);
+    other.ranged(0,127);
+    other.ranged(0,127);
+    replay_world.random = other.state();
+    PrototypeAI replay(rules, &ai);
+    replay.tick(replay_world, computer, player, 10);
+    require(replay.teams().size() == 1 && replay.teams()[0].team_type == "A" &&
+        replay_world.random.first == 5, "External draw was not retained by team choices");
+    // Without a yard, +13A is clear. The ratio roll still consumes its rejects.
+    auto dormant = world;
+    dormant.random = initial;
+    dormant.entities.erase(std::remove_if(dormant.entities.begin(), dormant.entities.end(),
+        [](const auto& e) { return e.type == "YARD"; }), dormant.entities.end());
+    PrototypeAI asleep(rules, &ai);
+    asleep.tick(dormant, computer, player, 10);
+    ra2::sim::Random ratio(initial); ratio.ranged(1,100); ratio.ranged(0, 0x7ffffffe);
+    require(asleep.teams().empty() && same_state(dormant.random, ratio.state()),
+        "Inactive house skipped the unconditional ratio draw or drew a weight");
 }
 
 void check_first_team_timer() {
@@ -1497,6 +1566,7 @@ int main(int argc, char** argv) try {
     }
     run_check("check_team_leader", [&] { check_team_leader(); });
     run_check("check_original_trigger_gates", [&] { check_original_trigger_gates(); });
+    run_check("check_shared_team_random", [&] { check_shared_team_random(); });
     run_check("check_first_team_timer", [&] { check_first_team_timer(); });
     run_check("check_base_plan", [&] { check_base_plan(); });
     run_check("check_wall_pick", [&] { check_wall_pick(); });

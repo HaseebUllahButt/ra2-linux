@@ -38,7 +38,7 @@ public:
     // The runtime must reject duplicate requests while a factory is busy.
     // Repeated frames do nothing. A frame rewind or house change resets clocks
     // and teams.
-    std::vector<skirmish::Order> tick(const session::world::Snapshot&,
+    std::vector<skirmish::Order> tick(session::world::Snapshot&,
         std::uint32_t computer_house_id, std::uint32_t player_house_id,
         std::int32_t game_frame);
     void reset() noexcept;
@@ -246,7 +246,7 @@ private:
     std::array<std::uint32_t, 3> choice_product_{};
     std::optional<std::int32_t> last_frame_;
     std::uint32_t computer_house_ = 0, player_house_ = 0;
-    Random rng_{1}; // 006388A0 draws, on a private stream
+    RandomState* match_random_ = nullptr; // Scenario +218, borrowed during tick
     std::int64_t next_build_ = 0, next_attack_ = 0, next_team_ = 0; // next_team_: House +5684 TeamTime
 };
 

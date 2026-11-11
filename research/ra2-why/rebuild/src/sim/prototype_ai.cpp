@@ -119,7 +119,6 @@ void PrototypeAI::reset() noexcept {
     for (const auto& trigger : triggers_) weights_.push_back(trigger.weight);
     for (std::size_t i = 0; i < team_types_.size() && i < authored_autocreate_.size(); ++i)
         team_types_[i].autocreate = authored_autocreate_[i];
-    rng_ = Random(1);
 }
 
 void PrototypeAI::placement_failed(std::uint32_t house, const std::string& type) {
@@ -149,11 +148,12 @@ std::vector<PrototypeAI::TeamView> PrototypeAI::teams() const {
     return result;
 }
 
-// The original Random_Pick (006388A0) on a private stream. TODO-ORIGINAL:
-// the original draws from the shared scenario Randomizer; this stream keeps
-// the shared world random state untouched.
+// Base 006BEDA1/006BEF92 draw from Scenario +218, the shared match state.
 std::uint32_t PrototypeAI::random(std::uint32_t low, std::uint32_t high) {
-    return static_cast<std::uint32_t>(rng_.ranged(static_cast<std::int32_t>(low), static_cast<std::int32_t>(high)));
+    Random rng(*match_random_);
+    const auto value=rng.ranged(static_cast<std::int32_t>(low),static_cast<std::int32_t>(high));
+    *match_random_=rng.state();
+    return static_cast<std::uint32_t>(value);
 }
 
 namespace {
@@ -768,8 +768,10 @@ bool PrototypeAI::recruitable(const Context& context, const WorldEntity& entity)
     return true;
 }
 
-std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& world,
+std::vector<skirmish::Order> PrototypeAI::tick(session::world::Snapshot& world,
     std::uint32_t computer_house_id, std::uint32_t player_house_id, std::int32_t game_frame) {
+    match_random_=&world.random;
+    struct Release { RandomState*& state; ~Release() { state=nullptr; } } release{match_random_};
     loop::profile::Scope probe(loop::profile::Phase::AI);
     std::vector<skirmish::Order> result;
     if (world.edition != session::world::Edition::Base || world.pending_cell_setup || game_frame < 0 ||
@@ -785,7 +787,6 @@ std::vector<skirmish::Order> PrototypeAI::tick(const session::world::Snapshot& w
         (last_frame_ && game_frame < *last_frame_)) reset();
     if (last_frame_ == game_frame) return result;
     if (computer_house_ != computer_house_id) {
-        rng_ = Random(0x9e3779b9u ^ computer_house_id);
         // The house timer runs from game start, not from the first AI tick.
         next_team_ = first_team_frame(rules_, difficulty_, computer->original_index.value_or(0));
     }
