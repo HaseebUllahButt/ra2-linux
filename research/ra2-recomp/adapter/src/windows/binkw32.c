@@ -48,7 +48,7 @@ int WINAPI BinkPause(ra_bink *h,int paused) { return ra_bink_pause(h,paused); }
 int WINAPI BinkWait(ra_bink *h) { return ra_bink_wait(h); }
 void WINAPI BinkSetVolume(ra_bink *h,int volume) { ra_bink_volume(h,volume); }
 void *WINAPI BinkOpenDirectSound(void *sound) { return sound; }
-int WINAPI BinkSetSoundSystem(void *callback,void *sound) { (void)callback; (void)sound; return 1; }
+int WINAPI BinkSetSoundSystem(void *callback,void *sound) { (void)sound; ra_bink_sound(callback!=NULL); return 1; }
 unsigned WINAPI BinkDDSurfaceType(IDirectDrawSurface *surface)
 {
     DDPIXELFORMAT pf={0}; pf.dwSize=sizeof(pf);

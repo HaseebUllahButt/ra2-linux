@@ -52,6 +52,8 @@ int hle_audio_stream_open(int,int);
 void hle_audio_stream_push(int,const int16_t *,int);
 void hle_audio_stream_close(int);
 void hle_audio_stream_gain(int,float);
+void hle_audio_stream_pause(int,int);
+void hle_audio_stream_clear(int);
 int hle_audio_stream_queued(int);
 int hle_dd_surface_pixels(uint32_t,uint8_t **,int *,int *,int *,int *);
 int hle_dd_frame(const uint8_t **,int *,int *,int *,int *,const uint32_t **,unsigned *);

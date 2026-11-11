@@ -1,6 +1,6 @@
 # Windows parts adapter
 
-Status: the Linux core and Windows DirectDraw DLL pass basic tests. J10 game acceptance remains open.
+Status: MIT win32hle is the base. Graphics, sound, and movie API checks pass. Game acceptance remains open.
 
 ## Layout and build rules
 
@@ -51,7 +51,8 @@ Do not infer a surface interface from a slot offset alone.
 
 Own surface pixels in C memory. Preserve the game's bit depth, masks, aligned pitch, and palette.
 Expose the same memory through Lock. Keep drawing exact before uploading an RGBA display buffer.
-Use SDL_CreateWindowFrom for the original game window. Pump its native window messages through SDL after each presented frame.
+Borrow the SDL window named by RA2UI_SDL_WINDOW_ID when ra2ui owns it.
+Use SDL_CreateWindowFrom only for the native window path. Pump events without consuming the ra2ui event queue.
 Implement each confirmed interface with its exact argument list. Do not share incompatible vtables between versions.
 Track references for surfaces, attached back buffers, palettes, and clippers.
 Implement fill, copy, source/destination color keys, overlap, and nearest-neighbor scaling in C.
@@ -207,3 +208,20 @@ The same C core builds on Linux and decodes both movies with those same results.
 The mission audio capture has 1111680 stereo sample frames with RMS 0.1280.
 Original-game playback with the replacement Bink DLL remains to be checked.
 The Bink SDK stub was read as an ABI reference only. Its header states GPL-2.0-or-later; no implementation was copied.
+
+## MIT base and native bridge
+
+The owner selected pcrecomp win32hle as the base on 2026-11-12.
+The copied modules and MIT notices are in upstream/pcrecomp/.
+A thread-local register frame adapts the base to real Windows stdcall calls.
+COM method thunks preserve nested calls and each method's argument cleanup.
+The public DLLs load one shared ra2adapter.dll. It owns one SDL audio mixer.
+No method falls back to the original implementation.
+Windows-only code supplies real HWND presentation and native clip regions.
+The portable surface conversion remains the display colour check.
+
+The API results are in reports/hle-api-checks.txt.
+The skirmish observer captures packed primary-surface RGB565 rows at game frames 200 through 219.
+Both runs use the same initial seed and measured FPS.
+The observer drives the same menu button notifications after their controls appear.
+A baseline-against-baseline check is required if the runs differ.

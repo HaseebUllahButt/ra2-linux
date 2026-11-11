@@ -326,7 +326,7 @@ typedef struct {
     AVPacket *pkt;
     SwrContext *swr;
     int stream;                   /* the sound's mixer stream */
-    int paused, have_frame, done, wrapped;
+    int paused, have_frame, done, wrapped, seeking;
     uint32_t start_ms, paused_at;
     float volume;
 } bink_t;
@@ -365,7 +365,7 @@ static void close_bink(bink_t *b) {
 }
 
 static void push_audio(bink_t *b) {
-    if (b->stream < 0 || !b->swr) return;
+    if (b->seeking || b->stream < 0 || !b->swr) return;
     int16_t out[8192 * 2];
     int n = swr_convert(b->swr, (uint8_t **)&(uint8_t *){ (uint8_t *)out }, 8192, (const uint8_t **)b->aframe->extended_data,
                         b->aframe->nb_samples);
@@ -476,7 +476,7 @@ static void k_Pause(void) {                              /* (bink, pause) -> the
     if (p && !b->paused) b->paused_at = hle_ticks_ms();
     if (!p && b->paused) b->start_ms += hle_ticks_ms() - b->paused_at;
     b->paused = p;
-    if (b->stream >= 0) hle_audio_stream_gain(b->stream, p ? 0.0f : b->volume);
+    if (b->stream >= 0) hle_audio_stream_pause(b->stream, p);
     RET((uint32_t)p, 2);
 }
 static void k_SetVolume(void) {                          /* (bink, volume) 32768 is full */
@@ -489,10 +489,22 @@ static void k_SetVolume(void) {                          /* (bink, volume) 32768
 static void k_Goto(void) {                               /* (bink, frame, flags): back to the start, then forward */
     bink_t *b = (bink_t *)APTR(0);
     uint32_t to = A32(1) ? A32(1) : 1;
-    av_seek_frame(b->fmt, b->vs, 0, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_BYTE);
+    if (to > b->Frames) to = b->Frames;
+    if (av_seek_frame(b->fmt, b->vs, 0, AVSEEK_FLAG_BACKWARD) < 0) {
+        b->ReadError = 1; g_error = "cannot rewind movie"; RETV(3);
+    }
+    if (b->stream >= 0) { hle_audio_stream_pause(b->stream, 1); hle_audio_stream_clear(b->stream); }
+    if (b->adec) avcodec_flush_buffers(b->adec);
+    if (b->swr) { swr_close(b->swr); if (swr_init(b->swr) < 0) hle_fatal("cannot reset movie audio converter"); }
+    av_frame_unref(b->frame); av_packet_unref(b->pkt);
     avcodec_flush_buffers(b->vdec);
     b->done = b->have_frame = b->wrapped = 0; b->FrameNum = 1;
+    b->seeking = 1;
     while (b->FrameNum < to && decode_frame(b)) b->FrameNum++;
+    b->seeking = 0;
+    b->LastFrameNum = 0;
+    if (b->stream >= 0) hle_audio_stream_pause(b->stream, b->paused);
+    b->paused_at = hle_ticks_ms();
     b->start_ms = hle_ticks_ms() - (uint32_t)((uint64_t)(b->FrameNum - 1) * 1000u * b->FrameRateDiv / b->FrameRate);
     RETV(3);
 }

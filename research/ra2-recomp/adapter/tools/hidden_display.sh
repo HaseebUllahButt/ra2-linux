@@ -21,6 +21,8 @@ read -r -t 15 adapter_display <&"${adapter_xserver[0]}"
 export DISPLAY=":$adapter_display" WINEDEBUG=-all
 export WINEDLLOVERRIDES="ddraw=n;winepulse.drv,winealsa.drv=d"
 printf 'Hidden display: %s\n' "$DISPLAY" >&2
+# Keep one server across registry setup and the test. Stop only this prefix in cleanup.
+wineserver -p
 wine reg add 'HKCU\Software\Wine\Drivers' /v Audio /t REG_SZ /d '' /f >"$adapter_root/build/audio-disable.log" 2>&1
 # Wine 11 filters Unix SDL_ variables. Set the Windows environment as well.
 wine reg add 'HKCU\Environment' /v SDL_AUDIODRIVER /t REG_SZ /d dummy /f >>"$adapter_root/build/audio-disable.log" 2>&1

@@ -4,7 +4,7 @@
 #include <string.h>
 int main(int argc,char **argv)
 {
-    if (argc!=2) return 2;
+    if (argc<2 || argc>3) return 2;
     FILE *f=fopen(argv[1],"rb"); if (!f) return 1;
     fseek(f,0,SEEK_END); long size=ftell(f); rewind(f);
     if (size<44) return 1;
@@ -15,6 +15,13 @@ int main(int argc,char **argv)
     if (!movie) { fprintf(stderr,"%s\n",ra_bink_error()); return 1; }
     size_t pitch=(size_t)movie->Width*2+8,bytes=pitch*movie->Height;
     unsigned char *pixels=malloc(bytes+16); if (!pixels) return 1;
+    if (argc==3) {
+        ra_bink_pause(movie,1);
+        if (ra_bink_goto(movie,17) || movie->FrameNum!=17 || !ra_bink_wait(movie) || ra_bink_do_frame(movie)) return 1;
+        if (ra_bink_goto(movie,1) || movie->FrameNum!=1 || !ra_bink_wait(movie)) return 1;
+        ra_bink_pause(movie,0);
+        puts("PASS: seek preserves pause state and returns to frame one");
+    }
     unsigned decoded=0;
     for (unsigned i=1;i<=movie->Frames;i++) {
         memset(pixels+bytes,0xa5,16);

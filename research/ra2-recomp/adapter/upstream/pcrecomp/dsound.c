@@ -81,7 +81,7 @@ static int audio_open_once(void) { return audio_open(); }
  * rate. */
 #define MAX_STREAMS 4
 #define STREAM_FRAMES (1 << 17)
-static struct { int used, channels, rate; float gain; int16_t *ring; uint32_t rd, wr; double pos; } g_stream[MAX_STREAMS];
+static struct { int used, channels, rate, paused; float gain; int16_t *ring; uint32_t rd, wr; double pos; } g_stream[MAX_STREAMS];
 int hle_audio_stream_open(int rate, int channels) {
     if (!audio_open_once()) return -1;
     pthread_mutex_lock(&g_mix);
@@ -113,7 +113,20 @@ int hle_audio_stream_queued(int id) {                    /* frames not yet playe
     pthread_mutex_unlock(&g_mix);
     return n;
 }
-void hle_audio_stream_gain(int id, float gain) { if (id >= 0 && id < MAX_STREAMS) g_stream[id].gain = gain; }
+void hle_audio_stream_gain(int id, float gain) {
+    if (id < 0 || id >= MAX_STREAMS) return;
+    pthread_mutex_lock(&g_mix); g_stream[id].gain = gain; pthread_mutex_unlock(&g_mix);
+}
+void hle_audio_stream_pause(int id, int paused) {
+    if (id < 0 || id >= MAX_STREAMS) return;
+    pthread_mutex_lock(&g_mix); g_stream[id].paused = paused != 0; pthread_mutex_unlock(&g_mix);
+}
+void hle_audio_stream_clear(int id) {
+    if (id < 0 || id >= MAX_STREAMS) return;
+    pthread_mutex_lock(&g_mix);
+    g_stream[id].rd = g_stream[id].wr = 0; g_stream[id].pos = 0;
+    pthread_mutex_unlock(&g_mix);
+}
 void hle_audio_stream_close(int id) {
     if (id < 0 || id >= MAX_STREAMS) return;
     pthread_mutex_lock(&g_mix);
@@ -149,7 +162,7 @@ static void mix(void *ud, Uint8 *stream, int len) {
     }
     g_mix_at = SDL_GetPerformanceCounter(), g_mix_frames = frames;
     for (int i = 0; i < MAX_STREAMS; i++) {
-        if (!g_stream[i].used) continue;
+        if (!g_stream[i].used || g_stream[i].paused) continue;
         double step = (double)g_stream[i].rate / OUT_RATE;
         for (int f = 0; f < frames && g_stream[i].rd < g_stream[i].wr; f++) {
             uint32_t k = g_stream[i].rd % STREAM_FRAMES;

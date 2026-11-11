@@ -15,7 +15,7 @@ typedef struct Draw {
     DWORD width,height,bits;
     HWND window;
     DWORD cooperative_flags;
-    int native_menu_repaint,repainting;
+    int native_menu_repaint,repainting,presenting;
     ra_present *display;
 } Draw;
 typedef struct Palette {
@@ -60,12 +60,21 @@ static HRESULT result(int status)
     default: return DDERR_INVALIDPARAMS;
     }
 }
-static HRESULT present(Surface *s)
+static ra_present *open_display(Draw *d,uint32_t width,uint32_t height)
+{
+    /* TODO-J14: preserve the game's native input procedure during the bridge. */
+    LONG_PTR native=d->window ? GetWindowLongPtrA(d->window,GWLP_WNDPROC) : 0;
+    ra_present *display=ra_present_open(d->window,width,height);
+    if (d->native_menu_repaint && native) SetWindowLongPtrA(d->window,GWLP_WNDPROC,native);
+    return display;
+}
+static HRESULT present_inner(Surface *s)
 {
     if (!(s->caps&DDSCAPS_PRIMARYSURFACE)) return DD_OK;
     Draw *d=s->owner;
+    if (d->repainting) return DD_OK;
     if (!d->display) {
-        d->display=ra_present_open(d->window,s->pixels.width,s->pixels.height);
+        d->display=open_display(d,s->pixels.width,s->pixels.height);
         if (!d->display) return DDERR_GENERIC;
         if ((d->cooperative_flags&DDSCL_EXCLUSIVE) && ra_present_place_game_window(d->display,s->pixels.width,s->pixels.height)) return DDERR_GENERIC;
     }
@@ -79,8 +88,19 @@ static HRESULT present(Surface *s)
     if (status==DD_OK && d->native_menu_repaint && !d->repainting && d->window) {
         d->repainting=1;
         RedrawWindow(d->window,NULL,NULL,RDW_INVALIDATE|RDW_ALLCHILDREN|RDW_UPDATENOW);
+        /* Owner-drawn controls update DirectDraw memory during WM_PAINT. */
+        status=result(ra_present_frame(d->display,&s->pixels));
         d->repainting=0;
     }
+    return status;
+}
+static HRESULT present(Surface *s)
+{
+    Draw *d=s->owner;
+    if (d->presenting) return DD_OK;
+    d->presenting=1;
+    HRESULT status=present_inner(s);
+    d->presenting=0;
     return status;
 }
 static ULONG WINAPI draw_AddRef(IDirectDraw *iface) { return ++((Draw *)iface)->refs; }
@@ -115,7 +135,7 @@ static HRESULT WINAPI draw_SetDisplayMode(IDirectDraw *iface, DWORD w,DWORD h,DW
     d->width=w; d->height=h; d->bits=bits;
     fprintf(stderr,"RA2 mode %lux%lu bits=%lu window=%p cooperative=%lx\n",w,h,bits,d->window,d->cooperative_flags);
     if (d->window && (d->cooperative_flags&DDSCL_EXCLUSIVE)) {
-        d->display=ra_present_open(d->window,w,h);
+        d->display=open_display(d,w,h);
         if (!d->display) return DDERR_GENERIC;
         if (ra_present_place_game_window(d->display,w,h)) return DDERR_GENERIC;
     }
@@ -458,5 +478,6 @@ HRESULT WINAPI DirectDrawCreate(GUID *guid,IDirectDraw **out,IUnknown *outer)
     d->iface.lpVtbl=&draw_vtable; d->refs=1; d->width=640; d->height=480; d->bits=16;
     const char *repaint=SDL_getenv("RA2_NATIVE_MENU_REPAINT");
     d->native_menu_repaint=repaint && !strcmp(repaint,"1");
+    fprintf(stderr,"RA2 ddraw: native menu repaint=%d\n",d->native_menu_repaint);
     *out=&d->iface; return DD_OK;
 }

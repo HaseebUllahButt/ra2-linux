@@ -63,7 +63,7 @@ build/test_bink.exe: tests/test_bink.c include/ra_bink.h | build
 build/test_bink_native: tests/test_bink_native.c src/bink.c include/ra_bink.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Wno-misleading-indentation $(SDL_CFLAGS) $(shell pkg-config --cflags libavformat libavcodec libavutil libswscale libswresample) tests/test_bink_native.c src/bink.c $(SDL_LIBS) $(shell pkg-config --libs libavformat libavcodec libavutil libswscale libswresample) -o $@
 
-build/capture_ddraw.dll: tests/capture_ddraw.c | build
+build/capture_ddraw.dll: tests/capture_ddraw.c tests/auto_menu.inc | build
 	$(WCC) -O2 -g -std=c11 -Wall -Wextra -Werror -shared $< -o $@
 build/capture_launch.exe: tests/capture_launch.c ../shim/launch.c | build
 	$(WCC) -O2 -g -std=c11 -Wall -Wextra -Wno-missing-field-initializers $< -o $@
@@ -81,3 +81,6 @@ build/dsound.dll: src/windows/dsound.def src/hle/proxy_win.c build/ra2adapter.dl
 	$(WCC) -shared -DRA_FORWARD_DSOUND src/hle/proxy_win.c src/windows/dsound.def -o $@
 build/binkw32.dll: src/windows/binkw32.def src/hle/proxy_win.c build/ra2adapter.dll
 	$(WCC) -shared -DRA_FORWARD_BINK src/hle/proxy_win.c src/windows/binkw32.def -o $@
+
+build/test_hle_stream.exe: tests/test_hle_stream.c upstream/pcrecomp/dsound.c src/hle/bridge_win.c compat/win32hle.h compat/pthread.h | build
+	$(WCC) -O2 -g -std=c11 -Wall -Wextra -Wno-unused-parameter -Wno-misleading-indentation -Icompat -I$(SDL_WIN)/include -I$(SDL_WIN)/include/SDL2 tests/test_hle_stream.c upstream/pcrecomp/dsound.c src/hle/bridge_win.c $(SDL_WIN)/lib/libSDL2.dll.a -o $@

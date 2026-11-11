@@ -18,5 +18,6 @@ Local changes:
 - The Windows clipper obtains the native window's visible region.
 - DirectSound preserves exact PCM16 samples at unit gain and supports file capture.
 - The Windows Bink bridge owns duplicated file descriptors and closes them.
+- Bink preserves repeated frame decoding, honours disabled sound, and matches the original end and pause state.
 
 Blowfish is copied as the J13 base. It is not built into a replacement DLL yet.

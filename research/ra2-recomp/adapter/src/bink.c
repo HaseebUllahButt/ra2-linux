@@ -27,6 +27,8 @@ typedef struct Movie {
     FILE *capture;
 } Movie;
 static char error_text[256];
+static int sound_enabled=1;
+void ra_bink_sound(int enabled) { sound_enabled=enabled!=0; }
 const char *ra_bink_error(void) { return error_text; }
 static int error(const char *message) { snprintf(error_text,sizeof(error_text),"%s",message); return -1; }
 static int read_bytes(void *context,uint8_t *out,int count)
@@ -100,11 +102,13 @@ ra_bink *ra_bink_open(unsigned char *bytes,size_t size)
         AVChannelLayout stereo=AV_CHANNEL_LAYOUT_STEREO;
         if (swr_alloc_set_opts2(&m->resample,&stereo,AV_SAMPLE_FMT_S16,m->audio->sample_rate,
             &m->audio->ch_layout,m->audio->sample_fmt,m->audio->sample_rate,0,NULL)<0 || swr_init(m->resample)<0) goto fail;
+        if (sound_enabled) {
         if (SDL_InitSubSystem(SDL_INIT_AUDIO)) goto fail;
         SDL_AudioSpec spec={0}; spec.freq=m->audio->sample_rate; spec.format=AUDIO_S16LSB; spec.channels=2; spec.samples=512;
         m->device=SDL_OpenAudioDevice(NULL,0,&spec,NULL,0);
         if (!m->device) { SDL_QuitSubSystem(SDL_INIT_AUDIO); goto fail; }
         SDL_PauseAudioDevice(m->device,0);
+        }
         const char *capture=SDL_getenv("RA2_BINK_AUDIO_CAPTURE");
         if (capture && *capture) { m->capture=fopen(capture,"ab"); if (!m->capture) goto fail; }
     }
@@ -128,7 +132,8 @@ static int decode_audio(Movie *m)
         int16_t *samples=(int16_t *)pcm;
         for (int i=0;i<written*2;i++) samples[i]=(int16_t)((int32_t)samples[i]*m->volume/32768);
         if (m->capture && fwrite(pcm,4,(size_t)written,m->capture)!=(size_t)written) { av_free(pcm); av_frame_free(&frame); return error("Cannot write Bink audio capture"); }
-        SDL_QueueAudio(m->device,pcm,(Uint32)written*4); av_free(pcm); av_frame_unref(frame);
+        if (m->device && SDL_QueueAudio(m->device,pcm,(Uint32)written*4)) { av_free(pcm); av_frame_free(&frame); return error("Cannot queue Bink audio"); }
+        av_free(pcm); av_frame_unref(frame);
     }
     av_frame_free(&frame); return 0;
 }
@@ -182,17 +187,23 @@ int ra_bink_goto(ra_bink *api,uint32_t frame)
 {
     if (!api || !frame || frame>api->Frames) return error("Invalid Bink seek frame");
     Movie *m=(Movie *)api;
-    /* Reopen the demuxer so predictive decoding starts at the first keyframe. */
-    unsigned char *bytes=malloc(m->size); if (!bytes) return error("Out of memory");
-    memcpy(bytes,m->bytes,m->size);
-    ra_bink *fresh=ra_bink_open(bytes,m->size); if (!fresh) return -1;
-    Movie old=*m; *m=*(Movie *)fresh; *(Movie *)fresh=old;
-    m->io->opaque=m; ((Movie *)fresh)->io->opaque=fresh;
-    ra_bink_close(fresh);
-    for (uint32_t i=1;i<frame;i++) { if (ra_bink_do_frame(api)) return -1; ra_bink_next(api); }
-    if (m->device) SDL_ClearQueuedAudio(m->device);
+    int volume=m->volume,paused=m->paused;
+    /* FFmpeg's Bink demuxer rewinds to frame one. Keep the audio device. */
+    if (av_seek_frame(m->format,m->video_stream,0,AVSEEK_FLAG_BACKWARD)<0) return error("Cannot rewind Bink stream");
+    avcodec_flush_buffers(m->video);
+    if (m->audio) avcodec_flush_buffers(m->audio);
+    av_frame_unref(m->frame); av_packet_unref(m->packet);
+    if (m->resample) { swr_close(m->resample); if (swr_init(m->resample)<0) return error("Cannot reset Bink audio converter"); }
+    api->FrameNum=1; api->LastFrameNum=0; m->decoded=0;
+    FILE *capture=m->capture; m->capture=NULL;
+    if (m->device) SDL_PauseAudioDevice(m->device,1);
+    int status=0;
+    for (uint32_t i=1;i<frame;i++) { if (ra_bink_do_frame(api)) { status=-1; break; } ra_bink_next(api); }
+    m->capture=capture; m->volume=volume; m->paused=paused;
+    if (m->device) { SDL_ClearQueuedAudio(m->device); SDL_PauseAudioDevice(m->device,paused); }
+    m->pause_start=SDL_GetTicks64();
     m->start=SDL_GetTicks64()-(uint64_t)(frame-1)*1000*api->FrameRateDiv/api->FrameRate;
-    return 0;
+    return status;
 }
 int ra_bink_pause(ra_bink *api,int paused)
 {

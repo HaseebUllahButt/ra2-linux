@@ -16,4 +16,5 @@ int ra_bink_pause(ra_bink *,int pause);
 int ra_bink_wait(ra_bink *);
 void ra_bink_volume(ra_bink *,int volume);
 const char *ra_bink_error(void);
+void ra_bink_sound(int enabled);
 #endif
