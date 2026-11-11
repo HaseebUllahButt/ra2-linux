@@ -633,6 +633,8 @@ class Emitter:
                    ' R.eflags = (R.eflags & ~0x240000u) | (f & 0x240000u); }')
         elif m in ('movsb', 'movsw', 'movsd', 'stosb', 'stosw', 'stosd', 'lodsb', 'lodsw', 'lodsd', 'scasb', 'scasw', 'scasd', 'cmpsb', 'cmpsw', 'cmpsd'):
             self.string(ins, m)
+        elif m == 'xlatb':
+            self.wreg('al', 'M8(ebx + (eax & 0xffu))')
         elif m == 'rdtsc':
             self.e('{ u64 t = rc_rdtsc(); eax = (u32)t; edx = (u32)(t >> 32); }')
         elif m == 'cpuid':
@@ -873,7 +875,9 @@ class Emitter:
             elif reg == 3: e('MF32(ad) = (float)ST(0); fpop();')
             elif reg == 5: e('fldcw(M16(ad));')
             elif reg == 7: e('M16(ad) = fnstcw();')
-            else: raise LiftError('x87 d9 /%d (fldenv/fnstenv)' % reg)
+            elif reg == 4: e('rc_fldenv(ad);')
+            elif reg == 6: e('rc_fnstenv(ad);')
+            else: raise LiftError('x87 d9 /%d' % reg)
             return
         if op == 0xdb:
             if reg == 0: e('fpush((f80)(s32)M32(ad));')
@@ -1049,7 +1053,11 @@ def lift(img, md, entry, entries):
         if a in f.targets or a == entry:
             lines.append('L_%08x: ;' % a)
         if a in f.bad:
-            lines.append('    rc_unreachable(0x%08xu); /* %s */' % (a, f.bad[a]))
+            if f.bad[a].startswith('falls into next function'):
+                # running on into the next function is a jump to it (a tail call)
+                lines.append('    { SAVE; RC_CALLD(0x%08xu); return; } /* %s */' % (a, f.bad[a]))
+            else:
+                lines.append('    rc_unreachable(0x%08xu); /* %s */' % (a, f.bad[a]))
             continue
         ins = f.insns[a]
         em.out = []

@@ -227,6 +227,40 @@ static inline void rc_frstor(u32 a)
     u32 env[7] = {0xffff0000u | cw, 0xffff0000u | (sw & 0xffu), 0xffffffffu, 0, 0, 0, 0};
     __asm__ volatile("fldenv %0" :: "m"(env) : "memory");
 }
+/* fnstenv / fldenv: 28-byte environment. Pointers are stored as 0. fnstenv masks all
+ * exceptions afterwards, like the CPU. */
+static inline u16 rc_tagword(void)
+{
+    u32 tw = 0;
+    for (int ph = 0; ph < 8; ph++) {
+        u32 t = 3;
+        if (R.tag >> ph & 1) {
+            f80 v = R.st[ph]; u16 ex; memcpy(&ex, (u8 *)&v + 8, 2); u64 mant; memcpy(&mant, &v, 8);
+            if ((ex & 0x7fff) == 0x7fff || ((ex & 0x7fff) == 0 && mant) || ((ex & 0x7fff) && !(mant >> 63))) t = 2;
+            else t = (ex & 0x7fff) == 0 && !mant ? 1 : 0;
+        }
+        tw |= t << (2 * ph);
+    }
+    return (u16)tw;
+}
+static inline void rc_fnstenv(u32 a)
+{
+    u8 *p = (u8 *)(uintptr_t)a; u16 cw = fnstcw(), sw = fsw(), tw = rc_tagword(), ff = 0xffff;
+    memset(p, 0, 28);
+    memcpy(p, &cw, 2); memcpy(p + 4, &sw, 2); memcpy(p + 8, &tw, 2);
+    memcpy(p + 2, &ff, 2); memcpy(p + 6, &ff, 2); memcpy(p + 10, &ff, 2); memcpy(p + 26, &ff, 2);
+    fldcw((u16)(cw | 0x3f));
+}
+static inline void rc_fldenv(u32 a)
+{
+    u8 *p = (u8 *)(uintptr_t)a; u16 cw, sw, tw;
+    memcpy(&cw, p, 2); memcpy(&sw, p + 4, 2); memcpy(&tw, p + 8, 2);
+    R.top = sw >> 11 & 7; R.c0 = sw >> 8 & 1; R.c1 = sw >> 9 & 1; R.c2 = sw >> 10 & 1; R.c3 = sw >> 14 & 1;
+    R.tag = 0;
+    for (int ph = 0; ph < 8; ph++) if ((tw >> (2 * ph) & 3) != 3) R.tag |= 1u << ph;
+    u32 env[7] = {0xffff0000u | cw, 0xffff0000u | (sw & 0xffu), 0xffffffffu, 0, 0, 0, 0};
+    __asm__ volatile("fldenv %0" :: "m"(env) : "memory");
+}
 static inline f80 LD80(u32 a) { f80 v = 0; memcpy(&v, (void *)(uintptr_t)a, 10); return v; }
 static inline void ST80(u32 a, f80 v) { memcpy((void *)(uintptr_t)a, &v, 10); }
 #endif
