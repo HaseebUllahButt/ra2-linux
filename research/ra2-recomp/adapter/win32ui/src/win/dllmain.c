@@ -17,6 +17,8 @@ __declspec(dllimport) void *__stdcall LoadLibraryA(const char *);
 __declspec(dllimport) DWORD __stdcall GetLastError(void);
 INT UICDECL ui_wsprintfA(char *out, const char *fmt, ...);
 
+#include "record.c"
+
 struct ui_export { const char *dll, *name; void *fn; };
 static const struct ui_export exports[] = {
 #define UIFN(dll, ret, name, args) { #dll ".DLL", #name, (void *)ui_##name },
@@ -78,6 +80,7 @@ static void patch_imports(void)
             void *fn = NULL;
             for (int e = 0; e < NEXP; e++) if (!strcmp(exports[e].dll, up) && !strcmp(exports[e].name, name)) { fn = exports[e].fn; break; }
             if (!fn) { fn = make_stub(ui_strdup(name)); stubs++; }
+            fn = rec_import(up, name, fn);
             DWORD old;
             VirtualProtect(&iat[i], 4, 0x04, &old);
             iat[i] = (DWORD)(uintptr_t)fn;
@@ -91,6 +94,7 @@ BOOL __stdcall DllMain(HINSTANCE inst, DWORD reason, void *res)
 {
     (void)inst; (void)res;
     if (reason == 1) {
+        rec_init();
         patch_imports();
         const char *also = getenv("RA2UI_ALSO_LOAD");
         if (also && *also && !LoadLibraryA(also)) ui_log("win32ui: cannot load %s (error %u)", also, GetLastError());

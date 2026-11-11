@@ -19,6 +19,8 @@ This file says what is done, what is open for stage 2, and how to run the tests.
 
 ## Open for stage 2 (logs must equal Wine's on 3 sessions: menu, skirmish, quit)
 
+Each test game writes `original/game/RA2.INI`. Copy it before a run and put it back after, so the Wine run
+and our run start with the same settings (sessions 1 and 2 had different settings; session 3 had the same).
 Sessions and logs: `reports/msglog/sessions.sh` (run from the repo root), `session<N>-wine.log.gz`,
 `session<N>-ours.log.gz`, `session<N>-diff.txt`.
 You can keep the Wine logs and record only `ours` again after each change.
@@ -42,7 +44,11 @@ Known differences, in log order:
       way wined3d does (`dlls/wined3d/swapchain.c` `wined3d_swapchain_state_setup_fullscreen`,
       `dlls/wined3d/device.c` `wined3d_device_setup_fullscreen_window`); b) patch the user32 import slots of
       Wine's wined3d.dll for the game window. Option a) is also right for the Linux build.
-4. Later differences are not known yet. Fix 1 and 2, record again, and read the next first difference.
+4. Session 3 (country choice): Wine selects America and the game gets WM_COMMAND wParam 0x106a1
+   (control 0x6a1, notification 1 = CBN_SELCHANGE). Ours sends no such notification, and the country
+   stays Russia. Check the combo box selection notifications (CBN_SELCHANGE, CBN_SELENDOK) in
+   `src/controls.c` against Wine `dlls/user32/combo.c` and `listbox.c`.
+5. Later differences are not known yet. Fix 1 and 2, record again, and read the next first difference.
 
 Port plan (Wine 11 source in `../../../ref-community/wine`, read the functions, keep the order exactly):
 
