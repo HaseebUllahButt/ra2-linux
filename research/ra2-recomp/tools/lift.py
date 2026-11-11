@@ -927,8 +927,9 @@ class Emitter:
             raise LiftError('x87 db %02x (fcmov/fcomi)' % modrm)
         if op == 0xdd:
             if reg == 0: e('R.tag &= ~(1u << ((R.top + %d) & 7));' % i); return
-            if reg == 2: e('ST(%d) = ST(0);' % i); return
-            if reg == 3: e('ST(%d) = ST(0); fpop();' % i); return
+            # fst/fstp st(i) also mark st(i) as valid
+            if reg == 2: e('ST(%d) = ST(0); R.tag |= 1u << ((R.top + %d) & 7);' % (i, i)); return
+            if reg == 3: e('ST(%d) = ST(0); R.tag |= 1u << ((R.top + %d) & 7); fpop();' % (i, i)); return
             if reg in (4, 5):
                 e('fcmp(ST(0), ST(%d));' % i)
                 if reg == 5: e('fpop();')
