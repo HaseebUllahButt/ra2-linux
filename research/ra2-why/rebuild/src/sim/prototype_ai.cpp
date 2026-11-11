@@ -688,7 +688,9 @@ std::string PrototypeAI::choose_harvester(const Context& context) const {
     for (std::size_t i = 0; i < std::min<std::size_t>(2, refineries.size()); ++i) refinery_count += owned(refineries[i]);
     if (rules_.read_integer(harvester, "TechLevel", -1) > context.computer.tech_level.value_or(10) ||
         owned(harvester) >= rules_.read_integer("General", "HarvestersPerRefinery") * refinery_count ||
-        !buildable(rules_, context.computer, context.actors, context.buildings, harvester, std::nullopt)) return {};
+        // 004E9C90: the harvester path uses the computer-house Can_Build gate.
+        !buildable(rules_, context.computer, context.actors, context.buildings, harvester,
+                   std::nullopt, false, true)) return {};
     return harvester;
 }
 
@@ -737,7 +739,10 @@ std::string PrototypeAI::choose_product(const Context& context, const char* regi
     std::int64_t best_frame = std::numeric_limits<std::int32_t>::max();
     for (std::size_t i = 0; i < types.size(); ++i) {
         if (wanted[i] <= 0 ||
-            !buildable(rules_, context.computer, context.actors, context.buildings, types[i], context.cash)) continue;
+            // 004EA1B0 line 108 (also 004E9C90, 004EA4D0): the product
+            // picker uses the computer-house Can_Build gate.
+            !buildable(rules_, context.computer, context.actors, context.buildings, types[i],
+                       context.cash, false, true)) continue;
         if (most == -1 || most < wanted[i]) {
             list.clear();
             most = wanted[i];

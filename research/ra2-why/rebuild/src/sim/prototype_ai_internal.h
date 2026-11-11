@@ -104,7 +104,7 @@ inline bool prerequisite(const IniFile& rules, const Actors& buildings, const st
 // without a money test. 004E9C90 tests Available_Money >= cost for units.
 inline bool buildable(const IniFile& rules, const WorldHouse& house, const Actors& actors,
                const Actors& buildings, const std::string& type, std::optional<std::int64_t> cash,
-               bool plan_node = false) {
+               bool plan_node = false, bool computer_products = false) {
     const auto cost = rules.read_integer(type, "Cost", -1);
     const auto tech = rules.read_integer(type, "TechLevel", -1);
     // TODO-ORIGINAL: This is a conservative policy filter, not House::Can_Build.
@@ -121,6 +121,14 @@ inline bool buildable(const IniFile& rules, const WorldHouse& house, const Actor
         contains(rules.read_list(type, "ForbiddenHouses"), house.country)) return false;
     if ((rules.read_bool(type, "RequiresStolenAlliedTech") && !house.stolen_tech_205.value_or(false)) ||
         (rules.read_bool(type, "RequiresStolenSovietTech") && !house.stolen_tech_204.value_or(false))) return false;
+    // 004EA1B0 line 108 (also 004E9C90, 004EA4D0) calls 004E3660, whose
+    // 004E3878 returns buildable for a computer house after the shared
+    // gates: the prerequisite loop and the BuildLimit switch are only for
+    // a human. computer_products scopes this to the AI.INI product picker
+    // and harvester path. The legacy policy and the plan nodes keep their
+    // own conservative tests. The campaign fallback to House +135 stays
+    // with the production runtime (original_can_build).
+    if (computer_products && !house.human_controlled.value_or(true)) return true;
     const auto limit = rules.read_integer(type, "BuildLimit");
     // Negative limits need historical counters, so this policy avoids them.
     if (limit < 0) return false;
