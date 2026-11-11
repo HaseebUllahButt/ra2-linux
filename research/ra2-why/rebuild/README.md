@@ -27,6 +27,10 @@ rebuild/build/ra2-native --game-dir "$PWD/game-full"
 rebuild/build/ra2-native --game-dir "$PWD/game-full" --skirmish --headless --autoplay --frames 12000
 ```
 
+When `ccache` is in PATH, the build and the test scripts use it.
+A second clean `make -j6 test` then takes about 25 seconds, not 5 minutes.
+Turn it off with `make RA2_CCACHE=`.
+
 Choose Single Player, Skirmish, and Start Game in the menu.
 Close the help panel with a click or F1.
 Select the MCV and press D, double-click it, or click Deploy.
