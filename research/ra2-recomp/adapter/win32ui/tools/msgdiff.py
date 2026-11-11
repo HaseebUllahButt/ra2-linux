@@ -14,11 +14,13 @@ FN = re.compile(r'\bfn=(\w+)')
 def base_read(path, args):
     opener = gzip.open if str(path).endswith('.gz') else open
     ignored = set()
+    last_depth = 0
     with opener(path, 'rt', errors='replace') as stream:
         for number, line in enumerate(stream, 1):
             line = line.rstrip('\n')
             depth = DEPTH.search(line)
-            d = int(depth[1]) if depth else 0
+            d = int(depth[1]) if depth else last_depth
+            last_depth = d
             start = line.startswith(('CALL ', 'MSG '))
             end = line.startswith(('RET ', 'MRET '))
             message = MSG.search(line)
