@@ -153,18 +153,38 @@ class Func:
             if p.mnemonic in ('movzx', 'mov') and len(p.operands) == 2 and p.operands[1].type == X86_OP_MEM and p.operands[1].size == 1 \
                and p.operands[0].type == X86_OP_REG and reg32(p.reg_name(p.operands[0].reg)) == idx and btable is None and n is None:
                 bm = p.operands[1].mem
-                if bm.index == 0 and bm.base != 0:
+                if bm.index == 0 and bm.base != 0 and (bm.disp & 0xffffffff) >= self.img.base:
                     btable = bm.disp & 0xffffffff
                     breg = reg32(p.reg_name(bm.base))
                     continue
-            if p.mnemonic == 'cmp' and p.operands[0].type == X86_OP_REG and p.operands[1].type == X86_OP_IMM:
+            if p.mnemonic == 'cmp' and p.operands[0].type == X86_OP_REG and p.operands[1].type in (X86_OP_IMM, X86_OP_REG):
                 r = reg32(p.reg_name(p.operands[0].reg))
                 if r == (breg or idx):
-                    n = (p.operands[1].imm & 0xffffffff) + 1
+                    if p.operands[1].type == X86_OP_IMM:
+                        n = (p.operands[1].imm & 0xffffffff) + 1
+                    else:
+                        k = self.reg_const(prev, p, reg32(p.reg_name(p.operands[1].reg)))
+                        if k is not None:
+                            n = k + 1
                     break
+            if p.mnemonic == 'and' and p.operands[0].type == X86_OP_REG and p.operands[1].type == X86_OP_IMM and n is None \
+               and reg32(p.reg_name(p.operands[0].reg)) == (breg or idx) and (p.operands[1].imm & 0xffffffff) < 512:
+                n = (p.operands[1].imm & 0xffffffff) + 1
+                break
         if btable is not None:
             if n is None:
-                raise LiftError('byte jump table without bound at %08x' % a)
+                # no bound check: the caller keeps the index in range. The dword table
+                # ends where the byte table starts (or at the first invalid target).
+                k = 0
+                while k < 256 and (btable <= tbl or tbl + 4 * k < btable):
+                    t = self.img.u32(tbl + 4 * k)
+                    if t is None or not (self.img.text_lo <= t < self.img.text_hi) or abs(t - a) > 0x10000:
+                        break
+                    k += 1
+                if k == 0:
+                    raise LiftError('byte jump table without bound at %08x' % a)
+                self.notes.append('byte jump table %08x: no bound, %d targets read' % (a, k))
+                return [self.img.u32(tbl + 4 * i) for i in range(k)]
             n = max(self.img.u8(btable + i) for i in range(n)) + 1
         if n is None:
             # no bound found: read while entries point into this area of .text
@@ -178,6 +198,26 @@ class Func:
             if n == 0:
                 raise LiftError('empty jump table at %08x' % a)
         return [self.img.u32(tbl + 4 * i) for i in range(n)]
+
+    def reg_const(self, prev, upto, r):
+        """Constant value of register r just before instruction upto (mov r, imm / push imm; pop r)."""
+        seen = [p for p in prev if p.address < upto.address]
+        for j in range(len(seen) - 1, -1, -1):
+            p = seen[j]
+            ops = p.operands
+            if p.mnemonic == 'mov' and len(ops) == 2 and ops[0].type == X86_OP_REG and reg32(p.reg_name(ops[0].reg)) == r:
+                return (ops[1].imm & 0xffffffff) if ops[1].type == X86_OP_IMM and ops[0].size == 4 else None
+            if p.mnemonic == 'pop' and ops[0].type == X86_OP_REG and reg32(p.reg_name(ops[0].reg)) == r:
+                for q in reversed(seen[:j]):       # matching push, no other stack change between
+                    if q.mnemonic == 'push':
+                        return (q.operands[0].imm & 0xffffffff) if q.operands[0].type == X86_OP_IMM else None
+                    if q.mnemonic in ('pop', 'call', 'ret', 'enter', 'leave', 'pushal', 'popal', 'pushfd', 'popfd') or \
+                       any(o.type == X86_OP_REG and reg32(q.reg_name(o.reg)) == 'esp' for o in q.operands):
+                        return None
+                return None
+            if len(ops) and ops[0].type == X86_OP_REG and reg32(p.reg_name(ops[0].reg)) == r and p.mnemonic not in ('cmp', 'test', 'push'):
+                return None
+        return None
 
     def linear_prev(self, a, k):
         out = []
@@ -202,6 +242,9 @@ def reg32(r):
     return t.get(r, r)
 
 NORETURN = set()
+# Callees that return a result in the flags (CRT asm helpers). Callers read the flags
+# after the call; the callee packs its flags into R.eflags at ret (native: the bridge).
+FLAGRET = {0x787665}
 
 class Emitter:
     def __init__(self, f):
@@ -209,6 +252,7 @@ class Emitter:
         self.ins = None
         self.out = []
         self.uses_fs = False
+        self.uses_mmx = False
 
     def e(self, s):
         self.out.append('    ' + s)
@@ -302,7 +346,7 @@ class Emitter:
         if t in f.insns or t in f.bad:
             return 'goto %s;' % self.lab(t)
         # tail call to another function
-        return '{ SAVE; rc_call(0x%08xu); return; }' % t
+        return '{ SAVE; RC_CALLD(0x%08xu); return; }' % t
 
     # ---- instructions ----
     def emit(self, ins):
@@ -462,7 +506,10 @@ class Emitter:
         elif m.startswith('set'):
             self.wr(ops[0], CC[m[3:]] if m[3:] in CC else self.cc_alias(m[3:]))
         elif m.startswith('cmov'):
-            raise LiftError('cmov')
+            c = m[4:]
+            self.e('if (%s) {' % (CC[c] if c in CC else self.cc_alias(c)))
+            self.wr(ops[0], self.rd(ops[1]))
+            self.e('}')
         elif m == 'jmp':
             op = ops[0]
             if op.type == X86_OP_IMM:
@@ -492,11 +539,13 @@ class Emitter:
             op = ops[0]
             if op.type == X86_OP_IMM:
                 t = op.imm & 0xffffffff
-                self.e('esp -= 4; M32(esp) = 0x%08xu; SAVE; rc_call(0x%08xu); LOAD;' % (nxt, t))
+                self.e('esp -= 4; M32(esp) = 0x%08xu; SAVE; RC_CALLD(0x%08xu); LOAD;%s' % (nxt, t, ' FLAGS_FROM_R;' if t in FLAGRET else ''))
             else:
                 self.e('{ u32 t = %s; esp -= 4; M32(esp) = 0x%08xu; SAVE; rc_call(t); LOAD; }' % (self.rd(op), nxt))
         elif m == 'ret':
             n = ops[0].imm if ops else 0
+            if self.f.entry in FLAGRET:
+                self.e('R.eflags = (u32)(cf | 2 | pf << 2 | zf << 6 | sf << 7 | of << 11 | 0x200);')
             self.e('esp += %d; SAVE; return;' % (4 + n))
         elif m == 'leave':
             self.e('esp = ebp; ebp = M32(esp); esp += 4;')
@@ -556,11 +605,54 @@ class Emitter:
             self.e('{ u32 f = M32(esp); esp += 4; cf = f & 1; pf = (f >> 2) & 1; zf = (f >> 6) & 1; sf = (f >> 7) & 1; R.df = (f >> 10) & 1; of = (f >> 11) & 1; }')
         elif m in ('movsb', 'movsw', 'movsd', 'stosb', 'stosw', 'stosd', 'lodsb', 'lodsw', 'lodsd', 'scasb', 'scasw', 'scasd', 'cmpsb', 'cmpsw', 'cmpsd'):
             self.string(ins, m)
+        elif m == 'rdtsc':
+            self.e('{ u64 t = rc_rdtsc(); eax = (u32)t; edx = (u32)(t >> 32); }')
+        elif m == 'cpuid':
+            self.e('rc_cpuid(&eax, &ebx, &ecx, &edx);')
+        elif m == 'emms' or any(o.type == X86_OP_REG and ins.reg_name(o.reg).startswith('mm') for o in ops):
+            self.mmx(ins, m)
         elif m == 'enter':
             if ops[1].imm != 0: raise LiftError('enter with nesting')
             self.e('esp -= 4; M32(esp) = ebp; ebp = esp; esp -= %du;' % ops[0].imm)
         else:
             raise LiftError('instruction %s %s' % (m, ins.op_str))
+
+    MMX2 = {'pxor': 'a ^ b', 'packssdw': 'mmx_packssdw(a, b)', 'packuswb': 'mmx_packuswb(a, b)',
+            'paddusb': 'mmx_paddusb(a, b)', 'pmulhw': 'mmx_pmulhw(a, b)', 'pmullw': 'mmx_pmullw(a, b)',
+            'punpckhwd': 'mmx_punpckhwd(a, b)', 'punpcklbw': 'mmx_punpcklbw(a, b)', 'psrlw': 'mmx_psrlw(a, b)',
+            'psrad': 'mmx_psrad(a, b)'}
+    def mmrd(self, op):
+        if op.type == X86_OP_REG:
+            r = self.ins.reg_name(op.reg)
+            return r if r.startswith('mm') else '(u64)%s' % self.rreg(r)
+        if op.type == X86_OP_IMM:
+            return '(u64)%du' % (op.imm & 0xff)
+        a = self.ea(op)
+        if isinstance(a, tuple): raise LiftError('mmx fs')
+        return '(*(u64 *)(uintptr_t)%s)' % a if op.size == 8 else '(u64)M32(%s)' % a
+    def mmx(self, ins, m):
+        """MMX: mm0..mm7 are u64 locals. MMX use sets x87 TOP = 0; emms empties all tags."""
+        ops = ins.operands
+        self.uses_mmx = True
+        if m == 'emms':
+            self.e('R.tag = 0; R.top = 0;'); return
+        if m in ('movq', 'movd'):
+            d, v = ops[0], self.mmrd(ops[1])
+            if d.type == X86_OP_REG and self.ins.reg_name(d.reg).startswith('mm'):
+                self.e('%s = %s;' % (self.ins.reg_name(d.reg), v if m == 'movq' else '(u64)(u32)(%s)' % v))
+            elif d.type == X86_OP_REG:
+                self.wreg(self.ins.reg_name(d.reg), '(u32)(%s)' % v)
+            else:
+                a = self.ea(d)
+                if isinstance(a, tuple): raise LiftError('mmx fs')
+                if m == 'movq': self.e('*(u64 *)(uintptr_t)%s = %s;' % (a, v))
+                else: self.e('M32(%s) = (u32)(%s);' % (a, v))
+            return
+        if m in self.MMX2:
+            d = self.ins.reg_name(ops[0].reg)
+            self.e('{ u64 a = %s, b = %s; %s = %s; }' % (d, self.mmrd(ops[1]), d, self.MMX2[m]))
+            return
+        raise LiftError('mmx instruction %s' % m)
 
     def cc_alias(self, c):
         al = {'c': 'b', 'nae': 'b', 'nb': 'ae', 'nc': 'ae', 'z': 'e', 'nz': 'ne', 'na': 'be', 'nbe': 'a', 'pe': 'p', 'po': 'np',
@@ -767,7 +859,9 @@ class Emitter:
             elif reg == 2: e('MF64(ad) = (double)ST(0);')
             elif reg == 3: e('MF64(ad) = (double)ST(0); fpop();')
             elif reg == 7: e('M16(ad) = fsw();')
-            else: raise LiftError('x87 dd /%d (frstor/fnsave)' % reg)
+            elif reg == 4: e('rc_frstor(ad);')
+            elif reg == 6: e('rc_fnsave(ad);')
+            else: raise LiftError('x87 dd /%d' % reg)
             return
         if op == 0xdf:
             if reg == 0: e('fpush((f80)(s16)M16(ad));')
@@ -833,8 +927,9 @@ class Emitter:
             raise LiftError('x87 db %02x (fcmov/fcomi)' % modrm)
         if op == 0xdd:
             if reg == 0: e('R.tag &= ~(1u << ((R.top + %d) & 7));' % i); return
-            if reg == 2: e('ST(%d) = ST(0);' % i); return
-            if reg == 3: e('ST(%d) = ST(0); fpop();' % i); return
+            # fst/fstp st(i) also mark st(i) as valid
+            if reg == 2: e('ST(%d) = ST(0); R.tag |= 1u << ((R.top + %d) & 7);' % (i, i)); return
+            if reg == 3: e('ST(%d) = ST(0); R.tag |= 1u << ((R.top + %d) & 7); fpop();' % (i, i)); return
             if reg in (4, 5):
                 e('fcmp(ST(0), ST(%d));' % i)
                 if reg == 5: e('fpop();')
@@ -874,6 +969,8 @@ def flag_check(f):
             w = 'z'
         if m == 'call':
             w = '!'
+            if ins.operands[0].type == X86_OP_IMM and (ins.operands[0].imm & 0xffffffff) in FLAGRET:
+                w = ALLF
         reads[a], writes[a] = r, w
     # forward data flow: set of flags defined on all paths
     preds = {}
@@ -932,6 +1029,8 @@ def lift(img, md, entry, entries):
             raise LiftError('%08x %s %s: %s' % (a, ins.mnemonic, ins.op_str, ex))
         lines.append('    /* %08x %s %s */' % (a, ins.mnemonic, ins.op_str))
         lines.extend(em.out)
+        if em.uses_mmx and 'u64 mm0' not in lines[3]:
+            lines[3] += ' u64 mm0 = 0, mm1 = 0, mm2 = 0, mm3 = 0, mm4 = 0, mm5 = 0, mm6 = 0, mm7 = 0;'
         # an instruction that does not continue to the next one (no-return call, trap)
         nxt = a + ins.size
         m = ins.mnemonic

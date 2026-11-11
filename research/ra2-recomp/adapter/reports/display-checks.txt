@@ -1,0 +1,6 @@
+Hidden display: :1
+MESA-EGL: warning: DRI3 error: Could not get DRI3 device
+MESA-EGL: warning: Ensure your X server supports DRI3 to get accelerated rendering
+RA2 mode 640x480 bits=16 window=0003004E cooperative=11
+Game window origin=0,0 client=640x480
+PASS: exclusive window origin, client size, primary presentation, and native message dispatch

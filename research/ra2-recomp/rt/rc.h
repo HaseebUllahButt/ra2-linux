@@ -17,8 +17,35 @@ typedef struct {
     u32 c0, c1, c2, c3;                           /* x87 condition bits             */
     u32 df;
     f80 st[8];
+    u32 eflags;                                   /* flags returned by FLAGRET callees */
 } RCState;
-extern RCState R;
+/* Per-thread state. R is the lifted register state of the current thread.
+ * rc_aux holds the bridge and entry state (offsets used by bridge.S).
+ * Windows build: both are thread-local. Linux test build: single thread, plain globals. */
+#ifdef _WIN32
+#define RC_TLS __thread
+#else
+#define RC_TLS
+#endif
+typedef union { f80 v; u8 b[16]; } f80s;              /* 16-byte stride for asm */
+typedef struct RCAux {
+    u32 save[8];         /*  0 eax ecx edx ebx esp ebp esi edi: registers at the asm edge */
+    u32 host_esp;        /* 32 host esp inside rc_native (0 = not in a native call) */
+    u32 host_top;        /* 36 top of this thread's private host stack */
+    u32 target;          /* 40 */
+    u32 sw_before;       /* 44 */
+    u32 fin_n, fout_n;   /* 48, 52 */
+    u32 entry;           /* 56 entry address set by an entry thunk */
+    u32 ret;             /* 60 return address for the entry exit */
+    u32 depth;           /* 64 lifted entry nesting depth */
+    u32 eflags;          /* 68 flags after a native call / for the entry exit */
+    u32 pad[2];          /* 72 */
+    f80s fin[8];         /* 80 */
+    f80s fout[8];        /* 208 */
+} RCAux;
+extern RC_TLS RCState R;
+extern RC_TLS RCAux rc_aux;
+void rc_thread_init(void);           /* set up R/rc_aux for the current thread */
 
 #define M8(a)  (*(u8  *)(uintptr_t)(u32)(a))
 #define M16(a) (*(u16 *)(uintptr_t)(u32)(a))
@@ -37,8 +64,64 @@ static inline u32 FS32(u32 o) { u32 v; __asm__ volatile("movl %%fs:(%1), %0" : "
 static inline void FSW32(u32 o, u32 v) { __asm__ volatile("movl %1, %%fs:(%0)" :: "r"(o), "r"(v) : "memory"); }
 static inline u32 FSBASE(void) { return FS32(0x18); }
 
+#define FLAGS_FROM_R do { u32 f_ = R.eflags; cf = f_ & 1; pf = (f_ >> 2) & 1; zf = (f_ >> 6) & 1; sf = (f_ >> 7) & 1; of = (f_ >> 11) & 1; } while (0)
+/* rdtsc / cpuid answers: hooks so a replay can feed recorded values */
+extern u64 (*rc_rdtsc_hook)(void);
+extern void (*rc_cpuid_hook)(u32 *a, u32 *b, u32 *c, u32 *d);
+static inline u64 rc_rdtsc(void) { return rc_rdtsc_hook(); }
+static inline void rc_cpuid(u32 *a, u32 *b, u32 *c, u32 *d) { rc_cpuid_hook(a, b, c, d); }
+/* MMX on u64 values (only the forms game.exe uses) */
+static inline s16 mmx_w(u64 v, int i) { return (s16)(v >> (16 * i)); }
+static inline u64 mmx_packssdw(u64 a, u64 b) {
+    u64 r = 0; s32 x[4] = { (s32)a, (s32)(a >> 32), (s32)b, (s32)(b >> 32) };
+    for (int i = 0; i < 4; i++) { s32 v = x[i] > 32767 ? 32767 : x[i] < -32768 ? -32768 : x[i]; r |= (u64)(u16)v << (16 * i); }
+    return r;
+}
+static inline u64 mmx_packuswb(u64 a, u64 b) {
+    u64 r = 0;
+    for (int i = 0; i < 8; i++) { s16 v = mmx_w(i < 4 ? a : b, i & 3); u8 o = v < 0 ? 0 : v > 255 ? 255 : (u8)v; r |= (u64)o << (8 * i); }
+    return r;
+}
+static inline u64 mmx_paddusb(u64 a, u64 b) {
+    u64 r = 0;
+    for (int i = 0; i < 8; i++) { u32 v = (u32)(u8)(a >> (8 * i)) + (u8)(b >> (8 * i)); r |= (u64)(v > 255 ? 255 : v) << (8 * i); }
+    return r;
+}
+static inline u64 mmx_pmulhw(u64 a, u64 b) {
+    u64 r = 0;
+    for (int i = 0; i < 4; i++) r |= (u64)(u16)(((s32)mmx_w(a, i) * mmx_w(b, i)) >> 16) << (16 * i);
+    return r;
+}
+static inline u64 mmx_pmullw(u64 a, u64 b) {
+    u64 r = 0;
+    for (int i = 0; i < 4; i++) r |= (u64)(u16)((s32)mmx_w(a, i) * mmx_w(b, i)) << (16 * i);
+    return r;
+}
+static inline u64 mmx_punpckhwd(u64 a, u64 b) {
+    return (a >> 32 & 0xffff) | (b >> 32 & 0xffff) << 16 | (a >> 48 & 0xffff) << 32 | (b >> 48 & 0xffff) << 48;
+}
+static inline u64 mmx_punpcklbw(u64 a, u64 b) {
+    u64 r = 0;
+    for (int i = 0; i < 4; i++) r |= (u64)(u8)(a >> (8 * i)) << (16 * i) | (u64)(u8)(b >> (8 * i)) << (16 * i + 8);
+    return r;
+}
+static inline u64 mmx_psrlw(u64 a, u64 n) {
+    if (n > 15) return 0;
+    u64 r = 0;
+    for (int i = 0; i < 4; i++) r |= (u64)((u16)(a >> (16 * i)) >> n) << (16 * i);
+    return r;
+}
+static inline u64 mmx_psrad(u64 a, u64 n) {
+    if (n > 31) n = 31;
+    return (u64)(u32)((s32)a >> n) | (u64)(u32)((s32)(a >> 32) >> n) << 32;
+}
+
 /* calls */
 void rc_call(u32 target);            /* any target: lifted or native */
+/* direct call to a known address: one array read, then the lifted function or rc_call */
+extern void (**rc_fpv)(void); extern u32 rc_fp_lo, rc_fp_n; extern long rc_lifted_calls;
+#define RC_CALLD(t) do { u32 i_ = (t) - rc_fp_lo; void (*f_)(void) = i_ < rc_fp_n ? rc_fpv[i_] : 0; \
+    if (f_) { rc_lifted_calls++; f_(); } else rc_call(t); } while (0)
 
 void rc_bad_jump(u32 from, u32 target) __attribute__((noreturn));
 void rc_unreachable(u32 at) __attribute__((noreturn));
@@ -87,6 +170,39 @@ static inline void fxam(void) {
     if (!(R.tag >> R.top & 1)) { R.c3 = 1; R.c2 = 0; R.c0 = 1; R.c1 = 0; return; }
     __asm__ volatile("fxam\n\tfnstsw %0" : "=a"(sw) : "t"(v));
     R.c0 = sw >> 8 & 1; R.c1 = sw >> 9 & 1; R.c2 = sw >> 10 & 1; R.c3 = sw >> 14 & 1;
+}
+/* fnsave / frstor: 108-byte image. Instruction and operand pointers are stored as 0. */
+static inline void rc_fnsave(u32 a)
+{
+    u8 *p = (u8 *)(uintptr_t)a; u32 tw = 0;
+    memset(p, 0, 28);
+    for (int ph = 0; ph < 8; ph++) {
+        u32 t = 3;
+        if (R.tag >> ph & 1) {
+            f80 v = R.st[ph]; u16 ex; memcpy(&ex, (u8 *)&v + 8, 2); u64 mant; memcpy(&mant, &v, 8);
+            if ((ex & 0x7fff) == 0x7fff || ((ex & 0x7fff) == 0 && mant) || ((ex & 0x7fff) && !(mant >> 63))) t = 2;
+            else t = (ex & 0x7fff) == 0 && !mant ? 1 : 0;
+        }
+        tw |= t << (2 * ph);
+    }
+    u16 cw = fnstcw(), sw = fsw(), tw16 = (u16)tw;
+    memcpy(p, &cw, 2); memcpy(p + 4, &sw, 2); memcpy(p + 8, &tw16, 2);
+    p[2] = p[3] = p[6] = p[7] = p[10] = p[11] = p[26] = p[27] = 0xff;   /* reserved halves read as ones */
+    for (int i = 0; i < 8; i++) memcpy(p + 28 + 10 * i, &R.st[(R.top + i) & 7], 10);
+    __asm__ volatile("fninit" ::: "memory");
+    R.top = 0; R.tag = 0; R.c0 = R.c1 = R.c2 = R.c3 = 0;
+}
+static inline void rc_frstor(u32 a)
+{
+    u8 *p = (u8 *)(uintptr_t)a; u16 cw, sw, tw;
+    memcpy(&cw, p, 2); memcpy(&sw, p + 4, 2); memcpy(&tw, p + 8, 2);
+    R.top = sw >> 11 & 7; R.c0 = sw >> 8 & 1; R.c1 = sw >> 9 & 1; R.c2 = sw >> 10 & 1; R.c3 = sw >> 14 & 1;
+    R.tag = 0;
+    for (int ph = 0; ph < 8; ph++) if ((tw >> (2 * ph) & 3) != 3) R.tag |= 1u << ph;
+    for (int i = 0; i < 8; i++) memcpy(&R.st[(R.top + i) & 7], p + 28 + 10 * i, 10);
+    /* last (a pending unmasked exception must not fire here): control word and exception bits go to the real FPU; its stack stays empty (R holds it) */
+    u16 env[14] = { cw, 0xffff, (u16)(sw & 0x80ffu), 0xffff, 0xffff, 0xffff };
+    __asm__ volatile("fldenv %0" :: "m"(env) : "memory");
 }
 static inline f80 LD80(u32 a) { f80 v = 0; memcpy(&v, (void *)(uintptr_t)a, 10); return v; }
 static inline void ST80(u32 a, f80 v) { memcpy((void *)(uintptr_t)a, &v, 10); }

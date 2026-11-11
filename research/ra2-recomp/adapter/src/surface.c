@@ -107,7 +107,7 @@ static unsigned char channel(uint32_t pixel, uint32_t mask)
     if (!mask) return 0;
     while (!(mask&1)) { pixel>>=1; mask>>=1; }
     value=pixel&mask;
-    return (unsigned char)((uint64_t)value*255/mask);
+    return (unsigned char)(((uint64_t)value*255+mask/2)/mask);
 }
 int ra_surface_rgba(const ra_surface *s, unsigned char *out, size_t size)
 {

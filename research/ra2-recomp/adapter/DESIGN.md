@@ -1,6 +1,6 @@
 # Windows parts adapter
 
-Status: J10 core works on Linux. The game acceptance checks have not run.
+Status: the Linux core and Windows DirectDraw DLL pass basic tests. J10 game acceptance remains open.
 
 ## Layout and build rules
 
@@ -51,7 +51,7 @@ Do not infer a surface interface from a slot offset alone.
 
 Own surface pixels in C memory. Preserve the game's bit depth, masks, aligned pitch, and palette.
 Expose the same memory through Lock. Keep drawing exact before uploading an RGBA display buffer.
-Use SDL_CreateWindowFrom for the original game window. Do not drain its Windows message queue.
+Use SDL_CreateWindowFrom for the original game window. Pump its native window messages through SDL after each presented frame.
 Implement each confirmed interface with its exact argument list. Do not share incompatible vtables between versions.
 Track references for surfaces, attached back buffers, palettes, and clippers.
 Implement fill, copy, source/destination color keys, overlap, and nearest-neighbor scaling in C.
@@ -103,5 +103,107 @@ Acceptance: our save loads in the original, and an original save loads with our 
 - Rebuild references: ../ra2-test-host/rebuild/src/{gfx,app/platform.cpp,audio,video/bink_player,fs} under the parent project folder.
 - The rebuild uses C++ and FFmpeg. Its files cannot be dropped unchanged into a C-only portable core.
 
-Reference checkouts stay ignored under `.reference/`. They are not shipped.
+The cnc-ddraw checkout stays ignored under `.reference/`. The OpenTS reference is shared at `/path/to/user/Projects/ra2/OpenTS`. Neither is shipped.
 No distribution licence is selected for the new adapter code yet.
+
+## Measured Windows progress, 2026-11-12
+
+The compiler is `../tools/wcc`, supplied by the translation lead.
+SDL2 Windows x86 version 2.30.12 builds and loads with the DLL under Wine.
+The build must select `libSDL2.dll.a` explicitly. Zig otherwise selects the static archive and lacks its system dependencies.
+The synthetic Windows test passes COM identity, lifetime, mode, surface, lock, fill, copy, color-key, palette, and flip-chain checks.
+A first original-game probe stopped at CreateClipper. Basic clipper state is now implemented.
+A second probe stopped at fullscreen clipper use at game caller 0x004ab6eb.
+The wrapper now accepts the matching exclusive window as the full-surface clip region.
+Windowed clipping still stops explicitly.
+The next original-game probe reached the intro with no unsupported call before its time limit.
+The owner saw a wrapped movie image on the desktop. All later game tests use a hidden Xvfb display and a private prefix.
+All test runs disable Wine audio drivers and select SDL dummy audio. Sound tests must write output to a file.
+
+The game passes ClientToScreen coordinates to BinkCopyToBuffer.
+A stored display size alone leaves the original window at a desktop offset.
+The exclusive-mode wrapper now places the game window at 0,0 and sets its client size through SDL.
+A Windows test starts the window at 120,80, then proves origin 0,0 and client size 640x480 after SetDisplayMode.
+The test also presents a primary surface on the hidden display.
+This fixes the measured coordinate prerequisite. The 20-frame acceptance check remains open.
+
+OpenTS read-only reference: https://github.com/OpenTS-Developers/OpenTS
+Reference commit: ba3c6c560e7dccb7eb2147431f542c43fe4e2352.
+Its LICENSE.md states GPL-3.0-or-later, with EA Section 7 terms for marked derived files.
+Its DSurface currently uses GDI-backed buffers and fixed RGB565. Its SDL window code uses SDL3.
+Use those files to find names and layouts. Check each against RA2 before reuse.
+No OpenTS implementation is copied into this adapter.
+The hidden 55-second probe reached a movie frame. Private captures show a coherent centered image without the earlier wrap.
+The process reached the probe time limit with no unsupported-method log.
+This is a visual check, not a Wine pixel-equality result.
+
+## RGB565 display comparison
+
+A synthetic primary surface contains all 65536 RGB565 pixel values across 1024x768 pixels.
+The same Windows test runs through Wine built-in DirectDraw and the adapter.
+Capture starts only after the test pumps window messages and signals READY.
+The comparison rejects captures that do not contain all 65536 colors.
+The first valid comparison found 1105920 differing bytes.
+Wine rounds each channel to the nearest 8-bit value. The first core rounded down.
+The core now rounds to the nearest value. A regression checks red values 3/31 and 4/31 against Wine values 25 and 33.
+This synthetic comparison does not replace the 20 replay-frame skirmish gate.
+The corrected capture passes: all 65536 RGB565 colors match Wine across 786432 displayed pixels.
+
+## Recorder finding: window message dispatch
+
+The recorder reports that the existing DirectDraw replacement pumps window messages.
+The game does not call PeekMessage itself in the observed path.
+The SDL presenter now calls SDL_PumpEvents after presenting each frame.
+This dispatches native window messages while preserving the original game window procedure.
+Keyboard and mouse behavior in a skirmish still needs the recorder check.
+J4 import reports are pending. COM method traces follow J4, and replay frames need the J8 shim.
+
+The hidden Windows regression passes: one posted native window message reaches the original window procedure during presentation.
+
+## J10 native menus and test audio
+
+The owner approved a temporary Windows-only menu bridge on 2026-11-12.
+Set RA2_NATIVE_MENU_REPAINT=1 to request native control repaint after a surface presentation.
+RedrawWindow stays inside the Windows wrapper and carries a TODO-J14 note.
+J14 owns adapter/win32ui/ and will replace this bridge.
+
+The first audio blocks did not stop Wine 11 speaker output. The owner reported the leak.
+The test launcher now sets HKCU\Software\Wine\Drivers Audio to an empty value in its private prefix.
+It blocks PulseAudio, PipeWire, and ALSA connections and sets SDL dummy audio.
+Wine filters SDL_AUDIODRIVER out of the Unix-to-Windows environment.
+The launcher also writes SDL_AUDIODRIVER=dummy under HKCU\Environment.
+A Windows test confirms that native, SDL, and CRT environment reads now return dummy.
+Every run checks PipeWire after five seconds and stops if a Red Alert stream appears.
+The launcher refuses prefixes outside adapter/build/ and never kills a shared Wine server.
+
+## J11 implemented subset
+
+The C mixer handles PCM8 and PCM16, mono and stereo, frequency changes, gain, pan, looping, and end-of-buffer stop.
+The Windows DLL exports DirectSoundCreate by name and ordinal 1.
+Buffers support ring locks, shared data on duplication, separate cursors, status, volume, pan, frequency, and release.
+SDL owns the audio callback. RA2_AUDIO_CAPTURE writes stereo PCM16 at 44100 Hz.
+The portable mixer test passes. The Windows DLL test passes with the dummy device.
+Its capture matches 6656 expected stereo PCM sample frames without speaker output.
+An original-game skirmish sound check remains open.
+
+## J12 decoder build and measured results
+
+FFmpeg 8.0.1 builds as Windows x86 static libraries with tools/wcc.
+The build enables the Bink demuxer, the bink video decoder, both Bink audio decoders, scaling, and resampling.
+FFmpeg calls the configure option bink, even though the public codec name is binkvideo.
+The build reports LGPL-2.1-or-later. No GPL component is enabled.
+The source archive SHA-256 is 05ee0b03119b45c0bdb4df654b96802e909e0a752f72e4fe3794f487229e5a41.
+
+The Windows binkw32.dll exports all 13 names with the game's exact stdcall decoration.
+The game passes a positioned Windows file handle for movies inside MIX archives.
+The Windows-only BinkOpen bridge reads that handle into owned memory. The decoder core uses portable C, SDL, and FFmpeg.
+The original Bink DLL and our DLL decode these same files through the positioned-handle path:
+
+- WESTLOGO.BIK: 640x480, 129 decoded frames, 15 fps.
+- S13_F01E.BIK: 640x480, 378 decoded frames, 15 fps.
+
+Both frame-count and frame-size comparisons pass under Wine.
+The same C core builds on Linux and decodes both movies with those same results.
+The mission audio capture has 1111680 stereo sample frames with RMS 0.1280.
+Original-game playback with the replacement Bink DLL remains to be checked.
+The Bink SDK stub was read as an ABI reference only. Its header states GPL-2.0-or-later; no implementation was copied.

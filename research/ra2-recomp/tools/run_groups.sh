@@ -4,7 +4,7 @@
 cd "$(dirname "$0")/../build" || exit 1
 T=/path/to/user/Projects/ra2/ra2-1to1
 EXE=$T/inputs/game.exe
-: > ../reports/groups.txt.new.new
+: > ../reports/groups.txt.new
 ONLY="$*"
 while read -r name fixture addrs; do
   [ -z "$name" ] && continue

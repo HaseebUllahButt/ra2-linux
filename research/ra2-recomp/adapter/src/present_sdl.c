@@ -43,6 +43,16 @@ fail:
     fprintf(stderr,"adapter: SDL display: %s\n",SDL_GetError());
     ra_present_close(p); return NULL;
 }
+int ra_present_place_game_window(ra_present *p,uint32_t w,uint32_t h)
+{
+    if (!p || !w || !h || w>16384 || h>16384) return RA_INVALID;
+    /* DirectDraw exclusive coordinates start at the display origin. Bink uses
+       ClientToScreen before writing into a locked primary surface. */
+    SDL_SetWindowBordered(p->window,SDL_FALSE);
+    SDL_SetWindowSize(p->window,(int)w,(int)h);
+    SDL_SetWindowPosition(p->window,0,0);
+    return RA_OK;
+}
 int ra_present_frame(ra_present *p, const ra_surface *s)
 {
     if (!p || !s || p->width!=s->width || p->height!=s->height) return RA_INVALID;
@@ -51,5 +61,9 @@ int ra_present_frame(ra_present *p, const ra_surface *s)
         SDL_RenderClear(p->renderer) || SDL_RenderCopy(p->renderer,p->texture,NULL,NULL)) {
         fprintf(stderr,"adapter: SDL present: %s\n",SDL_GetError()); return RA_UNSUPPORTED;
     }
-    SDL_RenderPresent(p->renderer); return RA_OK;
+    SDL_RenderPresent(p->renderer);
+    /* The original game relies on DirectDraw to dispatch its window messages.
+       SDL dispatches native messages for the borrowed game window here. */
+    SDL_PumpEvents();
+    return RA_OK;
 }
