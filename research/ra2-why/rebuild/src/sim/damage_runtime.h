@@ -48,9 +48,10 @@ struct AreaCandidate { std::uint32_t id; int distance; };
 struct AreaCollectionResult {
     std::optional<std::vector<AreaCandidate>> candidates;
     std::string missing;
+    bool special_group=false;
 };
 // Base 0047E5B3..0047E9C8, guarded to flat ground, overlay-free cells,
-// Unit occupants, and Infantry occupants when CellSpread exceeds 0.5.
+// Unit and Infantry occupants, and resolved special-group state.
 // Returns the original candidate
 // order, including repeated IDs. It does not dispatch damage. Cells or object
 // kinds outside this slice, aerial collection, and special groups block it.

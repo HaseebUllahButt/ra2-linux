@@ -721,7 +721,8 @@ void invulnerability_test(const rules::IniFile& rules,const rules::IniFile& art,
         hurt=after<hp;
     }
     check(hurt,"expired predicate let damage through");
-    // Area path: an invulnerable tank shields itself, but not its neighbour.
+    // A protected tank at the center of a small blast selects the original
+    // protected group, so an unprotected neighbour is not damaged either.
     auto area=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400);
     auto neighbour=area.entities[1];neighbour.id=4;neighbour.next=0;
     area.entities.push_back(neighbour);
@@ -730,19 +731,25 @@ void invulnerability_test(const rules::IniFile& rules,const rules::IniFile& art,
     sim::PrototypeCombatRuntime bombs(rules,map,art,exe);
     bombs.set_invulnerability([](std::uint32_t id,std::uint64_t){return id==2;});
     check(bombs.attack(area,1,2),"area test attack rejected");
+    bool protected_impact=false;
+    for (std::uint64_t frame=0;frame<300 && !protected_impact;++frame)
+        protected_impact=bombs.tick(area,frame).impacts>0;
+    check(protected_impact,"protected area impact never landed");
+    check(*area.entities[1].resolved_hp==400,"invulnerable tank took area damage");
+    check(*area.entities[3].resolved_hp==400,"protected small-blast group damaged its neighbour");
+    bombs.set_invulnerability({});
     bool neighbour_hurt=false;
-    for (std::uint64_t frame=0;frame<300 && !neighbour_hurt;++frame) {
+    for (std::uint64_t frame=300;frame<600 && !neighbour_hurt;++frame) {
         bombs.tick(area,frame);
         neighbour_hurt=area.entities[3].lifetime==world::Lifetime::Destroyed ||
             *area.entities[3].resolved_hp<400;
     }
-    check(neighbour_hurt,"area damage skipped an unprotected neighbour");
-    check(*area.entities[1].resolved_hp==400,"invulnerable tank took area damage");
-    std::cout<<"Invulnerability predicate shields direct and area damage, expires, and spares neighbours\n";
+    check(neighbour_hurt,"neighbour stayed protected after the shield expired");
+    std::cout<<"Invulnerability protects small-blast groups and expires\n";
 }
 // 0047E2C0 collects Infantry with the same damage-position virtual as Units.
 void infantry_blast_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
-    rules::IniFile map;map.parse("[AP]\nCellSpread=1\n");
+    rules::IniFile map;map.parse("[AP]\nCellSpread=.3\n");
     auto w=make_world("HTNK","E1",world::Kind::Unit,world::Kind::Infantry,400,125);
     w.entities[0].turret_facing_raw=16384;
     auto neighbour=w.entities[1];neighbour.id=4;neighbour.next=0;
