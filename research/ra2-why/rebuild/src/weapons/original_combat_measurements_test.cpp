@@ -153,6 +153,7 @@ void tank_duel_test(const rules::IniFile& rules,const rules::IniFile& art,const 
     std::cout<<"Grizzly first shot="<<grizzly.shots.front()<<" first hit="<<grizzly.damage.front()<<"\n";
     // Original completed boundary 14 follows native update 13.
     check(grizzly.shots.front()==13,"Grizzly first shot differs from the controlled original");
+    check(grizzly.damage.front()==23,"Grizzly first impact differs from the controlled original");
     check(gap(grizzly.damage)>=58 && gap(grizzly.damage)<=64,"Grizzly reload differs from the measured 2.95 s");
     // Measured kill 13.0 s from the order (first hit 1.3 s); 40 ms bar
     // sampling bounds the fall to about 263-277 frames.
@@ -165,11 +166,33 @@ void tank_duel_test(const rules::IniFile& rules,const rules::IniFile& art,const 
     check(rhino.damage.size()==5,"Rhino needed a different hit count than the measured 5");
     std::cout<<"Rhino first shot="<<rhino.shots.front()<<" first hit="<<rhino.damage.front()<<"\n";
     check(rhino.shots.front()==13,"Rhino first shot differs from the controlled original");
+    check(rhino.damage.front()==23,"Rhino first impact differs from the controlled original");
     check(gap(rhino.damage)>=63 && gap(rhino.damage)<=69,"Rhino reload differs from the measured 3.19 s");
     // Measured kill 14.1 s from the order (first hit 1.3 s); sampling
     // bounds the fall to about 285-299 frames.
     std::cout<<"Rhino kill band check: sim="<<rhino.kill<<" measured about 293\n";
     check(rhino.kill>=285 && rhino.kill<=299,"Rhino kill time differs from the measured 14.1 s");
+}
+// The original traces use forced fire against the shooter's own house.
+// The native order gate requires a different house until the order is set.
+void tank_same_house_impact_test(const rules::IniFile& rules,const rules::IniFile& art,
+                                 const std::string& exe) {
+    for (const char* type:{"MTNK","HTNK"}) {
+        rules::IniFile map;
+        const int hp=rules.read_integer(type,"Strength");
+        auto w=make_world(type,type,world::Kind::Unit,world::Kind::Unit,hp,hp);
+        sim::PrototypeCombatRuntime combat(rules,map,art,exe);
+        force_fire(w,combat,1,2);
+        join_attacker_house(w,2);
+        unsigned shot=999,impact_frame=999;
+        for (unsigned frame=0;frame<50 && impact_frame==999;++frame) {
+            const auto result=combat.tick(w,frame);
+            check(result.unresolved.empty(),"same-house tank tick unresolved");
+            if (result.fired) shot=frame;
+            if (result.impacts) impact_frame=frame;
+        }
+        check(shot==13 && impact_frame==23,"same-house tank impact timing differs from the original");
+    }
 }
 // Controlled original runs: two stationary GIs two cells apart, with
 // first hit at frame 3 and later hits 22..24 frames apart. The original
@@ -364,6 +387,7 @@ int main(int argc,char** argv) {
         auto rules=load(files,"rules.ini"),art=load(files,"art.ini");
         const std::string exe=std::string(argv[1])+"/game.exe";
         run("Grizzly and Rhino duels",[&]{tank_duel_test(rules,art,exe);});
+        run("Same-house tank impact",[&]{tank_same_house_impact_test(rules,art,exe);});
         run("GI prone duel",[&]{gi_prone_test(rules,art,exe);});
         run("Pillbox bursts",[&]{pillbox_burst_test(rules,art,exe);});
         run("three Rhinos vs Construction Yard",[&]{

@@ -869,13 +869,13 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
         else ++it;
     }
     std::vector<PrototypeCombatProjectile> flying;
-    for (auto shot:projectiles_) {
+    const auto advance_projectile=[&](PrototypeCombatProjectile shot) {
         try {
             const auto proposal=weapons::base_arc_proposal(shot.flight.arc);
             const Coord old{shot.flight.arc.position[0],shot.flight.arc.position[1],shot.flight.arc.position[2]};
             const Coord next{proposal.position[0],proposal.position[1],proposal.position[2]};
             const auto cell_index=prototype_cell(next);
-            if (cell_index==UINT32_MAX || !world.cells.count(cell_index)) continue;
+            if (cell_index==UINT32_MAX || !world.cells.count(cell_index)) return;
             weapons::FlatCannonTickInput tick{};tick.arc=shot.flight.arc;tick.target=shot.flight.target;
             tick.height_before=old.z-prototype_floor(world,old);tick.height_after=next.z-prototype_floor(world,next);
             // TODO-ORIGINAL: Read the engine's actual height unit and bridge state.
@@ -918,8 +918,10 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
                 const auto& p=shot.flight.arc.position;impact(shot,{p[0],p[1],p[2]},true);
             } else if (status==weapons::FlatCannonTickStatus::Continue) flying.push_back(std::move(shot));
         } catch (const std::exception& e) {report.unresolved.push_back(e.what());}
-    }
+    };
+    for (auto shot:projectiles_) advance_projectile(std::move(shot));
     projectiles_=std::move(flying);
+    std::vector<PrototypeCombatProjectile> newly_fired;
     const auto legal_guard_target=[&](const session::world::Entity& source,
                                       const session::world::Entity& target) {
         const auto* owner=prototype_house(world,source.house_id);
@@ -1189,7 +1191,7 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             world.random=rng.state();++report.fired;
             record(PrototypeCombatEventKind::Shot,shot,*target,*target->resolved_hp,*target->resolved_hp);
 
-            if (weapon->arcing && source->kind==session::world::Kind::Unit) projectiles_.push_back(std::move(shot));
+            if (weapon->arcing && source->kind==session::world::Kind::Unit) newly_fired.push_back(std::move(shot));
             else {
                 // TODO-ORIGINAL: Small-arms and other non-Cannon projectiles
                 // currently apply a direct hit without their original flight.
@@ -1198,6 +1200,12 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
         } catch (const std::exception& e) {report.unresolved.push_back(e.what());}
         ++it;
     }
+    // 0053DEA2..0053DEA5 reloads the growing object-list count after each
+    // update. Newly placed shells therefore receive a flight update in the
+    // firing frame, after the objects already in the list.
+    flying.clear();
+    for (auto shot:newly_fired) advance_projectile(std::move(shot));
+    for (auto& shot:flying) projectiles_.push_back(std::move(shot));
     // Base 006CDC40 Take_Damage calls 006D3B60 Can_Retaliate with the
     // attacker. When it passes, the victim assigns the attacker as its target
     // (virtual +2B8) and overrides its mission to attack it (virtual +1DC).

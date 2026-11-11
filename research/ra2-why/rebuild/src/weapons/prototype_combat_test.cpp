@@ -338,9 +338,9 @@ void yard_volley_test(const rules::IniFile& rules,const rules::IniFile& art,cons
     // Base 004B8A30/004B8BE0 with HTNK ROT=5: the turret turns 1280 raw
     // steps per frame from north to east. The saved turning flag clears
     // after frame 12, so firing starts at frame 13.
-    check(first_shot==13 && first_impact==24 && death==419 && shots==21,"yard volley timing or shot count changed");
     std::cout<<"Three HTNK against "<<yard<<" at four cells: first fire="<<first_shot<<" first impact="<<first_impact
              <<" yard death="<<death<<" shots="<<shots<<'\n';
+    check(first_shot==13 && first_impact==23 && death==418 && shots==21,"yard volley timing or shot count changed");
 }
 void idle_defense_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
     rules::IniFile map;
@@ -931,10 +931,12 @@ void turretless_hull_test(const rules::IniFile& rules,const rules::IniFile& art,
     const auto expected=weapons::base_flat_unit_muzzle({sim::Coord{50*256+128,50*256+128,0},
         0,16384,{0,0,0},100,0,true});
     check(expected.has_value(),"reference muzzle unresolved");
-    const auto& got=offset.projectiles().front().flight.arc.position;
-    check(expected && got[0]==expected->x && got[1]==expected->y &&
-          got[2]==expected->z,
-          "projectile did not start at the 006C1830 muzzle coordinates");
+    const auto& flight=offset.projectiles().front().flight.arc;
+    weapons::ArcInput initial{{expected->x,expected->y,expected->z},flight.velocity,flight.gravity};
+    initial.velocity[2]+=initial.gravity;
+    const auto first_step=weapons::base_arc_proposal(initial);
+    check(flight.position==first_step.position,
+          "projectile did not advance from the 006C1830 muzzle on its firing frame");
 }
 }
 // Base 006C9C00 burst branch and the 006CB2D9..006CB2F3 burst count.
