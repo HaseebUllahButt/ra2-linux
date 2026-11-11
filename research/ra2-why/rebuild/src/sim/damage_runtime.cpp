@@ -108,6 +108,7 @@ AreaCollectionResult base_small_ground_area_candidates(
             return missing("object IDs are invalid");
     if (source_id && !entities.count(source_id)) return missing("area source is unknown");
     std::vector<AreaCandidate> result;
+    bool special_group=false;
     for (unsigned i=0;i<count;++i) {
         const int x=cx+base_blast_offsets[i][0], y=cy+base_blast_offsets[i][1];
         if (x<0 || x>=512 || y<0 || y>=512)
@@ -132,10 +133,9 @@ AreaCollectionResult base_small_ground_area_candidates(
             const bool unit=object.kind==session::world::Kind::Unit;
             const bool infantry=object.kind==session::world::Kind::Infantry;
             // Unit and Infantry both use 0041B240 -> 005D4E40 for their
-            // damage position. Small blasts also need the unresolved
-            // Infantry special-group timer at +154/+15C.
-            if (!unit && !(infantry && spread>0.5f))
-                return missing("area object kind or small Infantry special state is unresolved");
+            // damage position.
+            if (!unit && !infantry)
+                return missing("area object kind is unresolved");
             if (type_filter && unit) {
                 if (!p->excluded_by_scenario) return missing("area type exclusion is unknown");
                 if (*p->excluded_by_scenario) { id=next; continue; }
@@ -153,15 +153,14 @@ AreaCollectionResult base_small_ground_area_candidates(
                 if (!p->special_flag) return missing("area special-group flag is unknown");
                 if (*p->special_flag) {
                     if (!p->special_virtual) return missing("area special-group virtual result is unknown");
-                    if (*p->special_virtual && d<0x55)
-                        return missing("area special-group dispatch is unresolved");
+                    if (*p->special_virtual && d<0x55) special_group=true;
                 }
             }
             result.push_back({id,d});
             id=next;
         }
     }
-    return {std::move(result),{}};
+    return {std::move(result),{},special_group};
 }
 }
 
@@ -802,9 +801,10 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
         }
         std::vector<AreaCandidate> candidates;
         const auto collect=base_small_ground_area_candidates(world,position,weapon->spread,shot.source_id,
-            false,[](const session::world::Entity& e)->std::optional<AreaUnitProperties> {
-                // TODO-ORIGINAL: Resolve type exclusion and special-group virtuals.
-                return AreaUnitProperties{e.active.value_or(true),e.position,false,false,false};
+            false,[&](const session::world::Entity& e)->std::optional<AreaUnitProperties> {
+                // Unit and Infantry use +32C to read their Iron Curtain timer.
+                const bool shielded=invulnerable_ && invulnerable_(e.id,frame);
+                return AreaUnitProperties{e.active.value_or(true),e.position,true,shielded,false};
             },distance_);
         if (collect.candidates) candidates=*collect.candidates;
         else if (prototype_alive(aimed) && prototype_cell(*aimed->position)==prototype_cell(position)) {
@@ -829,6 +829,9 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
                 !prototype_bool(base_,map_,t.type,"Fearless")) prone_.insert(t.id);
         };
         for (const auto& candidate:candidates) {
+            // 0047EA1A dispatches only to protected objects in this group.
+            // Positive damage cannot pass their Iron Curtain protection.
+            if (collect.special_group) continue;
             auto* target=prototype_find(world,candidate.id);
             if (!prototype_alive(target) || candidate.distance>radius) continue;
             // Caller-set invulnerability: positive damage is skipped before
@@ -846,7 +849,7 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             hit_any|=hit.applied;
             if (hit.destroyed) ++report.destroyed;
         }
-        if (!hit_any && prototype_alive(aimed) && prototype_cell(*aimed->position)==prototype_cell(position)) {
+        if (!collect.special_group && !hit_any && prototype_alive(aimed) && prototype_cell(*aimed->position)==prototype_cell(position)) {
             // TODO-ORIGINAL: Permit a direct hit when the flat prototype's
             // impact height misses the original area distance check.
             const int before=*aimed->resolved_hp;

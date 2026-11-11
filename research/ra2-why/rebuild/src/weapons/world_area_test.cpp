@@ -20,13 +20,13 @@ int main() {
    }
    std::map<std::uint32_t,sim::AreaUnitProperties> props;
    for (int j=0;j<count;++j) {
-    session::world::Entity e; sim::Coord p; int dx,dy,active,kind;
-    std::cin >> e.id >> dx >> dy >> p.x >> p.y >> p.z >> active >> kind;
+    session::world::Entity e; sim::Coord p; int dx,dy,active,kind,shield;
+    std::cin >> e.id >> dx >> dy >> p.x >> p.y >> p.z >> active >> kind >> shield;
     auto &head=world.cells.at((cy+dy)*512+cx+dx).heads->ground_head;
     e.kind=kind==15?session::world::Kind::Infantry:session::world::Kind::Unit;
     e.lifetime=session::world::Lifetime::Placed;
     e.next=head; e.position=p; head=e.id;
-    world.entities.push_back(e); props.emplace(e.id,sim::AreaUnitProperties{bool(active),p,false,false,false});
+    world.entities.push_back(e); props.emplace(e.id,sim::AreaUnitProperties{bool(active),p,true,bool(shield),false});
    }
    if (source && !props.count(source)) { session::world::Entity e; e.id=source; world.entities.push_back(e); }
    const auto lookup=[&](const session::world::Entity& e)->std::optional<sim::AreaUnitProperties> {
@@ -34,7 +34,7 @@ int main() {
    };
    const auto r=sim::base_small_ground_area_candidates(world,impact,spread,source,false,lookup,dist);
    if (!r.candidates) throw std::runtime_error(r.missing);
-   std::cout << r.candidates->size(); for (const auto& c:*r.candidates) std::cout << ' ' << c.id << ' ' << c.distance;
+   std::cout << r.special_group << ' ' << r.candidates->size(); for (const auto& c:*r.candidates) std::cout << ' ' << c.id << ' ' << c.distance;
    std::cout << '\n';
    if (count) {
     auto bad=world; bad.entities[0].next.reset();
