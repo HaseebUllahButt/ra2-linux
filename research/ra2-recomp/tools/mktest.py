@@ -88,7 +88,7 @@ def main():
     todo = [(s, o) for s, o in zip(srcs, objs) if not (os.path.exists(o) and os.path.getmtime(o) > max(os.path.getmtime(s), hdr))]
     running = []
     for s, o in todo:
-        while len(running) >= 2:
+        while len(running) >= int(os.environ.get("RC_JOBS", "2")):
             running.pop(0).wait()
         running.append(subprocess.Popen(['nice'] + cf + ['-c', s, '-o', o]))
     for p in running:

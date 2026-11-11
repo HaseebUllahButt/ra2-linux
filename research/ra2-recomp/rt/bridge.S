@@ -1,108 +1,157 @@
-/* rc_native(target): run original x86 code (or a host stand-in) with the lifted
- * register state R. The guest stack is real memory: ESP = R.esp + 4 skips the
- * return-address slot that lifted code already pushed; "call" writes the host
- * return address into that same slot. x87 values in R move to the real FPU and back. */
+/* bridge.S (runtime v2): edges between lifted code and native x86 code.
+ *
+ * rc_native_asm(RCAux *a): run native code at a->target with the registers in
+ *   a->save. The guest stack is real memory: the slot at save[esp] holds the return
+ *   address that lifted code pushed; we put the host return label there (C puts the
+ *   game value back) and enter the target with "ret". x87 values a->fin move to the
+ *   real FPU and the callee's results come back in a->fout. a->host_esp is pushed and
+ *   set, so a nested entry (native code calling lifted code) runs below this frame.
+ *
+ * rc_entry_common: native code called a lifted function through an entry thunk.
+ *   In: ecx = this thread's RCAux (entry address in a->entry), native ecx in TMP.
+ *   It saves the registers, moves to the host stack and calls rc_entry_c(a).
+ *
+ * TMP and AUX: thread-local words read with no free register.
+ *   Windows: TEB TLS slots (%fs), offsets patched at start-up (rc_patch_*).
+ *   Linux tests: one thread, plain globals.
+ *
+ * RCAux offsets: save 0..28, host_esp 32, host_top 36, target 40, sw_before 44,
+ *   fin_n 48, fout_n 52, entry 56, ret 60, fin 80, fout 208 (see rc.h). */
+#ifdef _WIN32
+# define S(x) _##x
+# define LD_AUX(r, n) movl %fs:0x7ff0, r ; rcp_aux_##n:
+# define ST_TMP(r, n) movl r, %fs:0x7ff4 ; rcp_tmp_##n:
+# define LD_TMP(r, n) movl %fs:0x7ff4, r ; rcp_tmp_##n:
+#else
+# define S(x) x
+# define LD_AUX(r, n) movl $rc_aux, r
+# define ST_TMP(r, n) movl r, rc_g_tmp
+# define LD_TMP(r, n) movl rc_g_tmp, r
+#endif
+
         .text
-        .globl rc_native
-rc_native:
+        .globl S(rc_native_asm)
+S(rc_native_asm):
         push %ebp
         push %ebx
         push %esi
         push %edi
-        mov 20(%esp), %eax
-        mov %eax, rc_target
-        mov %esp, rc_host_esp
+        mov 20(%esp), %ecx
+        pushl 32(%ecx)                  /* outer host_esp */
+        mov %esp, 32(%ecx)
         fnstsw %ax
-        mov %eax, rc_sw_before
-        /* push guest x87 values (rc_fin_n of them, deepest first) */
-        mov rc_fin_n, %ecx
-        lea rc_fin, %edx
-1:      test %ecx, %ecx
+        mov %eax, 44(%ecx)
+        mov 48(%ecx), %ebx              /* push guest x87 values, deepest first */
+        lea 80(%ecx), %edx
+1:      test %ebx, %ebx
         jz 2f
         fldt (%edx)
         add $16, %edx
-        dec %ecx
+        dec %ebx
         jmp 1b
-2:      mov R+0, %eax
-        mov R+4, %ecx
-        mov R+8, %edx
-        mov R+12, %ebx
-        mov R+20, %ebp
-        mov R+24, %esi
-        mov R+28, %edi
-        mov R+16, %esp
-        add $4, %esp
+2:      mov 16(%ecx), %esp              /* guest esp: the return-address slot */
+        movl $3f, (%esp)
+        pushl 40(%ecx)                  /* target, taken by ret */
+        mov 0(%ecx), %eax
+        mov 8(%ecx), %edx
+        mov 12(%ecx), %ebx
+        mov 20(%ecx), %ebp
+        mov 24(%ecx), %esi
+        mov 28(%ecx), %edi
+        mov 4(%ecx), %ecx
         cld
-        call *rc_target
-        mov %eax, R+0
-        mov %ecx, R+4
-        mov %edx, R+8
-        mov %ebx, R+12
-        mov %esp, R+16
-        mov %ebp, R+20
-        mov %esi, R+24
-        mov %edi, R+28
-        mov rc_host_esp, %esp
+        ret
+3:      ST_TMP(%ecx, 1)
+        LD_AUX(%ecx, 1)
+        mov %eax, 0(%ecx)
+        mov %edx, 8(%ecx)
+        mov %ebx, 12(%ecx)
+        mov %esp, 16(%ecx)
+        mov %ebp, 20(%ecx)
+        mov %esi, 24(%ecx)
+        mov %edi, 28(%ecx)
+        LD_TMP(%eax, 2)
+        mov %eax, 4(%ecx)
+        mov 32(%ecx), %esp              /* back to the host stack */
+        popl 32(%ecx)
         /* pop real x87 values left by the callee */
         fnstsw %ax
-        mov %eax, rc_sw_after
-        mov rc_sw_before, %ecx
-        shr $11, %ecx
-        and $7, %ecx
+        mov 44(%ecx), %ebx
+        shr $11, %ebx
+        and $7, %ebx
         shr $11, %eax
         and $7, %eax
-        sub %eax, %ecx
-        and $7, %ecx
-        mov %ecx, rc_fout_n
-        lea rc_fout, %edx
-3:      test %ecx, %ecx
-        jz 4f
+        sub %eax, %ebx
+        and $7, %ebx
+        mov %ebx, 52(%ecx)
+        lea 208(%ecx), %edx
+4:      test %ebx, %ebx
+        jz 5f
         fstpt (%edx)
         add $16, %edx
-        dec %ecx
-        jmp 3b
-4:      pop %edi
+        dec %ebx
+        jmp 4b
+5:      pop %edi
         pop %esi
         pop %ebx
         pop %ebp
         ret
-        .section .note.GNU-stack,"",@progbits
-/* rc_entry_tramp: called like original code (by pilot_call_orig). Saves the real
- * registers into R, runs the lifted function on a private host stack, then returns
- * R's registers and pushes the lifted x87 results onto the real FPU. */
-        .text
-        .globl rc_entry_tramp
-rc_entry_tramp:
-        mov %eax, R+0
-        mov %ecx, R+4
-        mov %edx, R+8
-        mov %ebx, R+12
-        mov %esp, R+16
-        mov %ebp, R+20
-        mov %esi, R+24
-        mov %edi, R+28
-        mov %esp, rc_entry_esp
-        mov $rc_private_stack_top, %esp
-        mov (%esp), %esp
-        call rc_entry_c
-        mov rc_fout_n, %ecx
-        lea rc_fout, %edx
-        mov %ecx, %eax
+
+        .globl S(rc_entry_common)
+S(rc_entry_common):
+        mov %eax, 0(%ecx)
+        mov %edx, 8(%ecx)
+        mov %ebx, 12(%ecx)
+        mov %esp, 16(%ecx)
+        mov %ebp, 20(%ecx)
+        mov %esi, 24(%ecx)
+        mov %edi, 28(%ecx)
+        LD_TMP(%eax, 3)
+        mov %eax, 4(%ecx)
+        mov 32(%ecx), %eax              /* nested: continue below the bridge frame */
+        test %eax, %eax
+        jnz 6f
+        mov 36(%ecx), %eax
+6:      mov %eax, %esp
+        push %ecx
+        call S(rc_entry_c)
+        mov %eax, %ecx
+        mov 52(%ecx), %ebx              /* push x87 results, deepest first */
+        mov %ebx, %eax
         shl $4, %eax
-        add %eax, %edx
-5:      test %ecx, %ecx
-        jz 6f
+        lea 208(%ecx,%eax), %edx
+7:      test %ebx, %ebx
+        jz 8f
         sub $16, %edx
         fldt (%edx)
-        dec %ecx
-        jmp 5b
-6:      mov R+0, %eax
-        mov R+4, %ecx
-        mov R+8, %edx
-        mov R+12, %ebx
-        mov R+20, %ebp
-        mov R+24, %esi
-        mov R+28, %edi
-        mov rc_entry_esp, %esp
+        dec %ebx
+        jmp 7b
+8:      mov 16(%ecx), %esp
+        pushl 60(%ecx)                  /* return address, taken by ret */
+        mov 0(%ecx), %eax
+        mov 8(%ecx), %edx
+        mov 12(%ecx), %ebx
+        mov 20(%ecx), %ebp
+        mov 24(%ecx), %esi
+        mov 28(%ecx), %edi
+        mov 4(%ecx), %ecx
         ret
+
+/* rc_entry_tramp: called like original code (Linux difftest). Entry = rc_entry_addr. */
+        .globl S(rc_entry_tramp)
+S(rc_entry_tramp):
+        ST_TMP(%ecx, 4)
+        LD_AUX(%ecx, 4)
+        jmp S(rc_entry_common)
+
+#ifdef _WIN32
+        .data
+        .globl _rc_patch_aux, _rc_patch_tmp
+_rc_patch_aux: .long rcp_aux_1, rcp_aux_4, 0
+_rc_patch_tmp: .long rcp_tmp_1, rcp_tmp_2, rcp_tmp_3, rcp_tmp_4, 0
+#else
+        .data
+        .globl rc_g_tmp
+rc_g_tmp: .long 0
         .section .note.GNU-stack,"",@progbits
+#endif

@@ -18,7 +18,32 @@ typedef struct {
     u32 df;
     f80 st[8];
 } RCState;
-extern RCState R;
+/* Per-thread state. R is the lifted register state of the current thread.
+ * rc_aux holds the bridge and entry state (offsets used by bridge.S).
+ * Windows build: both are thread-local. Linux test build: single thread, plain globals. */
+#ifdef _WIN32
+#define RC_TLS __thread
+#else
+#define RC_TLS
+#endif
+typedef union { f80 v; u8 b[16]; } f80s;              /* 16-byte stride for asm */
+typedef struct RCAux {
+    u32 save[8];         /*  0 eax ecx edx ebx esp ebp esi edi: registers at the asm edge */
+    u32 host_esp;        /* 32 host esp inside rc_native (0 = not in a native call) */
+    u32 host_top;        /* 36 top of this thread's private host stack */
+    u32 target;          /* 40 */
+    u32 sw_before;       /* 44 */
+    u32 fin_n, fout_n;   /* 48, 52 */
+    u32 entry;           /* 56 entry address set by an entry thunk */
+    u32 ret;             /* 60 return address for the entry exit */
+    u32 depth;           /* 64 lifted entry nesting depth */
+    u32 pad[3];          /* 68 */
+    f80s fin[8];         /* 80 */
+    f80s fout[8];        /* 208 */
+} RCAux;
+extern RC_TLS RCState R;
+extern RC_TLS RCAux rc_aux;
+void rc_thread_init(void);           /* set up R/rc_aux for the current thread */
 
 #define M8(a)  (*(u8  *)(uintptr_t)(u32)(a))
 #define M16(a) (*(u16 *)(uintptr_t)(u32)(a))
