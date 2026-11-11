@@ -132,7 +132,7 @@ void rc_call(u32 target)
     else native_with_fpu(target);
 }
 void (*rc_log_hook)(const char *msg);    /* rc_win.c: write to rc.log */
-static void die(const char *msg)
+static __attribute__((noreturn)) void die(const char *msg)
 {
     fprintf(stderr, "%s", msg);
     if (rc_log_hook) rc_log_hook(msg);

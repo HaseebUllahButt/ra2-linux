@@ -4,7 +4,7 @@
 # Writes <out>/rc.log, <out>/shot.png (and click.png), prints MENU OK/FAIL (+ MOUSE OK/FAIL).
 R=$(cd "$(dirname "$0")/.." && pwd)
 # one game at a time on this machine (shared lock with other helpers)
-[ -z "$RC_LOCKED" ] && exec env RC_LOCKED=1 flock /tmp/ra2-game-why.lock "$0" "$@"
+[ -z "$RC_LOCKED" ] && exec env RC_LOCKED=1 flock -o /tmp/ra2-game-why.lock "$0" "$@"
 OUT=$(mkdir -p "$1" && cd "$1" && pwd); SECS=${2:-45}
 export DISPLAY=:77 WINEPREFIX=$R/build/prefix WINEDEBUG=${WINEDEBUG:--all}
 export WINEDLLOVERRIDES="ddraw=n,b;winepulse.drv,winealsa.drv=d"

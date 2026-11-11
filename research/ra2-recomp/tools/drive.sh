@@ -4,7 +4,7 @@
 #   w N = wait N s, c X Y = click, m X Y = move, s NAME = screenshot NAME.png
 # env: RC_ON, RC_OFF, RC_NOLIFT=1 (start game.exe without rc.dll)
 R=$(cd "$(dirname "$0")/.." && pwd)
-[ -z "$RC_LOCKED" ] && exec env RC_LOCKED=1 flock /tmp/ra2-game-why.lock "$0" "$@"
+[ -z "$RC_LOCKED" ] && exec env RC_LOCKED=1 flock -o /tmp/ra2-game-why.lock "$0" "$@"
 OUT=$(mkdir -p "$1" && cd "$1" && pwd)
 export DISPLAY=:77 WINEPREFIX=$R/build/prefix WINEDEBUG=${WINEDEBUG:--all}
 export WINEDLLOVERRIDES="ddraw=n,b;winepulse.drv,winealsa.drv=d"
