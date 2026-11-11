@@ -20,8 +20,11 @@ void rc_native_asm(RCAux *a);          /* bridge.S */
 #include <windows.h>
 #endif
 
-/* ---- function table, on/off ---- */
-static u8 *fn_off;                       /* per rc_table index: 1 = run original code */
+/* ---- function table, on/off ----
+ * rc_fp: one pointer per .text byte address (J17): lookup is one array read.
+ * NULL = not lifted, or switched off (run the original code). */
+static u32 RC_TEXT_LO, RC_TEXT_HI;       /* lowest and highest lifted address + 1 */
+static void (**rc_fp)(void);
 int rc_find(u32 a)
 {
     int lo = 0, hi = rc_table_n - 1;
@@ -32,10 +35,24 @@ int rc_find(u32 a)
     }
     return -1;
 }
+static void fp_init(void)
+{
+    RC_TEXT_LO = 0xffffffffu; RC_TEXT_HI = 0;
+    for (int i = 0; i < rc_table_n; i++) {
+        if (rc_table[i].addr < RC_TEXT_LO) RC_TEXT_LO = rc_table[i].addr;
+        if (rc_table[i].addr >= RC_TEXT_HI) RC_TEXT_HI = rc_table[i].addr + 1;
+    }
+    void (**t)(void) = calloc(RC_TEXT_HI - RC_TEXT_LO, sizeof *t);
+    if (!t) { fprintf(stderr, "[rc] no memory for the function map\n"); abort(); }
+    for (int i = 0; i < rc_table_n; i++)
+        if (rc_table[i].addr - RC_TEXT_LO < RC_TEXT_HI - RC_TEXT_LO) t[rc_table[i].addr - RC_TEXT_LO] = rc_table[i].fn;
+    rc_fp = t;
+}
 void rc_set_off(int idx, int off)
 {
-    if (!fn_off) fn_off = calloc(rc_table_n + 1, 1);
-    fn_off[idx] = (u8)off;
+    if (!rc_fp) fp_init();
+    u32 a = rc_table[idx].addr;
+    if (a - RC_TEXT_LO < RC_TEXT_HI - RC_TEXT_LO) rc_fp[a - RC_TEXT_LO] = off ? 0 : rc_table[idx].fn;
 }
 static int off_init;
 static void load_off_env(void)
@@ -50,9 +67,8 @@ void (*rc_lookup(u32 a))(void)
 #ifndef _WIN32
     if (!off_init) load_off_env();      /* Windows: rc_win.c sets the on/off map */
 #endif
-    int i = rc_find(a);
-    if (i < 0 || (fn_off && fn_off[i])) return 0;
-    return rc_table[i].fn;
+    if (!rc_fp) fp_init();
+    return a - RC_TEXT_LO < RC_TEXT_HI - RC_TEXT_LO ? rc_fp[a - RC_TEXT_LO] : 0;
 }
 
 /* ---- rdtsc / cpuid (replay can replace the hooks) ---- */
@@ -106,8 +122,8 @@ static void native_with_fpu(u32 target)
 static int trace_on = -1; static long trace_n;
 void rc_call(u32 target)
 {
-    if (trace_on < 0) trace_on = getenv("RC_TRACE") != 0;
-    if (trace_on && (trace_n++ < (getenv("RC_TRACE")[0] == 0x32 ? 2000000 : 300) || trace_n % 100000 == 0))
+    if (__builtin_expect(trace_on, 0) && trace_on < 0) trace_on = getenv("RC_TRACE") != 0;
+    if (__builtin_expect(trace_on, 0) && (trace_n++ < (getenv("RC_TRACE")[0] == 0x32 ? 2000000 : 300) || trace_n % 100000 == 0))
         fprintf(stderr, "[rc] call %08x from %08x esp=%08x ecx=%08x n=%ld %s\n", target, M32(R.esp), R.esp, R.ecx, trace_n, rc_lookup(target) ? "lifted" : "native");
     void (*f)(void) = rc_lookup(target);
     if (f) { rc_lifted_calls++; f(); }
