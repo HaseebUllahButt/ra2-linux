@@ -72,9 +72,50 @@ static DWORD WINAPI stats_thread(void *p)
     }
     return 0;
 }
+/* RC_WATCH=<hex addr>: log every write to that dword (page made read-only; the
+ * faulting write runs once with the trap flag, then the page is protected again). */
+static u32 watch_addr, watch_page;
+static __thread int watch_step;
+static u32 fn_of(u32 eip, u32 *off)
+{
+    u32 best = 0, bf = 0;
+    for (int i = 0; i < rc_table_n; i++) {
+        u32 f = (u32)(uintptr_t)rc_table[i].fn;
+        if (f <= eip && f > bf) { bf = f; best = rc_table[i].addr; }
+    }
+    *off = eip - bf;
+    return eip - bf < 0x10000 ? best : 0;
+}
+static int watch_veh(EXCEPTION_POINTERS *e)
+{
+    DWORD c = e->ExceptionRecord->ExceptionCode; DWORD old;
+    if (c == EXCEPTION_ACCESS_VIOLATION && e->ExceptionRecord->NumberParameters > 1 &&
+        e->ExceptionRecord->ExceptionInformation[0] == 1 &&
+        (e->ExceptionRecord->ExceptionInformation[1] & ~0xfffu) == watch_page) {
+        u32 a = e->ExceptionRecord->ExceptionInformation[1];
+        if (a + 4 > watch_addr && a < watch_addr + 4) {
+            u32 off, f = fn_of(e->ContextRecord->Eip, &off);
+            logf_("watch: write %08x old=%08x eip=%08lx lifted=f_%08x+%x ret=%08x esp=%08lx R.esp=%08x depth=%u tid=%lu\n", a, *(u32 *)(uintptr_t)watch_addr,
+                  (unsigned long)e->ContextRecord->Eip, f, off, *(u32 *)(uintptr_t)e->ContextRecord->Esp,
+                  (unsigned long)e->ContextRecord->Esp, R.esp, rc_aux.depth, GetCurrentThreadId());
+            watch_step = 2;
+        } else watch_step = 1;
+        VirtualProtect((void *)(uintptr_t)watch_page, 4096, PAGE_READWRITE, &old);
+        e->ContextRecord->EFlags |= 0x100;
+        return 1;
+    }
+    if (c == EXCEPTION_SINGLE_STEP && watch_step) {
+        if (watch_step == 2) logf_("watch:   new=%08x\n", *(u32 *)(uintptr_t)watch_addr);
+        watch_step = 0;
+        VirtualProtect((void *)(uintptr_t)watch_page, 4096, PAGE_READONLY, &old);
+        return 1;
+    }
+    return 0;
+}
 static LONG WINAPI veh(EXCEPTION_POINTERS *e)
 {
     static int n;
+    if (watch_addr && watch_veh(e)) return EXCEPTION_CONTINUE_EXECUTION;
     DWORD c = e->ExceptionRecord->ExceptionCode;
     if (c == 0x406D1388 || c == DBG_PRINTEXCEPTION_C || n >= 40) return EXCEPTION_CONTINUE_SEARCH;
     n++;
@@ -131,6 +172,11 @@ static void start(void)
     }
     FlushInstructionCache(GetCurrentProcess(), 0, 0);
     AddVectoredExceptionHandler(1, veh);
+    if (getenv("RC_WATCH")) {
+        watch_addr = (u32)strtoul(getenv("RC_WATCH"), 0, 16); watch_page = watch_addr & ~0xfffu;
+        VirtualProtect((void *)(uintptr_t)watch_page, 4096, PAGE_READONLY, &old);
+        logf_("watching %08x (value %08x)\n", watch_addr, *(u32 *)(uintptr_t)watch_addr);
+    }
     logf_("rc.dll: %d lifted functions, %d on, %d entry patches, tls %lu %lu\n", rc_table_n, n_on, n_patched, slot_aux, slot_tmp);
     if (!getenv("RC_NOSTATS")) CreateThread(0, 0, stats_thread, 0, 0, 0);
 }
