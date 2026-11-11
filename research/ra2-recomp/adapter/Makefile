@@ -29,7 +29,7 @@ SDL_WIN ?= $(firstword $(wildcard .reference/SDL2-*/i686-w64-mingw32))
 .PHONY: windows
 windows: build/ddraw.dll build/test_ddraw.exe
 build/ddraw.dll: src/windows/ddraw.c src/windows/ddraw_slots.inc src/windows/ddraw.def src/surface.c src/present_sdl.c | build
-	nice -n 19 $(WCC) -O2 -g -std=c11 -Wall -Wextra -Werror -Wno-unused-parameter -Iinclude -I$(SDL_WIN)/include/SDL2 -shared src/windows/ddraw.c src/surface.c src/present_sdl.c src/windows/ddraw.def $(SDL_WIN)/lib/libSDL2.dll.a -o $@
+	nice -n 19 $(WCC) -O2 -g -std=c11 -Wall -Wextra -Werror -Wno-unused-parameter -Iinclude -I$(SDL_WIN)/include/SDL2 -shared src/windows/ddraw.c src/surface.c src/present_sdl.c src/windows/ddraw.def $(SDL_WIN)/lib/libSDL2.dll.a -luser32 -o $@
 	cp $(SDL_WIN)/bin/SDL2.dll build/SDL2.dll
 build/test_ddraw.exe: tests/test_ddraw.c | build
 	nice -n 19 $(WCC) -O2 -g -std=c11 -Wall -Wextra -Werror $< -o $@
@@ -43,3 +43,19 @@ build/test_display.exe: tests/test_display.c | build
 
 build/test_color.exe: tests/test_color.c | build
 	nice -n 19 $(WCC) -O2 -g -std=c11 -Wall -Wextra -Werror $< -luser32 -o $@
+
+build/dsound.dll: src/windows/dsound.c src/windows/dsound_slots.inc src/windows/dsound.def src/audio.c include/ra_audio.h | build
+	nice -n 19 $(WCC) -O2 -g -std=c11 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-misleading-indentation -Iinclude -I$(SDL_WIN)/include/SDL2 -shared src/windows/dsound.c src/audio.c src/windows/dsound.def $(SDL_WIN)/lib/libSDL2.dll.a -o $@
+	cp $(SDL_WIN)/bin/SDL2.dll build/SDL2.dll
+
+build/test_audio: tests/test_audio.c src/audio.c include/ra_audio.h | build
+	nice -n 19 $(CC) $(CPPFLAGS) $(CFLAGS) tests/test_audio.c src/audio.c -lm -o $@
+build/test_dsound.exe: tests/test_dsound.c | build
+	nice -n 19 $(WCC) -O2 -g -std=c11 -Wall -Wextra -Werror $< -o $@
+
+FFMPEG_WIN ?= build/ffmpeg-win/install
+build/binkw32.dll: src/windows/binkw32.c src/windows/binkw32.def src/bink.c include/ra_bink.h | build
+	nice -n 19 $(WCC) -O2 -g -std=c11 -Wall -Wextra -Werror -Wno-misleading-indentation -Iinclude -I$(SDL_WIN)/include/SDL2 -I$(FFMPEG_WIN)/include -shared src/windows/binkw32.c src/bink.c src/windows/binkw32.def $(FFMPEG_WIN)/lib/libavformat.a $(FFMPEG_WIN)/lib/libavcodec.a $(FFMPEG_WIN)/lib/libswscale.a $(FFMPEG_WIN)/lib/libswresample.a $(FFMPEG_WIN)/lib/libavutil.a $(SDL_WIN)/lib/libSDL2.dll.a -lbcrypt -o $@
+
+build/test_bink.exe: tests/test_bink.c include/ra_bink.h | build
+	nice -n 19 $(WCC) -O2 -g -std=c11 -Wall -Wextra -Werror -Iinclude $< -o $@
