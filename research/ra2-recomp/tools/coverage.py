@@ -57,6 +57,8 @@ def discover_one(a, img=None, md=None, entries=None):
             odd.append(x)
         if i.bytes[:2] == bytearray(b'\0\0'):
             odd.append(x)
+        if i.bytes[0] in (0x06, 0x07, 0x0e, 0x16, 0x17, 0x1e, 0x1f):   # push/pop es, cs, ss, ds
+            odd.append(x)
         branch = m == 'call' or m.startswith('j') or m.startswith('loop')
         for op in i.operands:
             if op.type == X86_OP_IMM and not branch:
@@ -70,6 +72,10 @@ def discover_one(a, img=None, md=None, entries=None):
         d = f.insns[ja].operands[0].mem.disp & 0xffffffff
         tabs.append((d, 4 * len(tl)))
     r['odd'] = odd
+    try:
+        r['flagbad'] = L.flag_check(f)[:1] if r['ok'] and f.insns and not (f.calls & getattr(L, 'FLAGRET', set())) else []
+    except Exception as ex:
+        r['flagbad'] = ['flag check crash: %r' % ex]
     r['refs'] = sorted(refs)
     r['ptrs'] = sorted(ptrs)
     r['tables'] = tabs
@@ -199,20 +205,18 @@ def classify(img, md, cov, s, e, dptr, entries):
     if s in cov.refs or any(v in cov.refs for v in range(s - 3, s)):
         if all(x < 0x80 for x in b) or s in cov.refs:
             return 'jump table' if all(x < 0x80 for x in b) else 'other data'
+    # mostly small byte values: a table of bytes, not code
+    if sum(1 for x in b if x < 0x10) * 2 >= len(b):
+        return 'other data'
     refd = s in dptr or s in cov.calls or s in cov.ptrs
-    # code check: decode linearly, must end in ret/jmp without odd instructions
+    # code check: decode linearly to the end of the gap without odd instructions
     a = s
     okcode = True
-    last = None
     while a < e:
         ins = next(md.disasm(img.read(a, 16), a, 1), None)
         if ins is None or ins.mnemonic in ODD or ins.bytes[:2] == bytearray(b'\0\0'):
             okcode = False; break
-        last = ins
         a += ins.size
-    if okcode and a == e and last is not None and last.mnemonic in ('ret', 'jmp', 'int3') or \
-       okcode and a == e and last is not None and last.mnemonic == 'call':
-        return 'unlisted code' if refd else 'dead code'
     if okcode and a == e:
         return 'unlisted code' if refd else 'dead code'
     return 'other data'

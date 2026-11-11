@@ -17,6 +17,7 @@ Each candidate is discovered with lift.Func.discover(); all other candidates cou
 entries, so a function stops where the next one starts. A candidate is dropped when:
   - discovery hits bytes that do not decode, or odd instructions (in/out, les, ...),
   - it starts like data (add [reg],reg forms = small byte values),
+  - it reads a flag before any instruction sets it (an entry in the middle of code),
   - its instructions start in the middle of another function's instruction,
   - it runs over jump-table bytes or bytes that code reads as data,
   - it runs into a listed function without a call or jump (a stub or padding),
@@ -144,6 +145,8 @@ def check(img, r, cov, src, entries, bogus=None):
             return 'runs into listed function %08x without a call' % a
     if r['odd'] and not strong:
         return 'odd instruction at %08x' % r['odd'][0]
+    if r.get('flagbad') and not any(s in TRUSTED for s in src):
+        return 'reads flags it did not set: ' + r['flagbad'][0]
     ins = r['insns']
     if not ins:
         return 'empty'
