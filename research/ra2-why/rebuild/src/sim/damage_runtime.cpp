@@ -661,11 +661,10 @@ bool PrototypeCombatRuntime::can_attack(const session::world::Snapshot& world,
     return verse && std::isfinite(*verse) && *verse>0;
 }
 std::optional<PrototypeCombatRuntime::TurretAim> PrototypeCombatRuntime::turret_aim(
-    session::world::Entity& source,const session::world::Entity& target,std::int32_t frame) {
+    session::world::Entity& source,const session::world::Entity& target,std::int32_t frame,bool omni_fire) {
     // Base 006FB890 Unit aim update. It runs every frame for a Unit with a
-    // target, independent of the 00704DF0 fire gate: the OmniFire (+107)
-    // skip and the UnitType +BB1/+BB0 skips live in the fire gate only and
-    // never suppress this update. The gate reads the Unit +2F8 turret
+    // target, independent of the 00704DF0 fire gate. OmniFire (+107)
+    // skips setting a new turret direction at 006FB911. The gate reads the Unit +2F8 turret
     // FacingClass when the type +AAB Turret byte is set and the +2E0 hull
     // FacingClass otherwise, and compares it with the 005D2730 target
     // direction every frame.
@@ -709,7 +708,7 @@ std::optional<PrototypeCombatRuntime::TurretAim> PrototypeCombatRuntime::turret_
         state=turrets_.insert_or_assign(source.id,fresh).first;
     }
     auto& facing=state->second.facing;
-    base_facing_set_desired(facing,direction,frame);
+    if (!omni_fire) base_facing_set_desired(facing,direction,frame);
     const auto current=base_facing_current(facing,frame);
     state->second.written=current;
     source.turret_facing_raw=current;source.turret_facing=static_cast<int>(current>>8);
@@ -1052,7 +1051,7 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             // range. A Unit without a turret keeps its hull facing here:
             // the original re-issues Set_Desired only on the hull branch
             // and leaves drive rotation to the locomotor.
-            const auto aim=turret_aim(*source,*target,static_cast<std::int32_t>(frame));
+            const auto aim=turret_aim(*source,*target,static_cast<std::int32_t>(frame),weapon->omni_fire);
             // AircraftClass::IsCloseEnoughToAttack (006C5070) delegates to
             // weapon eligibility. Flight missions use ground separation here,
             // so a bomber can reach a ground target below its cruise height.
@@ -1073,8 +1072,8 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             // the art loader sets those flags at 0070AD93 and 0070AD79 from
             // the Image section keys LargeVisceroid and SmallVisceroid, and
             // the type constructor 0070A67F clears both by default. The
-            // skips restrict firing only; the 006FB890 aim update above
-            // still runs.
+            // visceroid skips restrict firing only; OmniFire also skips
+            // setting a new turret direction in 006FB890.
             const auto gate_image=prototype_string(base_,map_,source->type,"Image");
             const auto gate_image_name=gate_image.empty()?source->type:gate_image;
             const bool facing_skip=weapon->omni_fire ||
