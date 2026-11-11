@@ -49,8 +49,9 @@ struct AreaCollectionResult {
     std::optional<std::vector<AreaCandidate>> candidates;
     std::string missing;
 };
-// Base 0047E5B3..0047E9C8, guarded to small spreads, flat ground,
-// overlay-free cells and Unit occupants. Returns the original candidate
+// Base 0047E5B3..0047E9C8, guarded to flat ground, overlay-free cells,
+// Unit occupants, and Infantry occupants when CellSpread exceeds 0.5.
+// Returns the original candidate
 // order, including repeated IDs. It does not dispatch damage. Cells or object
 // kinds outside this slice, aerial collection, and special groups block it.
 AreaCollectionResult base_small_ground_area_candidates(

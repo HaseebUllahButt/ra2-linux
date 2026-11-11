@@ -129,9 +129,14 @@ AreaCollectionResult base_small_ground_area_candidates(
             auto p=resolve(object);
             if (!p || !p->active) return missing("area object active state is unknown");
             if (!*p->active) { id=next; continue; }
-            if (object.kind!=session::world::Kind::Unit)
-                return missing("non-Unit area distance or callbacks are unresolved");
-            if (type_filter) {
+            const bool unit=object.kind==session::world::Kind::Unit;
+            const bool infantry=object.kind==session::world::Kind::Infantry;
+            // Unit and Infantry both use 0041B240 -> 005D4E40 for their
+            // damage position. Small blasts also need the unresolved
+            // Infantry special-group timer at +154/+15C.
+            if (!unit && !(infantry && spread>0.5f))
+                return missing("area object kind or small Infantry special state is unresolved");
+            if (type_filter && unit) {
                 if (!p->excluded_by_scenario) return missing("area type exclusion is unknown");
                 if (*p->excluded_by_scenario) { id=next; continue; }
             }

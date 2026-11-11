@@ -154,8 +154,9 @@ original comparison covers 2,048 object selections and collisions. It does not
 claim a complete projectile update.
 
 `base_small_ground_area_candidates()` collects Unit recipients in the original
-cell and link order for CellSpread up to 10.0. It preserves repeated IDs and
-excludes the source. It stops on buildings, other object kinds, overlays,
+cell and link order for CellSpread up to 10.0. It includes Infantry when
+CellSpread exceeds 0.5. It preserves repeated IDs and excludes the source.
+It stops on buildings, other object kinds, overlays,
 bridges, airborne collection, special groups and unknown state. The original
 comparison covers 600 area collections. It does not run damage callbacks or
 other detonation effects. `base_advance_flat_projectile()` retains projectile
