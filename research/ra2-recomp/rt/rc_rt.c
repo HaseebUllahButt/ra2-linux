@@ -106,6 +106,7 @@ static void native_with_fpu(u32 target)
     for (int i = 7; i >= 0; i--) if (R.tag >> ((R.top + i) & 7) & 1) v[n++] = ST(i);
     for (int i = 0; i < n; i++) a->fin[i].v = v[i];
     a->fin_n = n; R.tag = 0;
+    R.top = (R.top + n) & 7;            /* the values now live on the real FPU: TOP moves like a pop */
     rc_native_calls++;
     /* The bridge writes a host return address into the slot that holds the game
      * return address. Put the game value back so stack memory matches the original. */
