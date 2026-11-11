@@ -54,7 +54,7 @@ extern uint32_t g_ebx, g_esi, g_edi, g_ebp;
  * like __ftol receive their argument on the FPU stack from the caller, and the
  * control word persists across calls. A per-function local stack would make every
  * cross-call FPU value read as 0. */
-extern double   g_st[8];
+extern long double g_st[8];
 extern int      g_fp_top;
 extern uint16_t g_fpu_cw;
 
@@ -1041,20 +1041,24 @@ static inline double fp_pop_ring(void) {
 RECOMP_SHARED_DATA int64_t g_st_i64[8] = {0};
 #endif
 
-static inline void fp_push_impl(double* st, int* top, double val) {
+#include "x87_exact.h"
+
+static inline void fp_push_impl(long double* st, int* top, long double val) {
     /* Shift stack down, push new value */
     for (int i = 7; i > 0; i--) { st[i] = st[i-1]; g_st_i64[i] = g_st_i64[i-1]; }
     st[0] = val;
     g_st_i64[0] = 0;
     (*top)++;
+    x87_external_push();
 }
 
-static inline double fp_pop_impl(double* st, int* top) {
-    double val = st[0];
+static inline long double fp_pop_impl(long double* st, int* top) {
+    long double val = st[0];
     for (int i = 0; i < 7; i++) { st[i] = st[i+1]; g_st_i64[i] = g_st_i64[i+1]; }
     st[7] = 0.0;
     g_st_i64[7] = 0;
     (*top)--;
+    x87_external_pop();
     return val;
 }
 

@@ -773,6 +773,42 @@ class Lifter:
             lines.append(f"_flag_k = {fk};")
         return lines
 
+    def _exact_x87(self, insn):
+        """Run the original x87 opcode with a host pointer for memory operands."""
+        if not insn.mnemonic.startswith("f") and insn.mnemonic != "wait":
+            return None
+        raw = list(insn.bytes)
+        at = next((i for i, b in enumerate(raw) if 0xd8 <= b <= 0xdf), None)
+        if at is None and insn.mnemonic not in ("wait", "fwait"):
+            return None
+        mem = next((o for o in insn.operands if o.type == X86_OP_MEM), None)
+        # Address and segment prefixes belong to the guest address calculation.
+        # Keep operand size for the 14/28-byte environment instructions.
+        code = ([0x9b] if at is None else
+                ([0x66] if 0x66 in raw[:at] else []) + raw[at:at+2])
+        arg = 'eax'
+        if mem is not None:
+            code[-1] &= 0x38  # same opcode extension, [eax] host address
+            arg = f'(uint32_t)(uintptr_t)ADDR({self._fmt_mem_addr(mem.mem)})'
+        opcode = '.byte ' + ','.join(str(b) for b in code)
+        inputs = ''
+        if insn.mnemonic.startswith('fcmov'):
+            opcode = 'pushl %3; popfl; ' + opcode
+            inputs = '"r"((recomp_eflags(_flag_k, _flag_a, _flag_b, _cf, _df) & 0x45u) | 2u)'
+        lines = [f'{{ uint32_t _xa = {arg}, _xf; x87_prepare();',
+                 f'__asm__ volatile("frstor %2; {opcode}; pushfl; popl %1; fnsave %2; fldcw %2" '
+                 f': "+a"(_xa), "=&r"(_xf), "+m"(g_x87) : {inputs} : "memory", "cc", '
+                 '"st", "st(1)", "st(2)", "st(3)", "st(4)", "st(5)", "st(6)", "st(7)");',
+                 'x87_finish();']
+        if insn.mnemonic in ('fnstsw', 'fstsw') and mem is None:
+            lines.append('eax = (eax & 0xffff0000u) | (_xa & 0xffffu);')
+        if insn.mnemonic in ('fcomi','fucomi','fcompi','fucompi','fcomip','fucomip'):
+            lines.append('_flag_a = _xf & 0x45u; _flag_b = 0; _cf = _xf & 1; _flag_k = FK_EFLAGS;')
+            self._flag_state = ('eflags', '_flag_a, _flag_b')
+            self._flag_seq += 1
+        lines.append('}')
+        return lines
+
     def _lift_instruction(self, insn) -> list:
         """
         Lift a single x86 instruction to C statement(s).
@@ -810,6 +846,9 @@ class Lifter:
             m = m.split()[-1]
         ops = insn.operands if insn.operands else []
         lines = []
+        exact = self._exact_x87(insn)
+        if exact is not None:
+            return exact
 
         # Address comment
         comment = f"/* 0x{insn.address:08X}: {insn.mnemonic} {insn.op_str} */"

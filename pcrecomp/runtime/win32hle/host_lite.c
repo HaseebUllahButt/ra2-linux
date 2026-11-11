@@ -27,7 +27,7 @@
  * recomp_types.h declares these extern; exactly one translation unit defines
  * them, and for a win32hle host that is here. (Mirrors native32.c.) */
 uint32_t  g_eax, g_ecx, g_edx, g_esp, g_ebx, g_esi, g_edi, g_ebp;
-double    g_st[8];
+long double g_st[8];
 int       g_fp_top;
 #ifdef RECOMP_X87_RING
 /* the x87 stack, a pointer into a long buffer (recomp_types.h fp_push_ring) */
@@ -107,7 +107,8 @@ static void mach_take(void) {
 
 typedef struct {
     uint32_t eax, ecx, edx, esp, ebx, esi, edi, ebp, fs, cur;
-    double   st[8];
+    long double st[8];
+    struct x87_image x87;
     int      fp_top;
     uint16_t fpu_cw;
     uint64_t mm[8];
@@ -117,6 +118,7 @@ static void regs_save(regs_t *r) {
     r->eax=g_eax; r->ecx=g_ecx; r->edx=g_edx; r->esp=g_esp;
     r->ebx=g_ebx; r->esi=g_esi; r->edi=g_edi; r->ebp=g_ebp;
     r->fs=g_fs_base; r->cur=g_cur_func;
+    r->x87 = g_x87;
     memcpy(r->st, X87_TOP, sizeof r->st); r->fp_top=g_fp_top; r->fpu_cw=g_fpu_cw;
     memcpy(r->mm, g_mm, sizeof g_mm);
 }
@@ -124,7 +126,9 @@ static void regs_load(const regs_t *r) {
     g_eax=r->eax; g_ecx=r->ecx; g_edx=r->edx; g_esp=r->esp;
     g_ebx=r->ebx; g_esi=r->esi; g_edi=r->edi; g_ebp=r->ebp;
     g_fs_base=r->fs; g_cur_func=r->cur;
+    g_x87 = r->x87;
     memcpy(X87_TOP, r->st, sizeof r->st); g_fp_top=r->fp_top; g_fpu_cw=r->fpu_cw;
+    __asm__ volatile("fldcw %0" : : "m"(g_fpu_cw) : "memory");
     memcpy(g_mm, r->mm, sizeof g_mm);
 }
 
@@ -154,6 +158,8 @@ void mach_enter(void) {
             g_ms.r.esp    = lo + GUEST_STACK - 64;
             g_ms.r.fs     = make_tib(lo, lo + GUEST_STACK);
             g_ms.r.fpu_cw = 0x027F;
+            g_ms.r.x87.cw = 0x027F;
+            g_ms.r.x87.tw = 0xFFFF;
             g_ms.inited   = 1;
         }
         mach_take();
