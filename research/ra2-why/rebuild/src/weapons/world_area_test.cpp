@@ -20,10 +20,11 @@ int main() {
    }
    std::map<std::uint32_t,sim::AreaUnitProperties> props;
    for (int j=0;j<count;++j) {
-    session::world::Entity e; sim::Coord p; int dx,dy,active;
-    std::cin >> e.id >> dx >> dy >> p.x >> p.y >> p.z >> active;
+    session::world::Entity e; sim::Coord p; int dx,dy,active,kind;
+    std::cin >> e.id >> dx >> dy >> p.x >> p.y >> p.z >> active >> kind;
     auto &head=world.cells.at((cy+dy)*512+cx+dx).heads->ground_head;
-    e.kind=session::world::Kind::Unit; e.lifetime=session::world::Lifetime::Placed;
+    e.kind=kind==15?session::world::Kind::Infantry:session::world::Kind::Unit;
+    e.lifetime=session::world::Lifetime::Placed;
     e.next=head; e.position=p; head=e.id;
     world.entities.push_back(e); props.emplace(e.id,sim::AreaUnitProperties{bool(active),p,false,false,false});
    }

@@ -740,6 +740,25 @@ void invulnerability_test(const rules::IniFile& rules,const rules::IniFile& art,
     check(*area.entities[1].resolved_hp==400,"invulnerable tank took area damage");
     std::cout<<"Invulnerability predicate shields direct and area damage, expires, and spares neighbours\n";
 }
+// 0047E2C0 collects Infantry with the same damage-position virtual as Units.
+void infantry_blast_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+    rules::IniFile map;map.parse("[AP]\nCellSpread=1\n");
+    auto w=make_world("HTNK","E1",world::Kind::Unit,world::Kind::Infantry,400,125);
+    w.entities[0].turret_facing_raw=16384;
+    auto neighbour=w.entities[1];neighbour.id=4;neighbour.next=0;
+    w.entities[1].next=4;w.entities.push_back(neighbour);
+    sim::PrototypeCombatRuntime combat(rules,map,art,exe);
+    check(combat.attack(w,1,2),"infantry blast attack rejected");
+    bool impacted=false;
+    for(unsigned frame=0;frame<100 && !impacted;++frame) {
+        const auto result=combat.tick(w,frame);
+        check(result.unresolved.empty(),"infantry blast was unresolved");
+        impacted=result.impacts>0;
+    }
+    check(impacted,"infantry blast never landed");
+    check(*w.entities[1].resolved_hp<125 && *w.entities[3].resolved_hp<125,
+          "infantry blast missed a nearby soldier");
+}
 // Base 004B8A30/004B8BE0 turret turning and 00704C00 fire facing check.
 void turret_turn_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
     rules::IniFile map;
@@ -1050,6 +1069,7 @@ int main(int argc,char** argv) {
         infantry_test(rules,art,std::string(argv[1])+"/game.exe");
         cyclic_link_test(rules,art,std::string(argv[1])+"/game.exe");
         invulnerability_test(rules,art,std::string(argv[1])+"/game.exe");
+        infantry_blast_test(rules,art,std::string(argv[1])+"/game.exe");
         structure_test(rules,art,std::string(argv[1])+"/game.exe");
         turret_turn_test(rules,art,std::string(argv[1])+"/game.exe");
         turretless_hull_test(rules,art,std::string(argv[1])+"/game.exe");
