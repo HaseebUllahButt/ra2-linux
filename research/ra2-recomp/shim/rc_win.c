@@ -30,6 +30,8 @@ static void logf_(const char *fmt, ...)
     if (!lg) return;
     va_list ap; va_start(ap, fmt); vfprintf(lg, fmt, ap); va_end(ap); fflush(lg);
 }
+extern void (*rc_log_hook)(const char *msg);
+static void log_hook(const char *m) { logf_("%s", m); }
 static void thread_attach(void)
 {
     rc_thread_init();
@@ -128,6 +130,11 @@ static LONG WINAPI veh(EXCEPTION_POINTERS *e)
         if (f <= eip && f > bf) { bf = f; best = rc_table[i].addr; }
     }
     if (best && eip - bf < 0x10000) logf_("  in lifted f_%08x+%x\n", best, eip - bf);
+    {
+        CONTEXT *x = e->ContextRecord;
+        logf_("  eax=%08lx ecx=%08lx edx=%08lx ebx=%08lx esi=%08lx edi=%08lx ebp=%08lx [esp]=%08lx %08lx %08lx R.esp=%08x entry=%08x\n",
+              x->Eax, x->Ecx, x->Edx, x->Ebx, x->Esi, x->Edi, x->Ebp, ((DWORD *)x->Esp)[0], ((DWORD *)x->Esp)[1], ((DWORD *)x->Esp)[2], R.esp, rc_aux.entry);
+    }
     logf_("exception %08lx at %08lx %s+%lx (addr %08lx) esp=%08lx depth=%u\n", c, (unsigned long)e->ContextRecord->Eip,
           strrchr(mod, '\\') ? strrchr(mod, '\\') + 1 : mod, (unsigned long)(e->ContextRecord->Eip - (uintptr_t)hm),
           (unsigned long)(e->ExceptionRecord->NumberParameters > 1 ? e->ExceptionRecord->ExceptionInformation[1] : 0),
@@ -138,6 +145,7 @@ static void start(void)
 {
     const char *lp = getenv("RC_LOG");
     lg = fopen(lp ? lp : "rc.log", "w");
+    rc_log_hook = log_hook;
     slot_aux = TlsAlloc(); slot_tmp = TlsAlloc();
     if (slot_aux >= 64 || slot_tmp >= 64) { logf_("TLS slot too high (%lu %lu)\n", slot_aux, slot_tmp); ExitProcess(3); }
     u32 off_aux = 0xe10 + 4 * slot_aux, off_tmp = 0xe10 + 4 * slot_tmp;
@@ -177,6 +185,7 @@ static void start(void)
         VirtualProtect((void *)(uintptr_t)watch_page, 4096, PAGE_READONLY, &old);
         logf_("watching %08x (value %08x)\n", watch_addr, *(u32 *)(uintptr_t)watch_addr);
     }
+    logf_("thunks at %p..%p\n", th, th + 32 * rc_table_n);
     logf_("rc.dll: %d lifted functions, %d on, %d entry patches, tls %lu %lu\n", rc_table_n, n_on, n_patched, slot_aux, slot_tmp);
     if (!getenv("RC_NOSTATS")) CreateThread(0, 0, stats_thread, 0, 0, 0);
 }

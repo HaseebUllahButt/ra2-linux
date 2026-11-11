@@ -3,6 +3,7 @@
  * lifted code waits in a native call), function on/off switch per table entry. */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "rc.h"
 RC_TLS RCState R;
 #ifdef _WIN32
@@ -130,15 +131,22 @@ void rc_call(u32 target)
     if (f) { rc_lifted_calls++; f(); }
     else native_with_fpu(target);
 }
+void (*rc_log_hook)(const char *msg);    /* rc_win.c: write to rc.log */
+static void die(const char *msg)
+{
+    fprintf(stderr, "%s", msg);
+    if (rc_log_hook) rc_log_hook(msg);
+    abort();
+}
 void rc_bad_jump(u32 from, u32 target)
 {
-    fprintf(stderr, "[rc] unknown jump target %08x at %08x\n", target, from);
-    abort();
+    char b[128]; snprintf(b, sizeof b, "[rc] unknown jump target %08x at %08x (esp %08x)\n", target, from, R.esp);
+    die(b);
 }
 void rc_unreachable(u32 at)
 {
-    fprintf(stderr, "[rc] reached code that was not lifted at %08x\n", at);
-    abort();
+    char b[128]; snprintf(b, sizeof b, "[rc] reached code that was not lifted at %08x (esp %08x ret %08x)\n", at, R.esp, M32(R.esp));
+    die(b);
 }
 /* guest stack for lifted code in tests: plain process memory, outside the game image */
 static u32 guest_stack[1 << 18];
@@ -159,11 +167,28 @@ RCAux *rc_entry_c(RCAux *a)
     R.esp = a->save[4]; R.ebp = a->save[5]; R.esi = a->save[6]; R.edi = a->save[7];
     a->ret = 0;
     u32 ret = M32(R.esp);
-    R.top = 0; R.tag = 0; R.df = 0;
+    R.df = 0;
+    /* x87: the native stack (fnsave image) becomes R; the real FPU keeps the control
+     * word and the exception bits with an empty stack */
+    {
+        u8 *p = a->fsave; u16 cw, sw, tw;
+        memcpy(&cw, p, 2); memcpy(&sw, p + 4, 2); memcpy(&tw, p + 8, 2);
+        R.top = sw >> 11 & 7; R.tag = 0;
+        for (int ph = 0; ph < 8; ph++) if ((tw >> (2 * ph) & 3) != 3) R.tag |= 1u << ph;
+        for (int i = 0; i < 8; i++) memcpy(&R.st[(R.top + i) & 7], p + 28 + 10 * i, 10);
+        if (getenv("RC_FPA")) { R.top = 0; R.tag = 0; }
+        u16 env[14] = { cw, 0xffff, (u16)(sw & 0x80ffu), 0xffff, 0xffff, 0xffff };
+        __asm__ volatile("fldenv %0" :: "m"(env) : "memory");
+        if (R.tag && getenv("RC_FPLOG")) {
+            static int nlog;
+            static FILE *fl; if (!fl) fl = fopen(getenv("RC_FPLOG"), "w");
+            if (fl && nlog++ < 60) fprintf(fl, "[rc] entry %08x with x87 tag %02x top %u cw %04x sw %04x ret %08x depth %u\n", entry, R.tag, R.top, cw, sw, ret, a->depth), fflush(fl);
+        }
+    }
     a->depth++;
     void (*f)(void) = rc_lookup(entry);
     if (f) { rc_lifted_calls++; f(); }
-    else { fprintf(stderr, "[rc] entry %08x is not lifted\n", entry); abort(); }
+    else { char b[96]; snprintf(b, sizeof b, "[rc] entry %08x is not lifted\n", entry); die(b); }
     a->depth--;
     /* hand x87 results back: fout[0] = ST(0); the asm loads deepest first */
     int n = 0;

@@ -14,7 +14,7 @@ from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 
 WCC = [HERE + '/wcc']
 CFLAGS = ['-O1', '-std=gnu11', '-fno-strict-aliasing', '-fwrapv', '-w', '-mno-sse', '-mno-sse2',
-          '-ffp-contract=off', '-frounding-math', '-g0', '-I' + ROOT + '/rt']
+          '-ffp-contract=off', '-frounding-math', '-g0', '-I' + ROOT + '/rt'] + os.environ.get('RC_CFLAGS', '').split()
 
 _img = _md = _entries = None
 def _init(entries):

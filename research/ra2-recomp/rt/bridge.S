@@ -115,6 +115,7 @@ S(rc_entry_common):
         jnz 6f
         mov 36(%ecx), %eax
 6:      mov %eax, %esp
+        fnsave 336(%ecx)                /* native x87 stack (arguments in ST) -> R in rc_entry_c */
         push %ecx
         call S(rc_entry_c)
         mov %eax, %ecx

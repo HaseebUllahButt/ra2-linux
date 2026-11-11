@@ -14,7 +14,7 @@ pgrep -u "$USER" -f "Xvfb :77" >/dev/null || { Xvfb :77 -screen 0 1024x768x24 >/
 wineserver -k 2>/dev/null; sleep 1
 cd /path/to/user/Projects/ra2/original/game
 if [ -n "$RC_NOLIFT" ]; then nice -n 10 wine game.exe > "$OUT/wine.log" 2>&1 &
-else nice -n 10 wine "$R/build/win/rclaunch.exe" game.exe "$R/build/win/rc.dll" > "$OUT/wine.log" 2>&1 & fi
+else W=${RC_DLLDIR:-$R/build/win}; nice -n 10 wine "$W/rclaunch.exe" game.exe "$W/rc.dll" > "$OUT/wine.log" 2>&1 & fi
 sleep 5
 if [ "$(pw-cli ls Node 2>/dev/null | grep -c 'Red Alert')" != 0 ]; then echo "SOUND LEAK: killing the game"; wineserver -k; exit 3; fi
 echo "$2" | tr ';' '\n' | while read -r op a b; do

@@ -42,6 +42,7 @@ typedef struct RCAux {
     u32 pad[2];          /* 72 */
     f80s fin[8];         /* 80 */
     f80s fout[8];        /* 208 */
+    u8 fsave[108];       /* 336 native x87 state at an entry (fnsave) */
 } RCAux;
 extern RC_TLS RCState R;
 extern RC_TLS RCAux rc_aux;
@@ -120,8 +121,12 @@ static inline u64 mmx_psrad(u64 a, u64 n) {
 void rc_call(u32 target);            /* any target: lifted or native */
 /* direct call to a known address: one array read, then the lifted function or rc_call */
 extern void (**rc_fpv)(void); extern u32 rc_fp_lo, rc_fp_n; extern long rc_lifted_calls;
+#ifdef RC_NO_CALLD
+#define RC_CALLD(t) rc_call(t)
+#else
 #define RC_CALLD(t) do { u32 i_ = (t) - rc_fp_lo; void (*f_)(void) = i_ < rc_fp_n ? rc_fpv[i_] : 0; \
     if (f_) { rc_lifted_calls++; f_(); } else rc_call(t); } while (0)
+#endif
 
 void rc_bad_jump(u32 from, u32 target) __attribute__((noreturn));
 void rc_unreachable(u32 at) __attribute__((noreturn));
