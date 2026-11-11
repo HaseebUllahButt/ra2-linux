@@ -91,7 +91,7 @@ X87_C2 = ('fsin', 'fcos', 'fsincos', 'fptan')
 class FakeF:
     """the parts of lift.Func that Emitter reads"""
     def __init__(self, insns):
-        self.insns, self.bad, self.tables = insns, {}, {}
+        self.insns, self.bad, self.tables, self.entry = insns, {}, {}, 0
 
 def x87_mfmt(b):
     i = 0
@@ -119,6 +119,8 @@ def gen_example(i, key, ex, md):
     nxt = a + ins.size
     if m in SKIP_MN:
         return None, SKIP_MN[m]
+    if m == 'emms' or any(o.type == X86_OP_REG and ins.reg_name(o.reg).startswith('mm') for o in ops):
+        return None, 'MMX (helpers checked by tests/mmx against the real MMX unit)'
     if any(o.type == X86_OP_MEM and o.mem.segment and ins.reg_name(o.mem.segment) in ('fs', 'gs') for o in ops):
         return None, 'fs: access (thread block, needs Windows)'
     x87 = 0xd8 <= ins.opcode[0] <= 0xdf

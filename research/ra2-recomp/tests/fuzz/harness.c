@@ -11,7 +11,11 @@
 #include <unistd.h>
 #include "fz.h"
 
-RCState R;
+RCState R; RCAux rc_aux;
+void (**rc_fpv)(void); u32 rc_fp_lo, rc_fp_n; long rc_lifted_calls;
+static u64 fz_rdtsc(void) { return 0x123456789abcull; }
+static void fz_cpuid(u32 *a, u32 *b, u32 *c, u32 *d) { *a = *b = *c = *d = 0; }
+u64 (*rc_rdtsc_hook)(void) = fz_rdtsc; void (*rc_cpuid_hook)(u32 *, u32 *, u32 *, u32 *) = fz_cpuid;
 FZFlags FZF;
 u32 FZI[8];
 int FZ_exit;
