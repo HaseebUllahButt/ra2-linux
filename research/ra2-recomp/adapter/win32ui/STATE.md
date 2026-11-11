@@ -84,7 +84,9 @@ Other open items:
   (button, static, edit, list box, combo box, trackbar, progress, hotkey), commit b32698a.
   It builds `build/ra2ui-port.dll` (`make build/ra2ui-port.dll`, `PORT_SRC` in the Makefile) and tests with
   `tests/run.sh` (its last result: hidden controls 14 of 15 sequences equal, visible 12 of 15).
-  Paint, capture, scrolling and list view are still open there. The production build still uses
+  Its logs are in `build/ctltest/` and `build/ctltest-visible/`. It finished as a partial port: paint order,
+  selection drawing, capture, scrolling and list view are still open. Its last game runs did not reach the
+  skirmish setup screen every time, so test the game before you switch. The production build still uses
   `src/controls.c`. When the port is complete, replace `src/controls.c` with `src/controls/*.c` in `SRC`,
   then check `reports/wine-dialog-rects.txt` and the game again.
 - The game cursor in menus (SetCursor/LoadCursorA give no visible cursor yet).
