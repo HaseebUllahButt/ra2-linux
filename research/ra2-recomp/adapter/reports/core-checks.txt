@@ -1,0 +1,7 @@
+make: Entering directory '/path/to/user/Projects/ra2/ra2-recomp/adapter'
+./build/test_surface
+PASS: copy, clipping, stretch, keys, overlap, pitch, palette, RGB565, RGB555, BGR24, BGR32
+SDL_VIDEODRIVER=dummy ./build/test_present
+PASS: SDL display and frame upload
+make: Leaving directory '/path/to/user/Projects/ra2/ra2-recomp/adapter'
+PASS: copy, clipping, stretch, keys, overlap, pitch, palette, RGB565, RGB555, BGR24, BGR32
