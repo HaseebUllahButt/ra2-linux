@@ -13,11 +13,13 @@ extern u32 FZ_fmask;         /* eflags bits to compare (CF PF ZF SF DF OF) */
 extern u32 FZ_rmask[8];      /* register bits to compare */
 extern u32 FZ_cmask;         /* x87 condition bits to compare: bit k = Ck */
 extern u32 FZ_xmask;         /* x87 exception bits to compare (status word bits 0..5) */
-extern u32 FZ_mm_addr, FZ_mm_mask;   /* one memory dword compared only under this mask */
+extern u32 FZ_mm_addr[4], FZ_mm_mask[4];   /* up to 4 memory dwords compared only under these masks (mask 0 = unused) */
 
 enum {
     K_X87 = 1, K_STRING = 2, K_REP = 4, K_BTMEM = 8, K_DIV = 16, K_IND = 32, K_RET = 64,
     K_BR = 128, K_POPF = 256, K_FLDCW = 512, K_LEAVE = 1024, K_IDIV = 2048,
+    K_SEQ = 4096,    /* several instructions (tools/insnfuzz.py SEQS): ebp in test memory, memory operand aligned */
+    K_OVL = 8192,    /* string op: edi close to esi, so source and destination overlap */
 };
 enum { MF_INT, MF_F32, MF_F64, MF_F80, MF_I16, MF_I32, MF_I64, MF_CW };
 
@@ -28,6 +30,7 @@ struct fzex {
     int kind;
     int mem, base, index, scale; u32 disp; int msize, mfmt;
     u32 target; int indreg, btreg, dsize;
+    u32 xabs;        /* a second absolute data address to map (0 = none) */
 };
 extern const struct fzex fz_table[];
 extern const int fz_n;

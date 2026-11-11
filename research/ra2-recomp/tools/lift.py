@@ -545,7 +545,7 @@ class Emitter:
         elif m == 'ret':
             n = ops[0].imm if ops else 0
             if self.f.entry in FLAGRET:
-                self.e('R.eflags = (u32)(cf | 2 | pf << 2 | zf << 6 | sf << 7 | of << 11 | 0x200);')
+                self.e('R.eflags = (u32)(cf | 2 | pf << 2 | zf << 6 | sf << 7 | of << 11 | 0x200 | (R.eflags & 0x240000u));')
             self.e('esp += %d; SAVE; return;' % (4 + n))
         elif m == 'leave':
             self.e('esp = ebp; ebp = M32(esp); esp += 4;')
@@ -600,9 +600,12 @@ class Emitter:
         elif m in ('popal', 'popad'):
             self.e('edi=M32(esp); esi=M32(esp+4); ebp=M32(esp+8); ebx=M32(esp+16); edx=M32(esp+20); ecx=M32(esp+24); eax=M32(esp+28); esp += 32;')
         elif m in ('pushfd', 'pushf'):
-            self.e('esp -= 4; M32(esp) = (u32)(cf | 2 | pf << 2 | zf << 6 | sf << 7 | R.df << 10 | of << 11 | 0x200);')
+            # AC (bit 18) and ID (bit 21) live in R.eflags: CPU checks (0077f14d, 0077f282) toggle them
+            # with popfd and read them back with pushfd. They are never set on the real CPU.
+            self.e('esp -= 4; M32(esp) = (u32)(cf | 2 | pf << 2 | zf << 6 | sf << 7 | R.df << 10 | of << 11 | 0x200 | (R.eflags & 0x240000u));')
         elif m in ('popfd', 'popf'):
-            self.e('{ u32 f = M32(esp); esp += 4; cf = f & 1; pf = (f >> 2) & 1; zf = (f >> 6) & 1; sf = (f >> 7) & 1; R.df = (f >> 10) & 1; of = (f >> 11) & 1; }')
+            self.e('{ u32 f = M32(esp); esp += 4; cf = f & 1; pf = (f >> 2) & 1; zf = (f >> 6) & 1; sf = (f >> 7) & 1; R.df = (f >> 10) & 1; of = (f >> 11) & 1;'
+                   ' R.eflags = (R.eflags & ~0x240000u) | (f & 0x240000u); }')
         elif m in ('movsb', 'movsw', 'movsd', 'stosb', 'stosw', 'stosd', 'lodsb', 'lodsw', 'lodsd', 'scasb', 'scasw', 'scasd', 'cmpsb', 'cmpsw', 'cmpsd'):
             self.string(ins, m)
         elif m == 'rdtsc':
@@ -753,10 +756,11 @@ class Emitter:
             av, w = self.dst_ref(ops[0])
         else:
             if ops[0].type == X86_OP_MEM:
-                # bit string addressing: offset may reach outside the operand
+                # bit string addressing: offset may reach outside the operand; the offset is
+                # signed at the operand size (a 16-bit offset is -32768..32767)
                 a = self.ea(ops[0])
                 if isinstance(a, tuple): raise LiftError('bt fs')
-                self.e('s32 bo = (s32)%s; u32 ad = %s + (u32)((bo >> 5) * 4);' % (self.rd(ops[1]), a))
+                self.e('s32 bo = (s32)(%s)%s; u32 ad = %s + (u32)((bo >> 5) * 4);' % (STY[s], self.rd(ops[1]), a))
                 bit = '((u32)bo & 31)'
                 av, w = 'M32(ad)', (lambda v: self.e('M32(ad) = (u32)(%s);' % v))
                 s = 4
@@ -902,12 +906,13 @@ class Emitter:
                  0xeb: 'fpush(3.14159265358979323851L);', 0xec: 'fpush(0.301029995663981195214L);', 0xed: 'fpush(0.693147180559945309429L);',
                  0xee: 'fpush(0.0L);',
                  0xf0: 'ST(0) = x_f2xm1(ST(0));', 0xf1: 'ST(1) = x_fyl2x(ST(1), ST(0)); fpop();',
-                 0xf2: 'ST(0) = x_fptan(ST(0)); fpush(1.0L); R.c2 = 0;', 0xf3: 'ST(1) = x_fpatan(ST(1), ST(0)); fpop();',
+                 0xf2: 'if (x_trig_out(ST(0))) R.c2 = 1; else { f80 o; ST(0) = x_fptan(ST(0), &o); fpush(o); R.c2 = 0; }', 0xf3: 'ST(1) = x_fpatan(ST(1), ST(0)); fpop();',
                  0xf5: 'ST(0) = x_fprem(ST(0), ST(1), 1);', 0xf8: 'ST(0) = x_fprem(ST(0), ST(1), 0);',
                  0xf9: 'ST(1) = x_fyl2xp1(ST(1), ST(0)); fpop();',
-                 0xfa: 'ST(0) = x_fsqrt(ST(0));', 0xfb: '{ f80 v = ST(0); ST(0) = x_fsin(v); fpush(x_fcos(v)); R.c2 = 0; }',
+                 0xfa: 'ST(0) = x_fsqrt(ST(0));', 0xfb: 'if (x_trig_out(ST(0))) R.c2 = 1; else { f80 c; ST(0) = x_fsincos(ST(0), &c); fpush(c); R.c2 = 0; }',
                  0xfc: 'ST(0) = x_frndint(ST(0));', 0xfd: 'ST(0) = x_fscale(ST(0), ST(1));',
-                 0xfe: 'ST(0) = x_fsin(ST(0)); R.c2 = 0;', 0xff: 'ST(0) = x_fcos(ST(0)); R.c2 = 0;',
+                 0xfe: 'if (x_trig_out(ST(0))) R.c2 = 1; else { ST(0) = x_fsin(ST(0)); R.c2 = 0; }',
+                 0xff: 'if (x_trig_out(ST(0))) R.c2 = 1; else { ST(0) = x_fcos(ST(0)); R.c2 = 0; }',
                  0xf6: 'R.top = (R.top - 1) & 7;', 0xf7: 'R.top = (R.top + 1) & 7;'}.get(modrm)
             if x is None: raise LiftError('x87 d9 %02x' % modrm)
             if x and modrm in (0xe8, 0xe9, 0xea, 0xeb, 0xec, 0xed):
@@ -916,8 +921,8 @@ class Emitter:
                 x = '{ f80 v; __asm__ volatile("%s" : "=t"(v) :: "memory"); fpush(v); }' % insn
             e(x)
             return
-        if op == 0xda and modrm == 0xe9:
-            e('fcmp(ST(0), ST(1)); fpop(); fpop();'); return
+        if op == 0xda and modrm == 0xe9:   # fucompp: quiet compare (a quiet NaN does not raise "invalid")
+            e('fucmp(ST(0), ST(1)); fpop(); fpop();'); return
         if op == 0xdb:
             if modrm == 0xe2:
                 e('__asm__ volatile("fnclex" ::: "memory");'); return
@@ -930,8 +935,8 @@ class Emitter:
             # fst/fstp st(i) also mark st(i) as valid
             if reg == 2: e('ST(%d) = ST(0); R.tag |= 1u << ((R.top + %d) & 7);' % (i, i)); return
             if reg == 3: e('ST(%d) = ST(0); R.tag |= 1u << ((R.top + %d) & 7); fpop();' % (i, i)); return
-            if reg in (4, 5):
-                e('fcmp(ST(0), ST(%d));' % i)
+            if reg in (4, 5):   # fucom/fucomp: quiet compare
+                e('fucmp(ST(0), ST(%d));' % i)
                 if reg == 5: e('fpop();')
                 return
             raise LiftError('x87 dd %02x' % modrm)
