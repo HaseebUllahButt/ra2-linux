@@ -4,6 +4,13 @@ TEST_GAME_DIR ?= $(if $(wildcard ../game-full/game.exe),../game-full,../game)
 # tests against the real game data in game/ (read-only).
 
 CXX ?= g++
+# Use ccache (a compiler cache) when it is installed. tools/ccache holds
+# g++, c++, gcc and cc wrappers that send each source through ccache,
+# also for test scripts. Turn it off with: make RA2_CCACHE=
+RA2_CCACHE ?= $(shell command -v ccache 2>/dev/null)
+ifneq ($(RA2_CCACHE),)
+export PATH := $(CURDIR)/tools/ccache:$(PATH)
+endif
 .DEFAULT_GOAL := all
 FEATURE_GAME_DIR ?= $(abspath $(TEST_GAME_DIR))
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O2
