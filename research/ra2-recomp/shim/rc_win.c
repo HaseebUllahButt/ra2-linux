@@ -78,7 +78,17 @@ static LONG WINAPI veh(EXCEPTION_POINTERS *e)
     DWORD c = e->ExceptionRecord->ExceptionCode;
     if (c == 0x406D1388 || c == DBG_PRINTEXCEPTION_C || n >= 40) return EXCEPTION_CONTINUE_SEARCH;
     n++;
-    logf_("exception %08lx at %08lx (addr %08lx) esp=%08lx depth=%u\n", c, (unsigned long)e->ContextRecord->Eip,
+    char mod[MAX_PATH] = "?"; HMODULE hm = 0;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           (LPCSTR)(uintptr_t)e->ContextRecord->Eip, &hm)) GetModuleFileNameA(hm, mod, sizeof mod);
+    u32 eip = e->ContextRecord->Eip, best = 0, bf = 0;      /* which lifted function holds eip */
+    for (int i = 0; i < rc_table_n; i++) {
+        u32 f = (u32)(uintptr_t)rc_table[i].fn;
+        if (f <= eip && f > bf) { bf = f; best = rc_table[i].addr; }
+    }
+    if (best && eip - bf < 0x10000) logf_("  in lifted f_%08x+%x\n", best, eip - bf);
+    logf_("exception %08lx at %08lx %s+%lx (addr %08lx) esp=%08lx depth=%u\n", c, (unsigned long)e->ContextRecord->Eip,
+          strrchr(mod, '\\') ? strrchr(mod, '\\') + 1 : mod, (unsigned long)(e->ContextRecord->Eip - (uintptr_t)hm),
           (unsigned long)(e->ExceptionRecord->NumberParameters > 1 ? e->ExceptionRecord->ExceptionInformation[1] : 0),
           (unsigned long)e->ContextRecord->Esp, rc_aux.depth);
     return EXCEPTION_CONTINUE_SEARCH;

@@ -55,6 +55,13 @@ void (*rc_lookup(u32 a))(void)
     return rc_table[i].fn;
 }
 
+/* ---- rdtsc / cpuid (replay can replace the hooks) ---- */
+static u64 real_rdtsc(void) { u32 lo, hi; __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); return (u64)hi << 32 | lo; }
+static void real_cpuid(u32 *a, u32 *b, u32 *c, u32 *d)
+{ __asm__ volatile("cpuid" : "+a"(*a), "=b"(*b), "+c"(*c), "=d"(*d)); }
+u64 (*rc_rdtsc_hook)(void) = real_rdtsc;
+void (*rc_cpuid_hook)(u32 *a, u32 *b, u32 *c, u32 *d) = real_cpuid;
+
 /* ---- per-thread set-up ---- */
 #define HOST_STACK (8u << 20)
 void rc_thread_init(void)
@@ -92,6 +99,7 @@ static void native_with_fpu(u32 target)
     /* a nested entry may have run on this thread; rc_aux is still this thread's */
     R.eax = a->save[0]; R.ecx = a->save[1]; R.edx = a->save[2]; R.ebx = a->save[3];
     R.esp = a->save[4]; R.ebp = a->save[5]; R.esi = a->save[6]; R.edi = a->save[7];
+    R.eflags = a->eflags;
     M32(slot) = saved;
     for (int i = (int)a->fout_n - 1; i >= 0; i--) fpush(a->fout[i].v);
 }
@@ -147,6 +155,7 @@ RCAux *rc_entry_c(RCAux *a)
     a->save[0] = R.eax; a->save[1] = R.ecx; a->save[2] = R.edx; a->save[3] = R.ebx;
     a->save[4] = R.esp; a->save[5] = R.ebp; a->save[6] = R.esi; a->save[7] = R.edi;
     a->ret = ret;
+    a->eflags = (R.eflags & 0x8d5u) | 0x202u;   /* flags for FLAGRET callers; DF = 0 */
     R = outer;
     return a;
 }

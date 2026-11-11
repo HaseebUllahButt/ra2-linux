@@ -16,7 +16,7 @@
  *   Linux tests: one thread, plain globals.
  *
  * RCAux offsets: save 0..28, host_esp 32, host_top 36, target 40, sw_before 44,
- *   fin_n 48, fout_n 52, entry 56, ret 60, fin 80, fout 208 (see rc.h). */
+ *   fin_n 48, fout_n 52, entry 56, ret 60, eflags 68, fin 80, fout 208 (see rc.h). */
 #ifdef _WIN32
 # define S(x) _##x
 # define LD_AUX(r, n) movl %fs:0x7ff0, r ; rcp_aux_##n:
@@ -72,8 +72,10 @@ S(rc_native_asm):
         mov %edi, 28(%ecx)
         LD_TMP(%eax, 2)
         mov %eax, 4(%ecx)
-        mov 32(%ecx), %esp              /* back to the host stack */
+        mov 32(%ecx), %esp              /* back to the host stack (mov/pop keep the flags) */
         popl 32(%ecx)
+        pushfl                          /* native flags, for FLAGRET callees */
+        popl 68(%ecx)
         /* pop real x87 values left by the callee */
         fnstsw %ax
         mov 44(%ecx), %ebx
@@ -128,6 +130,7 @@ S(rc_entry_common):
         jmp 7b
 8:      mov 16(%ecx), %esp
         pushl 60(%ecx)                  /* return address, taken by ret */
+        pushl 68(%ecx)                  /* flags (below the return address), taken by popf */
         mov 0(%ecx), %eax
         mov 8(%ecx), %edx
         mov 12(%ecx), %ebx
@@ -135,6 +138,7 @@ S(rc_entry_common):
         mov 24(%ecx), %esi
         mov 28(%ecx), %edi
         mov 4(%ecx), %ecx
+        popfl
         ret
 
 /* rc_entry_tramp: called like original code (Linux difftest). Entry = rc_entry_addr. */
