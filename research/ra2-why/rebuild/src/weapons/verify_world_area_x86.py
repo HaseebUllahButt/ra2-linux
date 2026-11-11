@@ -9,6 +9,7 @@ Run: RA2_GAME_DIR=/path/to/game python3 rebuild/src/weapons/verify_world_area_x8
 import os
 from pathlib import Path
 import random
+import re
 import struct
 import subprocess
 import sys
@@ -18,7 +19,7 @@ u=Uc(UC_ARCH_X86,UC_MODE_32)
 u.mem_map(0x400000,0x800000);u.mem_write(0x400000,(Path(os.environ['RA2_GAME_DIR'])/'game.exe').read_bytes()[:0x431000])
 u.mem_map(0x1000000,0x200000);u.mem_map(0x2000000,0x100000);u.mem_map(0x3000000,0x1000)
 base,stack,stop=0x1000000,0x20fff00,0x3000000
-scenario,warhead,position,vtable,cells,objs,heap=(base+n for n in (0x1000,0x3000,0x5000,0x7000,0x10000,0x40000,0x100000))
+scenario,warhead,position,vtable,cells,objs,heap=(base+n for n in (0x1000,0x3000,0x5000,0x7000,0x10000,0x50000,0x100000))
 def w(p,n):u.mem_write(p,struct.pack('<I',n&0xffffffff))
 def read(p):return struct.unpack('<I',u.mem_read(p,4))[0]
 def signed(n):return n if n<0x80000000 else n-0x100000000
@@ -26,6 +27,9 @@ def ret(cpu,val,n=0):
  sp=cpu.reg_read(UC_X86_REG_ESP);cpu.reg_write(UC_X86_REG_EAX,val&0xffffffff);cpu.reg_write(UC_X86_REG_EIP,read(sp));cpu.reg_write(UC_X86_REG_ESP,sp+4+4*n)
 w(stack,stop);u.reg_write(UC_X86_REG_ESP,stack);u.emu_start(0x5441e0,stop,count=100000)
 assert list(struct.iter_unpack('<hh',u.mem_read(0xa6f248,36)))==[(0,0),(1,-1),(0,-1),(-1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)]
+header=Path(__file__).resolve().parents[1]/'sim'/'blast_offsets.h'
+offsets=[tuple(map(int,m)) for m in re.findall(r'\{\{(-?\d+),(-?\d+)\}\}',header.read_text())]
+assert offsets==list(struct.iter_unpack('<hh',u.mem_read(0xa6f248,309*4)))
 w(0xa3d290,scenario);w(0x850cd8,104);w(vtable+0x2c,stop+0x100);w(vtable+0xa0,stop+0x110);w(vtable+0x32c,stop+0x120)
 coords={};mapping={};allocated=heap;result=None
 
@@ -57,11 +61,11 @@ def nearby_float(value, delta):
  return struct.unpack('<f',struct.pack('<I',bits+delta))[0]
 for k in range(600):
  impact=(12800+rng.randrange(256),16640+rng.randrange(256),0)
- spread=rng.choice((0.,.3,.5,1.,1.1,1.5,2.,
-                    *(nearby_float(v,d) for v in (.01,1.01) for d in (-1,0,1))))
+ spread=rng.choice((0.,.3,.5,1.,1.1,1.5,2.,3.,4.,5.,6.,7.,8.,9.,10.,
+                    *(nearby_float(n+.01,d) for n in range(10) for d in (-1,0,1))))
  entries=[]
  for j in range(rng.randrange(0,12)):
-  limit=1 if spread<=.5 else 2
+  limit=1 if spread<=.5 else 10
   dx=rng.randrange(-limit,limit+1);dy=rng.randrange(-limit,limit+1);ident=objs+j*0x1000
   pos=(impact[0]+dx*256+rng.randrange(-120,121),impact[1]+dy*256+rng.randrange(-120,121),rng.randrange(-100,101))
   entries.append((ident,dx,dy,*pos,rng.randrange(2)))
@@ -73,9 +77,9 @@ lines=subprocess.check_output([sys.argv[1]],input=''.join(map(line,cases)),text=
 for case,line in zip(cases,lines):
  impact,spread,source,entries=case;cx,cy=impact[0]//256,impact[1]//256
  mapping={};coords={};allocated=heap;result=None
- for dy in range(-2,3):
-  for dx in range(-2,3):
-   cell=cells+((dy+2)*5+(dx+2))*0x1000;mapping[(cx+dx,cy+dy)]=cell
+ for dy in range(-10,11):
+  for dx in range(-10,11):
+   cell=cells+((dy+10)*21+(dx+10))*0x200;mapping[(cx+dx,cy+dy)]=cell
    w(cell+0x44,-1);w(cell+0x140,0);w(cell+0xe4,0)
  for ident,dx,dy,x,y,z,active in entries:
   cell=mapping[(cx+dx,cy+dy)];w(ident,vtable);w(ident+0x30,read(cell+0xe4));w(cell+0xe4,ident)
@@ -83,7 +87,7 @@ for case,line in zip(cases,lines):
  u.mem_write(warhead+0x124,struct.pack('<f',spread));u.mem_write(position,struct.pack('<iii',*impact))
  w(stack,stop);w(stack+4,source);w(stack+8,warhead);w(stack+12,1)
  u.reg_write(UC_X86_REG_ECX,position);u.reg_write(UC_X86_REG_EDX,90);u.reg_write(UC_X86_REG_ESP,stack);u.reg_write(UC_X86_REG_FPCW,0xe7f)
- u.emu_start(0x47e2c0,stop,count=100000)
+ u.emu_start(0x47e2c0,stop,count=500000)
  native=list(map(int,line.split()));assert result is not None and [len(result)//2,*result]==native,(case,result,native)
 assert len(lines)==len(cases)
 print(f'Base game.exe: {len(cases)} ordered ground area collections match')

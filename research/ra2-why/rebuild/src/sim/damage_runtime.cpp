@@ -72,6 +72,7 @@ WorldCollisionResult base_world_projectile_collision(
 }
 
 #include "fp.h"
+#include "blast_offsets.h"
 #include <array>
 #include <cmath>
 
@@ -85,7 +86,7 @@ AreaCollectionResult base_small_ground_area_candidates(
         world.random.first>=250 || world.random.second>=250 ||
         (world.random.first+103)%250!=world.random.second)
         return missing("base world setup or random state is incomplete");
-    if (!resolve || !std::isfinite(spread) || spread<0 || spread>2.0f)
+    if (!resolve || !std::isfinite(spread) || spread<0 || spread>10.0f)
         return missing("area inputs are outside the recovered small-spread slice");
     const auto cx=impact.x/256, cy=impact.y/256;
     if (cx<0 || cx>=512 || cy<0 || cy>=512)
@@ -98,12 +99,7 @@ AreaCollectionResult base_small_ground_area_candidates(
         return missing("aerial or bridge area collection is unresolved");
     // DAT_00A6F248 is initialized by 005441E0 in this order. Count is
     // DAT_007A5908[trunc(CellSpread + 0.99)].
-    constexpr std::array<std::array<int,2>,21> offsets{{
-        {{0,0}},{{1,-1}},{{0,-1}},{{-1,-1}},{{-1,0}},
-        {{1,0}},{{-1,1}},{{0,1}},{{1,1}},{{-1,-2}},{{0,-2}},{{1,-2}},
-        {{-2,-1}},{{2,-1}},{{-2,0}},{{2,0}},{{-2,1}},{{2,1}},
-        {{-1,2}},{{0,2}},{{1,2}}}};
-    constexpr std::array<unsigned,3> counts{{1,9,21}};
+    constexpr std::array<unsigned,11> counts{{1,9,21,37,61,89,121,161,205,253,309}};
     const auto count=counts.at(static_cast<std::size_t>(fp::add(static_cast<double>(spread),0.99)));
     std::map<std::uint32_t,const session::world::Entity*> entities;
     for (const auto& entity:world.entities)
@@ -112,7 +108,7 @@ AreaCollectionResult base_small_ground_area_candidates(
     if (source_id && !entities.count(source_id)) return missing("area source is unknown");
     std::vector<AreaCandidate> result;
     for (unsigned i=0;i<count;++i) {
-        const int x=cx+offsets[i][0], y=cy+offsets[i][1];
+        const int x=cx+base_blast_offsets[i][0], y=cy+base_blast_offsets[i][1];
         if (x<0 || x>=512 || y<0 || y>=512)
             return missing("area needs the original fallback cell");
         const auto cell=world.cells.find(static_cast<unsigned>(y*512+x));
