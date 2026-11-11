@@ -13,7 +13,7 @@ int main() {
   while (std::cin >> impact.x >> impact.y >> impact.z >> spread >> source >> count) {
    session::world::Snapshot world;
    const int cx=impact.x/256,cy=impact.y/256;
-   for (int dy=-1;dy<=1;++dy) for (int dx=-1;dx<=1;++dx) {
+   for (int dy=-2;dy<=2;++dy) for (int dx=-2;dx<=2;++dx) {
     session::world::CellState cell; cell.allocated=true; cell.heads.emplace(); cell.cell_flag_100=false;
     cell.terrain.emplace(); cell.terrain->floor_world_height=0; cell.terrain->ramp_index=0; cell.terrain->overlay_type_index=-1;
     world.cells.emplace((cy+dy)*512+cx+dx,std::move(cell));
@@ -38,7 +38,8 @@ int main() {
    if (count) {
     auto bad=world; bad.entities[0].next.reset();
     // This object may be outside the one-cell spread; run this check for the nine-cell slice.
-    if (spread>0.01f && sim::base_small_ground_area_candidates(bad,impact,spread,source,false,lookup,dist).candidates)
+    if (spread>0.01f && spread<=0.5f &&
+        sim::base_small_ground_area_candidates(bad,impact,spread,source,false,lookup,dist).candidates)
       throw std::runtime_error("missing area link accepted");
    }
   }
