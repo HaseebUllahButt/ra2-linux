@@ -234,7 +234,7 @@ private:
     // raw facing; a different shown facing restarts this state from it.
     // A Unit without a turret never rotates here: the 00704DF0 gate reads
     // the unrotated +2E0 hull facing (FUN_006FB890 turretless branch).
-    struct TurretAim { std::uint16_t current, direction; };
+    struct TurretAim { std::uint16_t current, direction; bool turning_before=false; };
     struct TurretState { BaseFacing facing; std::uint16_t written=0; };
     std::map<std::uint32_t,TurretState> turrets_;
     std::set<std::uint32_t> prone_; // Infantry +5C3 after a panic hit.

@@ -96,6 +96,7 @@ struct Entity {
     std::optional<double> veterancy; // Base Techno +118.
     std::optional<bool> veteran_firepower, elite_firepower, veteran_rof, elite_rof;
     std::optional<std::uint16_t> turret_facing_raw;
+    std::optional<bool> unit_turret_turning_599, techno_firing_57d;
     std::optional<std::int32_t> burst_index;
     std::optional<std::int32_t> techno_field_13c, techno_field_140, techno_field_144;
     std::optional<double> armor_multiplier; // Base Techno +120.

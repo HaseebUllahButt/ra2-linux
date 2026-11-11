@@ -211,9 +211,9 @@ void tank_test(const rules::IniFile& rules,const rules::IniFile& art,const std::
               a.entities[0].weapon_timer_start_frame==b.entities[0].weapon_timer_start_frame &&
               a.entities[0].weapon_timer_duration==b.entities[0].weapon_timer_duration,"replay state differs");
         same_rng(a.random,b.random);
-        if (frame<11) check(r.fired==0 && !a.random.first,"tank fired before its turret turned");
-        if (frame==11) {
-            check(r.fired==1 && a.entities[0].weapon_timer_start_frame==11 &&
+        if (frame<13) check(r.fired==0 && !a.random.first,"tank fired before its turret turned");
+        if (frame==13) {
+            check(r.fired==1 && a.entities[0].weapon_timer_start_frame==13 &&
                   a.entities[0].weapon_timer_duration==67,"real 120mm reload");
             same_rng(a.random,oracle.state());
         }
@@ -336,9 +336,9 @@ void yard_volley_test(const rules::IniFile& rules,const rules::IniFile& art,cons
         if (result.destroyed) { death=frame; break; }
     }
     // Base 004B8A30/004B8BE0 with HTNK ROT=5: the turret turns 1280 raw
-    // steps per frame from north to east and 00704C00 lets it fire within
-    // 2048 raw steps, at frame 11. Before turret turning it fired at frame 0.
-    check(first_shot==11 && first_impact==22 && death==417 && shots==21,"yard volley timing or shot count changed");
+    // steps per frame from north to east. The saved turning flag clears
+    // after frame 12, so firing starts at frame 13.
+    check(first_shot==13 && first_impact==24 && death==419 && shots==21,"yard volley timing or shot count changed");
     std::cout<<"Three HTNK against "<<yard<<" at four cells: first fire="<<first_shot<<" first impact="<<first_impact
              <<" yard death="<<death<<" shots="<<shots<<'\n';
 }
@@ -376,7 +376,7 @@ void idle_defense_test(const rules::IniFile& rules,const rules::IniFile& art,con
     // The turret starts north and the enemy is east: it turns first.
     unsigned defended=0;
     for (unsigned frame=1;frame<40 && !defended;++frame) if (guard.tick(tank,frame).fired) defended=frame;
-    check(defended==12,"idle tank did not defend after its turret turned");
+    check(defended==14,"idle tank did not defend after its turret turned");
 }
 // The flight mission fire gate (Part 3) blocks new shots only. Weapon
 // timing, damage and in-flight projectiles stay shared with the prototype.
@@ -751,14 +751,14 @@ void turret_turn_test(const rules::IniFile& rules,const rules::IniFile& art,cons
     // already shows 3 steps of turn (Current divides before it multiplies).
     const std::array<std::pair<unsigned,std::uint16_t>,4> expected{{{0,3},{6,8193},{10,13653},{11,15018}}};
     std::size_t next=0;
-    for (unsigned frame=0;frame<=12;++frame) {
+    for (unsigned frame=0;frame<=13;++frame) {
         const auto r=combat.tick(w,frame);
         check(r.unresolved.empty(),"turret test unresolved");
         if (next<expected.size() && expected[next].first==frame) {
             check(w.entities[0].turret_facing_raw==expected[next].second,"original turret interpolation");
             ++next;
         }
-        check(r.fired==(frame==11?1u:0u),"turret fired outside the original facing tolerance");
+        check(r.fired==(frame==13?1u:0u),"turret fired before the saved turning flag cleared");
     }
     check(w.entities[0].turret_facing_raw==16383 && w.entities[0].turret_facing==63,"turret did not finish the turn");
     // A turret already on target fires on the order frame.
@@ -766,6 +766,35 @@ void turret_turn_test(const rules::IniFile& rules,const rules::IniFile& art,cons
     ready.entities[0].turret_facing_raw=16384;
     sim::PrototypeCombatRuntime aligned(rules,map,art,exe);
     check(aligned.attack(ready,1,2) && aligned.tick(ready,0).fired==1,"aligned turret waited");
+    // +57D bypasses the saved-turning gate but not the angle check.
+    auto bypass=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400);
+    bypass.entities[0].techno_firing_57d=true;
+    sim::PrototypeCombatRuntime special(rules,map,art,exe);
+    check(special.attack(bypass,1,2),"turning bypass attack rejected");
+    for (unsigned frame=0;frame<=11;++frame)
+        check(special.tick(bypass,frame).fired==(frame==11?1u:0u),"+57D turning bypass changed");
+    rules::IniFile guided_mode;guided_mode.parse("[Cannon]\nROT=1\n");
+    auto guided=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400);
+    sim::PrototypeCombatRuntime guided_fire(rules,guided_mode,art,exe);
+    check(guided_fire.attack(guided,1,2),"guided attack rejected");
+    bool guided_shot=false;
+    for (unsigned frame=0;frame<=11 && !guided_shot;++frame) {
+        const auto result=guided_fire.tick(guided,frame);
+        if (result.fired) {
+            check(guided.entities[0].unit_turret_turning_599.value_or(false),
+                  "guided shot waited for the turning flag");
+            guided_shot=true;
+        }
+    }
+    check(guided_shot,"guided shot did not bypass the turning gate");
+    // While +599 is set, 006FB890 finishes the old turn before retargeting.
+    auto moving=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400);
+    sim::PrototypeCombatRuntime tracking(rules,map,art,exe);
+    check(tracking.attack(moving,1,2),"moving target attack rejected");
+    tracking.tick(moving,0);
+    moving.entities[1].position=sim::Coord{50*256+128,54*256+128,0};
+    tracking.tick(moving,1);
+    check(moving.entities[0].turret_facing_raw==1368,"turret changed direction while turning");
 }
 // Hull fire gate for a Unit without a turret (FUN_006FB890 turretless
 // branch, 006FB92F..006FB989): the 00704DF0 gate reads the unrotated +2E0
@@ -823,6 +852,13 @@ void turretless_hull_test(const rules::IniFile& rules,const rules::IniFile& art,
     check(spinner.attack(spin,1,2),"spinning attack rejected");
     check(spinner.tick(spin,0).fired==0,"spinning turret ignored the gate");
     check(spin.entities[0].turret_facing_raw==2048,"spinning turret did not advance by 8 steps");
+    // Firing reads the old facing before the spinning update advances it.
+    auto spin_ready=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400);
+    spin_ready.entities[0].turret_facing_raw=16384;
+    rules::IniFile spin_ready_mode;spin_ready_mode.parse("[HTNK]\nTurretSpins=yes\n[Cannon]\nROT=0\n");
+    sim::PrototypeCombatRuntime spin_first(rules,spin_ready_mode,art,exe);
+    check(spin_first.attack(spin_ready,1,2) && spin_first.tick(spin_ready,0).fired==1,
+          "spinning turret used the next frame facing to fire");
     // An OmniFire weapon (+107) skips the 00704DF0 facing gate.
     auto omni=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400);
     omni.entities[1].position=sim::Coord{51*256+128,50*256+128,0};
@@ -835,6 +871,12 @@ void turretless_hull_test(const rules::IniFile& rules,const rules::IniFile& art,
     for (int frame=1;frame<=5;++frame) omni_fire.tick(omni,frame);
     check(omni.entities[0].turret_facing_raw==0,
           "OmniFire turned the turret toward the target");
+    auto omni_turn=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400);
+    omni_turn.entities[0].unit_turret_turning_599=true;
+    sim::PrototypeCombatRuntime omni_gated(rules,omnimode,art,exe);
+    check(omni_gated.attack(omni_turn,1,2) && omni_gated.tick(omni_turn,0).fired==0,
+          "OmniFire bypassed the earlier turning gate");
+    check(omni_gated.tick(omni_turn,1).fired==1,"OmniFire did not fire after turning cleared");
     // A spinning OmniFire turret still advances by 8 steps every tick
     // (006FB9B1..006FB9CB), independent of the OmniFire aim skip.
     auto spin_omni=make_world("DRON","E1",world::Kind::Unit,world::Kind::Infantry,300,100);

@@ -671,6 +671,9 @@ std::optional<PrototypeCombatRuntime::TurretAim> PrototypeCombatRuntime::turret_
     // destination (006FB98E) are not reproduced here.
     if (source.kind!=session::world::Kind::Unit ||
         !source.position || !target.position) return {};
+    // TODO-ORIGINAL: restore +599 and +57D when loading saved actors. The
+    // prototype starts with both clear, as in the measured fresh tanks.
+    const bool turning_before=source.unit_turret_turning_599.value_or(false);
     const auto dx=static_cast<long long>(target.position->x)-source.position->x;
     const auto dy=static_cast<long long>(target.position->y)-source.position->y;
     if (std::abs(dx)>100000 || std::abs(dy)>100000 || (!dx && !dy)) return {};
@@ -683,7 +686,8 @@ std::optional<PrototypeCombatRuntime::TurretAim> PrototypeCombatRuntime::turret_
         // the target direction, so driving and aim rotation stay with the
         // locomotor and no rotation state is needed here.
         const auto hull=source.hull_facing_raw.value_or(0);
-        return TurretAim{hull,direction};
+        source.unit_turret_turning_599=false;
+        return TurretAim{hull,direction,turning_before};
     }
     // Turret aim. Base 006FA5AD: the turret ROT is the Techno type ROT
     // (+638). A TurretSpins turret never aims; FUN_006fb890 instead advances
@@ -697,7 +701,7 @@ std::optional<PrototypeCombatRuntime::TurretAim> PrototypeCombatRuntime::turret_
         const auto q=static_cast<std::uint16_t>(((shown>>7)+1)/2&0xff)+8;
         const auto spun=static_cast<std::uint16_t>(q*0x100);
         source.turret_facing_raw=spun;
-        return TurretAim{spun,direction};
+        return TurretAim{shown,direction,turning_before};
     }
     // Base 006FA5AD: Set_Desired(direction) on the +2F8 FacingClass.
     const auto rot=base_facing_rot(prototype_int(base_,map_,source.type,"ROT").value_or(0));
@@ -707,11 +711,13 @@ std::optional<PrototypeCombatRuntime::TurretAim> PrototypeCombatRuntime::turret_
         state=turrets_.insert_or_assign(source.id,fresh).first;
     }
     auto& facing=state->second.facing;
-    if (!omni_fire) base_facing_set_desired(facing,direction,frame);
+    const auto current_before=base_facing_current(facing,frame);
+    if (!omni_fire && !turning_before) base_facing_set_desired(facing,direction,frame);
     const auto current=base_facing_current(facing,frame);
     state->second.written=current;
+    source.unit_turret_turning_599=base_facing_rotating(facing,frame);
     source.turret_facing_raw=current;source.turret_facing=static_cast<int>(current>>8);
-    return TurretAim{current,direction};
+    return TurretAim{current_before,direction,turning_before};
 }
 
 bool PrototypeCombatRuntime::attack(session::world::Snapshot& world,std::uint32_t source_id,std::uint32_t target_id) {
@@ -1064,6 +1070,10 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             const weapons::FireTimer timer{source->weapon_timer_start_frame.value_or(-1),
                                            source->weapon_timer_duration.value_or(0)};
             if (!weapons::base_fire_timer_ready(timer,static_cast<int>(frame))) {++it;continue;}
+            // Unit CanFire 00704DBD: firing reads the previous aim update's
+            // +599 before 006FB890 refreshes it later in this frame.
+            if (aim && !source->techno_firing_57d.value_or(false) &&
+                aim->turning_before && !weapon->projectile_rot) {++it;continue;}
             // Base 00704DF0..00704E8E: FIRE_FACING until the aiming facing is
             // close enough. That facing is the turret for a turreted Unit and
             // the hull for a Unit without one, as in RA1 UnitClass::Can_Fire.

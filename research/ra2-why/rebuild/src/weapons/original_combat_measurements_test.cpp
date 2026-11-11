@@ -98,7 +98,7 @@ void check_no_retaliation(const sim::PrototypeCombatTick& result,
 }
 // Measured duel: run one attacker against one same-type victim at the
 // measured distance and record the frames of every damage event.
-struct Duel {std::vector<unsigned> damage;std::vector<int> per_hit;unsigned kill=0;};
+struct Duel {std::vector<unsigned> shots,damage;std::vector<int> per_hit;unsigned kill=0;};
 Duel duel(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe,
           const char* shooter,world::Kind shooter_kind,const char* victim,world::Kind victim_kind,
           int cells,int target_hp) {
@@ -129,8 +129,11 @@ Duel duel(const rules::IniFile& rules,const rules::IniFile& art,const std::strin
         const auto r=combat.tick(w,frame);
         if (!r.unresolved.empty()) throw std::runtime_error(r.unresolved.front());
         check_no_retaliation(r,w,2);
-        for (const auto& e:r.events) if (e.kind==sim::PrototypeCombatEventKind::Damage && e.hp_after<e.hp_before) {
-            d.damage.push_back(frame);d.per_hit.push_back(e.hp_before-e.hp_after);
+        for (const auto& e:r.events) {
+            if (e.kind==sim::PrototypeCombatEventKind::Shot && e.source_id==1) d.shots.push_back(frame);
+            if (e.kind==sim::PrototypeCombatEventKind::Damage && e.hp_after<e.hp_before) {
+                d.damage.push_back(frame);d.per_hit.push_back(e.hp_before-e.hp_after);
+            }
         }
         if (r.destroyed) {d.kill=frame;break;}
     }
@@ -147,6 +150,9 @@ void tank_duel_test(const rules::IniFile& rules,const rules::IniFile& art,const 
     std::cout<<"Grizzly->Grizzly: hits="<<grizzly.damage.size()<<" gap="<<gap(grizzly.damage)
              <<" frames kill="<<grizzly.kill<<"\n";
     check(grizzly.damage.size()==5,"Grizzly needed a different hit count than the measured 5");
+    std::cout<<"Grizzly first shot="<<grizzly.shots.front()<<" first hit="<<grizzly.damage.front()<<"\n";
+    // Original completed boundary 14 follows native update 13.
+    check(grizzly.shots.front()==13,"Grizzly first shot differs from the controlled original");
     check(gap(grizzly.damage)>=58 && gap(grizzly.damage)<=64,"Grizzly reload differs from the measured 2.95 s");
     // Measured kill 13.0 s from the order (first hit 1.3 s); 40 ms bar
     // sampling bounds the fall to about 263-277 frames.
@@ -157,6 +163,8 @@ void tank_duel_test(const rules::IniFile& rules,const rules::IniFile& art,const 
     std::cout<<"Rhino->Rhino: hits="<<rhino.damage.size()<<" gap="<<gap(rhino.damage)
              <<" frames kill="<<rhino.kill<<"\n";
     check(rhino.damage.size()==5,"Rhino needed a different hit count than the measured 5");
+    std::cout<<"Rhino first shot="<<rhino.shots.front()<<" first hit="<<rhino.damage.front()<<"\n";
+    check(rhino.shots.front()==13,"Rhino first shot differs from the controlled original");
     check(gap(rhino.damage)>=63 && gap(rhino.damage)<=69,"Rhino reload differs from the measured 3.19 s");
     // Measured kill 14.1 s from the order (first hit 1.3 s); sampling
     // bounds the fall to about 285-299 frames.
