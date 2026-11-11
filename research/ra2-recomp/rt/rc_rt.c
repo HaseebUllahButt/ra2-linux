@@ -47,7 +47,9 @@ static void load_off_env(void)
 }
 void (*rc_lookup(u32 a))(void)
 {
-    if (!off_init) load_off_env();
+#ifndef _WIN32
+    if (!off_init) load_off_env();      /* Windows: rc_win.c sets the on/off map */
+#endif
     int i = rc_find(a);
     if (i < 0 || (fn_off && fn_off[i])) return 0;
     return rc_table[i].fn;
