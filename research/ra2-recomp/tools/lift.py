@@ -1050,7 +1050,7 @@ def lift(img, md, entry, entries):
     em = Emitter(f)
     lines = ['#include "rc.h"', 'void f_%08x(void)' % entry, '{', '    LOADREGS;', '    goto L_%08x;' % entry]
     for a in sorted(set(f.insns) | set(f.bad)):
-        if a in f.targets or a == entry:
+        if a in f.targets or a == entry or a in f.bad:
             lines.append('L_%08x: ;' % a)
         if a in f.bad:
             if f.bad[a].startswith('falls into next function'):
@@ -1072,7 +1072,8 @@ def lift(img, md, entry, entries):
         # an instruction that does not continue to the next one (no-return call, trap)
         nxt = a + ins.size
         m = ins.mnemonic
-        if m not in ('jmp', 'ret', 'int3', 'hlt', 'ud2') and nxt not in f.succ.get(a, []):
+        if m not in ('jmp', 'ret', 'int3', 'hlt', 'ud2') and nxt not in f.succ.get(a, []) and \
+           not f.bad.get(nxt, '').startswith('falls into next function'):
             lines.append('    rc_unreachable(0x%08xu);' % nxt)
     lines.append('}')
     # check: every fall-through goes to the next emitted address
