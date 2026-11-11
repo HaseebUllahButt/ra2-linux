@@ -711,9 +711,9 @@ build/super_weapon_option_test: build/native/src/sim/test_super_weapon_option.o 
 	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
 
 build/prototype_combat_test: build/native/src/weapons/prototype_combat_test.o $(PROTOTYPE_TEST_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
 
 build/damage_invulnerability_test: build/native/src/sim/test_damage_invulnerability.o $(PROTOTYPE_TEST_OBJECTS)
-	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
 	$(CXX) $(CXXFLAGS) $^ $(SDL_FLAGS) -ldl -o $@
 
 build/prototype_victory_test: build/native/src/sim/test_prototype_victory.o build/native/src/sim/prototype_victory.o
