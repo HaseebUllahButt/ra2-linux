@@ -1,0 +1,512 @@
+[
+  {
+    "name": "grizzly-1",
+    "base_frame": 2560,
+    "first_shot": 14,
+    "first_hit": 24,
+    "kill": 269,
+    "shots": [
+      {
+        "frame": 14,
+        "stored_start_relative": 13,
+        "duration": 62
+      },
+      {
+        "frame": 76,
+        "stored_start_relative": 75,
+        "duration": 61
+      },
+      {
+        "frame": 137,
+        "stored_start_relative": 136,
+        "duration": 62
+      },
+      {
+        "frame": 199,
+        "stored_start_relative": 198,
+        "duration": 60
+      },
+      {
+        "frame": 259,
+        "stored_start_relative": 258,
+        "duration": 61
+      }
+    ],
+    "hits": [
+      {
+        "frame": 24,
+        "damage": 65,
+        "hp": 235
+      },
+      {
+        "frame": 86,
+        "damage": 65,
+        "hp": 170
+      },
+      {
+        "frame": 147,
+        "damage": 65,
+        "hp": 105
+      },
+      {
+        "frame": 209,
+        "damage": 65,
+        "hp": 40
+      },
+      {
+        "frame": 269,
+        "damage": 40,
+        "hp": 0
+      }
+    ],
+    "shot_gaps": [
+      62,
+      61,
+      62,
+      60
+    ],
+    "impact_delays": [
+      10,
+      10,
+      10,
+      10,
+      10
+    ],
+    "shooter_xyz": [
+      22144,
+      16768,
+      208
+    ],
+    "target_xyz": [
+      23168,
+      16768,
+      208
+    ],
+    "frames": 270
+  },
+  {
+    "name": "grizzly-2",
+    "base_frame": 2830,
+    "first_shot": 14,
+    "first_hit": 24,
+    "kill": 265,
+    "shots": [
+      {
+        "frame": 14,
+        "stored_start_relative": 13,
+        "duration": 61
+      },
+      {
+        "frame": 75,
+        "stored_start_relative": 74,
+        "duration": 60
+      },
+      {
+        "frame": 135,
+        "stored_start_relative": 134,
+        "duration": 60
+      },
+      {
+        "frame": 195,
+        "stored_start_relative": 194,
+        "duration": 60
+      },
+      {
+        "frame": 255,
+        "stored_start_relative": 254,
+        "duration": 62
+      }
+    ],
+    "hits": [
+      {
+        "frame": 24,
+        "damage": 65,
+        "hp": 235
+      },
+      {
+        "frame": 85,
+        "damage": 65,
+        "hp": 170
+      },
+      {
+        "frame": 145,
+        "damage": 65,
+        "hp": 105
+      },
+      {
+        "frame": 205,
+        "damage": 65,
+        "hp": 40
+      },
+      {
+        "frame": 265,
+        "damage": 40,
+        "hp": 0
+      }
+    ],
+    "shot_gaps": [
+      61,
+      60,
+      60,
+      60
+    ],
+    "impact_delays": [
+      10,
+      10,
+      10,
+      10,
+      10
+    ],
+    "shooter_xyz": [
+      22144,
+      16768,
+      208
+    ],
+    "target_xyz": [
+      23168,
+      16768,
+      208
+    ],
+    "frames": 266
+  },
+  {
+    "name": "grizzly-3",
+    "base_frame": 3096,
+    "first_shot": 14,
+    "first_hit": 24,
+    "kill": 270,
+    "shots": [
+      {
+        "frame": 14,
+        "stored_start_relative": 13,
+        "duration": 60
+      },
+      {
+        "frame": 74,
+        "stored_start_relative": 73,
+        "duration": 62
+      },
+      {
+        "frame": 136,
+        "stored_start_relative": 135,
+        "duration": 62
+      },
+      {
+        "frame": 198,
+        "stored_start_relative": 197,
+        "duration": 62
+      },
+      {
+        "frame": 260,
+        "stored_start_relative": 259,
+        "duration": 62
+      }
+    ],
+    "hits": [
+      {
+        "frame": 24,
+        "damage": 65,
+        "hp": 235
+      },
+      {
+        "frame": 84,
+        "damage": 65,
+        "hp": 170
+      },
+      {
+        "frame": 146,
+        "damage": 65,
+        "hp": 105
+      },
+      {
+        "frame": 208,
+        "damage": 65,
+        "hp": 40
+      },
+      {
+        "frame": 270,
+        "damage": 40,
+        "hp": 0
+      }
+    ],
+    "shot_gaps": [
+      60,
+      62,
+      62,
+      62
+    ],
+    "impact_delays": [
+      10,
+      10,
+      10,
+      10,
+      10
+    ],
+    "shooter_xyz": [
+      22144,
+      16768,
+      208
+    ],
+    "target_xyz": [
+      23168,
+      16768,
+      208
+    ],
+    "frames": 271
+  },
+  {
+    "name": "rhino-1",
+    "base_frame": 3367,
+    "first_shot": 14,
+    "first_hit": 24,
+    "kill": 288,
+    "shots": [
+      {
+        "frame": 14,
+        "stored_start_relative": 13,
+        "duration": 66
+      },
+      {
+        "frame": 80,
+        "stored_start_relative": 79,
+        "duration": 66
+      },
+      {
+        "frame": 146,
+        "stored_start_relative": 145,
+        "duration": 67
+      },
+      {
+        "frame": 213,
+        "stored_start_relative": 212,
+        "duration": 65
+      },
+      {
+        "frame": 278,
+        "stored_start_relative": 277,
+        "duration": 67
+      }
+    ],
+    "hits": [
+      {
+        "frame": 24,
+        "damage": 90,
+        "hp": 310
+      },
+      {
+        "frame": 90,
+        "damage": 90,
+        "hp": 220
+      },
+      {
+        "frame": 156,
+        "damage": 90,
+        "hp": 130
+      },
+      {
+        "frame": 223,
+        "damage": 90,
+        "hp": 40
+      },
+      {
+        "frame": 288,
+        "damage": 40,
+        "hp": 0
+      }
+    ],
+    "shot_gaps": [
+      66,
+      66,
+      67,
+      65
+    ],
+    "impact_delays": [
+      10,
+      10,
+      10,
+      10,
+      10
+    ],
+    "shooter_xyz": [
+      22144,
+      16768,
+      208
+    ],
+    "target_xyz": [
+      23168,
+      16768,
+      208
+    ],
+    "frames": 289
+  },
+  {
+    "name": "rhino-2",
+    "base_frame": 3656,
+    "first_shot": 15,
+    "first_hit": 25,
+    "kill": 289,
+    "shots": [
+      {
+        "frame": 15,
+        "stored_start_relative": 14,
+        "duration": 67
+      },
+      {
+        "frame": 82,
+        "stored_start_relative": 81,
+        "duration": 65
+      },
+      {
+        "frame": 147,
+        "stored_start_relative": 146,
+        "duration": 67
+      },
+      {
+        "frame": 214,
+        "stored_start_relative": 213,
+        "duration": 65
+      },
+      {
+        "frame": 279,
+        "stored_start_relative": 278,
+        "duration": 67
+      }
+    ],
+    "hits": [
+      {
+        "frame": 25,
+        "damage": 90,
+        "hp": 310
+      },
+      {
+        "frame": 92,
+        "damage": 90,
+        "hp": 220
+      },
+      {
+        "frame": 157,
+        "damage": 90,
+        "hp": 130
+      },
+      {
+        "frame": 224,
+        "damage": 90,
+        "hp": 40
+      },
+      {
+        "frame": 289,
+        "damage": 40,
+        "hp": 0
+      }
+    ],
+    "shot_gaps": [
+      67,
+      65,
+      67,
+      65
+    ],
+    "impact_delays": [
+      10,
+      10,
+      10,
+      10,
+      10
+    ],
+    "shooter_xyz": [
+      22144,
+      16768,
+      208
+    ],
+    "target_xyz": [
+      23168,
+      16768,
+      208
+    ],
+    "frames": 290
+  },
+  {
+    "name": "rhino-3",
+    "base_frame": 3946,
+    "first_shot": 15,
+    "first_hit": 25,
+    "kill": 287,
+    "shots": [
+      {
+        "frame": 15,
+        "stored_start_relative": 14,
+        "duration": 65
+      },
+      {
+        "frame": 80,
+        "stored_start_relative": 79,
+        "duration": 65
+      },
+      {
+        "frame": 145,
+        "stored_start_relative": 144,
+        "duration": 66
+      },
+      {
+        "frame": 211,
+        "stored_start_relative": 210,
+        "duration": 66
+      },
+      {
+        "frame": 277,
+        "stored_start_relative": 276,
+        "duration": 67
+      }
+    ],
+    "hits": [
+      {
+        "frame": 25,
+        "damage": 90,
+        "hp": 310
+      },
+      {
+        "frame": 90,
+        "damage": 90,
+        "hp": 220
+      },
+      {
+        "frame": 155,
+        "damage": 90,
+        "hp": 130
+      },
+      {
+        "frame": 221,
+        "damage": 90,
+        "hp": 40
+      },
+      {
+        "frame": 287,
+        "damage": 40,
+        "hp": 0
+      }
+    ],
+    "shot_gaps": [
+      65,
+      65,
+      66,
+      66
+    ],
+    "impact_delays": [
+      10,
+      10,
+      10,
+      10,
+      10
+    ],
+    "shooter_xyz": [
+      22144,
+      16768,
+      208
+    ],
+    "target_xyz": [
+      23168,
+      16768,
+      208
+    ],
+    "frames": 288
+  }
+]
