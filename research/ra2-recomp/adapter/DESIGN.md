@@ -105,3 +105,34 @@ Acceptance: our save loads in the original, and an original save loads with our 
 
 Reference checkouts stay ignored under `.reference/`. They are not shipped.
 No distribution licence is selected for the new adapter code yet.
+
+## Measured Windows progress, 2026-11-12
+
+The compiler is `../tools/wcc`, supplied by the translation lead.
+SDL2 Windows x86 version 2.30.12 builds and loads with the DLL under Wine.
+The build must select `libSDL2.dll.a` explicitly. Zig otherwise selects the static archive and lacks its system dependencies.
+The synthetic Windows test passes COM identity, lifetime, mode, surface, lock, fill, copy, color-key, palette, and flip-chain checks.
+A first original-game probe stopped at CreateClipper. Basic clipper state is now implemented.
+A second probe stopped at fullscreen clipper use at game caller 0x004ab6eb.
+The wrapper now accepts the matching exclusive window as the full-surface clip region.
+Windowed clipping still stops explicitly.
+The next original-game probe reached the intro with no unsupported call before its time limit.
+The owner saw a wrapped movie image on the desktop. All later game tests use a hidden Xvfb display and a private prefix.
+All test runs disable Wine audio drivers and select SDL dummy audio. Sound tests must write output to a file.
+
+The game passes ClientToScreen coordinates to BinkCopyToBuffer.
+A stored display size alone leaves the original window at a desktop offset.
+The exclusive-mode wrapper now places the game window at 0,0 and sets its client size through SDL.
+A Windows test starts the window at 120,80, then proves origin 0,0 and client size 640x480 after SetDisplayMode.
+The test also presents a primary surface on the hidden display.
+This fixes the measured coordinate prerequisite. The 20-frame acceptance check remains open.
+
+OpenTS read-only reference: https://github.com/OpenTS-Developers/OpenTS
+Reference commit: ba3c6c560e7dccb7eb2147431f542c43fe4e2352.
+Its LICENSE.md states GPL-3.0-or-later, with EA Section 7 terms for marked derived files.
+Its DSurface currently uses GDI-backed buffers and fixed RGB565. Its SDL window code uses SDL3.
+Use those files to find names and layouts. Check each against RA2 before reuse.
+No OpenTS implementation is copied into this adapter.
+The hidden 55-second probe reached a movie frame. Private captures show a coherent centered image without the earlier wrap.
+The process reached the probe time limit with no unsupported-method log.
+This is a visual check, not a Wine pixel-equality result.

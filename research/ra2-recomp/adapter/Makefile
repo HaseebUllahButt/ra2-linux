@@ -23,3 +23,20 @@ test: build/test_surface build/test_present
 	SDL_VIDEODRIVER=dummy ./build/test_present
 clean:
 	rm -rf build
+
+WCC ?= ../tools/wcc
+SDL_WIN ?= $(firstword $(wildcard .reference/SDL2-*/i686-w64-mingw32))
+.PHONY: windows
+windows: build/ddraw.dll build/test_ddraw.exe
+build/ddraw.dll: src/windows/ddraw.c src/windows/ddraw_slots.inc src/windows/ddraw.def src/surface.c src/present_sdl.c | build
+	$(WCC) -O2 -g -std=c11 -Wall -Wextra -Werror -Wno-unused-parameter -Iinclude -I$(SDL_WIN)/include/SDL2 -shared src/windows/ddraw.c src/surface.c src/present_sdl.c src/windows/ddraw.def $(SDL_WIN)/lib/libSDL2.dll.a -o $@
+	cp $(SDL_WIN)/bin/SDL2.dll build/SDL2.dll
+build/test_ddraw.exe: tests/test_ddraw.c | build
+	$(WCC) -O2 -g -std=c11 -Wall -Wextra -Werror $< -o $@
+
+.PHONY: test-tools
+test-tools:
+	python3 tests/test_compare_frames.py
+
+build/test_display.exe: tests/test_display.c | build
+	$(WCC) -O2 -g -std=c11 -Wall -Wextra -Werror $< -luser32 -o $@
