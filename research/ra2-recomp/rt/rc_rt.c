@@ -25,6 +25,7 @@ void rc_native_asm(RCAux *a);          /* bridge.S */
  * NULL = not lifted, or switched off (run the original code). */
 static u32 RC_TEXT_LO, RC_TEXT_HI;       /* lowest and highest lifted address + 1 */
 static void (**rc_fp)(void);
+void (**rc_fpv)(void); u32 rc_fp_lo, rc_fp_n;   /* same map, for RC_CALLD in lifted code */
 int rc_find(u32 a)
 {
     int lo = 0, hi = rc_table_n - 1;
@@ -46,7 +47,7 @@ static void fp_init(void)
     if (!t) { fprintf(stderr, "[rc] no memory for the function map\n"); abort(); }
     for (int i = 0; i < rc_table_n; i++)
         if (rc_table[i].addr - RC_TEXT_LO < RC_TEXT_HI - RC_TEXT_LO) t[rc_table[i].addr - RC_TEXT_LO] = rc_table[i].fn;
-    rc_fp = t;
+    rc_fp = t; rc_fpv = t; rc_fp_lo = RC_TEXT_LO; rc_fp_n = RC_TEXT_HI - RC_TEXT_LO;
 }
 void rc_set_off(int idx, int off)
 {

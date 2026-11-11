@@ -346,7 +346,7 @@ class Emitter:
         if t in f.insns or t in f.bad:
             return 'goto %s;' % self.lab(t)
         # tail call to another function
-        return '{ SAVE; rc_call(0x%08xu); return; }' % t
+        return '{ SAVE; RC_CALLD(0x%08xu); return; }' % t
 
     # ---- instructions ----
     def emit(self, ins):
@@ -539,7 +539,7 @@ class Emitter:
             op = ops[0]
             if op.type == X86_OP_IMM:
                 t = op.imm & 0xffffffff
-                self.e('esp -= 4; M32(esp) = 0x%08xu; SAVE; rc_call(0x%08xu); LOAD;%s' % (nxt, t, ' FLAGS_FROM_R;' if t in FLAGRET else ''))
+                self.e('esp -= 4; M32(esp) = 0x%08xu; SAVE; RC_CALLD(0x%08xu); LOAD;%s' % (nxt, t, ' FLAGS_FROM_R;' if t in FLAGRET else ''))
             else:
                 self.e('{ u32 t = %s; esp -= 4; M32(esp) = 0x%08xu; SAVE; rc_call(t); LOAD; }' % (self.rd(op), nxt))
         elif m == 'ret':
