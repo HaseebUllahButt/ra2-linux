@@ -51,7 +51,7 @@ Do not infer a surface interface from a slot offset alone.
 
 Own surface pixels in C memory. Preserve the game's bit depth, masks, aligned pitch, and palette.
 Expose the same memory through Lock. Keep drawing exact before uploading an RGBA display buffer.
-Use SDL_CreateWindowFrom for the original game window. Do not drain its Windows message queue.
+Use SDL_CreateWindowFrom for the original game window. Pump its native window messages through SDL after each presented frame.
 Implement each confirmed interface with its exact argument list. Do not share incompatible vtables between versions.
 Track references for surfaces, attached back buffers, palettes, and clippers.
 Implement fill, copy, source/destination color keys, overlap, and nearest-neighbor scaling in C.
@@ -148,3 +148,14 @@ Wine rounds each channel to the nearest 8-bit value. The first core rounded down
 The core now rounds to the nearest value. A regression checks red values 3/31 and 4/31 against Wine values 25 and 33.
 This synthetic comparison does not replace the 20 replay-frame skirmish gate.
 The corrected capture passes: all 65536 RGB565 colors match Wine across 786432 displayed pixels.
+
+## Recorder finding: window message dispatch
+
+The recorder reports that the existing DirectDraw replacement pumps window messages.
+The game does not call PeekMessage itself in the observed path.
+The SDL presenter now calls SDL_PumpEvents after presenting each frame.
+This dispatches native window messages while preserving the original game window procedure.
+Keyboard and mouse behavior in a skirmish still needs the recorder check.
+J4 import reports are pending. COM method traces follow J4, and replay frames need the J8 shim.
+
+The hidden Windows regression passes: one posted native window message reaches the original window procedure during presentation.

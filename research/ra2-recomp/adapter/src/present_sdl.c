@@ -61,5 +61,9 @@ int ra_present_frame(ra_present *p, const ra_surface *s)
         SDL_RenderClear(p->renderer) || SDL_RenderCopy(p->renderer,p->texture,NULL,NULL)) {
         fprintf(stderr,"adapter: SDL present: %s\n",SDL_GetError()); return RA_UNSUPPORTED;
     }
-    SDL_RenderPresent(p->renderer); return RA_OK;
+    SDL_RenderPresent(p->renderer);
+    /* The original game relies on DirectDraw to dispatch its window messages.
+       SDL dispatches native messages for the borrowed game window here. */
+    SDL_PumpEvents();
+    return RA_OK;
 }

@@ -5,6 +5,12 @@
 #undef NDEBUG
 #include <assert.h>
 #include <stdio.h>
+static unsigned message_count;
+static LRESULT CALLBACK test_window_proc(HWND window,UINT message,WPARAM wparam,LPARAM lparam)
+{
+    if (message==WM_APP+7) { message_count++; return 0; }
+    return DefWindowProcA(window,message,wparam,lparam);
+}
 int main(void)
 {
     HMODULE module=LoadLibraryA(".\\ddraw.dll");
@@ -14,7 +20,7 @@ int main(void)
     DDSURFACEDESC desc={0};
     DDBLTFX fx={0};
     WNDCLASSA wc={0};
-    wc.lpfnWndProc=DefWindowProcA; wc.hInstance=GetModuleHandleA(NULL); wc.lpszClassName="AdapterDisplayTest";
+    wc.lpfnWndProc=test_window_proc; wc.hInstance=GetModuleHandleA(NULL); wc.lpszClassName="AdapterDisplayTest";
     assert(RegisterClassA(&wc));
     HWND window=CreateWindowA(wc.lpszClassName,"Adapter display test",WS_POPUP|WS_VISIBLE,120,80,640,480,NULL,NULL,wc.hInstance,NULL);
     assert(window && module);
@@ -29,11 +35,13 @@ int main(void)
     assert(origin.x==0 && origin.y==0 && client.right==640 && client.bottom==480);
     desc.dwSize=sizeof(desc); desc.dwFlags=DDSD_CAPS; desc.ddsCaps.dwCaps=DDSCAPS_PRIMARYSURFACE;
     assert(IDirectDraw_CreateSurface(draw,&desc,&primary,NULL)==DD_OK);
+    assert(PostMessageA(window,WM_APP+7,0,0));
     fx.dwSize=sizeof(fx); fx.dwFillColor=0xf800;
     assert(IDirectDrawSurface_Blt(primary,NULL,NULL,NULL,DDBLT_COLORFILL,&fx)==DD_OK);
+    assert(message_count==1);
     assert(IDirectDrawSurface_Release(primary)==0);
     assert(IDirectDraw_Release(draw)==0);
     DestroyWindow(window); FreeLibrary(module);
-    puts("PASS: exclusive window origin, client size, and primary presentation");
+    puts("PASS: exclusive window origin, client size, primary presentation, and native message dispatch");
     return 0;
 }
