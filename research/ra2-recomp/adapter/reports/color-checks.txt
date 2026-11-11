@@ -1,0 +1,1 @@
+PASS: all 65536 RGB565 colors match Wine across 786432 pixels

@@ -52,6 +52,11 @@ static void formats(void)
     assert(ra_surface_fill(&s,NULL,0xf800)==RA_OK);
     assert(ra_surface_rgba(&s,out,12)==RA_OK);
     assert(memcmp(out,"\xff\0\0\xff",4)==0);
+    /* Wine's UNORM display conversion rounds to the nearest 8-bit value. */
+    assert(ra_surface_fill(&s,NULL,3u<<11)==RA_OK);
+    assert(ra_surface_rgba(&s,out,12)==RA_OK && out[0]==25);
+    assert(ra_surface_fill(&s,NULL,4u<<11)==RA_OK);
+    assert(ra_surface_rgba(&s,out,12)==RA_OK && out[0]==33);
     s.red_mask=0x7c00; s.green_mask=0x03e0;
     assert(ra_surface_fill(&s,NULL,0x03e0)==RA_OK);
     assert(ra_surface_rgba(&s,out,12)==RA_OK);

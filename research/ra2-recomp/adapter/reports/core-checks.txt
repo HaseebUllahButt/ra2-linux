@@ -1,5 +1,4 @@
 make: Entering directory '/path/to/user/Projects/ra2/ra2-recomp/adapter'
-make: Nothing to be done for 'all'.
 ./build/test_surface
 PASS: copy, clipping, stretch, keys, overlap, pitch, palette, RGB565, RGB555, BGR24, BGR32
 SDL_VIDEODRIVER=dummy ./build/test_present

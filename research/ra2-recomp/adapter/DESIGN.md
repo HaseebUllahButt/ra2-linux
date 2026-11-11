@@ -1,6 +1,6 @@
 # Windows parts adapter
 
-Status: J10 core works on Linux. The game acceptance checks have not run.
+Status: the Linux core and Windows DirectDraw DLL pass basic tests. J10 game acceptance remains open.
 
 ## Layout and build rules
 
@@ -103,7 +103,7 @@ Acceptance: our save loads in the original, and an original save loads with our 
 - Rebuild references: ../ra2-test-host/rebuild/src/{gfx,app/platform.cpp,audio,video/bink_player,fs} under the parent project folder.
 - The rebuild uses C++ and FFmpeg. Its files cannot be dropped unchanged into a C-only portable core.
 
-Reference checkouts stay ignored under `.reference/`. They are not shipped.
+The cnc-ddraw checkout stays ignored under `.reference/`. The OpenTS reference is shared at `/path/to/user/Projects/ra2/OpenTS`. Neither is shipped.
 No distribution licence is selected for the new adapter code yet.
 
 ## Measured Windows progress, 2026-11-12
@@ -136,3 +136,15 @@ No OpenTS implementation is copied into this adapter.
 The hidden 55-second probe reached a movie frame. Private captures show a coherent centered image without the earlier wrap.
 The process reached the probe time limit with no unsupported-method log.
 This is a visual check, not a Wine pixel-equality result.
+
+## RGB565 display comparison
+
+A synthetic primary surface contains all 65536 RGB565 pixel values across 1024x768 pixels.
+The same Windows test runs through Wine built-in DirectDraw and the adapter.
+Capture starts only after the test pumps window messages and signals READY.
+The comparison rejects captures that do not contain all 65536 colors.
+The first valid comparison found 1105920 differing bytes.
+Wine rounds each channel to the nearest 8-bit value. The first core rounded down.
+The core now rounds to the nearest value. A regression checks red values 3/31 and 4/31 against Wine values 25 and 33.
+This synthetic comparison does not replace the 20 replay-frame skirmish gate.
+The corrected capture passes: all 65536 RGB565 colors match Wine across 786432 displayed pixels.

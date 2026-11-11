@@ -60,3 +60,25 @@ The wrapper currently handles DirectDraw version 1, surfaces, palettes, and basi
 Windowed clip regions, GDI surface access, and other interface versions remain open.
 Fullscreen clipper use requires the matching exclusive game window.
 Do not use this DLL as a finished replacement yet.
+
+Builds run at priority 19. Use at most four build jobs on test-host.
+The hidden runner prefers `~/.local/bin/Xvfb` and selects a free display automatically.
+The shared OpenTS reference is `/path/to/user/Projects/ra2/OpenTS`.
+
+Compare a fixed pattern containing every RGB565 color:
+
+```
+make build/test_color.exe
+(cd build && ../tools/hidden_display.sh ../tests/capture_color.sh wine)
+(cd build && ../tools/hidden_display.sh ../tests/capture_color.sh adapter)
+```
+
+These are synthetic display checks. They do not satisfy the skirmish replay gate.
+
+Extract and compare the captured pixels with ImageMagick and Python:
+
+```
+magick build/color-wine.png -depth 8 rgba:build/color-wine.rgba
+magick build/color-adapter.png -depth 8 rgba:build/color-adapter.rgba
+python3 tools/check_color_pattern.py build/color-wine.rgba build/color-adapter.rgba
+```
