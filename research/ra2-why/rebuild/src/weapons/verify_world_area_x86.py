@@ -18,7 +18,7 @@ u=Uc(UC_ARCH_X86,UC_MODE_32)
 u.mem_map(0x400000,0x800000);u.mem_write(0x400000,(Path(os.environ['RA2_GAME_DIR'])/'game.exe').read_bytes()[:0x431000])
 u.mem_map(0x1000000,0x200000);u.mem_map(0x2000000,0x100000);u.mem_map(0x3000000,0x1000)
 base,stack,stop=0x1000000,0x20fff00,0x3000000
-scenario,warhead,position,vtable,cells,objs,heap=(base+n for n in (0x1000,0x3000,0x5000,0x7000,0x10000,0x20000,0x100000))
+scenario,warhead,position,vtable,cells,objs,heap=(base+n for n in (0x1000,0x3000,0x5000,0x7000,0x10000,0x40000,0x100000))
 def w(p,n):u.mem_write(p,struct.pack('<I',n&0xffffffff))
 def read(p):return struct.unpack('<I',u.mem_read(p,4))[0]
 def signed(n):return n if n<0x80000000 else n-0x100000000
@@ -52,11 +52,17 @@ def hook(cpu,addr,size,user):
   cpu.emu_stop()
 for addr in (0x548070,0x55a280,stop+0x100,stop+0x110,stop+0x120,0x782017,0x47fed0,0x47e9c8):u.hook_add(UC_HOOK_CODE,hook,begin=addr,end=addr)
 rng=random.Random(0x47e2c0);cases=[]
+def nearby_float(value, delta):
+ bits=struct.unpack('<I',struct.pack('<f',value))[0]
+ return struct.unpack('<f',struct.pack('<I',bits+delta))[0]
 for k in range(600):
- impact=(12800+rng.randrange(256),16640+rng.randrange(256),0);spread=rng.choice((0.,.3,.5))
+ impact=(12800+rng.randrange(256),16640+rng.randrange(256),0)
+ spread=rng.choice((0.,.3,.5,1.,1.1,1.5,2.,
+                    *(nearby_float(v,d) for v in (.01,1.01) for d in (-1,0,1))))
  entries=[]
  for j in range(rng.randrange(0,12)):
-  dx=rng.randrange(-1,2);dy=rng.randrange(-1,2);ident=objs+j*0x1000
+  limit=1 if spread<=.5 else 2
+  dx=rng.randrange(-limit,limit+1);dy=rng.randrange(-limit,limit+1);ident=objs+j*0x1000
   pos=(impact[0]+dx*256+rng.randrange(-120,121),impact[1]+dy*256+rng.randrange(-120,121),rng.randrange(-100,101))
   entries.append((ident,dx,dy,*pos,rng.randrange(2)))
  source=rng.choice([0,base+0x60000]+[e[0] for e in entries]);cases.append((impact,spread,source,entries))
@@ -67,9 +73,9 @@ lines=subprocess.check_output([sys.argv[1]],input=''.join(map(line,cases)),text=
 for case,line in zip(cases,lines):
  impact,spread,source,entries=case;cx,cy=impact[0]//256,impact[1]//256
  mapping={};coords={};allocated=heap;result=None
- for dy in range(-1,2):
-  for dx in range(-1,2):
-   cell=cells+((dy+1)*3+(dx+1))*0x1000;mapping[(cx+dx,cy+dy)]=cell
+ for dy in range(-2,3):
+  for dx in range(-2,3):
+   cell=cells+((dy+2)*5+(dx+2))*0x1000;mapping[(cx+dx,cy+dy)]=cell
    w(cell+0x44,-1);w(cell+0x140,0);w(cell+0xe4,0)
  for ident,dx,dy,x,y,z,active in entries:
   cell=mapping[(cx+dx,cy+dy)];w(ident,vtable);w(ident+0x30,read(cell+0xe4));w(cell+0xe4,ident)

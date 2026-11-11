@@ -85,7 +85,7 @@ AreaCollectionResult base_small_ground_area_candidates(
         world.random.first>=250 || world.random.second>=250 ||
         (world.random.first+103)%250!=world.random.second)
         return missing("base world setup or random state is incomplete");
-    if (!resolve || !std::isfinite(spread) || spread<0 || spread>0.5f)
+    if (!resolve || !std::isfinite(spread) || spread<0 || spread>2.0f)
         return missing("area inputs are outside the recovered small-spread slice");
     const auto cx=impact.x/256, cy=impact.y/256;
     if (cx<0 || cx>=512 || cy<0 || cy>=512)
@@ -98,10 +98,13 @@ AreaCollectionResult base_small_ground_area_candidates(
         return missing("aerial or bridge area collection is unresolved");
     // DAT_00A6F248 is initialized by 005441E0 in this order. Count is
     // DAT_007A5908[trunc(CellSpread + 0.99)].
-    constexpr std::array<std::array<int,2>,9> offsets{{
+    constexpr std::array<std::array<int,2>,21> offsets{{
         {{0,0}},{{1,-1}},{{0,-1}},{{-1,-1}},{{-1,0}},
-        {{1,0}},{{-1,1}},{{0,1}},{{1,1}}}};
-    const auto count=static_cast<int>(fp::add(static_cast<double>(spread),0.99)) ? 9u : 1u;
+        {{1,0}},{{-1,1}},{{0,1}},{{1,1}},{{-1,-2}},{{0,-2}},{{1,-2}},
+        {{-2,-1}},{{2,-1}},{{-2,0}},{{2,0}},{{-2,1}},{{2,1}},
+        {{-1,2}},{{0,2}},{{1,2}}}};
+    constexpr std::array<unsigned,3> counts{{1,9,21}};
+    const auto count=counts.at(static_cast<std::size_t>(fp::add(static_cast<double>(spread),0.99)));
     std::map<std::uint32_t,const session::world::Entity*> entities;
     for (const auto& entity:world.entities)
         if (!entity.id || !entities.emplace(entity.id,&entity).second)
@@ -144,7 +147,7 @@ AreaCollectionResult base_small_ground_area_candidates(
             if (!safe_delta(impact.x,q.x) || !safe_delta(impact.y,q.y) || !safe_delta(impact.z,q.z))
                 return missing("area distance exceeds the verified integer domain");
             const int d=distance.between(impact,q);
-            if (i==0) {
+            if (i==0 && spread<=0.5f) {
                 if (!p->special_flag) return missing("area special-group flag is unknown");
                 if (*p->special_flag) {
                     if (!p->special_virtual) return missing("area special-group virtual result is unknown");
