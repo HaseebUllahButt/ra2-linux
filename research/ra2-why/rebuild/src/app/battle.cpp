@@ -211,6 +211,7 @@ class Battle final : public loop::MessagePump, public loop::Renderer {
     std::optional<OptionsMenuArt> options_art_;
     bool force_draw_=false;
     int human_stage_=0;
+    bool human_sell_after_army_=false;
     std::uint32_t human_target_=0,human_wait_frame_=0;
     std::optional<std::uint32_t> human_scout_frame_;
     std::map<std::uint32_t,sim::Coord> human_positions_;
@@ -1076,6 +1077,23 @@ public:
                 human_wait_frame_=state.frame_counter;
                 window_.inject_for_test({InputKind::Key,0,0,camera_x_>0?SDLK_LEFT:SDLK_RIGHT,true});
                 human_stage_=12;
+            } else if(human_sell_after_army_ || std::none_of(world_.entities.begin(),world_.entities.end(),
+                    [&](const w::Entity& e){return e.house_id==player_ && fighter(e);})) {
+                // The input check can lose its whole army while the computer
+                // stays at base. Sell the remaining buildings through the
+                // normal HUD and map clicks to exercise the result screen.
+                if(!human_sell_after_army_) { human_sell_after_army_=true; test_key(SDLK_h); }
+                const auto building=std::find_if(world_.entities.begin(),world_.entities.end(),
+                    [&](const w::Entity& e){return building_tools_.allowed(e,player_,BuildingTool::Sell);});
+                if(building!=world_.entities.end()) if(const auto at=anchor(*building)) {
+                    if(at->x<40||at->x>760||at->y<40||at->y>720) test_pan_to(*at);
+                    else {
+                        test_pan_to({400,380});
+                        if(building_tool_!=BuildingTool::Sell) {
+                            const auto button=hud_.sell_bounds();test_click(button.x+4,button.y+4);
+                        } else test_click(at->x,at->y);
+                    }
+                }
             } else if(state.frame_counter%90==0&&!orders_.selected_ids().empty()) {
                 const auto* source=find(world_,orders_.selected_ids().front());
                 const w::Entity* target=nullptr;
@@ -1828,6 +1846,10 @@ public:
 
 int run_prototype_battle(const BattleOptions& requested) {
     auto args=requested;
+    // The input check sells the last buildings if its army is lost. Use the
+    // normal Short Game option so surviving building crews do not delay the
+    // result screen. Normal matches keep the player's chosen setting.
+    if(args.human_input_check) args.setup.short_game=true;
     // A stationary normal opening for timing checks; normal matches use saved setup.
     if(const char* probe=std::getenv("RA2_AI_OPENING_CHECK")) {
         const std::string level=probe;
