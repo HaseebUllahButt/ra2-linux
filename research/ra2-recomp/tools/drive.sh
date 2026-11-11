@@ -10,7 +10,7 @@ export DISPLAY=:77 WINEPREFIX=$R/build/prefix WINEDEBUG=${WINEDEBUG:--all}
 export WINEDLLOVERRIDES="ddraw=n,b;winepulse.drv,winealsa.drv=d"
 export PULSE_SERVER=unix:/nonexistent PIPEWIRE_REMOTE=/nonexistent ALSA_CARD=none SDL_AUDIODRIVER=dummy
 export RC_LOG=$OUT/rc.log
-pgrep -u "$USER" -f "Xvfb :77" >/dev/null || { Xvfb :77 -screen 0 1024x768x24 >/dev/null 2>&1 & sleep 2; }
+timeout 5 xdpyinfo -display :77 >/dev/null 2>&1 || timeout 5 import -display :77 -window root png:/dev/null 2>/dev/null || { P=$(pgrep -u "$USER" -f "^Xvfb :77"); [ -n "$P" ] && kill -9 $P; rm -f /tmp/.X77-lock; Xvfb :77 -screen 0 1024x768x24 -nolisten tcp >/dev/null 2>&1 & sleep 2; }
 wineserver -k 2>/dev/null; sleep 1
 cd /path/to/user/Projects/ra2/original/game
 if [ -n "$RC_NOLIFT" ]; then nice -n 10 wine game.exe > "$OUT/wine.log" 2>&1 &

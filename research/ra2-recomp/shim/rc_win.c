@@ -141,11 +141,27 @@ static LONG WINAPI veh(EXCEPTION_POINTERS *e)
           (unsigned long)e->ContextRecord->Esp, rc_aux.depth);
     return EXCEPTION_CONTINUE_SEARCH;
 }
+#include <signal.h>
+static void on_abort(int sig)
+{   /* print return addresses found on the stack (rc.dll code and game code) */
+    u32 *sp = (u32 *)__builtin_frame_address(0), off;
+    HMODULE me = 0;
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)on_abort, &me);
+    logf_("SIGABRT: rc.dll at %p, R.esp=%08x depth=%u; stack:\n", me, R.esp, rc_aux.depth);
+    for (int i = 0, n = 0; i < 4096 && n < 40; i++) {
+        MEMORY_BASIC_INFORMATION mi;
+        if (!VirtualQuery(sp + i, &mi, sizeof mi) || mi.State != MEM_COMMIT) break;
+        u32 v = sp[i], f = fn_of(v, &off);
+        if (f && off < 0x8000) { logf_("  [%d] %08x = f_%08x+%x\n", i, v, f, off); n++; }
+    }
+    if (R.esp) { u32 *g = (u32 *)(uintptr_t)R.esp; logf_("  guest stack: %08x %08x %08x %08x\n", g[0], g[1], g[2], g[3]); }
+}
 static void start(void)
 {
     const char *lp = getenv("RC_LOG");
     lg = fopen(lp ? lp : "rc.log", "w");
     rc_log_hook = log_hook;
+    signal(SIGABRT, on_abort);
     slot_aux = TlsAlloc(); slot_tmp = TlsAlloc();
     if (slot_aux >= 64 || slot_tmp >= 64) { logf_("TLS slot too high (%lu %lu)\n", slot_aux, slot_tmp); ExitProcess(3); }
     u32 off_aux = 0xe10 + 4 * slot_aux, off_tmp = 0xe10 + 4 * slot_tmp;
