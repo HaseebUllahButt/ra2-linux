@@ -832,9 +832,11 @@ void turretless_hull_test(const rules::IniFile& rules,const rules::IniFile& art,
     sim::PrototypeCombatRuntime omni_fire(rules,omnimode,art,exe);
     check(omni_fire.attack(omni,1,2) && omni_fire.tick(omni,0).fired==1,
           "OmniFire weapon obeyed the facing gate");
+    for (int frame=1;frame<=5;++frame) omni_fire.tick(omni,frame);
+    check(omni.entities[0].turret_facing_raw==0,
+          "OmniFire turned the turret toward the target");
     // A spinning OmniFire turret still advances by 8 steps every tick
-    // (006FB9B1..006FB9CB): OmniFire skips only the fire restriction, not
-    // the 006FB890 aim update.
+    // (006FB9B1..006FB9CB), independent of the OmniFire aim skip.
     auto spin_omni=make_world("DRON","E1",world::Kind::Unit,world::Kind::Infantry,300,100);
     spin_omni.entities[1].position=sim::Coord{51*256+128,50*256+128,0};
     spin_omni.entities[1].cell=ra2map::Cell{51,50};

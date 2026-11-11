@@ -241,6 +241,6 @@ private:
     // Flight mission fire permission. Empty means every placed source fires.
     std::function<bool(const session::world::Entity&)> fire_gate_;
     std::optional<TurretAim> turret_aim(session::world::Entity& source,
-        const session::world::Entity& target,std::int32_t frame);
+        const session::world::Entity& target,std::int32_t frame,bool omni_fire);
 };
 }
