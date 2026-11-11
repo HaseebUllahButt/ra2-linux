@@ -25,8 +25,8 @@ def _disc(a):
     try:
         f.discover()
     except L.LiftError:
-        return a, [], []
-    return a, [(x, i.size) for x, i in f.insns.items()], sorted(f.targets)
+        return a, [], [], []
+    return a, [(x, i.size) for x, i in f.insns.items()], sorted(f.targets), f.table_data
 
 def patch_info(addrs, entries):
     """patchable: the 5 bytes at the entry belong only to this function, no jump lands
@@ -35,7 +35,8 @@ def patch_info(addrs, entries):
         res = p.map(_disc, sorted(entries), chunksize=64)
     win = {b: set() for a in addrs for b in range(a, a + 5)}
     tgt, ext = set(), {}
-    for a, ins, targets in res:
+    tdata = sorted(set(r for x in res for r in x[3]))
+    for a, ins, targets, _ in res:
         tgt.update(targets)
         ext[a] = (sum(s for x, s in ins), len(ins))
         for x, s in ins:
@@ -44,10 +45,15 @@ def patch_info(addrs, entries):
                     win[b].add(a)
     ent = set(entries)
     out = {}
+    intab = []
     for a in addrs:
         ok = all(win[b] == {a} for b in range(a, a + 5))
         ok = ok and not any(b in ent or b in tgt for b in range(a + 1, a + 5))
+        if any(lo < a + 5 and a < hi for lo, hi in tdata):   # inside jump-table data: never patch
+            ok = False; intab.append(a)
         out[a] = (ok, ext.get(a, (0, 0)))
+    if intab:
+        print('%d entries lie in jump-table data (not patched): %s' % (len(intab), ' '.join('%08x' % x for x in intab[:20])))
     return out
 
 def main():

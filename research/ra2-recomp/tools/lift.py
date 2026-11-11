@@ -69,6 +69,8 @@ class Func:
         self.calls = set()    # direct call targets
         self.bad = {}         # addr -> reason (emit trap)
         self.notes = []
+        self.table_data = []  # (lo, hi) byte ranges of jump-table data read by this function
+        self._btable = None
 
     def decode(self, a):
         b = self.img.read(a, 16)
@@ -143,6 +145,20 @@ class Func:
                     self.targets.add(s)
 
     def jump_table(self, a, ins):
+        tl = self.jump_table0(a, ins)
+        mem = ins.operands[0].mem
+        tbl = mem.disp & 0xffffffff
+        for t in set(tl):
+            pass
+        # record the dword table (and a byte table, if any) as data
+        lo = min([tbl] + [tbl - 4 * k for k in range(1, 9) if self.img.u32(tbl - 4 * k) in tl])
+        self.table_data.append((lo, tbl + 4 * max(1, sum(1 for i in range(64) if self.img.u32(tbl + 4 * i) in tl))))
+        if self._btable:
+            self.table_data.append(self._btable)
+        self._btable = None
+        return tl
+
+    def jump_table0(self, a, ins):
         mem = ins.operands[0].mem
         tbl = mem.disp & 0xffffffff
         idx = ins.reg_name(mem.index)
@@ -185,6 +201,7 @@ class Func:
                     raise LiftError('byte jump table without bound at %08x' % a)
                 self.notes.append('byte jump table %08x: no bound, %d targets read' % (a, k))
                 return [self.img.u32(tbl + 4 * i) for i in range(k)]
+            self._btable = (btable, btable + n)
             n = max(self.img.u8(btable + i) for i in range(n)) + 1
         if n is None:
             # no bound found: read while entries point into this area of .text
