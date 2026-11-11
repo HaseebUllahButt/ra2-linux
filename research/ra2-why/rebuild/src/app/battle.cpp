@@ -34,6 +34,7 @@
 #include "../sim/prototype_victory.h"
 #include "../render/battle_radar.h"
 #include "../sim/damage_runtime.h"
+#include "../sim/naval_target_gate.h"
 #include "../loop/game_loop.h"
 #include "../loop/profile.h"
 #include "../ui/score_screen.h"
@@ -239,6 +240,14 @@ public:
         movement_.use_original_path(sim::OriginalDistance::from_executable((args.game_directory/"game.exe").string()));
         combat_.set_fire_gate([this](const w::Entity& actor) {
             return !flies(actor) || aircraft_.ready_to_fire(actor.id);
+        });
+        const auto water_set=assets_.theater().settings().read_integer("General","WaterSet",-1);
+        const auto& tile_sets=assets_.theater().tile_sets();
+        const auto water_first=water_set>=0 && std::size_t(water_set)<tile_sets.size()
+            ? static_cast<std::int32_t>(tile_sets[water_set].first) : -1;
+        combat_.set_target_gate([this,water_first](const w::Snapshot& world,
+                const w::Entity& source,const w::Entity& target) {
+            return sim::naval_target_allowed(rules_,world,source,target,water_first);
         });
         sidebar_choices_.use_rules(rules_,house(world_,player_).side_index.value_or(-1));
         score_assets_=ui::ScoreAssets::load(files,labels_);

@@ -1,6 +1,7 @@
 #include <fs/mix_bootstrap.h>
 #include <rules/ini_file.h>
 #include <sim/damage_runtime.h>
+#include <sim/naval_target_gate.h>
 #include <app/battle_fallout.h>
 #include <app/battle_score.h>
 #include <app/battle_effects.h>
@@ -498,6 +499,28 @@ void target_gate_test(const rules::IniFile& rules,const rules::IniFile& art,cons
     check(resumed,"the resumed gate did not fire again");
     std::cout<<"Target gate blocks can_attack, acquisition, return fire and pauses active orders passed\n";
 }
+void submarine_land_gate_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+    rules::IniFile map;
+    auto w=make_world("SUB","DEST",world::Kind::Unit,world::Kind::Unit,200,400);
+    auto& cell=*w.cells.at(50*512+54).terrain;
+    cell.land_type=0;cell.resolved_tile_index=30;
+    w.entities[1].layer=world::Layer::Ground;
+    sim::PrototypeCombatRuntime combat(rules,map,art,exe);
+    combat.set_target_gate([&rules](const world::Snapshot& world,const world::Entity& source,
+                                   const world::Entity& target) {
+        return sim::naval_target_allowed(rules,world,source,target,100);
+    });
+    check(!combat.can_attack(w,1,2) && !combat.attack(w,1,2),"sub accepted a land target");
+    cell.land_type=2;
+    check(combat.can_attack(w,1,2),"sub rejected a ship on water");
+    cell.land_type=0;cell.resolved_tile_index=113;
+    check(combat.can_attack(w,1,2),"sub rejected the last original water tile");
+    cell.resolved_tile_index=114;
+    check(!combat.can_attack(w,1,2),"sub accepted a tile beyond the water set");
+    w.entities[0].type="HTNK";
+    check(sim::naval_target_allowed(rules,w,w.entities[0],w.entities[1],100),
+          "land target rule blocked a tank");
+}
 // Flight unlinks flying aircraft from their Cells and clears occupancy
 // tracking. A death must accept such an actor and still reject every other
 // unlink case.
@@ -907,6 +930,7 @@ int main(int argc,char** argv) {
         std::cout<<"TeamDelays="<<rules.read_string("General","TeamDelays")<<'\n';
         fire_gate_test(rules,art,std::string(argv[1])+"/game.exe");
         target_gate_test(rules,art,std::string(argv[1])+"/game.exe");
+        submarine_land_gate_test(rules,art,std::string(argv[1])+"/game.exe");
         unlinked_aircraft_death_test(rules,art,std::string(argv[1])+"/game.exe");
         air_ground_test(rules,art,std::string(argv[1])+"/game.exe");
         fallen_house_test(rules,art,std::string(argv[1])+"/game.exe",files);
