@@ -187,6 +187,7 @@ static inline void rc_fnsave(u32 a)
     }
     u16 cw = fnstcw(), sw = fsw(), tw16 = (u16)tw;
     memcpy(p, &cw, 2); memcpy(p + 4, &sw, 2); memcpy(p + 8, &tw16, 2);
+    p[2] = p[3] = p[6] = p[7] = p[10] = p[11] = p[26] = p[27] = 0xff;   /* reserved halves read as ones */
     for (int i = 0; i < 8; i++) memcpy(p + 28 + 10 * i, &R.st[(R.top + i) & 7], 10);
     __asm__ volatile("fninit" ::: "memory");
     R.top = 0; R.tag = 0; R.c0 = R.c1 = R.c2 = R.c3 = 0;
@@ -195,12 +196,13 @@ static inline void rc_frstor(u32 a)
 {
     u8 *p = (u8 *)(uintptr_t)a; u16 cw, sw, tw;
     memcpy(&cw, p, 2); memcpy(&sw, p + 4, 2); memcpy(&tw, p + 8, 2);
-    __asm__ volatile("fnclex" ::: "memory");
-    fldcw(cw);
     R.top = sw >> 11 & 7; R.c0 = sw >> 8 & 1; R.c1 = sw >> 9 & 1; R.c2 = sw >> 10 & 1; R.c3 = sw >> 14 & 1;
     R.tag = 0;
     for (int ph = 0; ph < 8; ph++) if ((tw >> (2 * ph) & 3) != 3) R.tag |= 1u << ph;
-    for (int i = 0; i < 8; i++) { f80 v = 0; memcpy(&v, p + 28 + 10 * i, 10); R.st[(R.top + i) & 7] = v; }
+    for (int i = 0; i < 8; i++) memcpy(&R.st[(R.top + i) & 7], p + 28 + 10 * i, 10);
+    /* last (a pending unmasked exception must not fire here): control word and exception bits go to the real FPU; its stack stays empty (R holds it) */
+    u16 env[14] = { cw, 0xffff, (u16)(sw & 0x80ffu), 0xffff, 0xffff, 0xffff };
+    __asm__ volatile("fldenv %0" :: "m"(env) : "memory");
 }
 static inline f80 LD80(u32 a) { f80 v = 0; memcpy(&v, (void *)(uintptr_t)a, 10); return v; }
 static inline void ST80(u32 a, f80 v) { memcpy((void *)(uintptr_t)a, &v, 10); }
