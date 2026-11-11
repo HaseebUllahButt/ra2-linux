@@ -1,8 +1,11 @@
 # RA2 Windows parts
 
-The adapter contains a portable surface core and a Windows DirectDraw DLL.
-J10 is incomplete. No skirmish or 20-frame equality result exists yet.
-J11, J12, and J13 have design notes only.
+The Windows DLLs use the MIT pcrecomp win32hle code as their base.
+The native bridge calls it from the original 32-bit game.
+The source and licence notices are in [upstream/pcrecomp](upstream/pcrecomp/README.md).
+DirectDraw, DirectSound, and Bink API checks pass. See [the checks](reports/hle-api-checks.txt).
+J10 still needs 20 matching skirmish frames. J11 still needs a full skirmish log.
+J12 still needs the original-game movie check. J13 is not complete.
 
 Read [DESIGN.md](DESIGN.md) for scope, ABI evidence, reference licences, and acceptance checks.
 
@@ -56,12 +59,12 @@ The tool requires 20 frames by default and rejects any changed byte.
 This tool does not capture frames or align recordings.
 
 Unsupported methods print their names and caller addresses, then stop.
-The wrapper currently handles DirectDraw version 1, surfaces, palettes, and basic clipper state.
-Windowed clip regions, GDI surface access, and other interface versions remain open.
+The base handles DirectDraw interfaces, surfaces, palettes, and native window clip regions.
+GDI surface access remains open.
 Fullscreen clipper use requires the matching exclusive game window.
 Do not use this DLL as a finished replacement yet.
 
-Builds run at priority 19. Use at most four build jobs on test-host.
+Builds may use eight jobs on test-host and twelve jobs on the test-host.
 The hidden runner prefers `~/.local/bin/Xvfb` and selects a free display automatically.
 The shared OpenTS reference is `/path/to/user/Projects/ra2/OpenTS`.
 
@@ -82,3 +85,15 @@ magick build/color-wine.png -depth 8 rgba:build/color-wine.rgba
 magick build/color-adapter.png -depth 8 rgba:build/color-adapter.rgba
 python3 tools/check_color_pattern.py build/color-wine.rgba build/color-adapter.rgba
 ```
+
+Build the current DLL set with FFmpeg and the SDL2 Windows development files present:
+
+```
+make -j8 build/ddraw.dll build/dsound.dll build/binkw32.dll
+./tools/hidden_display.sh ./tools/check_windows.sh
+```
+
+All three public DLLs need `ra2adapter.dll` and `SDL2.dll` beside them.
+The shared backend keeps one audio mixer for effects, music, and movies.
+The `*-legacy.dll` targets keep the earlier implementations for comparison.
+The portable surface and conversion tests remain the pixel checks.

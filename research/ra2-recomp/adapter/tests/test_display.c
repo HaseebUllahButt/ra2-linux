@@ -5,14 +5,16 @@
 #undef NDEBUG
 #include <assert.h>
 #include <stdio.h>
-static unsigned message_count;
+static unsigned message_count,mouse_message_count;
 static LRESULT CALLBACK test_window_proc(HWND window,UINT message,WPARAM wparam,LPARAM lparam)
 {
+    if (message==WM_LBUTTONUP) { mouse_message_count++; return 0; }
     if (message==WM_APP+7) { message_count++; return 0; }
     return DefWindowProcA(window,message,wparam,lparam);
 }
 int main(void)
 {
+    SetEnvironmentVariableA("RA2_NATIVE_MENU_REPAINT","1");
     HMODULE module=LoadLibraryA(".\\ddraw.dll");
     HRESULT (WINAPI *create)(GUID *,IDirectDraw **,IUnknown *);
     IDirectDraw *draw;
@@ -36,9 +38,10 @@ int main(void)
     desc.dwSize=sizeof(desc); desc.dwFlags=DDSD_CAPS; desc.ddsCaps.dwCaps=DDSCAPS_PRIMARYSURFACE;
     assert(IDirectDraw_CreateSurface(draw,&desc,&primary,NULL)==DD_OK);
     assert(PostMessageA(window,WM_APP+7,0,0));
+    assert(PostMessageA(window,WM_LBUTTONUP,0,0));
     fx.dwSize=sizeof(fx); fx.dwFillColor=0xf800;
     assert(IDirectDrawSurface_Blt(primary,NULL,NULL,NULL,DDBLT_COLORFILL,&fx)==DD_OK);
-    assert(message_count==1);
+    assert(message_count==1 && mouse_message_count==1);
     assert(IDirectDrawSurface_Release(primary)==0);
     assert(IDirectDraw_Release(draw)==0);
     DestroyWindow(window); FreeLibrary(module);

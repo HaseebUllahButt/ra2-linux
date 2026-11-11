@@ -8,13 +8,14 @@ struct ra_present {
     SDL_Texture *texture;
     unsigned char *rgba;
     uint32_t width,height;
+    int owns_window;
 };
 void ra_present_close(ra_present *p)
 {
     if (!p) return;
     if (p->texture) SDL_DestroyTexture(p->texture);
     if (p->renderer) SDL_DestroyRenderer(p->renderer);
-    if (p->window) SDL_DestroyWindow(p->window);
+    if (p->window && p->owns_window) SDL_DestroyWindow(p->window);
     free(p->rgba); free(p);
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
@@ -26,8 +27,13 @@ ra_present *ra_present_open(void *native, uint32_t w, uint32_t h)
     p=calloc(1,sizeof(*p));
     if (!p) { SDL_QuitSubSystem(SDL_INIT_VIDEO); return NULL; }
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY,"0");
-    p->window=native ? SDL_CreateWindowFrom(native) :
-        SDL_CreateWindow("RA2 adapter",SDL_WINDOWPOS_UNDEFINED,SDL_WINDOWPOS_UNDEFINED,(int)w,(int)h,0);
+    const char *window_id=SDL_GetHint("RA2UI_SDL_WINDOW_ID");
+    if (window_id && *window_id) p->window=SDL_GetWindowFromID((Uint32)strtoul(window_id,NULL,10));
+    if (!p->window) {
+        p->window=native ? SDL_CreateWindowFrom(native) :
+            SDL_CreateWindow("RA2 adapter",SDL_WINDOWPOS_UNDEFINED,SDL_WINDOWPOS_UNDEFINED,(int)w,(int)h,0);
+        p->owns_window=1;
+    }
     if (!p->window) goto fail;
     p->renderer=SDL_CreateRenderer(p->window,-1,SDL_RENDERER_SOFTWARE);
     if (!p->renderer) goto fail;
