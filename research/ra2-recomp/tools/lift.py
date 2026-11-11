@@ -194,10 +194,35 @@ class Func:
                 if t is None or not (self.img.text_lo <= t < self.img.text_hi) or abs(t - a) > 0x10000:
                     break
                 n += 1
-            self.notes.append('jump table %08x: no bound, %d entries read' % (a, n))
-            if n == 0:
+            # also entries just before the table: code like "sub ecx, 4; jb L" then
+            # "jmp [ecx*4 + tbl]" indexes from -4 to -1 (CRT memcpy). Extra targets are harmless.
+            back = 0
+            while back < 8:
+                t = self.img.u32(tbl - 4 * (back + 1))
+                if t is None or not (self.img.text_lo <= t < self.img.text_hi) or abs(t - a) > 0x10000:
+                    break
+                back += 1
+            self.notes.append('jump table %08x: no bound, %d entries read (+%d before)' % (a, n, back))
+            if n == 0 and back == 0:
                 raise LiftError('empty jump table at %08x' % a)
-        return [self.img.u32(tbl + 4 * i) for i in range(n)]
+            return [self.img.u32(tbl + 4 * i) for i in range(-back, n)]
+        out = [self.img.u32(tbl + 4 * i) for i in range(n)]
+        ok = lambda t: t is not None and self.img.text_lo <= t < self.img.text_hi and abs(t - a) <= 0x10000
+        good = [t for t in out if ok(t)]
+        if len(good) == len(out):
+            return out
+        # some entries are not code: the bound came from an unrelated compare, or the index
+        # can run below the table ("sub idx, k; jb" then "jmp [idx*4 + tbl]", CRT memcpy).
+        # Keep the code entries and add the code entries just before the table (a superset is safe).
+        back = []
+        for k in range(1, 9):
+            t = self.img.u32(tbl - 4 * k)
+            if not ok(t): break
+            back.append(t)
+        self.notes.append('jump table %08x: %d of %d entries are not code; %d entries before the table' % (a, len(out) - len(good), len(out), len(back)))
+        if not good and not back:
+            raise LiftError('jump table at %08x has no code targets' % a)
+        return back + good
 
     def reg_const(self, prev, upto, r):
         """Constant value of register r just before instruction upto (mov r, imm / push imm; pop r)."""
