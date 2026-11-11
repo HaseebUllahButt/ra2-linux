@@ -159,3 +159,29 @@ Keyboard and mouse behavior in a skirmish still needs the recorder check.
 J4 import reports are pending. COM method traces follow J4, and replay frames need the J8 shim.
 
 The hidden Windows regression passes: one posted native window message reaches the original window procedure during presentation.
+
+## J10 native menus and test audio
+
+The owner approved a temporary Windows-only menu bridge on 2026-11-12.
+Set RA2_NATIVE_MENU_REPAINT=1 to request native control repaint after a surface presentation.
+RedrawWindow stays inside the Windows wrapper and carries a TODO-J14 note.
+J14 owns adapter/win32ui/ and will replace this bridge.
+
+The first audio blocks did not stop Wine 11 speaker output. The owner reported the leak.
+The test launcher now sets HKCU\Software\Wine\Drivers Audio to an empty value in its private prefix.
+It blocks PulseAudio, PipeWire, and ALSA connections and sets SDL dummy audio.
+Wine filters SDL_AUDIODRIVER out of the Unix-to-Windows environment.
+The launcher also writes SDL_AUDIODRIVER=dummy under HKCU\Environment.
+A Windows test confirms that native, SDL, and CRT environment reads now return dummy.
+Every run checks PipeWire after five seconds and stops if a Red Alert stream appears.
+The launcher refuses prefixes outside adapter/build/ and never kills a shared Wine server.
+
+## J11 implemented subset
+
+The C mixer handles PCM8 and PCM16, mono and stereo, frequency changes, gain, pan, looping, and end-of-buffer stop.
+The Windows DLL exports DirectSoundCreate by name and ordinal 1.
+Buffers support ring locks, shared data on duplication, separate cursors, status, volume, pan, frequency, and release.
+SDL owns the audio callback. RA2_AUDIO_CAPTURE writes stereo PCM16 at 44100 Hz.
+The portable mixer test passes. The Windows DLL test passes with the dummy device.
+Its capture matches 6656 expected stereo PCM sample frames without speaker output.
+An original-game skirmish sound check remains open.

@@ -3,6 +3,7 @@
 #define INITGUID
 #include <windows.h>
 #include <ddraw.h>
+#include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +15,7 @@ typedef struct Draw {
     DWORD width,height,bits;
     HWND window;
     DWORD cooperative_flags;
+    int native_menu_repaint,repainting;
     ra_present *display;
 } Draw;
 typedef struct Palette {
@@ -71,7 +73,15 @@ static HRESULT present(Surface *s)
         PALETTEENTRY c=s->palette->entries[i];
         s->pixels.palette[i]=((uint32_t)c.peRed<<16)|((uint32_t)c.peGreen<<8)|c.peBlue;
     }
-    return result(ra_present_frame(d->display,&s->pixels));
+    HRESULT status=result(ra_present_frame(d->display,&s->pixels));
+    /* TODO-J14: remove native control painting when portable controls replace it.
+       The owner permits this Windows-only bridge during the Wine tests. */
+    if (status==DD_OK && d->native_menu_repaint && !d->repainting && d->window) {
+        d->repainting=1;
+        RedrawWindow(d->window,NULL,NULL,RDW_INVALIDATE|RDW_ALLCHILDREN|RDW_UPDATENOW);
+        d->repainting=0;
+    }
+    return status;
 }
 static ULONG WINAPI draw_AddRef(IDirectDraw *iface) { return ++((Draw *)iface)->refs; }
 static ULONG WINAPI draw_Release(IDirectDraw *iface)
@@ -446,5 +456,7 @@ HRESULT WINAPI DirectDrawCreate(GUID *guid,IDirectDraw **out,IUnknown *outer)
     if (outer) return CLASS_E_NOAGGREGATION;
     d=calloc(1,sizeof(*d)); if (!d) return DDERR_OUTOFMEMORY;
     d->iface.lpVtbl=&draw_vtable; d->refs=1; d->width=640; d->height=480; d->bits=16;
+    const char *repaint=SDL_getenv("RA2_NATIVE_MENU_REPAINT");
+    d->native_menu_repaint=repaint && !strcmp(repaint,"1");
     *out=&d->iface; return DD_OK;
 }
