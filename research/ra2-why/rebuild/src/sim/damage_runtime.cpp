@@ -1,4 +1,5 @@
 #include "damage_runtime.h"
+#include "kill_promotion.h"
 #include "../loop/profile.h"
 #include <algorithm>
 #include <array>
@@ -563,8 +564,13 @@ PrototypeHit prototype_damage(Snapshot& world,std::uint32_t target_id,std::uint3
             [](const weapons::ObjectDamageAction&,weapons::ObjectDamageState&){});
         health=path.state.health;status=path.status;
     }
+    const auto promotion=status==4
+        ? base_prepare_kill_promotion(world,base,source_id,target_id) : KillPromotion{};
     if (status==4 && !prototype_die(world,*target))
         return {false,false,"dead actor has unresolved Cell links"};
+    // Commit only once the existing death transaction succeeds. Missing
+    // promotion state must not block damage or removal.
+    if (status==4) base_commit_kill_promotion(world,promotion);
     target->resolved_hp=health;
     if (status && target->techno_field_329) target->techno_field_329=1;
     return {true,status==4,{}};
