@@ -59,3 +59,14 @@ build/binkw32.dll: src/windows/binkw32.c src/windows/binkw32.def src/bink.c incl
 
 build/test_bink.exe: tests/test_bink.c include/ra_bink.h | build
 	nice -n 19 $(WCC) -O2 -g -std=c11 -Wall -Wextra -Werror -Iinclude $< -o $@
+
+build/test_bink_native: tests/test_bink_native.c src/bink.c include/ra_bink.h | build
+	nice -n 19 $(CC) $(CPPFLAGS) $(CFLAGS) -Wno-misleading-indentation $(SDL_CFLAGS) $(shell pkg-config --cflags libavformat libavcodec libavutil libswscale libswresample) tests/test_bink_native.c src/bink.c $(SDL_LIBS) $(shell pkg-config --libs libavformat libavcodec libavutil libswscale libswresample) -o $@
+
+build/capture_ddraw.dll: tests/capture_ddraw.c | build
+	nice -n 19 $(WCC) -O2 -g -std=c11 -Wall -Wextra -Werror -shared $< -o $@
+build/capture_launch.exe: ../shim/launch.c | build
+	nice -n 19 $(WCC) -O2 -g -std=c11 -Wall -Wextra -Wno-missing-field-initializers $< -o $@
+
+build/click_control.exe: tests/click_control.c | build
+	nice -n 19 $(WCC) -O2 -g -std=c11 -Wall -Wextra -Werror $< -luser32 -o $@

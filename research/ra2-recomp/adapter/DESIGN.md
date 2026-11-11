@@ -185,3 +185,25 @@ SDL owns the audio callback. RA2_AUDIO_CAPTURE writes stereo PCM16 at 44100 Hz.
 The portable mixer test passes. The Windows DLL test passes with the dummy device.
 Its capture matches 6656 expected stereo PCM sample frames without speaker output.
 An original-game skirmish sound check remains open.
+
+## J12 decoder build and measured results
+
+FFmpeg 8.0.1 builds as Windows x86 static libraries with tools/wcc.
+The build enables the Bink demuxer, the bink video decoder, both Bink audio decoders, scaling, and resampling.
+FFmpeg calls the configure option bink, even though the public codec name is binkvideo.
+The build reports LGPL-2.1-or-later. No GPL component is enabled.
+The source archive SHA-256 is 05ee0b03119b45c0bdb4df654b96802e909e0a752f72e4fe3794f487229e5a41.
+
+The Windows binkw32.dll exports all 13 names with the game's exact stdcall decoration.
+The game passes a positioned Windows file handle for movies inside MIX archives.
+The Windows-only BinkOpen bridge reads that handle into owned memory. The decoder core uses portable C, SDL, and FFmpeg.
+The original Bink DLL and our DLL decode these same files through the positioned-handle path:
+
+- WESTLOGO.BIK: 640x480, 129 decoded frames, 15 fps.
+- S13_F01E.BIK: 640x480, 378 decoded frames, 15 fps.
+
+Both frame-count and frame-size comparisons pass under Wine.
+The same C core builds on Linux and decodes both movies with those same results.
+The mission audio capture has 1111680 stereo sample frames with RMS 0.1280.
+Original-game playback with the replacement Bink DLL remains to be checked.
+The Bink SDK stub was read as an ABI reference only. Its header states GPL-2.0-or-later; no implementation was copied.
