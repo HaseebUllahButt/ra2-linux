@@ -720,7 +720,10 @@ bool PrototypeCombatRuntime::attack(session::world::Snapshot& world,std::uint32_
     if (!can_attack(world,source_id,target_id)) return false;
     auto* source=prototype_find(world,source_id);
     guard_orders_.erase(source_id);guard_place_.erase(source_id);
-    infantry_fire_.erase(source_id);
+    // Infantry SetTarget 00502470 keeps its firing action when the target
+    // is unchanged. Repeated orders must not restart the firing animation.
+    const auto previous=orders_.find(source_id);
+    if (previous==orders_.end() || previous->second!=target_id) infantry_fire_.erase(source_id);
     orders_[source_id]=target_id;source->target_id=target_id;return true;
 }
 void PrototypeCombatRuntime::stop(session::world::Snapshot& world,std::uint32_t source_id) {

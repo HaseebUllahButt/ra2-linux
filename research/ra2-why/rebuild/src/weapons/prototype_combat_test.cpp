@@ -530,6 +530,7 @@ void conscript_armor_test(const rules::IniFile& rules,const rules::IniFile& art,
     check(combat.attack(w,1,2),"conscript attack rejected");
     std::vector<int> damage;
     for (unsigned frame=0;frame<100 && damage.size()<2;++frame) {
+        check(combat.attack(w,1,2),"repeated conscript order rejected");
         const auto tick=combat.tick(w,frame);
         for (const auto& event:tick.events)
             if (event.kind==sim::PrototypeCombatEventKind::Damage && event.target_id==2)
