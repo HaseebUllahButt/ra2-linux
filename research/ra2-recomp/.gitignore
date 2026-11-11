@@ -1,2 +1,6 @@
 build/
 __pycache__/
+tests/j1/*.exe
+tests/j1/*.dll
+tests/j1/*.lib
+tests/j1/*.pdb

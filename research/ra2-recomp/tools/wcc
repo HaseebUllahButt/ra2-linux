@@ -1,0 +1,3 @@
+#!/bin/sh
+# 32-bit Windows C compiler (zig cc, mingw target). Use like gcc.
+exec "${ZIG:-$HOME/.local/bin/zig}" cc -target x86-windows-gnu "$@"
