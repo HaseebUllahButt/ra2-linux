@@ -20,7 +20,7 @@ FZFlags FZF;
 u32 FZI[8];
 int FZ_exit;
 u32 FZ_target, FZ_IND = 0x30000000u;
-u32 FZ_fmask, FZ_rmask[8], FZ_cmask, FZ_xmask, FZ_mm_addr, FZ_mm_mask;
+u32 FZ_fmask, FZ_rmask[8], FZ_cmask, FZ_xmask, FZ_mm_addr[4], FZ_mm_mask[4];
 
 /* native side (native.S) */
 u32 fz_nin[8], fz_nin_flags, fz_nout[8], fz_nout_flags, fz_host_esp, fz_code;
@@ -175,7 +175,7 @@ static void fill(u32 lo, u32 n) { u8 *p = (u8 *)(uintptr_t)lo; for (u32 i = 0; i
 static void run_lifted(const struct fzex *x, const St *in, St *out)
 {
     for (int i = 0; i < 8; i++) ((u32 *)&R)[i] = in->r[i];
-    R.df = in->fl >> 10 & 1; R.top = in->top; R.tag = in->tag;
+    R.df = in->fl >> 10 & 1; R.top = in->top; R.tag = in->tag; R.eflags = in->fl | 0x202;
     for (int i = 0; i < 4; i++) (&R.c0)[i] = in->c[i];
     memset(R.st, 0, sizeof R.st);
     for (int i = 0; i < 8; i++) memcpy(&R.st[i], in->st[i], 10);
@@ -233,6 +233,7 @@ static int run_example(const struct fzex *x, int pc, u64 seed, long *ncmp, long 
     if (x->kind & K_BR) for (u32 p = x->target & ~(PG - 1); p < x->target + 6; p += PG) ok &= map_page(p);
     int abs = x->mem && x->base < 0 && x->index < 0;
     if (abs) for (u32 p = x->disp & ~(PG - 1); p < x->disp + (u32)x->msize; p += PG) { ok &= map_page(p); add_region(p, PG); }
+    if (x->xabs) for (u32 p = x->xabs & ~(PG - 1); p < x->xabs + 10; p += PG) { ok &= map_page(p); add_region(p, PG); }
     if (!ok) { *why = "cannot map pages"; goto unmap; }
     int mis = 0; long tries = 0; *ncmp = 0; *nfault = 0;
     St in, nat, lif;
@@ -243,12 +244,14 @@ static int run_example(const struct fzex *x, int pc, u64 seed, long *ncmp, long 
         memset(&in, 0, sizeof in);
         for (int i = 0; i < 8; i++) in.r[i] = rnd_val();
         in.fl = (rnd32() & 0x8d5) | (rnd(4) == 0 ? 0x400 : 0);
+        if (x->kind & K_SEQ) in.fl &= ~0x10u;   /* AF is not modelled: start sequences with AF = 0 so pushed flags match */
         in.r[4] = ARENA + 0x8000 + 4 * (rnd(129) - 64);
-        if ((x->kind & K_LEAVE) || rnd(2)) in.r[5] = in.r[4] + 4 * rnd(32);
+        if ((x->kind & (K_LEAVE | K_SEQ)) || rnd(2)) in.r[5] = in.r[4] + 4 * rnd(32);
         if (x->kind & K_STRING) {
             in.r[6] = ARENA + 0xa000 + rnd(1024) - 512; in.r[7] = ARENA + 0xc000 + rnd(1024) - 512;
             if (rnd(2)) { in.r[6] &= ~3u; in.r[7] &= ~3u; }
             if (x->kind & K_REP) in.r[1] = rnd(4) == 0 ? 0 : rnd(41);
+            if (x->kind & K_OVL) in.r[7] = in.r[6] + (u32)((int)rnd(17) - 8);
         }
         if (x->kind & K_BTMEM) in.r[x->btreg] = (u32)((int)rnd(2048) - 1024);
         if ((x->kind & K_DIV) && rnd(4)) {
@@ -264,7 +267,7 @@ static int run_example(const struct fzex *x, int pc, u64 seed, long *ncmp, long 
         u32 ea = 0;
         if (x->mem) {
             u32 T = ARENA + 0x2000 + rnd(4096) - 2048;
-            if (rnd(4)) T &= ~(u32)((x->msize >= 4 ? 4 : x->msize) - 1);
+            if (rnd(4) || (x->kind & K_SEQ)) T &= ~(u32)((x->msize >= 4 ? 4 : x->msize) - 1);
             if (abs) T = x->disp;
             else if (x->index < 0) in.r[x->base] = T - x->disp;
             else if (x->base == x->index) { u32 k = 1 + x->scale; T -= (T - x->disp) % k; in.r[x->base] = (T - x->disp) / k; }
@@ -294,7 +297,7 @@ static int run_example(const struct fzex *x, int pc, u64 seed, long *ncmp, long 
         /* masks */
         memcpy(FZI, in.r, 32);
         FZ_fmask = 0xcc5; for (int i = 0; i < 8; i++) FZ_rmask[i] = 0xffffffffu;
-        FZ_cmask = (x->kind & K_X87) ? 0 : 0xf; FZ_xmask = 0x3f; FZ_mm_addr = 0; FZ_mm_mask = 0;
+        FZ_cmask = (x->kind & K_X87) ? 0 : 0xf; FZ_xmask = 0x3f; memset(FZ_mm_addr, 0, sizeof FZ_mm_addr); memset(FZ_mm_mask, 0, sizeof FZ_mm_mask);
         x->mask();
         /* native */
         int sn, sl;
@@ -320,6 +323,8 @@ static int run_example(const struct fzex *x, int pc, u64 seed, long *ncmp, long 
             D(" fault native=%d lifted=%d", sn, sl);
         } else {
             (*ncmp)++;
+            /* the known DE difference (see below) also shows in AL after fnstsw ax; the game reads only AH */
+            if ((x->kind & K_SEQ) && (x->kind & K_X87) && (nat.ex & 1)) FZ_rmask[0] &= ~2u;
             for (int i = 0; i < 8; i++) if ((nat.r[i] ^ lif.r[i]) & FZ_rmask[i]) D(" %s", RN[i]);
             if ((nat.fl ^ lif.fl) & FZ_fmask) D(" flags(%03x)", (nat.fl ^ lif.fl) & FZ_fmask);
             if (nat.exit != lif.exit) D(" exit");
@@ -328,7 +333,10 @@ static int run_example(const struct fzex *x, int pc, u64 seed, long *ncmp, long 
                 if (memcmp(a, b, reg[i].n)) {
                     for (u32 k = 0; k < reg[i].n; k++) if (a[k] != b[k]) {
                         u32 ad = reg[i].lo + k;
-                        if (FZ_mm_mask && ad >= FZ_mm_addr && ad < FZ_mm_addr + 4 && !((a[k] ^ b[k]) & (FZ_mm_mask >> 8 * (ad - FZ_mm_addr)))) continue;
+                        int masked = 0;
+                        for (int j = 0; j < 4; j++)
+                            if (FZ_mm_mask[j] && ad - FZ_mm_addr[j] < 4 && !((a[k] ^ b[k]) & (FZ_mm_mask[j] >> 8 * (ad - FZ_mm_addr[j])))) masked = 1;
+                        if (masked) continue;
                         D(" mem@%08x(%02x/%02x)", ad, a[k], b[k]); break;
                     }
                 }
@@ -362,8 +370,8 @@ static int run_example(const struct fzex *x, int pc, u64 seed, long *ncmp, long 
     if (*ncmp == 0) *why = "no valid state";
 unmap:
     for (int i = 0; i < nmapped; i++) munmap((void *)(uintptr_t)mapped[i], PG);
-    for (int i = 1; i < nreg; i++) { free(reg[i].orig); free(reg[i].nat); }
-    nreg = 1;
+    for (int i = 0; i < nreg; i++) { free(reg[i].orig); free(reg[i].nat); }   /* all: the arena copies too (they leaked 128 KB per run) */
+    nreg = 0;
     return ok ? mis : -1;
 }
 

@@ -137,6 +137,15 @@ static inline void fcmp(f80 a, f80 b) {
     else if (a == b) { R.c3 = 1; R.c0 = R.c2 = 0; }
     else R.c0 = R.c2 = R.c3 = 1;
 }
+/* fucom/fucomp/fucompp: the same, but only a signalling NaN raises "invalid"
+ * (fcmp's "a > b" compiles to fcomip, which also raises it for a quiet NaN). */
+static inline void fucmp(f80 a, f80 b) {
+    R.c1 = 0;
+    if (__builtin_isgreater(a, b)) R.c0 = R.c2 = R.c3 = 0;
+    else if (__builtin_isless(a, b)) { R.c0 = 1; R.c2 = R.c3 = 0; }
+    else if (a == b) { R.c3 = 1; R.c0 = R.c2 = 0; }
+    else R.c0 = R.c2 = R.c3 = 1;
+}
 /* Status word: condition bits and TOP from R; exception flags from the real FPU,
  * because lifted x87 arithmetic runs on the real FPU and sets the same sticky flags. */
 static inline u16 fsw(void) {
@@ -153,15 +162,23 @@ static inline f80 x_fsqrt(f80 v) { __asm__ volatile("fsqrt" : "+t"(v)); return v
 static inline f80 x_fsin(f80 v) { __asm__ volatile("fsin" : "+t"(v)); return v; }
 static inline f80 x_fcos(f80 v) { __asm__ volatile("fcos" : "+t"(v)); return v; }
 static inline f80 x_f2xm1(f80 v) { __asm__ volatile("f2xm1" : "+t"(v)); return v; }
-static inline f80 x_fptan(f80 v) { __asm__ volatile("fptan\n\tfstp %%st(0)" : "+t"(v)); return v; }
+/* fptan and fsincos run as one real instruction: the pushed value is 1.0 (fptan) or the cosine, but a NaN
+ * for a NaN or infinite operand. Call them only when x_trig_out() is false (then they always push). */
+static inline f80 x_fptan(f80 v, f80 *pushed) { f80 t, o; __asm__ volatile("fptan" : "=t"(o), "=u"(t) : "0"(v)); *pushed = o; return t; }
+static inline f80 x_fsincos(f80 v, f80 *cosine) { f80 s, c; __asm__ volatile("fsincos" : "=t"(c), "=u"(s) : "0"(v)); *cosine = c; return s; }
+/* fsin, fcos, fsincos, fptan: a finite operand with |x| >= 2^63 is out of range: the CPU sets C2,
+ * leaves ST(0) as it is and pushes nothing. Quiet compares: no exception flag from the test itself. */
+static inline int x_trig_out(f80 v) { f80 a = __builtin_fabsl(v); return __builtin_isgreaterequal(a, 0x1p63L) && __builtin_isless(a, __builtin_infl()); }
 static inline f80 x_fpatan(f80 y, f80 x) { f80 r; __asm__ volatile("fpatan" : "=t"(r) : "0"(x), "u"(y) : "st(1)"); return r; }
 static inline f80 x_fyl2x(f80 y, f80 x) { f80 r; __asm__ volatile("fyl2x" : "=t"(r) : "0"(x), "u"(y) : "st(1)"); return r; }
 static inline f80 x_fyl2xp1(f80 y, f80 x) { f80 r; __asm__ volatile("fyl2xp1" : "=t"(r) : "0"(x), "u"(y) : "st(1)"); return r; }
 static inline f80 x_fscale(f80 a, f80 b) { __asm__ volatile("fscale" : "+t"(a) : "u"(b)); return a; }
 static inline f80 x_fprem(f80 a, f80 b, int one) {
-    u16 sw;
+    u16 sw; f80 a0 = a;
     if (one) __asm__ volatile("fprem1\n\tfnstsw %1" : "+t"(a), "=a"(sw) : "u"(b));
     else __asm__ volatile("fprem\n\tfnstsw %1" : "+t"(a), "=a"(sw) : "u"(b));
+    /* a NaN operand, an infinite dividend or a zero divisor: the CPU clears C1 and C2 and keeps C0 and C3 */
+    if (__builtin_isunordered(a0, b) || __builtin_isinf(a0) || b == 0) { R.c1 = 0; R.c2 = 0; return a; }
     R.c0 = sw >> 8 & 1; R.c1 = sw >> 9 & 1; R.c2 = sw >> 10 & 1; R.c3 = sw >> 14 & 1;
     return a;
 }
@@ -185,8 +202,9 @@ static inline void rc_fnsave(u32 a)
         }
         tw |= t << (2 * ph);
     }
-    u16 cw = fnstcw(), sw = fsw(), tw16 = (u16)tw;
+    u16 cw = fnstcw(), sw = fsw(), tw16 = (u16)tw, ff = 0xffff;
     memcpy(p, &cw, 2); memcpy(p + 4, &sw, 2); memcpy(p + 8, &tw16, 2);
+    memcpy(p + 2, &ff, 2); memcpy(p + 6, &ff, 2); memcpy(p + 10, &ff, 2); memcpy(p + 26, &ff, 2);   /* unused halves: the CPU writes 1s */
     for (int i = 0; i < 8; i++) memcpy(p + 28 + 10 * i, &R.st[(R.top + i) & 7], 10);
     __asm__ volatile("fninit" ::: "memory");
     R.top = 0; R.tag = 0; R.c0 = R.c1 = R.c2 = R.c3 = 0;
@@ -195,12 +213,14 @@ static inline void rc_frstor(u32 a)
 {
     u8 *p = (u8 *)(uintptr_t)a; u16 cw, sw, tw;
     memcpy(&cw, p, 2); memcpy(&sw, p + 4, 2); memcpy(&tw, p + 8, 2);
-    __asm__ volatile("fnclex" ::: "memory");
-    fldcw(cw);
     R.top = sw >> 11 & 7; R.c0 = sw >> 8 & 1; R.c1 = sw >> 9 & 1; R.c2 = sw >> 10 & 1; R.c3 = sw >> 14 & 1;
     R.tag = 0;
     for (int ph = 0; ph < 8; ph++) if ((tw >> (2 * ph) & 3) != 3) R.tag |= 1u << ph;
-    for (int i = 0; i < 8; i++) { f80 v = 0; memcpy(&v, p + 28 + 10 * i, 10); R.st[(R.top + i) & 7] = v; }
+    for (int i = 0; i < 8; i++) memcpy(&R.st[(R.top + i) & 7], p + 28 + 10 * i, 10);
+    /* last (a loaded unmasked exception is pending, as on the CPU): the real FPU gets the control word
+     * and the exception bits of the image; its stack stays empty, TOP and C0-C3 live in R */
+    u32 env[7] = {0xffff0000u | cw, 0xffff0000u | (sw & 0xffu), 0xffffffffu, 0, 0, 0, 0};
+    __asm__ volatile("fldenv %0" :: "m"(env) : "memory");
 }
 static inline f80 LD80(u32 a) { f80 v = 0; memcpy(&v, (void *)(uintptr_t)a, 10); return v; }
 static inline void ST80(u32 a, f80 v) { memcpy((void *)(uintptr_t)a, &v, 10); }

@@ -206,14 +206,215 @@ def gen_example(i, key, ex, md):
     elif m == 'lahf':
         k.append('    FZ_rmask[0] &= ~0x1000u;   /* AF is not modelled */')
     elif m in ('pushfd', 'pushf'):
-        k.append('    FZ_mm_addr = esp - 4; FZ_mm_mask = 0xec7u;   /* CF PF ZF SF IF DF OF and bit 1; AF is not modelled */')
+        k.append('    FZ_mm_addr[0] = esp - 4; FZ_mm_mask[0] = 0x240ec7u;   /* CF PF ZF SF IF DF OF AC ID and bit 1; AF is not modelled */')
     if x87:
         if m in X87_CMP: k.append('    FZ_cmask = 0xf;')
         elif m in X87_C2: k.append('    FZ_cmask = 0x4;')
     k.append('}')
     hexb = '"' + ''.join('\\x%02x' % x for x in b[:ins.size]) + '"'
-    row = '{%s, %s, 0x%08xu, %d, %s, fzl_%d, fzm_%d, %s, %s, 0x%08xu, %d, %d, %d}' % (
+    row = '{%s, %s, 0x%08xu, %d, %s, fzl_%d, fzm_%d, %s, %s, 0x%08xu, %d, %d, %d, 0u}' % (
         cstr(key), cstr(ex['text']), a, ins.size, hexb, i, i, '|'.join(kind) or '0', mrow, target, indreg, btreg, dsize)
+    return '\n'.join(c + k), row
+
+# ---- extra checks (J5b): the lifter bug classes in pcrecomp's CHANGELOG ----
+# Single forms that game.exe does not use but the lifter accepts (run at made-up addresses).
+EXTRA_BASE = 0x40000000   # far from the heap and from the game image addresses
+EXTRA = [
+    # 8/16-bit one-operand mul/imul/div/idiv use AX and DX:AX (pcrecomp #6)
+    'f6e1', 'f6e9', 'f6f1', 'f6f9', '66f7e1', '66f7e9', '66f7f3', '66f7fb',
+    # adc/sbb at 8 and 16 bits; neg 16
+    '10c8', '18e0', '6611c8', '6619c8', '66f7d8',
+    # rotates through carry with a count in cl, narrow sar (pcrecomp #72, #88)
+    'd2d0', 'd2d8', '66d3d0', '66d3d8', 'd3d0', 'd3d8', 'd1da', 'd2f8', '66d3f8', 'd2c0', '66d3c8',
+    # shrd (not in game), shld by cl, shld with count 0
+    '0fadc2', '0facc205', '0fa5c2', '0fa4c200',
+    # bsf/bsr, bt/bts/btr/btc reg,reg, bswap, imul 16-bit 3 operands
+    '0fbcc1', '0fbdc1', '660fbcc1', '0fa3c8', '0fabc8', '0fb3c8', '0fbbc8', '0fc8', '666bc1fd',
+    # bt/btr/btc on a memory bit string with a register offset, 32 and 16-bit (signed offset; pcrecomp #89)
+    '0fa306', '0fb306', '0fbb06', '660fa306', '660fab06', '660fb306',
+    # xadd / cmpxchg (lock forms), lahf (AF masked: not modelled)
+    'f00fc10e', '0fc0c8', 'f00fb10e', '0fb1ca', '9f',
+    # loop / jcxz / every short jcc and setcc (jo jno jp jnp seto setno setp setnp are not in game.exe)
+    'e210', '67e310',
+    '7010', '7110', '7210', '7310', '7410', '7510', '7610', '7710', '7810', '7910', '7a10', '7b10', '7c10', '7d10', '7e10', '7f10',
+    '0f90c0', '0f91c0', '0f92c0', '0f93c0', '0f94c0', '0f95c0', '0f96c0', '0f97c0',
+    '0f98c0', '0f99c0', '0f9ac0', '0f9bc0', '0f9cc0', '0f9dc0', '0f9ec0', '0f9fc0',
+    # string ops without rep, enter
+    'a4', 'a5', 'aa', 'ab', 'ac', 'ad', 'ae', 'af', 'a6', 'a7', 'c8080000',
+    # x87 forms pcrecomp got wrong and game.exe does not use: fsincos order, fsin/fcos/fptan C2,
+    # fprem/fprem1 C bits, fxam, fucom*, fst st(i), fld/fstp m80, fild/fistp m64, fist m16/m32, ftst, fpatan...
+    'd9fb', 'd9fe', 'd9ff', 'd9f2', 'd9f8', 'd9f5', 'd9e5', 'dae9', 'dde1', 'dde9', 'ddd1',
+    'db2c24', 'db3c24', 'df2c24', 'df3c24', 'df1424', 'db1424', 'db1c24', 'd9e4', 'd9f3', 'd9f1', 'd9fd', 'd9f0',
+]
+
+# Multi-instruction sequences: flags, carry and x87 state that live across instructions.
+# Real code from game.exe: 'addr' and 'end'. Made-up code: 'hex' (placed at a made-up address).
+# 'mask': extra C for the mask function (input registers as eax.., FZ_* masks); 'kind': extra harness kinds.
+AFMASK2 = ('FZ_mm_addr[0] = esp - 4; FZ_mm_mask[0] = ~0x10u; FZ_mm_addr[1] = esp - 8; FZ_mm_mask[1] = ~0x10u; '
+           'FZ_rmask[0] &= ~0x10u; FZ_rmask[1] &= ~0x10u; FZ_rmask[3] &= ~0x10u;')
+CMP = 'FZ_cmask = 0xf;'
+SH = 'if ((ecx & 31) > 1) FZ_fmask &= ~0x800u;'
+SEQS = [
+    # carry chains: CF written by one instruction, read by the next (pcrecomp sbb idiom, precise_carry, add -> adc)
+    dict(cls='carry', name='cmp; sbb same', hex='39c819c0'),
+    dict(cls='carry', name='add; adc', hex='01c811da'),
+    dict(cls='carry', name='sub; sbb', hex='29c819da'),
+    dict(cls='carry', name='neg; sbb same', hex='f7d819c0'),
+    dict(cls='carry', name='game neg dl; sbb edx,edx', addr=0x0040165e, end=0x00401662),
+    dict(cls='carry', name='game sbb; sbb -1', addr=0x00422215, end=0x0042221a),
+    dict(cls='carry', name='game cmp; sbb', addr=0x00430429, end=0x0043042d),
+    dict(cls='carry', name='game add; adc', addr=0x00405081, end=0x00405085),
+    dict(cls='carry', name='game sub; sbb', addr=0x00404fec, end=0x00404ff0),
+    dict(cls='carry', name='game neg; adc 0', addr=0x00786a88, end=0x00786a8d),
+    dict(cls='carry', name='game neg; sbb 0', addr=0x007824e4, end=0x007824e9),
+    dict(cls='carry', name='game shr; rep stosd; adc; rep stosw', addr=0x0060092f, end=0x00600938),
+    dict(cls='carry', name='game shr; rep movsw; adc; rep movsb', addr=0x0077ee43, end=0x0077ee4c),
+    dict(cls='carry', name='game shr/rcr 64-bit loop', addr=0x00782537, end=0x00782543),
+    dict(cls='carry', name='game shld chain', addr=0x0077efdc, end=0x0077f01a),
+    # flags kept by inc/dec (pcrecomp: inc/dec keep CF)
+    dict(cls='keep', name='stc; inc; adc', hex='f94083d300'),
+    dict(cls='keep', name='cmp; dec; setb', hex='39c84a0f92c3'),
+    # pushfd/popfd round trips (pcrecomp recomp_eflags): CF, DF, and the AC/ID bits of CPU checks
+    dict(cls='pushf', name='stc; pushfd; clc; popfd; adc', hex='f99cf89d83d300'),
+    dict(cls='pushf', name='std; pushfd; cld; popfd', hex='fd9cfc9d'),
+    dict(cls='pushf', name='game saturating add (pushfd/popfd around cmp)', addr=0x0077ee6b, end=0x0077ee87,
+         mask='FZ_mm_addr[0] = esp - 4; FZ_mm_mask[0] = ~0x10u;'),
+    dict(cls='pushf', name='game CPU check: AC and ID flags toggle (0077f282)', addr=0x0077f289, end=0x0077f2c5, mask=AFMASK2),
+    dict(cls='pushf', name='game CPU check: AC and ID flags toggle (0077f14d)', addr=0x0077f161, end=0x0077f18b, mask=AFMASK2),
+    # logic ops then signed/unsigned conditions (pcrecomp: jcc after or/xor), bt then setae
+    dict(cls='logic', name='xor/or/test then setge/setle/setg', hex='31c80f9dc209db0f9ec685fe0f9fc0'),
+    dict(cls='logic', name='bt; setae', hex='0fa3c80f93c2', mask='FZ_fmask &= ~0x884u;'),
+    # x87 compare -> fnstsw -> sahf/test -> jcc (pcrecomp: fcom flags, NaN = unordered, jp, fucompp pops)
+    dict(cls='x87cmp', name='fcom; fnstsw; sahf; setp/seta/sete', hex='d8d1dfe09e0f9ac10f97c50f94c2', mask=CMP),
+    dict(cls='x87cmp', name='fucompp; fnstsw; sahf; setp/setb', hex='dae9dfe09e0f9ac10f92c5', mask=CMP),
+    dict(cls='x87cmp', name='ftst; fnstsw; test ah 41/05; sete/setp', hex='d9e4dfe0f6c4410f94c1f6c4050f9ac5', mask=CMP),
+    dict(cls='x87cmp', name='fxam; fnstsw; and eax 4500', hex='d9e5dfe02500450000', mask=CMP),
+    dict(cls='x87cmp', name='game fcomp m64; fnstsw; test ah; je', addr=0x00414c61, end=0x00414c72),
+    dict(cls='x87cmp', name='game fcompp; fnstsw; test ah; jne', addr=0x00411df3, end=0x00411dfc, mask=CMP),
+    dict(cls='x87cmp', name='game fcomp st1; fnstsw; sahf; jne', addr=0x007823a9, end=0x007823b3, mask=CMP),
+    dict(cls='x87cmp', name='fcomp m64; fnstsw; sahf; setbe/seta/setp', hex='dc1c24dfe09e0f96c10f97c50f9ac2', mask=CMP),
+    dict(cls='x87cmp', name='game fcomp st1; fnstsw; test; fstp; je', addr=0x00437280, end=0x0043728b),
+    dict(cls='x87cmp', name='game fcomp m64abs; fnstsw; sahf; jae', addr=0x0078782a, end=0x00787835, mask=CMP),
+    dict(cls='x87cmp', name='game fcomp; fnstsw; sahf; ja', addr=0x007877e3, end=0x007877ee, mask=CMP),
+    dict(cls='x87cmp', name='game fcomp m32; fnstsw; mov al; test; jne', addr=0x004372f9, end=0x00437308),
+    dict(cls='x87cmp', name='game fcomp st1; fnstsw; test; fstp; jne', addr=0x0045fa48, end=0x0045fa57),
+    dict(cls='x87cmp', name='game fcomp; cmp; fnstsw; je', addr=0x006d6393, end=0x006d639f),
+    dict(cls='x87cmp', name='game fcomp; fnstsw; test; mov; jne', addr=0x00437669, end=0x0043767e),
+    dict(cls='x87cmp', name='game fcomp; fnstsw; sahf; jb', addr=0x007877f1, end=0x007877fc, mask=CMP),
+    dict(cls='x87cmp', name='game fcomp; fnstsw; fstp; test; fstp; je', addr=0x0057d348, end=0x0057d359),
+    dict(cls='x87cmp', name='game fcompp; fnstsw; fcom; test; fnstsw; je', addr=0x00721e0e, end=0x00721e1b),
+    dict(cls='x87cmp', name='game fcomp; fnstsw; sahf; mov; jae', addr=0x0078776a, end=0x0078777b, mask=CMP),
+    dict(cls='x87cmp', name='game fcomp; fnstsw; sahf; je', addr=0x0078d2ba, end=0x0078d2c9, mask=CMP),
+    # x87 stack bookkeeping: no leaked or lost slots (pcrecomp: fucompp leak, fst st(i))
+    dict(cls='x87stack', name='fld m32; fld st0; fmulp; fstp m64', hex='d90424d9c0dec9dd5c2408'),
+    dict(cls='x87stack', name='fld1; fldz; fucompp; fnstsw', hex='d9e8d9eedae9dfe0', mask=CMP),
+    dict(cls='x87stack', name='fld st0; fst st2; fstp st1', hex='d9c0ddd2ddd9'),
+    dict(cls='x87stack', name='fild m64; fistp m64', hex='df2c24df7c2408'),
+    dict(cls='x87stack', name='fld m80; fstp m80', hex='db2c24db7c2410'),
+    # rep with ecx = 0 keeps flags (pcrecomp #8), direction flag, overlapping copies
+    dict(cls='rep', name='cmp; repe cmpsb; sbb', hex='39d0f3a619c0'),
+    dict(cls='rep', name='cmp; repne scasb; sete/setb', hex='39d0f2ae0f94c00f92c4'),
+    dict(cls='rep', name='game std; rep movsd; cld', addr=0x00783443, end=0x00783447),
+    dict(cls='rep', name='game std; repne scasb; inc; cmp', addr=0x00782005, end=0x0078200b),
+    dict(cls='rep', name='std; rep stosd; cld', hex='fdf3abfc'),
+    dict(cls='rep', name='rep movsb overlap', hex='f3a4', kind=['K_OVL']),
+    dict(cls='rep', name='rep movsd overlap', hex='f3a5', kind=['K_OVL']),
+    dict(cls='rep', name='std; rep movsb overlap; cld', hex='fdf3a4fc', kind=['K_OVL']),
+    dict(cls='rep', name='std; rep movsd overlap; cld', hex='fdf3a5fc', kind=['K_OVL']),
+    # count 0 keeps flags; counts at or above the width (pcrecomp: shift.by-zero, count-masked, shld/shrd)
+    dict(cls='shift', name='cmp; shl cl; setb/sete', hex='39d0d3e30f92c00f94c4', mask=SH),
+    dict(cls='shift', name='cmp; shld cl; setb/sete', hex='39d00fa5c30f92c00f94c4', mask=SH),
+    dict(cls='shift', name='cmp; shrd cl; setb/sete', hex='39d00fadc30f92c00f94c4', mask=SH),
+    dict(cls='shift', name='cmp; shr dx cl; sete', hex='39d066d3ea0f94c0', mask=SH + ' if ((ecx & 31) >= 16) FZ_fmask &= ~1u;'),
+    dict(cls='shift', name='cmp; sar al cl; setl', hex='39d0d2f80f9cc4', mask=SH),
+    # 8/16-bit partial registers
+    dict(cls='partial', name='ah/al mix; xchg; movsx; sar cx', hex='88c400e080d40086e00fbfc866d1f9'),
+    dict(cls='partial', name='add ax; adc dx; sbb si', hex='6601d86611ca6619fe'),
+    # 3-operand imul overflow
+    dict(cls='imul', name='imul r,r,imm32; seto; setc', hex='69c1452301000f90c20f92c6', mask='FZ_fmask &= ~0xc4u;'),
+    dict(cls='imul', name='imul r16,r16,imm8; seto', hex='666bcafd0f90c0', mask='FZ_fmask &= ~0xc4u;'),
+    # divides: the fault must happen on both sides; quotient overflow
+    dict(cls='div', name='cdq; idiv', hex='99f7f9', mask='FZ_fmask = 0x400;'),
+    dict(cls='div', name='xor edx; div', hex='31d2f7f1', mask='FZ_fmask = 0x400;'),
+]
+SEQ_BASE = 0x41000000
+
+def gen_seq(i, k_, sq, md, img):
+    """several instructions: returns (c_code, table_row) or (None, skip_reason)"""
+    if 'hex' in sq:
+        a = SEQ_BASE + 0x1000 * k_; b = bytes.fromhex(sq['hex'])
+    else:
+        a = sq['addr']; b = img.read(a, sq['end'] - a)
+    il = list(md.disasm(b, a))
+    if sum(x.size for x in il) != len(b):
+        return None, 'does not decode to whole instructions'
+    end = a + len(b)
+    insns = {x.address: x for x in il}
+    kind = {'K_SEQ'} | set(sq.get('kind', []))
+    target = 0; dsize = 0
+    mems = []
+    for x in il:
+        m = x.mnemonic.split()[-1]; ops = x.operands
+        if 0xd8 <= x.opcode[0] <= 0xdf: kind.add('K_X87')
+        if (m.startswith('j') or m.startswith('loop')) and m != 'jmp' and ops and ops[0].type == X86_OP_IMM \
+           or m == 'jmp' and ops[0].type == X86_OP_IMM:
+            t = ops[0].imm & 0xffffffff
+            if t not in insns and t != end:
+                if target and t != target: return None, 'two outside branch targets'
+                if a - 6 < t < end + 6: return None, 'branch target overlaps the code'
+                target = t; kind.add('K_BR')
+        elif m in ('call', 'ret', 'jmp') and x is not il[-1]:
+            return None, 'call/ret/indirect jump must be last'
+        str_op = m[:-1] in STRING and m[-1] in 'bwd' and not 0xd8 <= x.opcode[0] <= 0xdf
+        if str_op:
+            kind.add('K_STRING')
+            if x.prefix[0] in (0xf2, 0xf3): kind.add('K_REP')
+        elif m not in ('lea', 'nop'):
+            mems += [(x, o) for o in ops if o.type == X86_OP_MEM]
+        if m in ('div', 'idiv'):
+            kind.add('K_DIV'); dsize = ops[0].size
+            if m == 'idiv': kind.add('K_IDIV')
+    fake = dict(insns); fake[end] = None
+    if target: fake[target] = None
+    em = L.Emitter(FakeF(fake))
+    body = []
+    try:
+        for x in il:
+            em.out = []
+            em.emit(x)
+            body.append('L_%08x: ;' % x.address)
+            body += em.out
+    except L.LiftError as ex_:
+        return None, 'lifter rejects: %s' % ex_
+    # memory: the first operand drives the register choice; a second absolute address gets its own page
+    mrow = '0, -1, -1, 0, 0u, 0, MF_INT'; xabs = 0
+    if mems:
+        x, o = mems[0]; mo = o.mem
+        base = REGIDX[L.reg32(x.reg_name(mo.base))] if mo.base else -1
+        index = REGIDX[L.reg32(x.reg_name(mo.index))] if mo.index else -1
+        mf = x87_mfmt(bytes(x.bytes)) if 0xd8 <= x.opcode[0] <= 0xdf else 'MF_INT'
+        mrow = '1, %d, %d, %d, 0x%xu, %d, %s' % (base, index, mo.scale if mo.index else 0, mo.disp & 0xffffffff, o.size, mf)
+        drv_abs = not (mo.base or mo.index)
+        for x2, o2 in mems[1:]:
+            m2 = o2.mem
+            if not (m2.base or m2.index) and not (drv_abs and (m2.disp & ~0xfff) == (mo.disp & ~0xfff)):
+                xabs = m2.disp & 0xffffffff
+    c = ['void fzl_%d(void)' % i, '{',
+         '    u32 eax=R.eax,ecx=R.ecx,edx=R.edx,ebx=R.ebx,esp=R.esp,ebp=R.ebp,esi=R.esi,edi=R.edi;',
+         '    u8 cf=FZF.cf,zf=FZF.zf,sf=FZF.sf,of=FZF.of,pf=FZF.pf;',
+         '    /* %s */' % sq['name']]
+    c += [l.replace('return;', '{ if (!FZ_exit) FZ_exit = 2; goto fz_out; }') for l in body]
+    c.append('L_%08x: goto fz_out;' % end)
+    if target: c.append('L_%08x: FZ_exit = 1; goto fz_out;' % target)
+    c += ['fz_out:', '    SAVE; FZF.cf=cf; FZF.zf=zf; FZF.sf=sf; FZF.of=of; FZF.pf=pf;', '}']
+    k = ['void fzm_%d(void)' % i, '{',
+         '    u32 eax=FZI[0],ecx=FZI[1],edx=FZI[2],ebx=FZI[3],esp=FZI[4],ebp=FZI[5],esi=FZI[6],edi=FZI[7];',
+         '    (void)eax;(void)ecx;(void)edx;(void)ebx;(void)esp;(void)ebp;(void)esi;(void)edi;',
+         '    ' + sq.get('mask', ''), '}']
+    hexb = '"' + ''.join('\\x%02x' % v for v in b) + '"'
+    text = ' ; '.join('%s %s' % (x.mnemonic, x.op_str) for x in il)
+    row = '{%s, %s, 0x%08xu, %d, %s, fzl_%d, fzm_%d, %s, %s, 0x%08xu, -1, -1, %d, 0x%08xu}' % (
+        cstr('seq: ' + sq['name']), cstr(text[:200]), a, len(b), hexb, i, i, '|'.join(sorted(kind)), mrow, target, dsize, xabs)
     return '\n'.join(c + k), row
 
 def gen(forms_path, out):
@@ -230,6 +431,28 @@ def gen(forms_path, out):
                 skips.setdefault(key, (row, fm['count'], ex['text']))
                 continue
             codes.append(code); rows.append(row); keys.add(key); i += 1
+    # extra checks from pcrecomp's lifter bug list (reports/pcrecomp-faults.md):
+    # single forms the game does not use, then multi-instruction sequences
+    nextra = nseq = 0
+    for k_, h in enumerate(EXTRA):
+        ex = {'addr': '%08x' % (EXTRA_BASE + 0x1000 * k_), 'bytes': h}
+        ins = next(md.disasm(bytes.fromhex(h), int(ex['addr'], 16), 1))
+        ex['text'] = '%s %s' % (ins.mnemonic, ins.op_str)
+        key = 'extra: ' + form_key(ins)
+        code, row = gen_example(i, key, ex, md)
+        if code is None:
+            skips.setdefault(key, (row, 0, ex['text']))
+            continue
+        codes.append(code); rows.append(row); keys.add(key); i += 1; nextra += 1
+    img = L.Image(L.EXE)
+    for k_, sq in enumerate(SEQS):
+        code, row = gen_seq(i, k_, sq, md, img)
+        key = 'seq: ' + sq['name']
+        if code is None:
+            skips.setdefault(key, (row, 0, sq['name']))
+            continue
+        codes.append(code); rows.append(row); keys.add(key); i += 1; nseq += 1
+    print('extra forms (not in game.exe) %d of %d, sequences %d of %d' % (nextra, len(EXTRA), nseq, len(SEQS)))
     nchunk = 4
     for c in range(nchunk):
         open('%s/gen%d.c' % (out, c), 'w').write('#include "fz.h"\n' + '\n'.join(codes[c::nchunk]) + '\n')
