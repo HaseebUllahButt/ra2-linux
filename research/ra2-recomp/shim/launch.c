@@ -1,5 +1,5 @@
 /* rclaunch.exe: start the original game.exe with rc.dll loaded before the game's own code.
- * usage: rclaunch.exe <game.exe> <rc.dll> [game arguments...]
+ * usage: rclaunch.exe <game.exe> <dll>[;<dll>...] [game arguments...]   (DLLs load in this order)
  * The game starts suspended. Its entry point gets "push stub; ret". The stub loads
  * rc.dll through the game's own LoadLibraryA import slot, puts the entry bytes back
  * and jumps to the entry. The launcher waits for the game and returns its exit code. */
@@ -44,7 +44,9 @@ int main(int argc, char **argv)
     if (!llslot) { fprintf(stderr, "rclaunch: no LoadLibraryA import\n"); return 2; }
     DWORD entry = base + entry_rva;
 
-    char dll[MAX_PATH]; GetFullPathNameA(argv[2], MAX_PATH, dll, 0);
+    char dlls[8][MAX_PATH]; int nd = 0;
+    { char list[4096]; strncpy(list, argv[2], sizeof list - 1); list[sizeof list - 1] = 0;
+      for (char *t = strtok(list, ";"); t && nd < 8; t = strtok(0, ";")) GetFullPathNameA(t, MAX_PATH, dlls[nd++], 0); }
     char cmd[4096]; snprintf(cmd, sizeof cmd, "\"%s\"", argv[1]);
     for (int i = 3; i < argc; i++) { strncat(cmd, " ", sizeof cmd - strlen(cmd) - 1); strncat(cmd, argv[i], sizeof cmd - strlen(cmd) - 1); }
     STARTUPINFOA si = { sizeof si }; PROCESS_INFORMATION pi;
@@ -52,17 +54,19 @@ int main(int argc, char **argv)
         fprintf(stderr, "rclaunch: CreateProcess failed %lu\n", GetLastError()); return 2;
     }
     HANDLE h = pi.hProcess;
-    unsigned char *mem = VirtualAllocEx(h, 0, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-    DWORD m = (DWORD)(uintptr_t)mem, path = m + 0x100, saved = m + 0x400;
+    unsigned char *mem = VirtualAllocEx(h, 0, 8192, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    DWORD m = (DWORD)(uintptr_t)mem, saved = m + 0x200, path = m + 0x400;
     unsigned char orig[16]; SIZE_T got;
     DWORD old; VirtualProtectEx(h, (void *)(uintptr_t)entry, 16, PAGE_EXECUTE_READWRITE, &old);
     ReadProcessMemory(h, (void *)(uintptr_t)entry, orig, 16, &got);
-    unsigned char st[64]; int k = 0;
+    unsigned char st[256]; int k = 0;
 #define B(x) st[k++] = (unsigned char)(x)
 #define D(x) do { DWORD v_ = (x); memcpy(st + k, &v_, 4); k += 4; } while (0)
     B(0x60);                                  /* pushad */
-    B(0x68); D(path);                         /* push path */
-    B(0xff); B(0x15); D(llslot);              /* call [LoadLibraryA] */
+    for (int i = 0; i < nd; i++) {
+        B(0x68); D(path + MAX_PATH * i);      /* push path */
+        B(0xff); B(0x15); D(llslot);          /* call [LoadLibraryA] */
+    }
     B(0xbe); D(saved);                        /* mov esi, saved */
     B(0xbf); D(entry);                        /* mov edi, entry */
     B(0xb9); D(16);                           /* mov ecx, 16 */
@@ -70,7 +74,7 @@ int main(int argc, char **argv)
     B(0x61);                                  /* popad */
     B(0x68); D(entry); B(0xc3);               /* push entry; ret */
     WriteProcessMemory(h, mem, st, k, &got);
-    WriteProcessMemory(h, (void *)(uintptr_t)path, dll, strlen(dll) + 1, &got);
+    for (int i = 0; i < nd; i++) WriteProcessMemory(h, (void *)(uintptr_t)(path + MAX_PATH * i), dlls[i], strlen(dlls[i]) + 1, &got);
     WriteProcessMemory(h, (void *)(uintptr_t)saved, orig, 16, &got);
     unsigned char jmp[6] = { 0x68, 0, 0, 0, 0, 0xc3 }; memcpy(jmp + 1, &m, 4);
     WriteProcessMemory(h, (void *)(uintptr_t)entry, jmp, 6, &got);
