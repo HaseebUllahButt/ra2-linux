@@ -692,6 +692,53 @@ void yard_defense_test(const rules::IniFile& rules,const rules::IniFile& art,con
     }
     check(dead && retarget && retarget<=dead+1,"Rhino lost Guard after its explicit target died");
 }
+// Iron Curtain-style shield regression: direct and area damage recipients.
+void invulnerability_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
+    rules::IniFile map;
+    // Direct hit: an invulnerable target keeps its HP and cell chains.
+    auto w=make_world("E1","E1",world::Kind::Infantry,world::Kind::Infantry,
+        rules.read_integer("E1","Strength"),rules.read_integer("E1","Strength"));
+    sim::PrototypeCombatRuntime combat(rules,map,art,exe);
+    const int hp=rules.read_integer("E1","Strength");
+    combat.set_invulnerability([](std::uint32_t id,std::uint64_t){return id==2;});
+    check(combat.attack(w,1,2),"direct test attack rejected");
+    std::size_t impacts=0;
+    for (std::uint64_t frame=1;frame<40;++frame) {
+        const auto r=combat.tick(w,frame);impacts+=r.impacts;
+        if (impacts) break;
+        check(*w.entities[1].resolved_hp==hp,"predicate did not block direct damage");
+    }
+    check(impacts>0,"direct impact never landed");
+    check(*w.entities[1].resolved_hp==hp,("predicate hp "+std::to_string(*w.entities[1].resolved_hp)).c_str());
+    check(w.cells.at(50*512+54).heads->ground_head==2,"invulnerable death changed cell chains");
+    // Expired predicate: the same target now takes damage.
+    combat.set_invulnerability([](std::uint32_t id,std::uint64_t frame){return id==2 && frame<100;});
+    bool hurt=false;int after=0;
+    for (std::uint64_t frame=40;frame<400 && !hurt;++frame) {
+        combat.tick(w,frame);
+        after=*w.entities[1].resolved_hp;
+        hurt=after<hp;
+    }
+    check(hurt,"expired predicate let damage through");
+    // Area path: an invulnerable tank shields itself, but not its neighbour.
+    auto area=make_world("HTNK","HTNK",world::Kind::Unit,world::Kind::Unit,400,400);
+    auto neighbour=area.entities[1];neighbour.id=4;neighbour.next=0;
+    area.entities.push_back(neighbour);
+    area.entities[1].next=4; // the target chains to the neighbour in its cell
+    area.entities[2].next=0; // the tree leaves the occupant chain
+    sim::PrototypeCombatRuntime bombs(rules,map,art,exe);
+    bombs.set_invulnerability([](std::uint32_t id,std::uint64_t){return id==2;});
+    check(bombs.attack(area,1,2),"area test attack rejected");
+    bool neighbour_hurt=false;
+    for (std::uint64_t frame=0;frame<300 && !neighbour_hurt;++frame) {
+        bombs.tick(area,frame);
+        neighbour_hurt=area.entities[3].lifetime==world::Lifetime::Destroyed ||
+            *area.entities[3].resolved_hp<400;
+    }
+    check(neighbour_hurt,"area damage skipped an unprotected neighbour");
+    check(*area.entities[1].resolved_hp==400,"invulnerable tank took area damage");
+    std::cout<<"Invulnerability predicate shields direct and area damage, expires, and spares neighbours\n";
+}
 // Base 004B8A30/004B8BE0 turret turning and 00704C00 fire facing check.
 void turret_turn_test(const rules::IniFile& rules,const rules::IniFile& art,const std::string& exe) {
     rules::IniFile map;
@@ -955,6 +1002,7 @@ int main(int argc,char** argv) {
         tank_test(rules,art,std::string(argv[1])+"/game.exe");
         infantry_test(rules,art,std::string(argv[1])+"/game.exe");
         cyclic_link_test(rules,art,std::string(argv[1])+"/game.exe");
+        invulnerability_test(rules,art,std::string(argv[1])+"/game.exe");
         structure_test(rules,art,std::string(argv[1])+"/game.exe");
         turret_turn_test(rules,art,std::string(argv[1])+"/game.exe");
         turretless_hull_test(rules,art,std::string(argv[1])+"/game.exe");

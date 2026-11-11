@@ -156,6 +156,9 @@ struct TypeFacts {
     std::int32_t cost=0;                 // +550.
     std::int32_t strength=0;             // ObjectType +A0.
     std::string deploys_into;            // UnitType +3C8 name.
+    std::vector<std::string> dock;       // Dock: names of the docking types.
+    std::int32_t number_of_docks=0;      // NumberOfDocks.
+    bool unit_reload=false;              // UnitReload.
     // BuildingType.
     PlacementBuilding placement;
     std::int32_t adjacent=3;             // +C40.
@@ -183,6 +186,7 @@ struct Catalog {
     std::optional<std::array<std::array<float,8>,12>> land_speed;
     std::vector<std::int32_t> shipyards;  // [General] Shipyard, Rules +790, heap indexes.
     std::vector<bool> overlay_wall;       // [OverlayTypes] order: Wall (OverlayType +278).
+    std::vector<std::string> overlay_names; // [OverlayTypes] order; the Cell overlay index is the position.
     std::int32_t naval_yard_adjacency=20; // Rules +C00 AINavalYardAdjacency, constructor 00640B80.
     double build_speed=0;                 // Rules +13B0.
     float minimum_low_power=0, maximum_low_power=0, low_power_penalty=0, multiple_factory=0;

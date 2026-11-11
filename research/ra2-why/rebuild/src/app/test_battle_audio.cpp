@@ -1,4 +1,5 @@
 #include "battle_audio.h"
+#include "battle_superweapons.h"
 #include <SDL.h>
 #include <algorithm>
 #include <cassert>
@@ -119,4 +120,38 @@ int main(int argc,char** argv) {
         assert(audio.queued_samples()==queued&&audio.mixed_samples()==mixed);
     }
     std::cout<<"base fire and EVA PCM, first tick, pause, fast/slow pacing, and death filters passed\n";
+    // Super weapon EVA: every mapped section exists in the stock base
+    // EVA.INI with Allied and Russian samples, and the mapped names play
+    // real PCM. A renamed or missing section fails here.
+    {
+        for(const auto* section:app::superweapon_speech_sections()) {
+            assert(!eva.read_string(section,"Allied").empty());
+            assert(!eva.read_string(section,"Russian").empty());
+        }
+        const char* sides[]={"Allied","Russian"};
+        for(const auto* side:sides) {
+            config.speech_side=side;
+            const auto speak_pcm=[&](const char* section) {
+                // A fresh player per line: the PCM block then starts at the
+                // first sample of the speech, with nothing queued before it.
+                app::BattleAudio audio(files,rules,1,side);
+                assert(audio.enabled());
+                audio.speak(section);
+                audio.service(false);
+                assert(loud(audio.last_pcm())); // Real decoded WAV, not silence.
+                audio::GameAudio reference;reference.configure(config);
+                reference.on_event(section);
+                std::vector<std::int16_t> expected(audio.last_pcm().size());
+                reference.render(expected);
+                assert(audio.last_pcm()==expected); // Original sample, byte for byte.
+            };
+            speak_pcm("EVA_NuclearMissileLaunched");
+            speak_pcm("EVA_LightningStormReady");
+            speak_pcm("EVA_LightningStormCreated");
+            for (const auto* section : app::superweapon_activation_sections())
+                speak_pcm(section);
+        }
+        config.speech_side="Allied";
+    }
+    std::cout<<"super weapon EVA sections and PCM playback passed\n";
 }

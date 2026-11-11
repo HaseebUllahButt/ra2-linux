@@ -12,8 +12,9 @@
 #include <utility>
 
 namespace ra2::sim {
-PrototypeAI::PrototypeAI(const rules::IniFile& base_rules, const rules::IniFile* base_ai, Difficulty difficulty)
-    : rules_(base_rules), difficulty_(difficulty) {
+PrototypeAI::PrototypeAI(const rules::IniFile& base_rules, const rules::IniFile* base_ai, Difficulty difficulty,
+                         const rules::IniFile* base_art)
+    : rules_(base_rules), difficulty_(difficulty), art_(base_art) {
     if (!base_ai) return;
     const auto& ai = *base_ai;
     // Section bodies keyed by the ID lists, as AI.INI stores them.
@@ -112,6 +113,7 @@ void PrototypeAI::reset() noexcept {
     choice_product_ = {};
     base_centres_.clear();
     plan_.clear();
+    wall_request_.reset();
     naval_ = true; // 004E18C0
     weights_.clear();
     for (const auto& trigger : triggers_) weights_.push_back(trigger.weight);
@@ -270,6 +272,7 @@ void PrototypeAI::make_plan(const Context& context) {
         plan.insert(plan.begin() + at + 1, std::string{});
     }
     plan_.clear();
+    wall_request_.reset();
     for (auto& type : plan) plan_.push_back({std::move(type), std::nullopt});
 }
 
@@ -423,7 +426,13 @@ bool PrototypeAI::plan_walls(const Context& context, std::size_t node) {
             }
         if (!building) continue;
         std::int32_t width = 1, height = 1;
-        const auto foundation = rules_.read_string(type, "Foundation");
+        // The real foundation lives in ART.INI, under the type's Image name
+        // when it has one. Rules Foundation stays the fallback for test
+        // fixtures without art.
+        std::string image = type;
+        if (art_) image = rules_.read_string(type, "Image", type);
+        const auto foundation = (art_ ? art_ : &rules_)->read_string(image, "Foundation",
+            rules_.read_string(type, "Foundation", ""));
         if (const auto x = foundation.find_first_of("xX"); x != std::string::npos) {
             width = std::max(1, number(foundation.substr(0, x), 1));
             height = std::max(1, number(foundation.substr(x + 1), 1));
@@ -469,17 +478,51 @@ bool PrototypeAI::plan_walls(const Context& context, std::size_t node) {
 //  - else the node type becomes the building to make (+553C).
 // A wall node (with a Cell) is built (0042C000) when the Cell holds the
 // wall overlay (+1215, +BEC) or any building.
-// TODO-ORIGINAL: our game cannot place a wall building (it becomes an
-// overlay), so a wall node counts as built and the walls are not made.
-// Node -3 (004F2350), the upgrade path (+C20) and the replacement skip
+// A wall node is built (0042C000) when its Cell holds the wall overlay of
+// the wall type or a building of the plan; the caller places the finished
+// wall at the planned Cell through production place(), which writes the
+// overlay and retires the temporary building.
+// TODO-ORIGINAL: Node -3 (004F2350), the upgrade path (+C20) and the replacement skip
 // of 0042C3D0 (node +8, 004F64C0) are not modelled. House +15F88 is zero
 // (004E18C0) and is taken as zero.
 std::string PrototypeAI::plan_build(const Context& context) {
+    // 0042C000: a wall node counts as built when a building of the plan
+    // stands at the exact Cell, or the Cell holds the wall overlay of the
+    // wall type (the node type must name an OverlayType).
+    const auto wall_built = [&](const Context& context, const std::string& type, ra2map::Cell cell) {
+        for (const auto* building : context.buildings)
+            if (building->cell && building->cell->x == cell.x && building->cell->y == cell.y) return true;
+        // The overlay of a wall type is the [OverlayTypes] entry of the same
+        // name; its position in the section is the overlay index, as
+        // Catalog::overlay_names reads it (0042C000 compares Cell +44 with
+        // the type's overlay frame at +264).
+        int overlay_index = -1;
+        if (const auto* section = rules_.find_section("OverlayTypes")) {
+            std::int32_t position = 0;
+            for (const auto& entry : section->entries) {
+                if (equal_name(entry.value, type)) { overlay_index = position; break; }
+                ++position;
+            }
+        }
+        if (overlay_index < 0) return false;
+        const auto key = std::uint32_t(cell.y) * 512 + cell.x;
+        const auto found = context.world.cells.find(key);
+        return found != context.world.cells.end() && found->second.terrain &&
+            found->second.terrain->overlay_type_index == std::int32_t(overlay_index);
+    };
     const auto unbuilt = [&]() {
         for (std::size_t i = 0; i < plan_.size(); ++i) {
             const auto& type = plan_[i].type;
             if (type.empty()) return i;
-            if (plan_[i].cell) continue; // a wall node, see above
+            if (plan_[i].cell) {
+                if (wall_built(context, type, *plan_[i].cell)) {
+                    if (wall_request_ && equal_name(wall_request_->type, type) &&
+                        wall_request_->cell.x == plan_[i].cell->x && wall_request_->cell.y == plan_[i].cell->y)
+                        wall_request_.reset();
+                    continue; // built, see 0042C000 above
+                }
+                return i;
+            }
             const auto nodes = std::count_if(plan_.begin(), plan_.begin() + static_cast<std::ptrdiff_t>(i) + 1,
                 [&](const PlanNode& item) { return equal_name(item.type, type) && !item.cell; });
             if (std::count_if(context.buildings.begin(), context.buildings.end(),
@@ -541,6 +584,12 @@ std::string PrototypeAI::plan_build(const Context& context) {
             }
         }
     }
+    // A wall node asks for the wall at its planned Cell; expose the Cell so
+    // the caller places the finished wall there (0042C3D0).
+    if (i < plan_.size() && plan_[i].cell)
+        wall_request_ = WallRequest{type, *plan_[i].cell};
+    else
+        wall_request_.reset();
     return type;
 }
 

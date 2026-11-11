@@ -266,6 +266,32 @@ int main(int argc, char** argv) {
         const auto palette = gfx::Palette::from_bytes(*files.read_file("cameo.pal"));
         const auto icon = gfx::ShpImage::parse(*files.read_file("POWRICON.SHP")).decode_frame(0, palette);
         assert(exact(screen, icon, 878, 228) > 2800);
+        // Super weapon cameo: a granted weapon renders its original
+        // SidebarImage from [SuperWeaponTypes], not fallback text. The
+        // cached name comes from the rules, independent of the initial
+        // choices, and the build-type icon above stays untouched.
+        const auto sidebar_image = rules.read_string("MultiSpecial", "SidebarImage");
+        assert(!sidebar_image.empty() && "MultiSpecial SidebarImage missing");
+        // The real battle mounts the side archive before the HUD loads
+        // (run_prototype_battle); the cameo icons live there.
+        const auto side_mount = files.mount("sidec01.mix", false);
+        auto with_super = o;
+        with_super.choices.push_back(
+            {"MultiSpecial", "Nuke", 0, true, 0, BuildCategory::Defenses});
+        allied.load_assets(files, rules, art, with_super.choices);
+        // The Defenses tab shows the weapon; switch to it like a click would.
+        assert(allied.handle_click(913, 199, with_super).kind == HudActionKind::None);
+        auto super_screen = frame(); allied.draw(super_screen, with_super);
+        const auto super_icon = gfx::ShpImage::parse(
+            *files.read_file(sidebar_image + ".shp")).decode_frame(0, palette);
+        const auto super_bounds = allied.choice_bounds(with_super, "MultiSpecial");
+        assert(super_bounds.width == 60 && super_bounds.height == 48);
+        assert(exact(super_screen, super_icon, super_bounds.x, super_bounds.y) > 2800);
+        // The build-type cameo keeps its original icon after the reload:
+        // back on the Buildings tab, slot 0 still shows the power plant.
+        assert(allied.handle_click(884, 199, with_super).kind == HudActionKind::None);
+        auto back_screen = frame(); allied.draw(back_screen, with_super);
+        assert(exact(back_screen, icon, 878, 228) > 2800);
         // Disabled cameos are darker and refuse clicks.
         auto off = o; off.choices[0].enabled = false;
         auto dimmed = frame(); allied.draw(dimmed, off);

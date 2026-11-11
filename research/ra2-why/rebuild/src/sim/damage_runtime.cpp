@@ -813,6 +813,10 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
         for (const auto& candidate:candidates) {
             auto* target=prototype_find(world,candidate.id);
             if (!prototype_alive(target) || candidate.distance>radius) continue;
+            // Caller-set invulnerability: positive damage is skipped before
+            // the damage kernel, so HP and Cell chains stay unchanged and no
+            // retaliation starts.
+            if (raw_for(*target)>0 && invulnerable_ && invulnerable_(target->id,frame)) continue;
             const int before=*target->resolved_hp;
             auto hit=prototype_damage(world,candidate.id,shot.source_id,raw_for(*target),
                                       candidate.distance,*weapon,merged_,map_);
@@ -828,7 +832,9 @@ PrototypeCombatTick PrototypeCombatRuntime::tick(session::world::Snapshot& world
             // TODO-ORIGINAL: Permit a direct hit when the flat prototype's
             // impact height misses the original area distance check.
             const int before=*aimed->resolved_hp;
-            auto hit=prototype_damage(world,aimed->id,shot.source_id,raw_for(*aimed),0,*weapon,merged_,map_);
+            const bool shielded=raw_for(*aimed)>0 && invulnerable_ && invulnerable_(aimed->id,frame);
+            auto hit=shielded?PrototypeHit{}:prototype_damage(world,aimed->id,shot.source_id,
+                raw_for(*aimed),0,*weapon,merged_,map_);
             panic(*aimed,hit);
             if (hit.applied && !hit.destroyed && shot.source_id) struck.emplace_back(aimed->id,shot.source_id);
             if (!hit.missing.empty()) report.unresolved.push_back(hit.missing);

@@ -9,6 +9,7 @@
 #include "../gfx/shp_decode.h"
 #include <algorithm>
 #include <cctype>
+#include <iostream>
 #include <cstdint>
 
 namespace ra2::app {
@@ -95,7 +96,25 @@ void BattleHud::load_assets(const fs::MixFileSystem& files, const rules::IniFile
     if (!pal) return;
     try { cameo_palette_ = gfx::Palette::from_bytes(*pal); }
     catch (const std::exception&) { return; }
+    // Super weapon cameo art first: the SidebarImage= of each
+    // [SuperWeaponTypes] section, cached independently of the build
+    // choices so a granted weapon shows its original icon instead of
+    // fallback text. The cameo palette above renders it. A super weapon
+    // section is never a build type, so the choice loop below skips it.
+    std::set<std::string> superweapon_sections;
+    if (const auto* types = rules.find_section("SuperWeaponTypes"))
+        for (const auto& entry : types->entries) {
+            const std::string section(entry.value);
+            if (section.empty()) continue;
+            superweapon_sections.insert(section);
+            auto image = rules.read_string(section, "SidebarImage");
+            if (image.empty()) continue;
+            const bool has_extension = image.size() > 4 &&
+                image.compare(image.size() - 4, 4, ".shp") == 0;
+            cameo_names_[section] = has_extension ? image : image + ".shp";
+        }
     for (const auto& c : choices) {
+        if (superweapon_sections.count(c.type)) continue;
         const auto image = rules.read_string(c.type, "Image", c.type);
         cameo_names_[c.type] = art.read_string(image, "Cameo", image + "ICON") + ".shp";
     }

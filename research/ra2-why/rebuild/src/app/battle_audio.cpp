@@ -1,4 +1,5 @@
 #include "battle_audio.h"
+#include "battle_superweapons.h"
 #include <algorithm>
 #include <cctype>
 #include <set>
@@ -53,6 +54,13 @@ BattleAudio::BattleAudio(const fs::MixFileSystem& files,const rules::IniFile& ru
         }
         const auto speech=lower(eva_.read_string("EVA_UnitLost",side));
         if(!speech.empty())names.insert(speech+".wav");
+        // Super weapon speech: every stock base EVA.INI section the battle
+        // maps (see battle_superweapons.h). Cache each line the file has
+        // for this side, so a mapped name never misses its sample.
+        for(const auto* section:superweapon_speech_sections()) {
+            const auto line=lower(eva_.read_string(section,side));
+            if(!line.empty())names.insert(line+".wav");
+        }
         std::size_t bytes=0;
         for(const auto& name:names) {
             try {
@@ -103,6 +111,10 @@ void BattleAudio::observe(const session::world::Snapshot& world,std::uint64_t fr
         seen_[e.id]={hp,e.lifetime==session::world::Lifetime::Placed,e.weapon_timer_start_frame};
     }
     ready_=true;
+}
+void BattleAudio::speak(const std::string& eva_section) {
+    if(!device_||eva_section.empty())return;
+    mixer_.on_event(eva_section);
 }
 void BattleAudio::service(bool paused) noexcept {
     if(!device_)return;
