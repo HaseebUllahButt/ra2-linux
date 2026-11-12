@@ -162,3 +162,22 @@ Rules for all jobs:
 8. Native Linux skirmish: Dec 5 (worst Jan 5). Native complete: Dec 15 (worst Jan 31).
 9. Critical path: the window and dialog code (J14). Strongest crew there from hour 0.
 10. Stop the hand 1:1 fixes and the rebuild rule work now; reuse their harness, SDL, sound, Bink and file code. Owner task: 1 hour of recorded play at 10:00.
+
+## 11. Status (translation lead, 2026-11-12 early morning)
+
+| Job | Status | Evidence |
+|---|---|---|
+| J1 compiler | Done | `tools/wcc` (zig cc x86-windows-gnu); tests/j1 |
+| J2 function list | Done | tests/entries-v2.txt: 19,274 entries, 99.43% of non-padding code; reports/coverage.md |
+| J5 fuzzer | Done | tools/insnfuzz.sh: 0 mismatches, about 6 million states; reports/insnfuzz.md, reports/pcrecomp-faults.md |
+| J6 runtime v2 | Done | tests/rt2 (Wine): native->lifted 8 deep on 5 threads; 77 group rows unchanged; native x87 stack carried into entries |
+| J7 shim | Done | shim/rc_win.c, shim/launch.c (several DLLs), tools/drive.sh |
+| J16 last functions | Done | 0 functions fail to lift (MMX, cmov, cpuid/rdtsc hooks, fnsave/fnstenv, xlatb, flag-returning CRT helper) |
+| J17 speed | Done | lookup is one array read; direct calls RC_CALLD; lifted replay about 400 frames/s (19x real time) |
+| M1 | Met | reports/m1-menu.png: all functions on, menu, mouse |
+| M3 | Met | reports/m3.md: 6,256-frame replay, 0 value cells differ against the control |
+| xverify | Done | reports/xverify.md: our lifter vs pcrecomp on the same functions |
+| M3b | Open | needs 20 recordings; fallback census in rc.dll (RC_FALLBACK): 1 seen, added |
+| JOIN | Running | pcrecomp native build + our exact x87 (Codex helper, /path/to/user/Projects/ra2/join) |
+
+Builds: full lift + compile of rc.dll takes about 2 minutes on the test-host (`tools/winbuild.sh`).
