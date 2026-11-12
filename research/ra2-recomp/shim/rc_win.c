@@ -18,6 +18,7 @@ extern const int rc_table_n;
 extern const u8 rc_patchable[];
 extern u32 rc_patch_aux[], rc_patch_tmp[];
 extern long rc_native_calls, rc_lifted_calls;
+extern u32 rc_fb_addr[], rc_fb_count[]; extern int rc_fb_n;
 void rc_entry_common(void);
 void rc_set_off(int idx, int off);
 static DWORD slot_aux, slot_tmp;
@@ -70,7 +71,11 @@ static DWORD WINAPI stats_thread(void *p)
 {
     for (int t = 0;; t++) {
         Sleep(2000);
-        logf_("t=%ds lifted_calls=%ld native_calls=%ld\n", 2 * (t + 1), rc_lifted_calls, rc_native_calls);
+        logf_("t=%ds lifted_calls=%ld native_calls=%ld fallback_targets=%d\n", 2 * (t + 1), rc_lifted_calls, rc_native_calls, rc_fb_n);
+        if (t % 5 == 4 && getenv("RC_FALLBACK")) {          /* every 10 s: list of game-code fallbacks */
+            FILE *f = fopen(getenv("RC_FALLBACK"), "w");
+            if (f) { for (int i = 0; i < 8192; i++) if (rc_fb_addr[i]) fprintf(f, "%08x %u\n", rc_fb_addr[i], rc_fb_count[i]); fclose(f); }
+        }
     }
     return 0;
 }

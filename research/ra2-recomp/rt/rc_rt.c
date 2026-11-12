@@ -98,8 +98,21 @@ void rc_thread_init(void)
 }
 
 /* ---- native calls ---- */
+/* fallback census: native calls into game.exe code (not imports, not other DLLs) */
+#define FB_N 8192
+u32 rc_fb_addr[FB_N]; u32 rc_fb_count[FB_N]; int rc_fb_n;
+static void fb_note(u32 t)
+{
+    if (t < 0x401000u || t >= 0x7995d0u) return;
+    u32 h = (t * 2654435761u) >> 19;                /* 13-bit hash, open addressing */
+    for (int k = 0; k < FB_N; k++, h = (h + 1) & (FB_N - 1)) {
+        if (rc_fb_addr[h] == t) { rc_fb_count[h]++; return; }
+        if (!rc_fb_addr[h]) { rc_fb_addr[h] = t; rc_fb_count[h] = 1; rc_fb_n++; return; }
+    }
+}
 static void native_with_fpu(u32 target)
 {
+    fb_note(target);
     RCAux *a = &rc_aux;
     /* move every valid guest x87 value to the real FPU, deepest first */
     int n = 0; f80 v[8];
