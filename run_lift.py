@@ -435,11 +435,14 @@ CLIP_LINE_SITES = {   # loop head (test edx, edx), accept path, reject path
 
 
 def clip_line_patches(target):
-    head, accept, reject = CLIP_LINE_SITES[target]
-    reset = '{ extern unsigned ra2_clip_rounds; ra2_clip_rounds = 0; } /* line clip cap (issue #20) */'
-    return {head: '{ extern unsigned ra2_clip_rounds; if (++ra2_clip_rounds > 64) goto L_%08X; } '
-                  '/* line clip cap (issue #20) */' % reject,
-            accept: reset, reject: reset}
+    head, _accept, reject = CLIP_LINE_SITES[target]
+    # The x87 exit sites have no patch markers in the lifted output.
+    # Reset at the marked prologue so each call gets its own budget.
+    entry = {'game': 0x00775620, 'gamemd': 0x007BC2B0}[target]
+    reset = '{ extern unsigned ra2_clip_rounds; ra2_clip_rounds = 0; } /* one clip budget per call */'
+    return {entry: reset,
+            head: '{ extern unsigned ra2_clip_rounds; if (++ra2_clip_rounds > 64) goto L_%08X; } '
+                  '/* line clip cap (issue #20) */' % reject}
 
 
 # The launcher check. gamemd.exe starts by looking for RA2MD.exe (0x0049F5C0,
