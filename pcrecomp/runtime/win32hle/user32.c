@@ -116,6 +116,14 @@
  * 6 pixels, its y 8ths of 13. */
 #define DLG_BX 6
 #define DLG_BY 13
+/* MapDialogRect's MulDiv: a*b/c rounded to nearest, halves away from zero.
+ * Windows and Wine place a dialog and its controls with it; a plain integer
+ * divide put every control with an odd x (or a y of 4 to 7 eighths) a pixel
+ * up and left of where the game expects it. */
+static int dlg_muldiv(int a, int b, int c) {
+    int64_t p = (int64_t)a * b, h = (c >= 0 ? c : -c) / 2;
+    return (int)(((p >= 0) == (c >= 0) ? p + h : p - h) / c);
+}
 
 /* ---- classes ---- */
 enum { K_GUEST, K_DEFAULT, K_DIALOG, K_BUTTON, K_STATIC, K_EDIT, K_LISTBOX, K_COMBOBOX, K_SCROLLBAR,
@@ -1301,7 +1309,7 @@ static uint32_t create_dialog(uint32_t hinst, uint32_t tmpl, uint32_t parent, ui
         p += ex ? 6 : 2;
         p = sz_or_ord(p, font, sizeof font, &atom);
     }
-    int px = dx * DLG_BX / 4, py = dy * DLG_BY / 8, pw = dcx * DLG_BX / 4, ph = dcy * DLG_BY / 8;
+    int px = dlg_muldiv(dx, DLG_BX, 4), py = dlg_muldiv(dy, DLG_BY, 8), pw = dlg_muldiv(dcx, DLG_BX, 4), ph = dlg_muldiv(dcy, DLG_BY, 8);
     win_t *pp = W(parent);
     if ((style & DS_CENTER) || (!(style & WS_CHILD) && pp == NULL)) {
         px = (g_screen_w - pw) / 2, py = (g_screen_h - ph) / 2;
@@ -1338,7 +1346,9 @@ static uint32_t create_dialog(uint32_t hinst, uint32_t tmpl, uint32_t parent, ui
         p += 2 + extra;
         const char *ctl_cls = ccls[0] ? ccls : (const char *)(uintptr_t)catom;
         uint32_t c = hle_create_window(cex | 0x4u /* NOPARENTNOTIFY */, ctl_cls, tatom ? "" : ctext, cs | WS_CHILD,
-                                       x * DLG_BX / 4, y * DLG_BY / 8, cx * DLG_BX / 4, cy * DLG_BY / 8, h, cid, hinst, cdata);
+                                       dlg_muldiv(x, DLG_BX, 4), dlg_muldiv(y, DLG_BY, 8),
+                                       dlg_muldiv(x + cx, DLG_BX, 4) - dlg_muldiv(x, DLG_BX, 4),   /* MapDialogRect maps both edges */
+                                       dlg_muldiv(y + cy, DLG_BY, 8) - dlg_muldiv(y, DLG_BY, 8), h, cid, hinst, cdata);
         win_t *cw = W(c);
         if (cw && tatom) cw->extra[0] = tatom;           /* an icon/bitmap resource id */
         if (!c) fprintf(stderr, "[user32] dialog control %u (%s) not created\n", cid, catom ? "atom" : ccls);
