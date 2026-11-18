@@ -1160,7 +1160,9 @@ static uint32_t trackbar_proc(win_t *x, uint32_t m, uint32_t w, uint32_t l) {
     case 0x0406u: x->rmin = (int16_t)(l & 0xFFFF), x->rmax = (int16_t)(l >> 16); if (w) invalidate(x, 0); return 0;   /* TBM_SETRANGE */
     case 0x0407u: x->rmin = (int)l; return 0;            /* TBM_SETRANGEMIN */
     case 0x0408u: x->rmax = (int)l; return 0;            /* TBM_SETRANGEMAX */
-    case 0x0414u: case 0x0415u: case 0x0417u: return 0;  /* TICFREQ, PAGESIZE, LINESIZE */
+    case 0x0415u: { int old = x->page ? x->page : 20; x->page = (int)l; return (uint32_t)old; }   /* TBM_SETPAGESIZE */
+    case 0x0416u: return (uint32_t)(x->page ? x->page : 20);                                      /* TBM_GETPAGESIZE */
+    case 0x0414u: case 0x0417u: return 0;                /* TICFREQ, LINESIZE */
     case 0x0418u: case 0x041Fu: return 1;
     case 0x0419u: {                                      /* TBM_GETTHUMBRECT */
         int span = x->rmax > x->rmin ? x->rmax - x->rmin : 1, tx = 5 + (x->w - 10) * (x->pos - x->rmin) / span;
@@ -1170,7 +1172,31 @@ static uint32_t trackbar_proc(win_t *x, uint32_t m, uint32_t w, uint32_t l) {
     case 0x041Au: put_rect(l, 5, x->h / 2 - 2, x->w - 5, x->h / 2 + 2); return 0;   /* TBM_GETCHANNELRECT */
     case WM_LBUTTONDOWN: case WM_MOUSEMOVE: case WM_LBUTTONUP: {
         if (m == WM_MOUSEMOVE && !x->tracking) return 0;
-        if (m == WM_LBUTTONDOWN) x->tracking = 1, g_capture = h, set_focus(h);
+        if (m == WM_LBUTTONUP && x->paged) {             /* the click was a page step: Windows ends it here */
+            win_t *p = W(x->parent);
+            x->paged = 0;
+            if (p) hle_send(p->hwnd, x->style & 2u ? WM_VSCROLL : WM_HSCROLL, 8u /* TB_ENDTRACK */, h);
+            return 0;
+        }
+        if (m == WM_LBUTTONDOWN) {
+            /* Off the thumb a click is a page up or down, by the page size,
+             * not a jump to the point (Windows and Wine: a game's
+             * Visual Details slider, clicked mid-track, goes to its end). */
+            int cx0 = (int16_t)(l & 0xFFFF), sp = x->rmax > x->rmin ? x->rmax - x->rmin : 1;
+            int tx0 = 5 + (x->w - 10) * (x->pos - x->rmin) / sp;
+            set_focus(h);
+            if (cx0 < tx0 - 5 || cx0 > tx0 + 5) {
+                int pg = x->page ? x->page : 20, up = cx0 < tx0;
+                int np = up ? x->pos - pg : x->pos + pg;
+                x->pos = np < x->rmin ? x->rmin : np > x->rmax ? x->rmax : np;
+                x->paged = 1;
+                invalidate(x, 0);
+                win_t *p = W(x->parent);
+                if (p) hle_send(p->hwnd, x->style & 2u ? WM_VSCROLL : WM_HSCROLL, up ? 2u : 3u /* TB_PAGEUP, TB_PAGEDOWN */, h);
+                return 0;
+            }
+            x->tracking = 1, g_capture = h;
+        }
         int cx = (int16_t)(l & 0xFFFF), span = x->rmax - x->rmin, pos;
         pos = x->rmin + (span * (cx - 5) + (x->w - 10) / 2) / (x->w > 10 ? x->w - 10 : 1);
         x->pos = pos < x->rmin ? x->rmin : pos > x->rmax ? x->rmax : pos;
