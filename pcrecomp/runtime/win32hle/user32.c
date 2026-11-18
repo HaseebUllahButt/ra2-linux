@@ -189,6 +189,14 @@ static win_t *W(uint32_t h) {
  * driver watching for a button's click). */
 void (*hle_proc_hook)(uint32_t hwnd, uint32_t msg, uint32_t wParam, uint32_t lParam);
 static int g_msgtrace = -1;                      /* HLE_MSGTRACE=1: every message, but paints and mouse moves */
+/* Whether a window is validated, once it has been sent WM_PAINT. A control the
+ * game subclassed handles its own painting, and what it has not validated
+ * stays invalid, as on Windows: Red Alert 2's dialogs ask GetUpdateRect which
+ * of their controls still need drawing, and a skirmish's map picture waited
+ * for one that said so. */
+static int auto_validates(const win_t *t) {
+    return t->kind != K_GUEST && t->proc == g_cls[t->cls].proc;
+}
 static uint32_t call_proc(uint32_t proc, uint32_t h, uint32_t m, uint32_t w, uint32_t l) {
     if (hle_proc_hook) hle_proc_hook(h, m, w, l);
     if (!proc) return 0;
@@ -694,7 +702,7 @@ static void u_DispatchMessageA(void) {
     win_t *x = W(h);
     if (!x) RET(0, 1);
     uint32_t r = call_proc(x->proc, h, m, MEM32(lp + 8), MEM32(lp + 12));
-    if (m == WM_PAINT && (x = W(h)) && x->inval && x->kind != K_GUEST) x->inval = 0;
+    if (m == WM_PAINT && (x = W(h)) && x->inval && auto_validates(x)) x->inval = 0;
     RET(r, 1);
 }
 
@@ -1447,7 +1455,7 @@ static uint32_t run_modal(uint32_t h) {
                 if (c) q_push(m.hwnd, m.message == WM_KEYDOWN ? WM_CHAR : WM_SYSCHAR, (uint32_t)c, m.lParam);
             }
             if (t) call_proc(t->proc, mm[0], mm[1], mm[2], mm[3]);
-            if (m.message == WM_PAINT && (t = W(m.hwnd)) && t->inval && t->kind != K_GUEST) t->inval = 0;
+            if (m.message == WM_PAINT && (t = W(m.hwnd)) && t->inval && auto_validates(t)) t->inval = 0;
         }
     }
     uint32_t r = d ? d->dlg_result : 0xFFFFFFFFu;
@@ -1518,7 +1526,7 @@ static int is_dialog_message(uint32_t dlg, msg_t *m) {
         if (c) q_push(m->hwnd, m->message == WM_KEYDOWN ? WM_CHAR : WM_SYSCHAR, (uint32_t)c, m->lParam);
     }
     if (t) call_proc(t->proc, m->hwnd, m->message, m->wParam, m->lParam);
-    if (m->message == WM_PAINT && (t = W(m->hwnd)) && t->inval && t->kind != K_GUEST) t->inval = 0;
+    if (m->message == WM_PAINT && (t = W(m->hwnd)) && t->inval && auto_validates(t)) t->inval = 0;
     return 1;
 }
 static void u_IsDialogMessageA(void) {                   /* (dlg, msg) */
@@ -1609,7 +1617,7 @@ static void u_ShowWindow(void) {
 static void u_UpdateWindow(void) {
     win_t *x = W(A32(0));
     if (x && x->inval && visible(x)) hle_send(x->hwnd, WM_PAINT, 0, 0);
-    if ((x = W(A32(0))) && x->kind != K_GUEST) x->inval = 0;
+    if ((x = W(A32(0))) && auto_validates(x)) x->inval = 0;
     RET(x != NULL, 1);
 }
 static void u_CloseWindow(void) { RET(W(A32(0)) != NULL, 1); }   /* minimize: nothing to minimize to */
@@ -1880,7 +1888,7 @@ static void u_RedrawWindow(void) {                       /* (h, rect, rgn, flags
         for (int i = 0; i < n; i++) {
             hle_send(list[i], WM_PAINT, 0, 0);
             win_t *y = W(list[i]);
-            if (y && y->kind != K_GUEST) y->inval = 0;
+            if (y && auto_validates(y)) y->inval = 0;
         }
     }
     RET(1, 4);
