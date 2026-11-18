@@ -147,7 +147,7 @@ typedef struct {
     int seq;                             /* creation order: the tab order, and who wins a click among equals */
     int z;                               /* the z-order among siblings, lowest on top: creation order until moved */
     /* the built-in controls' state */
-    int state, check, pos, rmin, rmax, cursel, top, item_h, sel0, sel1, limit, dropped, tracking;
+    int state, check, pos, rmin, rmax, cursel, top, item_h, sel0, sel1, limit, dropped, tracking, page, paged;   /* a trackbar's page size (0: 20, as Windows), and a page click awaiting its release */
     int sel_h, drop_h;                   /* a combo box: its selection field, and its height dropped */
     struct item { char *text; uint32_t data; } *items;
     int nitems, citems;
@@ -427,9 +427,9 @@ static uint32_t create_window(uint32_t exstyle, const char *cls, const char *tit
 
 /* A list's item height, and a combo box's selection field, as Windows works
  * them out: from the font (13 pixels, plus 4 for the field), or for an
- * owner-drawn one from the parent's answer to WM_MEASUREITEM. A drop-down
- * combo's window is only its field; the template's height is how tall it is
- * dropped. */
+ * owner-drawn one from the parent's answer to WM_MEASUREITEM (the field's
+ * starts at 18, as Wine's does). A drop-down combo's window is only its field;
+ * the template's height, less the field's, is its list's. */
 static void measure(win_t *x) {
     uint32_t h = x->hwnd;
     int combo = x->kind == K_COMBOBOX, owner = (x->style & 0x30u) != 0;
@@ -437,7 +437,7 @@ static void measure(win_t *x) {
     x->sel_h = 17, x->item_h = 13, x->drop_h = x->h;
     if (owner && p) {
         uint32_t mark = hle_scratch_mark();
-        uint32_t mi_[6] = { combo ? 3u : 2u, x->id, combo ? 0xFFFFFFFFu : 0u, (uint32_t)x->w, combo ? 11u : 13u, 0 };
+        uint32_t mi_[6] = { combo ? 3u : 2u, x->id, combo ? 0xFFFFFFFFu : 0u, (uint32_t)x->w, combo ? 18u : 13u, 0 };
         uint32_t mi = hle_scratch_copy(mi_, sizeof mi_);  /* MEASUREITEMSTRUCT */
         hle_send(p->hwnd, WM_MEASUREITEM, x->id, mi);
         if (!(x = W(h))) { hle_scratch_release(mark); return; }
@@ -455,7 +455,11 @@ static void measure(win_t *x) {
         }
         hle_scratch_release(mark);
     }
-    if (combo && (x->style & 3u) != 1u) x->h = x->sel_h + 4;   /* not CBS_SIMPLE */
+    if (combo && (x->style & 3u) != 1u) {                /* not CBS_SIMPLE */
+        int tmpl_h = x->h;
+        x->h = owner ? x->sel_h : x->sel_h + 4;           /* an owner-drawn field is its item height and 6 (Wine: 19 -> 25) */
+        x->drop_h = tmpl_h > x->h ? tmpl_h - x->h : 0;    /* the list's own height: what is left of the template's */
+    }
 }
 
 /* A visible child going (hidden or destroyed) uncovers its parent, which
@@ -1050,7 +1054,13 @@ static uint32_t list_msg(win_t *x, uint32_t m, uint32_t w, uint32_t l, int *hand
     case 0x0198u:                                        /* LB_GETITEMRECT */
         put_rect(l, 0, ((int)w - x->top) * x->item_h, x->w, ((int)w - x->top + 1) * x->item_h);
         return 1;
-    case 0x01A0u: case 0x0153u: if (w != 0xFFFFFFFFu || x->kind == K_LISTBOX) x->item_h = (int)(l & 0xFFFF); return 0;   /* SETITEMHEIGHT */
+    case 0x01A0u: case 0x0153u:                          /* SETITEMHEIGHT */
+        if (w != 0xFFFFFFFFu || x->kind == K_LISTBOX) x->item_h = (int)(l & 0xFFFF);
+        else if (x->kind == K_COMBOBOX && (x->style & 0x30u) && (x->style & 3u) != 1u && (int)(l & 0xFFFF) > 0) {
+            x->sel_h = 6 + (int)(l & 0xFFFF), x->h = x->sel_h;   /* an owner-drawn combo's field, -1: its window follows (Wine: 19 -> 25 high) */
+            invalidate(x, 1);
+        }
+        return 0;
     case 0x01A1u: case 0x0154u: return (uint32_t)x->item_h;   /* GETITEMHEIGHT */
     case 0x01A9u: {                                      /* LB_ITEMFROMPOINT */
         int i = x->top + (int16_t)(l >> 16) / (x->item_h ? x->item_h : 1);
@@ -1114,7 +1124,7 @@ static uint32_t combobox_proc(win_t *x, uint32_t m, uint32_t w, uint32_t l) {
     case 0x0152u: {                                      /* CB_GETDROPPEDCONTROLRECT: screen coordinates */
         int ox, oy;
         origin(x, &ox, &oy);
-        put_rect(l, ox, oy, ox + x->w, oy + x->drop_h);
+        put_rect(l, ox, oy, ox + x->w, oy + x->drop_h);   /* Wine: the list's height from the combo's top, not both */
         return 1;
     }
     case 0x0141u: return 1;                              /* CB_LIMITTEXT */
@@ -1722,7 +1732,7 @@ static void move(win_t *x, int px, int py, int pw, int ph, int do_move, int do_s
      * 2's skirmish rows are laid out at their field height, and a dropped
      * height of 21 left their lists no room for one item). */
     if (do_size && x->kind == K_COMBOBOX && (x->style & 3u) != 1u) {
-        if (ph > x->h) x->drop_h = ph;
+        if (ph > x->h) x->drop_h = ph - x->h;            /* the list is what is left of the height given */
         ph = x->h;
     }
     if (do_move) x->x = px, x->y = py;
