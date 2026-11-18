@@ -44,6 +44,13 @@ static SDL_Texture *g_tex;
 static int g_tex_w, g_tex_h, g_tex_fmt;
 static unsigned g_shown_seq = ~0u;
 static uint32_t g_last_present;
+static uint32_t g_present_cost;                          /* how long the last present took, ms */
+/* The least time between two presents: 15 ms (60 a second), or, when presenting
+ * is slow (a loaded machine, a software renderer), three times what it cost,
+ * so the game keeps three parts in four of its time. Present on every draw
+ * into the primary at full cost left a loaded machine drawing menu text a
+ * letter a second and a screen's title late. */
+static uint32_t present_gap(void) { return g_present_cost > 20 ? 3 * g_present_cost : 15; }
 static int g_headless, g_fullscreen;
 static SDL_Rect g_dst;                                   /* where the picture is in the window */
 /* GL mode (hle_screen_gl set before hle_screen_open): the window is made for
@@ -228,7 +235,7 @@ static void present(void) {
     uint32_t now = hle_ticks_ms();
     g_src_w = w, g_src_h = h;
     if (seq == g_shown_seq && now - g_last_present < 250) return;
-    if (now - g_last_present < 15) return;
+    if (now - g_last_present < present_gap()) return;
     g_shown_seq = seq, g_last_present = now;
     if (hle_screen_frame_hook) hle_screen_frame_hook(px, w, h, pitch, bpp);
     if (!g_ren) return;
@@ -379,6 +386,7 @@ static void present(void) {
     }
     if (g_menu_depth) menu_draw();
     SDL_RenderPresent(g_ren);
+    g_present_cost = hle_ticks_ms() - now;
 }
 
 /* Who shows the cursor. A DirectDraw game draws its own into the picture, so
@@ -825,7 +833,7 @@ static void primary_changed(void) {
     static uint32_t last_events;
     if (!g_ren || !pthread_equal(pthread_self(), g_video_thread)) return;
     uint32_t now = hle_ticks_ms();
-    if (now - g_last_present < 15) return;
+    if (now - g_last_present < present_gap()) return;
     if (now - last_events >= 100) SDL_PumpEvents(), last_events = now;
     present();
 }
