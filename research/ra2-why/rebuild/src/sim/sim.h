@@ -1,0 +1,153 @@
+#pragma once
+#include "../map/map_file.h"
+#include "world.h"
+#include "ground.h"
+#include "drive.h"
+#include <set>
+#include <array>
+#include <map>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace ra2::sim {
+struct RandomState {
+    std::array<std::uint32_t,250> table{};
+    unsigned first=0,second=103;
+};
+// Base 00638790/00638840/006388A0; expansion 0065C6D0/0065C780/0065C7E0.
+class Random {
+public:
+    explicit Random(std::uint32_t seed);
+    explicit Random(const RandomState&);
+    RandomState state() const { return {table_,first_,second_}; }
+    std::uint32_t next();
+    // Inclusive; reversed endpoints are swapped. Equal endpoints consume no draw.
+    std::int32_t ranged(std::int32_t low, std::int32_t high);
+    const std::array<std::uint32_t,250>& table() const { return table_; }
+    unsigned first() const { return first_; }
+    unsigned second() const { return second_; }
+private:
+    std::array<std::uint32_t,250> table_{};
+    unsigned first_=0, second_=103;
+};
+using Ini = rules::IniFile;
+using Fields = std::map<std::string,std::string>;
+struct Type {
+    std::string name, category;
+    Fields fields; // Authored values, not computed engine defaults.
+    std::optional<std::int32_t> strength, cost, speed;
+    std::string armor, primary, secondary;
+};
+struct Weapon {
+    std::string name;
+    Fields fields;
+    std::optional<std::int32_t> damage, rof;
+    std::string range, projectile, warhead; // Range conversion is not yet recovered.
+};
+struct House {
+    std::string name, country;
+    std::vector<std::string> allies;
+    std::optional<std::int32_t> iq;
+    std::optional<std::int32_t> cash; // Unknown for local player money adjustment.
+    std::int64_t spent=0;
+};
+enum class Kind { Structure, Unit, Infantry, Aircraft };
+struct Entity {
+    std::uint32_t id=0; // Stable native ID; not an original pointer or array index.
+    Kind kind=Kind::Unit;
+    std::string house, type, mission, tag;
+    std::optional<std::int32_t> map_veterancy,map_group,map_follow;
+    std::optional<bool> map_above_bridge;
+    bool moving=false;
+    std::optional<ra2map::Cell> move_goal;
+    ra2map::Cell cell;
+    std::int32_t facing=0, subcell=0, map_health=0;
+    // Unit health scaling recovered from original instructions at 007435DA.
+    std::optional<std::int32_t> hp;
+    std::optional<Coord> position; // Supported ground vehicle center; other placement and bridge states stay unknown.
+    bool dead=false;
+    std::optional<std::int32_t> turret_facing; // 0..255; map placement is known, drive-turn updates remain unrecovered.
+};
+enum class Op { TakeCash, ResolvedDamage, RandomRange, Move, Attack, Produce, Stop };
+struct Command {
+    std::uint64_t frame=0;
+    Op op=Op::Stop;
+    std::uint32_t entity=0, target=0;
+    std::string house, type;
+    std::int32_t amount=0, high=0;
+    ra2map::Cell destination;
+    // Optional resolved original path, 0=N clockwise through 7=NW; this does not run path search.
+    std::vector<unsigned> path_directions;
+};
+enum class Error { None, Unsupported, PastFrame, InvalidEntity, InvalidHouse, InvalidAmount, UnknownHealth, UnknownMoney };
+struct Result {
+    std::uint64_t ticket=0;
+    Error error=Error::None;
+    std::int64_t value=0;
+    std::string detail;
+};
+struct SkippedObject { Kind kind; std::string type,house,reason; };
+struct Snapshot {
+    std::uint64_t frame=0;
+    std::vector<Entity> entities;
+    std::vector<SkippedObject> skipped_objects;
+    std::vector<House> houses;
+    std::vector<Result> results; // Commands executed on the last tick.
+    std::vector<std::string> gaps;
+    std::size_t queued=0;
+    std::array<std::uint32_t,250> random_table{};
+    unsigned random_first=0, random_second=103;
+};
+struct Capability { std::string name; bool supported; std::string detail; };
+class Simulation {
+public:
+    // Map INI overlays the base rules. All input objects are copied.
+    Simulation(const Ini& rules, const Ini& map, std::uint32_t seed,const TerrainCells& terrain={},const TheaterInputs* theater=nullptr);
+    Result issue(const Command&); // Only accepted commands receive a ticket.
+    void tick(); // Advance active movement, execute due commands in issue order, then increment frame.
+    Snapshot snapshot() const;
+    const std::map<std::string,Type>& types() const { return types_; }
+    const std::map<std::string,Weapon>& weapons() const { return weapons_; }
+    static std::vector<Capability> capabilities();
+    const TerrainCells& terrain() const { return terrain_; }
+    void load_ground_assets(const std::string& original_executable,const Ini& art);
+    void load_random_state(const RandomState&); // Before ticks or queued commands; preserves setup draws.
+private:
+    Result execute(const Command&);
+    Result start_move(const Command&);
+    void update_movement();
+    Snapshot state_;
+    Random random_;
+    TerrainCells terrain_;
+    std::map<std::uint32_t,std::size_t> terrain_index_;
+    std::optional<DriveTables> drive_tables_;
+    bool explicit_tubes_=false;
+    struct FoundationBounds { int width,height; };
+    std::map<std::string,FoundationBounds> foundations_;
+    std::map<std::string,Fields> country_fields_;
+    Fields clear_fields_,road_fields_;
+    int guard_area_iq_=4;
+    std::set<std::uint32_t> terrain_blockers_;
+    std::map<std::uint32_t,DriveSegment> movements_;
+    std::map<std::uint32_t,std::string> completion_missions_;
+    std::map<std::uint32_t,std::uint64_t> last_move_completion_;
+    std::uint64_t next_ticket_=1;
+    struct Pending { Command command; std::uint64_t ticket; };
+    std::vector<Pending> queue_;
+    std::map<std::string,Type> types_;
+    std::map<std::string,Weapon> weapons_;
+};
+// Proven factory primitive, 004C9FB0. Input is already resolved build time.
+int factory_stage_frames(int resolved_build_frames);
+// Cash-only factory update from 004C9B20, with resolved external build inputs.
+// This does not establish prerequisites, build-time formulas, or unit placement.
+struct Factory {
+    int progress=0, remaining_cost=0, interval=0;
+    std::uint64_t timer_start=0;
+    bool suspended=true, insufficient_funds=false;
+    bool done() const { return progress==54; }
+    void begin(int resolved_cost,int resolved_build_frames,std::uint64_t frame);
+    void tick(House& house,std::uint64_t frame);
+};
+} // namespace ra2::sim

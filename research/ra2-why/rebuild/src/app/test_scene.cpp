@@ -1,0 +1,411 @@
+#include "scene.h"
+#include "house_color.h"
+#include "terrain_inputs.h"
+#include <algorithm>
+#include <set>
+#include <iostream>
+#include <stdexcept>
+
+namespace ra2::app {
+struct SceneColorTest {
+    static std::size_t vehicles(const Scene& scene) { return scene.vehicles_.size(); }
+};
+}
+
+namespace {
+void require(bool condition, const char* message) {
+    if (!condition) throw std::runtime_error(message);
+}
+ra2::rules::IniFile read_ini(const ra2::fs::MixFileSystem& files, const char* name) {
+    const auto bytes = files.read_file(name);
+    if (!bytes) throw std::runtime_error(std::string("Missing original ") + name);
+    ra2::rules::IniFile ini;
+    ini.parse(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()));
+    return ini;
+}
+}
+int main(int argc, char** argv) {
+    try {
+        if (argc != 3) throw std::runtime_error("Usage: scene_test <game-dir> <map>");
+        using namespace ra2;
+        rules::IniFile base_fixture, map_fixture;
+        base_fixture.parse("[E1]\nImage=OLD\nStrength=125\nStrength=999\n[E1]\nImage=WRONG\n");
+        map_fixture.parse("[E1]\nImage=GI\nImage=WRONG\n[E1]\nStrength=1\n[NewType]\nValue=2\n");
+        const auto merged = app::overlay_rules(base_fixture, map_fixture);
+        require(merged.read_string("E1", "Image") == "GI" &&
+                merged.read_integer("E1", "Strength") == 125 &&
+                merged.read_integer("NewType", "Value") == 2,
+                "Map overrides changed the first effective source values");
+        const auto map = rules::IniFile::from_file(argv[2]);
+        const auto geometry = render::MapGeometry::from_ini(map);
+        const auto packed = app::allocated_terrain(pack::load_terrain(map), geometry);
+        ra2map::MapFile map_objects;
+        map_objects.parse(map);
+        const auto tree_center = actors::terrain_position({2,3}, -104);
+        require(tree_center.x == 640 && tree_center.y == 896 && tree_center.z == 0,
+                "Terrain placement did not preserve the original zero-Z floor clamp");
+        require(actors::terrain_position({2,3}, 104).z == 104, "Raised terrain object lost its floor height");
+        for (const auto variant : {fs::GameVariant::RedAlert2, fs::GameVariant::YurisRevenge}) {
+            const bool expansion = variant == fs::GameVariant::YurisRevenge;
+            fs::MixFileSystem files(argv[1]);
+            files.mount_language(variant);
+            files.bootstrap(variant);
+            files.mount_overlays();
+            files.mount_resources();
+            auto terrain_art = render::TheaterArt::load(files, "TEMPERATE");
+            const auto cells = app::terrain_inputs(packed, terrain_art);
+            const auto rules = read_ini(files, expansion ? "RULESMD.INI" : "RULES.INI");
+            const auto art = read_ini(files, expansion ? "ARTMD.INI" : "ART.INI");
+            if(!expansion) {
+                const auto red=app::house_color(rules,1), blue=app::house_color(rules,2);
+                require(red.r>red.g && red.r>red.b && blue.b>blue.r,
+                    "Base picker colours lost the original rules order");
+                const auto pal_bytes=files.read_file("UNITTEM.PAL");
+                require(bool(pal_bytes),"Missing unit palette for colour check");
+                const auto source=gfx::Palette::from_bytes(*pal_bytes);
+                const auto ramp=app::house_ramp(rules,2);
+                const auto remapped=source.with_house_ramp(ramp);
+                for(unsigned i=0;i<256;++i) {
+                    const auto expected=i>=16 && i<32?ramp[i-16]:source[i];
+                    require(remapped[i].r==expected.r && remapped[i].g==expected.g &&
+                        remapped[i].b==expected.b && remapped[i].a==expected.a,
+                        "House remap changed an unrelated palette entry");
+                }
+                require(ramp.front().b>ramp.back().b,"House ramp lost shade order");
+            }
+
+            const auto theater = app::theater_inputs(terrain_art);
+            sim::Simulation simulation(rules, map, 0, cells, &theater);
+            const auto live = app::initialized_terrain(packed, simulation.terrain());
+            require(live.tiles.size() == packed.tiles.size(), "Initialized map lost packed cells");
+            for (std::size_t i = 0; i < live.tiles.size(); ++i) {
+                const auto& cell = simulation.terrain().at(i);
+                require(live.tiles[i].index == cell.resolved_tile_index &&
+                        live.tiles[i].subtile == cell.subtile &&
+                        live.tiles[i].x == packed.tiles[i].x && live.tiles[i].y == packed.tiles[i].y &&
+                        packed.tiles[i].index == cell.tile_index,
+                        "Terrain drawing lost live indexes or changed the packed source");
+            }
+            bool unresolved_rejected = false;
+            try { app::initialized_terrain(packed, cells); }
+            catch (const std::runtime_error&) { unresolved_rejected = true; }
+            require(unresolved_rejected, "Terrain drawing accepted an unfinished tile pass");
+            app::Scene scene(files, art, app::overlay_rules(rules, map), geometry, simulation.terrain(),
+                "TEMPERATE", map_objects.terrain());
+            const auto battlefield = render::render_minimap(live, geometry, terrain_art,
+                render::TileIndexSpace::LiveCell);
+            const auto frame = scene.render(battlefield, simulation.snapshot(),
+                {0, 0, battlefield.width, battlefield.height});
+            for (const auto& gap : frame.gaps)
+                if (gap != "Terrain TIBTRE01: Tiberium spawner drawing is unresolved")
+                    throw std::runtime_error(gap);
+            require(frame.gaps.size() == 5, "Original animated spawner gaps were lost");
+            require(frame.drawn > simulation.snapshot().entities.size(), "Original map trees did not reach the scene");
+            require(frame.image.rgba != battlefield.rgba, "The scene did not compose the original buildings");
+            if(!expansion) {
+                app::Scene prepared(files,art,app::overlay_rules(rules,map),geometry,simulation.terrain(),
+                    "TEMPERATE",map_objects.terrain());
+                prepared.prepare(simulation.snapshot(),{"GACNST","GAPOWR","GAPILE","GAREFN","E1","MTNK"});
+                const auto warmed=prepared.render(battlefield,simulation.snapshot(),
+                    {0,0,battlefield.width,battlefield.height});
+                require(warmed.image.rgba==frame.image.rgba && warmed.drawn==frame.drawn && warmed.gaps==frame.gaps,
+                    "Preparing scene assets changed pixels, object count, or draw errors");
+            }
+
+
+            // A flat cell gives an independently fixed anchor: (1800,1245).
+            // Width 80 and LocalSize (2,6) come from the original test map.
+            sim::TerrainCell flat;
+            flat.cell = {80,96}; flat.height_level = 0; flat.ramp_index = 0; flat.floor_world_height = 0;
+            app::Scene fixture(files, art, rules, geometry, {flat}, "TEMPERATE");
+            sim::Entity building;
+            building.id = 1; building.kind = sim::Kind::Structure; building.type = "CAAIRP";
+            building.cell = flat.cell; building.map_health = 256;
+            const auto anchor = fixture.map_anchor(building);
+            require(anchor.x == 1800 && anchor.y == 1245, "Actor and tile projection origins differ");
+            const auto palette_bytes = files.read_file("UNITTEM.PAL");
+            require(palette_bytes.has_value(), "Original actor palette is missing");
+            const auto palette = gfx::Palette::from_bytes(*palette_bytes);
+            const auto sprite_art = actors::ActorArt::load(files, art, rules, "CAAIRP", actors::Kind::Building);
+            const auto sprite = sprite_art.draw_frame(0, palette);
+            render::Bitmap empty{battlefield.width, battlefield.height,
+                std::vector<std::uint8_t>(battlefield.rgba.size())};
+            sim::Snapshot state; state.entities.push_back(building);
+            const render::Rectangle view{1550, 1045, 500, 400};
+            auto drawn = fixture.render(empty, state, view);
+            require(drawn.drawn == 1 && drawn.gaps.empty(), "Original SHP composition failed");
+            const int left = 250 - sprite.width / 2, top = 200 - sprite.height / 2;
+            std::size_t checked = 0;
+            for (int y = 0; y < sprite.height; ++y) for (int x = 0; x < sprite.width; ++x) {
+                if (left+x < 0 || top+y < 0 || left+x >= 500 || top+y >= 400) continue;
+                const auto source = (std::size_t(y)*sprite.width+x)*4;
+                if (!sprite.pixels[source+3]) continue;
+                const auto target = (std::size_t(top+y)*500+left+x)*4;
+                require(std::equal(sprite.pixels.begin()+source, sprite.pixels.begin()+source+4,
+                    drawn.image.rgba.begin()+target), "Original actor pixels moved or changed palette");
+                ++checked;
+            }
+            require(checked > 100, "Original actor pixel check was empty");
+            if(!expansion) {
+                app::Scene resources(files,art,rules,geometry,{flat},"TEMPERATE",{},true);
+                const sim::Snapshot no_actors;
+                const auto baseline=resources.render(empty,no_actors,view);
+                const auto* overlays=rules.find_section("OverlayTypes");
+                require(overlays,"Missing resource registry");
+                auto ore=std::find_if(overlays->entries.begin(),overlays->entries.end(),
+                    [&](const auto& entry) { return rules.read_bool(entry.value,"Tiberium",false); });
+                require(ore!=overlays->entries.end(),"Missing resource type");
+                session::world::Snapshot world;
+                auto& resource=world.cells[flat.cell.y*512u+flat.cell.x];
+                resource.terrain=flat;
+                resource.terrain->overlay_type_index=int(ore-overlays->entries.begin());
+                resource.overlay_data_11e=11;
+                const auto visible=resources.render(empty,no_actors,view,&world);
+                require(visible.gaps.empty() && visible.drawn==1 &&
+                    visible.image.rgba!=baseline.image.rgba,"Live ore did not change scene pixels");
+                require(resources.render(empty,no_actors,view).image.rgba==baseline.image.rgba,
+                    "Default null world changed the old scene result");
+                resource.terrain->overlay_type_index=-1;
+                const auto depleted=resources.render(empty,no_actors,view,&world);
+                require(depleted.gaps.empty() && depleted.drawn==0 &&
+                    depleted.image.rgba==baseline.image.rgba,"Depletion did not restore scene terrain");
+                const auto guarded=fixture.render(empty,no_actors,view,&world);
+                require(guarded.image.rgba==baseline.image.rgba && !guarded.gaps.empty(),
+                    "Strict scene accepted unfinished resource drawing");
+            }
+            if(!expansion) {
+                app::Scene coloured(files,art,rules,geometry,{flat},"TEMPERATE",{},true);
+                state.entities[0].type="GAPOWR";
+                state.entities[0].house="Player";
+                coloured.set_house_color("Player",2);
+                coloured.set_house_color("Player",1);
+                coloured.prepare(state,{"MTNK"});
+                const auto prepared_vehicles=app::SceneColorTest::vehicles(coloured);
+                const auto red=coloured.render(empty,state,view);
+                coloured.set_house_color("Player",2);
+                const auto blue=coloured.render(empty,state,view);
+                require(red.gaps.empty() && blue.gaps.empty() && red.drawn==1 && blue.drawn==1 &&
+                    red.image.rgba!=blue.image.rgba,"Building house colours did not change pixels");
+                coloured.set_house_color("Player",1);
+                require(coloured.render(empty,state,view).image.rgba==red.image.rgba,
+                    "Switching house colours reused the wrong cached frame");
+                state.entities[0].type="MTNK"; state.entities[0].kind=sim::Kind::Unit;
+                state.entities[0].turret_facing=0;
+                const auto tank_position=actors::building_draw_position(flat.cell,0);
+                state.entities[0].position=sim::Coord{int(tank_position.x),int(tank_position.y),0};
+                const auto red_tank=coloured.render(empty,state,view);
+                coloured.set_house_color("Player",2);
+                const auto blue_tank=coloured.render(empty,state,view);
+                require(red_tank.gaps.empty() && blue_tank.gaps.empty() &&
+                    red_tank.image.rgba!=blue_tank.image.rgba,"Tank house colours did not change pixels");
+                require(app::SceneColorTest::vehicles(coloured)==prepared_vehicles,
+                    "First coloured tank render loaded an unwarmed vehicle variant");
+                state.entities[0]=building;
+            }
+            state.entities[0].dead = true;
+            require(fixture.render(empty, state, view).drawn == 0, "Dead actor remained visible");
+            state.entities[0].dead = false;
+            state.entities[0].kind = sim::Kind::Infantry;
+            state.entities[0].type = "E1";
+            state.entities[0].subcell = 4;
+            const auto infantry = fixture.map_anchor(state.entities[0]);
+            require(infantry.x == 1800 && infantry.y == 1267, "Original infantry subcell was lost");
+            require(fixture.render(empty, state, view).drawn == 1, "Original infantry main image did not draw");
+            if(!expansion) {
+                app::Scene native(files,art,rules,geometry,{flat},"TEMPERATE",{},true);
+                auto soldier=state.entities[0];soldier.subcell=0;
+                std::set<std::pair<std::int64_t,std::int64_t>> anchors;
+                for(const auto spot:{2,3,4}) {
+                    const auto pos=actors::infantry_position(flat.cell,spot,0);
+                    soldier.position=sim::Coord{int(pos.x),int(pos.y),int(pos.z)};
+                    const auto at=native.map_anchor(soldier);
+                    const auto expected=actors::project_world(pos,actors::ScreenPoint{geometry.local.x*60-geometry.size.width*30,
+                        geometry.local.y*30+(geometry.size.width+1)*15});
+                    require(at.x==expected.x && at.y==expected.y,"Native soldier lost its resolved position");
+                    anchors.emplace(at.x,at.y);
+                }
+                require(anchors.size()==3,"Native soldiers in one cell share a draw position");
+                const auto before=native.map_anchor(soldier);
+                soldier.position->x+=16;
+                const auto after=native.map_anchor(soldier);
+                require(before.x!=after.x || before.y!=after.y,"Infantry walking did not move the draw anchor");
+            }
+            state.entities[0].kind = sim::Kind::Unit;
+            const auto unsupported = fixture.render(empty, state, view);
+            require(unsupported.drawn == 0 && unsupported.gaps.size() == 1, "Unresolved vehicle draw was invented");
+            // TREE01 has no Strength; ReadINI gives it Rules TreeStrength.
+            require(!rules.find("TREE01", "Strength") &&
+                    rules.read_integer("General", "TreeStrength", 0) >= 2 &&
+                    actors::terrain_initial_frame(rules, "TREE01") == 0,
+                    "Original initial terrain health selected the wrong frame");
+            app::Scene tree_scene(files, art, rules, geometry, {flat}, "TEMPERATE", {{flat.cell, "TREE01"}});
+            const auto tree_output = tree_scene.render(empty, {}, view);
+            require(tree_output.drawn == 1 && tree_output.gaps.empty(), "Original tree did not draw");
+            const auto iso = files.read_file("ISOTEM.PAL");
+            require(iso.has_value(), "Original terrain object palette is missing");
+            const auto tree_art = actors::ActorArt::load(files, art, rules, "TREE01", actors::Kind::Terrain);
+            const auto tree_pixels = tree_art.draw_frame(0, gfx::Palette::from_bytes(*iso));
+            const int tree_left = 250 - tree_pixels.width / 2, tree_top = 215 - tree_pixels.height / 2;
+            std::size_t tree_checked = 0;
+            for (int y = 0; y < tree_pixels.height; ++y) for (int x = 0; x < tree_pixels.width; ++x) {
+                if (tree_left+x < 0 || tree_top+y < 0 || tree_left+x >= 500 || tree_top+y >= 400) continue;
+                const auto source = (std::size_t(y)*tree_pixels.width+x)*4;
+                if (!tree_pixels.pixels[source+3]) continue;
+                const auto target = (std::size_t(tree_top+y)*500+tree_left+x)*4;
+                require(std::equal(tree_pixels.pixels.begin()+source, tree_pixels.pixels.begin()+source+4,
+                    tree_output.image.rgba.begin()+target), "Tree frame, palette, or center changed");
+                ++tree_checked;
+            }
+            require(tree_checked > 100, "Original tree pixel check was empty");
+            if (!expansion) {
+                // Terror Drone: base SHP vehicle, Turret=no, eight facings.
+                // Resting frame is StartStandFrame 48 plus direction 3.
+                auto drone = building;
+                drone.kind = sim::Kind::Unit; drone.type = "DRON"; drone.facing = 64;
+                drone.turret_facing = 64;
+                drone.position = sim::Coord{80*256+128,96*256+128,0};
+                state.entities = {drone};
+                const auto drone_output = fixture.render(empty, state, view);
+                if (!drone_output.gaps.empty()) throw std::runtime_error(drone_output.gaps.front());
+                require(drone_output.drawn == 1, "Original SHP vehicle did not reach the native scene");
+                const auto drone_frames = actors::shp_vehicle_frames(rules, art, "DRON");
+                require(drone_frames.start_stand == 48 && drone_frames.facings == 8 &&
+                        actors::shp_vehicle_frame(drone_frames, 64, false, 0) == 51,
+                        "Original SHP vehicle frame layout changed");
+                const auto drone_art = actors::ActorArt::load(files, art, rules, "DRON", actors::Kind::Vehicle);
+                const auto drone_pixels = drone_art.draw_frame(51, palette);
+                const auto drone_origin = drone_art.main_canvas_origin(fixture.map_anchor(drone));
+                std::size_t drone_checked = 0;
+                for (int y = 0; y < drone_pixels.height; ++y) for (int x = 0; x < drone_pixels.width; ++x) {
+                    const auto source = (std::size_t(y)*drone_pixels.width+x)*4;
+                    if (!drone_pixels.pixels[source+3]) continue;
+                    const int dx = int(drone_origin.x)-view.x+x, dy = int(drone_origin.y)-view.y+y;
+                    require(dx>=0 && dy>=0 && dx<500 && dy<400, "Original SHP vehicle fixture was clipped");
+                    const auto target = (std::size_t(dy)*500+dx)*4;
+                    require(std::equal(drone_pixels.pixels.begin()+source, drone_pixels.pixels.begin()+source+4,
+                        drone_output.image.rgba.begin()+target), "SHP vehicle frame, palette, or center changed");
+                    ++drone_checked;
+                }
+                require(drone_checked > 50, "Original SHP vehicle pixel check was empty");
+                app::Scene warm_drone(files, art, rules, geometry, {flat}, "TEMPERATE");
+                warm_drone.prepare(state, {"DRON"});
+                const auto warm_output = warm_drone.render(empty, state, view);
+                require(warm_output.image.rgba == drone_output.image.rgba && warm_output.drawn == 1 &&
+                        warm_output.gaps.empty(), "Preparing the SHP vehicle changed its pixels");
+                drone.moving = true; state.entities = {drone};
+                const auto strict_moving = fixture.render(empty, state, view);
+                require(strict_moving.drawn == 0 && strict_moving.gaps.size() == 1,
+                        "Unrecovered SHP walk counter was invented");
+                auto tank = building;
+                tank.kind = sim::Kind::Unit; tank.type = "HTNK"; tank.facing = 64;
+                tank.turret_facing = 64;
+                tank.position = sim::Coord{80*256+128,96*256+128,0};
+                state.entities = {tank};
+                const auto tank_output = fixture.render(empty, state, view);
+                if (!tank_output.gaps.empty()) throw std::runtime_error(tank_output.gaps.front());
+                require(tank_output.drawn == 1, "Original tank did not reach the native scene");
+                auto tank_art = app::VehicleArt::load(files, art, rules, "HTNK");
+                const auto& tank_sprite = tank_art.draw(64);
+                std::size_t tank_checked = 0;
+                for (int y = 0; y < tank_sprite.image.height; ++y)
+                    for (int x = 0; x < tank_sprite.image.width; ++x) {
+                        const auto source = (std::size_t(y)*tank_sprite.image.width+x)*4;
+                        if (!tank_sprite.image.pixels[source+3]) continue;
+                        const int dx = 250+tank_sprite.left+x, dy = 215+tank_sprite.top+y;
+                        require(dx>=0 && dy>=0 && dx<500 && dy<400, "Original tank fixture was clipped");
+                        const auto target = (std::size_t(dy)*500+dx)*4;
+                        require(std::equal(tank_sprite.image.pixels.begin()+source,
+                            tank_sprite.image.pixels.begin()+source+4, tank_output.image.rgba.begin()+target),
+                            "Tank pixels lost their original screen offset");
+                        ++tank_checked;
+                    }
+                require(tank_checked == 1052, "Original default HTNK pose pixel count changed");
+                state.entities[0].turret_facing.reset();
+                const auto unknown_turret = fixture.render(empty, state, view);
+                require(unknown_turret.drawn == 0 && unknown_turret.gaps.size() == 1,
+                        "Unknown turret facing became a guessed hull-facing pose");
+                state.entities[0].turret_facing = 32;
+                const auto independent_turret = fixture.render(empty, state, view);
+                require(independent_turret.drawn == 1 && independent_turret.gaps.empty() &&
+                        independent_turret.image.rgba != tank_output.image.rgba,
+                        "Independent turret direction did not reach the scene");
+                const auto& turned_sprite = tank_art.draw(64, 32);
+                std::vector<std::uint8_t> expected(500*400*4);
+                for (std::size_t p=3;p<expected.size();p+=4) expected[p]=255;
+                std::size_t turned_pixels = 0;
+                for (int y = 0; y < turned_sprite.image.height; ++y)
+                    for (int x = 0; x < turned_sprite.image.width; ++x) {
+                        const auto source = (std::size_t(y)*turned_sprite.image.width+x)*4;
+                        if (!turned_sprite.image.pixels[source+3]) continue;
+                        const int dx = 250+turned_sprite.left+x, dy = 215+turned_sprite.top+y;
+                        require(dx>=0 && dy>=0 && dx<500 && dy<400, "Turned turret fixture was clipped");
+                        const auto target = (std::size_t(dy)*500+dx)*4;
+                        std::copy_n(turned_sprite.image.pixels.begin()+source,4,expected.begin()+target);
+                        ++turned_pixels;
+                    }
+                require(turned_pixels == 1092,
+                        ("Independent turret pixel count changed: " + std::to_string(turned_pixels)).c_str());
+                require(expected == independent_turret.image.rgba,
+                        "Independent turret alignment changed");
+                state.entities[0].turret_facing = 64;
+                require(fixture.render(empty,state,view).image.rgba == tank_output.image.rgba,
+                        "Turret pose cache changed the earlier pose");
+                {
+                    // Reused hull and turret layers must match a full draw.
+                    auto load_part = [&](const std::string& name) {
+                        const auto vxl = files.read_file(name + ".VXL");
+                        const auto hva = files.read_file(name + ".HVA");
+                        require(vxl && hva, "Missing original HTNK part");
+                        return std::make_pair(voxel::read_vxl(*vxl), voxel::read_hva(*hva));
+                    };
+                    const auto hull = load_part("HTNK"), turret = load_part("HTNKTUR"),
+                        barrel = load_part("HTNKBARL");
+                    const auto vpl = files.read_file("VOXELS.VPL");
+                    require(bool(vpl), "Missing original vehicle lighting table");
+                    const auto lighting = voxel::read_vpl(*vpl);
+                    auto fresh_art = app::VehicleArt::load(files, art, rules, "HTNK");
+                    const std::pair<int,int> poses[] = {{32,0},{32,63},{32,58},{64,58},{64,63},
+                        {0,63},{255,58},{128,128},{128,1},{200,63},{7,250},{32,63}};
+                    for (const auto& [hull_facing, turret_facing] : poses) {
+                        auto pose = voxel::vehicle_pose_from_map(std::uint8_t(hull_facing));
+                        pose.turret_facing = std::uint16_t(turret_facing) << 8;
+                        pose.hull = {&hull.first, &hull.second};
+                        pose.turret = {&turret.first, &turret.second};
+                        pose.barrel = {&barrel.first, &barrel.second};
+                        pose.turret_offset = rules.read_integer("HTNK", "TurretOffset", 0);
+                        const auto expected = voxel::draw_vehicle(pose, lighting);
+                        const auto& sprite = fresh_art.draw(std::uint8_t(hull_facing),
+                                                            std::uint8_t(turret_facing));
+                        require(sprite.left == expected.left && sprite.top == expected.top &&
+                                sprite.image.width == expected.image.width &&
+                                sprite.image.height == expected.image.height &&
+                                sprite.image.pixels.size() == expected.image.pixels.size()*4,
+                                "Reused vehicle layers changed the pose bounds");
+                        for (std::size_t i = 0; i < expected.image.pixels.size(); ++i) {
+                            const auto pixel = expected.image.pixels[i];
+                            require(sprite.image.pixels[i*4] == pixel.r &&
+                                    sprite.image.pixels[i*4+1] == pixel.g &&
+                                    sprite.image.pixels[i*4+2] == pixel.b &&
+                                    sprite.image.pixels[i*4+3] == pixel.a,
+                                    "Reused vehicle layers changed pose pixels");
+                        }
+                    }
+                }
+                for (int invalid : {-1,256}) {
+                    state.entities[0].turret_facing = invalid;
+                    const auto rejected = fixture.render(empty,state,view);
+                    require(rejected.drawn == 0 && rejected.gaps.size() == 1,
+                            "Invalid turret direction wrapped into a valid pose");
+                }
+            }
+            // A view beyond the map must not create an out-of-range iterator.
+            require(fixture.render(empty, {}, {1000000, 0, 1, 1}).image.rgba.size() == 4,
+                    "Empty outside-map view failed");
+            std::cout << (expansion ? "Expansion" : "Base") << " scene passed: " << frame.drawn
+                      << " buildings and trees, exact actor pixels, camera, subcells, and dead actor removal.\n";
+        }
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
+}

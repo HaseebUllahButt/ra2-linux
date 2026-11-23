@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -eu
+cd "$(dirname "$0")"
+binary=$(mktemp /tmp/ra2-sim-search-memory-test.XXXXXX)
+trap 'rm -f "$binary"' EXIT
+${CXX:-g++} -std=c++17 -Wall -Wextra -Werror -O2 ${SIM_TEST_FLAGS:-} \
+    search_memory.cpp path.cpp path_smoothing.cpp cell_entry.cpp distance.cpp test_search_memory.cpp -o "$binary"
+"$binary" "${1:-../../../game/game.exe}" "${2:-../../../game/gamemd.exe}" "${@:3}"

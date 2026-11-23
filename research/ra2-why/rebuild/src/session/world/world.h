@@ -1,0 +1,273 @@
+#pragma once
+#include "sim/sim.h"
+#include "sim/coarse_category.h"
+#include "sim/cell_setup.h"
+#include "weapons/occupant_order.h"
+#include "../placement_terrain.h"
+#include <cstdint>
+#include <map>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace ra2::session::world {
+enum class Edition { Base, Yuri };
+enum class Kind { Unit, Infantry, Aircraft, Structure, Terrain };
+enum class Lifetime { Created, Placed, Destroyed };
+enum class Layer { Ground, Bridge };
+enum class CreatedKind { House, Entity };
+enum class HouseRole { Player, Neutral, Special };
+// Complete is reserved for a finished original scenario. PrototypeComplete
+// identifies a separate playable world that still contains stated guesses.
+enum class SetupProgress { Unknown, PackedMapRead, Complete, OverlayObjectsRead, OverlayDataRead, ReadyForInitialUnits, PrototypeComplete };
+struct CreatedObject { CreatedKind kind; std::uint32_t id; };
+struct House {
+    std::uint32_t id=0;
+    std::optional<std::int32_t> original_index;
+    std::optional<HouseRole> role;
+    std::string name, country;
+    std::optional<std::int32_t> initial_credits, cash, selected_color, palette_color;
+    std::optional<std::int32_t> constructor_random, unit_registry_size;
+    std::optional<bool> category_flag; // Base House +142.
+    std::optional<std::int32_t> unit_count; // Base House +228.
+    std::optional<std::map<std::int32_t,std::int32_t>> unit_type_counts, unit_fixed_counts;
+    std::optional<std::map<std::int32_t,std::int32_t>> placed_unit_counts;
+    bool constructor_complete=false;
+    std::optional<double> reload_multiplier; // Base House +F0.
+    std::optional<std::int32_t> country_index, side_index, tech_level;
+    std::optional<bool> human_controlled, house_flag_135, stolen_tech_204, stolen_tech_205;
+    std::optional<std::uint32_t> stolen_mask_208, stolen_mask_20c, stolen_mask_210, stolen_mask_214;
+    std::optional<std::int32_t> power_output, power_drain;
+    std::optional<std::map<std::int32_t,std::int32_t>> buildings_active_5460, buildings_owned_5420,
+        buildings_ever_54a0, units_owned_5430, units_ever_54b0, infantry_owned_5440,
+        infantry_ever_54c0, aircraft_owned_5450, aircraft_ever_54d0;
+    std::optional<double> firepower_multiplier; // Base House +D0.
+    // Ordered House +54F8 records: stable attacker House ID, accumulated value.
+    std::optional<std::vector<std::pair<std::uint32_t,std::int32_t>>> attacker_damage_records;
+    std::optional<std::int32_t> attacker_damage_count, selected_enemy_index;
+    std::optional<bool> observer_flag_13d;
+    std::optional<std::uint32_t> alliance_mask_5674;
+};
+struct BaseUnitProfile {
+    std::optional<std::int32_t> restricted_land, movement_mode, placement_mode, speed_type, level_height;
+    std::optional<std::int32_t> leptons_per_sight_increase; // Rules +1324, independent of map level height.
+    std::optional<bool> type_flag_aa0, unit_flag_32c, linked_team;
+    std::optional<bool> type_flag_205, unit_flag_32a, type_flag_bb0, type_flag_bb1;
+};
+struct Entity {
+    std::uint32_t id=0, house_id=0; // Terrain may have no house (zero).
+    std::optional<std::uint32_t> next; // Zero is null; no value is unresolved.
+    Kind kind=Kind::Unit;
+    Lifetime lifetime=Lifetime::Created;
+    std::string type;
+    std::optional<sim::Coord> position;
+    std::optional<ra2map::Cell> cell;
+    std::optional<std::int32_t> resolved_hp, hull_facing, turret_facing;
+    std::optional<double> threat_field_428, resolved_threat;
+    std::optional<std::int32_t> original_type_index;
+    std::optional<bool> excluded_from_house_tracking;
+    std::optional<std::uint16_t> constructor_random; // Base Techno +320.
+    std::optional<bool> on_map;
+    std::optional<bool> occupancy_tracking; // Base Foot +5A0; movement can change it.
+    std::optional<std::int32_t> timer_length;
+    std::optional<bool> timer_active;
+    std::optional<std::uint8_t> height_byte;
+    std::optional<Layer> layer;
+    std::optional<sim::CoarseOccupantState> category;
+    std::optional<BaseUnitProfile> base_profile;
+    bool constructor_complete=false;
+    // Combat fields remain empty until their original load phase resolves.
+    std::optional<std::int32_t> maximum_hp;
+    std::optional<bool> active, in_limbo, collision_eligible, has_trigger;
+    std::optional<sim::Coord> collision_virtual_position;
+    // Zero is no target; an empty optional is unresolved.
+    std::optional<std::uint32_t> target_id;
+    // Base Techno +244 and +24C. The intervening +248 is unresolved.
+    std::optional<std::int32_t> weapon_timer_start_frame, weapon_timer_duration;
+    std::optional<std::uint8_t> object_field_74, object_field_76, techno_field_370;
+    std::optional<std::uint16_t> hull_facing_raw;
+    std::optional<bool> locomotor_moving;
+    std::optional<std::int32_t> mission;
+    std::optional<std::uint8_t> unit_field_7d;
+    std::optional<std::int32_t> techno_field_1b8;
+    std::optional<std::uint8_t> foot_field_5a1, object_field_75;
+    std::optional<double> firepower_multiplier; // Base Techno +128.
+    std::optional<double> veterancy; // Base Techno +118.
+    std::optional<bool> veteran_firepower, elite_firepower, veteran_rof, elite_rof;
+    std::optional<std::uint16_t> turret_facing_raw;
+    std::optional<bool> unit_turret_turning_599, techno_firing_57d;
+    std::optional<std::int32_t> burst_index;
+    std::optional<std::int32_t> techno_field_13c, techno_field_140, techno_field_144;
+    std::optional<double> armor_multiplier; // Base Techno +120.
+    // Resolved 004F58A0 country multiplier for this type; it varies by kind.
+    std::optional<double> house_armor_multiplier;
+    std::optional<std::uint8_t> techno_field_329;
+};
+struct CellState {
+    std::optional<bool> allocated; // The original allocated Cell, not the fallback receiver.
+    // Empty optional means occupancy is unresolved, not an empty cell.
+    std::optional<weapons::CellContentHeads> heads;
+    // The Cell +140 flags sit together near the front: validate() reads
+    // them for every Cell, so they share cache lines with heads and terrain.
+    std::optional<std::uint32_t> cell_flags_140;
+    std::optional<bool> cell_flag_80;
+    std::optional<bool> cell_flag_100;   // Base Cell +140 bit 100.
+    std::optional<bool> cell_flag_200;   // Separate Cell +140 bit 200.
+    std::optional<bool> cell_flag_20000;
+    std::optional<bool> cell_flag_40000; // Base Cell +140 bit 40000.
+    std::optional<sim::TerrainCell> terrain;
+    std::optional<sim::CoarseOverlayState> overlay;
+    std::optional<float> land_wheel;
+    std::optional<bool> usable;
+    std::optional<std::uint8_t> coarse_category, neighbor_count; // Base Cell +122.
+    std::optional<std::uint8_t> cell_field_11d, coarse_cache_height, hierarchy_cache_height;
+    std::optional<std::vector<std::uint8_t>> coarse_category_writes;
+    // Base 004710B5 initializes this field. Unit entry 00703087 reads its bits.
+    std::optional<std::uint32_t> ground_occupancy_124;
+    std::optional<float> unit_land_speed; // Resolved original locomotor land-table value.
+    // Base Cell +54/+58 and signed +116. Constructors set -1, but later
+    // state is not proved. Only +116 is known to index the TubeClass vector.
+    std::optional<std::int32_t> cell_field_54, cell_field_58;
+    std::optional<std::int16_t> tube_field_116;
+    std::optional<std::uint32_t> bridge_occupancy_128;
+    std::optional<std::int32_t> wall_owner;
+    std::optional<std::uint8_t> overlay_data_11e;
+    std::optional<std::uint8_t> cell_field_12c;
+};
+// An owning snapshot. IDs use zero as null. Original creation order does not
+// depend on the storage order of houses and entities. The shared next field is
+// the original Object +30, including for multi-cell objects.
+struct Snapshot {
+    Edition edition=Edition::Base;
+    // A placed Unit reached Cell setup 00472540, whose full effects are not
+    // yet staged. Do not use this snapshot for further placement or live AI.
+    bool pending_cell_setup=false;
+    // Packed Cell index when known; a pending setup with no index is unresolved.
+    std::optional<std::uint32_t> pending_setup_cell;
+    std::vector<CreatedObject> creation_order;
+    std::vector<House> houses;
+    std::vector<Entity> entities;
+    std::map<std::uint32_t,CellState> cells;
+    std::optional<PlacementGeometry> geometry;
+    std::optional<std::int32_t> session_field_838;
+    std::optional<std::int32_t> tube_vector_count;
+    sim::RandomState random;
+    SetupProgress setup_progress=SetupProgress::Unknown;
+    // Original map iteration order, expressed as y*512+x. Empty means unknown.
+    std::optional<std::vector<std::uint32_t>> cell_order;
+    std::optional<double> veteran_reload_multiplier; // Base Rules +5B0.
+    std::optional<double> veteran_firepower_multiplier; // Base Rules +590.
+    // Global fallback Cell +24 and +44. A missing map Cell can change +24.
+    std::optional<StartPoint> fallback_cell_coordinate;
+    std::optional<std::int32_t> fallback_overlay_index;
+    std::optional<std::uint8_t> fallback_overlay_data;
+    std::optional<std::int32_t> rules_field_94;
+};
+// Undo for a command that edits a Snapshot in place instead of a full copy.
+// It backs up every member except the Cells. Code that writes a Cell while an
+// Undo is active calls Undo::save_cell first. commit() keeps the edits; else
+// the destructor restores the Snapshot, also when an exception leaves.
+// Undos nest: save_cell records the Cell in every active Undo of the same
+// Snapshot.
+// RA2_UNDO_CHECK=1 also keeps a full copy and aborts if a restore differs.
+class Undo {
+public:
+    explicit Undo(Snapshot& snapshot);
+    ~Undo();
+    Undo(const Undo&) = delete;
+    Undo& operator=(const Undo&) = delete;
+    void commit() noexcept { committed_=true; }
+    static void save_cell(const Snapshot& snapshot, std::uint32_t key);
+private:
+    void restore();
+    Snapshot& snapshot_;
+    Snapshot backup_; // Every member except the Cells.
+    std::vector<std::pair<std::uint32_t,CellState>> cells_;
+    std::optional<Snapshot> check_;
+    Undo* outer_;
+    bool committed_=false;
+};
+// Visit every Cell of a Cell map in key order, like a range-for over it.
+// visit returns false to stop. A map walk waits for each node in turn when
+// the map is not in the CPU cache, so the walk asks the CPU to load nodes
+// ahead from the node addresses that the previous walk with the same
+// `ahead` list saved. The addresses stay plain integers and are only a
+// prefetch hint: a stale one wastes a load, and the walk itself always
+// follows the map. Returns false when visit stopped the walk.
+template<class Cells,class Visit>
+bool walk_cells(Cells& cells,std::vector<std::uintptr_t>& ahead,Visit&& visit) {
+    constexpr std::size_t distance=48;
+    std::size_t index=0;
+    for (auto it=cells.begin();it!=cells.end();++it,++index) {
+        if (index+distance<ahead.size()) {
+            // The read fields of a Cell sit in the first 160 bytes of its
+            // map node, which starts 32 bytes before the value.
+            const auto node=ahead[index+distance];
+            for (const std::uintptr_t offset:{std::uintptr_t(0),std::uintptr_t(64),std::uintptr_t(128)})
+                __builtin_prefetch(reinterpret_cast<const void*>(node-32+offset));
+        }
+        const auto here=reinterpret_cast<std::uintptr_t>(&*it);
+        if (index<ahead.size()) ahead[index]=here; else ahead.push_back(here);
+        if (!visit(*it)) return false;
+    }
+    ahead.resize(index);
+    return true;
+}
+enum class PlacementResult { Placed, Blocked, Unresolved };
+// Checks every head and shared next chain. Invalid and cyclic snapshots fail.
+bool validate(const Snapshot& snapshot);
+// Preserve the original ground-chain order and all unknown phase inputs.
+std::optional<sim::CoarseCategoryInputs> coarse_inputs(const Snapshot&, std::uint32_t cell);
+// Base 006C4610 writes this flag before calling Object unlimbo. It uses the
+// local map boundary, including cell height and ramp, even on a failed call.
+std::optional<bool> base_unit_on_map(const PlacementTerrain&, StartPoint);
+
+// Stage::create_unit on a Snapshot edited in place. The caller checks first
+// what the Stage constructor checks: a valid base Snapshot.
+std::optional<std::uint32_t> create_staged_unit(Snapshot&, std::uint32_t house_id, std::string type,
+    std::optional<std::int32_t> resolved_hp, std::int32_t original_type_index,
+    bool excluded_from_house_tracking);
+
+// Owns staged objects and the shared random state. House and Unit records hold
+// only recovered fields; unresolved constructor fields remain optional.
+class Stage {
+public:
+    explicit Stage(const sim::RandomState& random);
+    explicit Stage(Snapshot snapshot);
+    std::optional<std::uint32_t> create_player_house(std::string name, std::string country,
+        std::int32_t credits, std::int32_t selected_color, std::int32_t unit_registry_size,
+        std::optional<std::int32_t> original_index={});
+    // Pass the LightGrey palette index only after its original lookup resolves.
+    std::optional<std::uint32_t> create_auxiliary_house(HouseRole role,
+        std::int32_t unit_registry_size, std::optional<std::int32_t> resolved_palette_color,
+        std::optional<std::int32_t> original_index={});
+    // Type index and +202 flag are resolved original UnitType values.
+    std::optional<std::uint32_t> create_unit(std::uint32_t house_id, std::string type,
+        std::optional<std::int32_t> resolved_hp, std::int32_t original_type_index,
+        bool excluded_from_house_tracking);
+    // Input cells are already resolved by the original second map pass.
+    // Missing cells, occupancy, and runtime fields remain unknown.
+    bool install_base_cells(PlacementGeometry geometry, std::map<std::uint32_t,CellState> cells,
+        std::optional<std::int32_t> tube_vector_count, std::optional<std::int32_t> session_field_838);
+    PlacementResult place_base_unit(std::uint32_t unit_id, StartPoint cell,
+        std::uint8_t facing, const BaseUnitProfile& profile);
+    // Checked direct Unit entry accepts Z zero or the resolved floor height.
+    PlacementResult place_base_unit_at(std::uint32_t unit_id, StartPoint cell,
+        std::int32_t world_z, std::uint8_t facing, const BaseUnitProfile& profile);
+    // Wheel values are indexed by the final LandType. Absent cells and values
+    // remain unknown. Only a complete result changes the staged snapshot.
+    sim::CellSetupResult complete_pending_cell_setup(const sim::CellSetupStatic& guard,
+        const sim::TheaterInputs& theater, std::uint8_t cliff,
+        const std::map<std::int32_t,float>& land_wheels);
+    // Base Battle 005B7F01 clears four per-house type counter arrays.
+    // Unknown arrays block the update and leave the snapshot unchanged.
+    bool finish_battle_house_updates(std::uint32_t house_id);
+    // Add a positive unused budget, then clear the four arrays atomically.
+    bool finish_battle_house(std::uint32_t house_id,std::int32_t remaining_budget);
+    const Snapshot& snapshot() const noexcept { return snapshot_; }
+private:
+    std::optional<std::uint32_t> next_id() const;
+    Snapshot snapshot_;
+};
+}

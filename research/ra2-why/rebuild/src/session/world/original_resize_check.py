@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+"""Check fresh-size base map reset and resize in original x86.
+
+The original reader, Cell reset, resize wrapper, allocation loop, Cell
+constructor, coordinate setter, resize suffix, and early Cell pass execute.
+INI, allocation, Cell parent/registration, lighting lookups, category cache,
+and region builders are supplied. Object and lighting vectors are empty.
+The default tile index is supplied. An optional source adds decoded MP02T2
+tiles and the four recognised Overlay root branches. Stream, type identity,
+eligibility, direction table, and map lookup are supplied. Full Overlay
+processing and later Battle phases remain outside the check.
+"""
+import struct
+import subprocess
+import sys
+from unicorn import UC_HOOK_CODE
+from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_ESP,UC_X86_REG_EIP
+if len(sys.argv) not in (2,4,5):
+    raise SystemExit('usage: original_resize_check.py game.exe [real_map_case game_dir]')
+executable=sys.argv[1]
+tile_source=tuple(sys.argv[2:4])
+native=sys.argv[4] if len(sys.argv)==5 else None
+sys.argv=[sys.argv[0],executable,'--base']
+import original_move_trace as m
+map_object=0x8324e0
+vector=0x1200000
+rectangle=0x100b000
+heap=0x1400000
+heap_size=0x1000000
+m.cpu.mem_map(vector,0x100000)
+m.cpu.mem_map(heap,heap_size)
+m.word(map_object,0x79a954)
+m.word(map_object+0x138,vector)
+m.word(map_object+0x13c,262144)
+# MP02T2 Size. A poisoned old target cell models reused map storage.
+m.cpu.mem_write(rectangle,struct.pack('<iiii',0,0,100,100))
+target_index=80*512+135
+old=m.cell_for(135,80)
+m.word(vector+target_index*4,old)
+m.word(old+0x140,0xffffffff)
+m.cpu.mem_write(old+0x124,b'\xff')
+m.word(0xa40378,0)
+next_allocation=[heap]
+def allocate():
+    size=m.argument(0)
+    address=next_allocation[0]
+    next_allocation[0]+=(size+511)&~511
+    if next_allocation[0]>heap+heap_size:
+        raise RuntimeError('resize fixture heap exhausted')
+    m.cpu.mem_write(address,b'\xa5'*size)
+    m.cpu.reg_write(UC_X86_REG_EAX,address)
+m.bind(0x50dd50,12,m.ret(rectangle))
+m.bind(0x40ff10,0,m.ret(0))
+m.bind(0x40ffd0,4,m.ret(0))
+m.bind(0x782017,0,allocate)
+m.cpu.reg_write(UC_X86_REG_ECX,map_object)
+m.cpu.reg_write(UC_X86_REG_ESP,0x103f000)
+m.cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,0x100a000))
+m.cpu.emu_start(0x49cfd0,0x549981,count=50000000)
+assert m.cpu.reg_read(UC_X86_REG_EIP)==0x549981
+count=0
+for index in range(262144):
+    cell=m.read(vector+index*4)
+    if not cell:
+        continue
+    count+=1
+    assert not (m.read(cell+0x140)&0x180)
+    assert m.read(cell+0x2c)==0 and m.read(cell+0x3c)==0
+    assert m.read(cell+0x38)==0xffff and m.read(cell+0x44)==0xffffffff
+    assert m.read(cell+0x54)==0xffffffff and m.read(cell+0x58)==0xffffffff
+    assert struct.unpack('<h',m.cpu.mem_read(cell+0x116,2))[0]==-1
+    assert m.read(cell+0xe4)==0 and m.read(cell+0xe8)==0
+    assert m.cpu.mem_read(cell+0x122,1)==b'\0' and m.cpu.mem_read(cell+0x124,1)==b'\0'
+    assert m.read(cell+0x24)==(index%512)|((index//512)<<16)
+assert count==19900 and m.read(vector+target_index*4)==old
+print('base x86 reset and resize create 19900 clear map cells for MP02T2 Size')
+
+# Continue through the fresh resize suffix. Execute 005499C0, its original
+# 0054B2E0 Cell pass, and the original 00472540 Cell body. Supply the lighting
+# lookup, category cache, and two later region builders. The Cells still have
+# their original no-tile/no-overlay constructor values at this point.
+scenario=0x2500000
+rules=0x2510000
+m.cpu.mem_map(scenario,0x20000)
+m.word(0xa3d290,scenario)
+m.word(0x839848,rules)
+m.cpu.mem_write(rules+0x584,b'\0')
+m.word(0xa40970,0)
+m.word(0xa6e828,0)
+for i,address in enumerate((0xa6e018,0xa52ea8,0xa6e0e8,0xa6cf4c,0xa52c60,
+    0xa6e0e0,0xa52f84,0xa52c70,0xa52590,0xa52ef8,0xa52ef4,0xa6cb74,
+    0xa6dd0c,0xa52c68,0xa52ee0)):
+    m.word(address,(i+1)*100)
+for address,pop in ((0x4284e0,4),(0x429a90,0),(0x54fda0,0),(0x54ebd0,0),
+                    (0x563d80,4),(0x781d3b,0),(0x529590,4),(0x5385a0,4),
+                    (0x478f40,0)):
+    m.bind(address,pop,m.ret(0))
+region_vtable=0x100d000
+m.word(region_vtable+0xc,0x1013000)
+m.bind(0x1013000,0,m.ret(0))
+for offset in (0x88,0xa0,0xb8):
+    m.word(map_object+offset,region_vtable)
+call_counts={0x5499c0:0,0x54b2e0:0,0x472540:0}
+def count_call(cpu,address,size,data):
+    call_counts[address]+=1
+for address in call_counts:
+    m.cpu.hook_add(UC_HOOK_CODE,count_call,begin=address,end=address)
+m.cpu.emu_start(0x549981,0x49d066,count=200000000)
+assert m.cpu.reg_read(UC_X86_REG_EIP)==0x49d066
+assert call_counts=={0x5499c0:1,0x54b2e0:1,0x472540:19900},call_counts
+count=0
+for index in range(262144):
+    cell=m.read(vector+index*4)
+    if not cell:
+        continue
+    count+=1
+    assert not (m.read(cell+0x140)&0x180)
+    assert m.read(cell+0x54)==0xffffffff and m.read(cell+0x58)==0xffffffff
+    assert struct.unpack('<h',m.cpu.mem_read(cell+0x116,2))[0]==-1
+    assert m.read(cell+0xe4)==0 and m.read(cell+0xe8)==0
+    assert m.cpu.mem_read(cell+0x122,1)==b'\0' and m.cpu.mem_read(cell+0x124,1)==b'\0'
+assert count==19900
+print('base x86 early Cell pass preserves tested fields in all 19900 fresh cells')
+
+# The reader next assigns a default tile to every allocated Cell. The INI
+# lookups and string comparison are supplied, with default tile index 7.
+m.word(0xa52f00,7)
+m.bind(0x50d7f0,12,m.ret(0))
+m.bind(0x50e9a0,20,m.ret(0))
+m.bind(0x781f20,0,m.ret(1))
+m.cpu.emu_start(0x49d066,0x49d0f9,count=50000000)
+assert m.cpu.reg_read(UC_X86_REG_EIP)==0x49d0f9
+count=0
+for index in range(262144):
+    cell=m.read(vector+index*4)
+    if not cell:
+        continue
+    count+=1
+    assert m.read(cell+0x38)==7
+    assert not (m.read(cell+0x140)&0x180)
+    assert m.read(cell+0x54)==0xffffffff and m.read(cell+0x58)==0xffffffff
+    assert struct.unpack('<h',m.cpu.mem_read(cell+0x116,2))[0]==-1
+    assert m.read(cell+0xe4)==0 and m.read(cell+0xe8)==0
+    assert m.cpu.mem_read(cell+0x122,1)==b'\0' and m.cpu.mem_read(cell+0x124,1)==b'\0'
+assert count==19900
+print('base x86 default tile assignment preserves tested fields in all 19900 cells')
+
+if tile_source:
+    # Supply the actual decoded MP02T2 IsoMapPack5 stream to the original
+    # 0054E1E0 reader. Stream services and tile-index conversion are supplied.
+    # The next map phases and their state changes remain outside this check.
+    emitter,game=tile_source
+    data=subprocess.check_output([emitter,game,'--tile-bytes'])
+    assert len(data)>=4 and (len(data)-4)%11==0 and data[-4:]==b'\0'*4
+    expected={}
+    for offset in range(0,len(data)-4,11):
+        x,y,tile,subtile,height,ice=struct.unpack_from('<HHIBBB',data,offset)
+        if x<512 and y<512 and m.read(vector+(y*512+x)*4):
+            expected[y*512+x]=(tile,subtile,height,ice)
+    cursor=[0]
+    def read_stream():
+        target=m.argument(0)
+        size=m.argument(1)
+        end=cursor[0]+size
+        assert end<=len(data)
+        m.cpu.mem_write(target,data[cursor[0]:end])
+        cursor[0]=end
+    def tile_identity():
+        m.cpu.reg_write(UC_X86_REG_EAX,m.cpu.reg_read(UC_X86_REG_ECX))
+    m.word(0xa6f238,0)
+    m.bind(0x53efb0,8,m.ret(0))
+    m.bind(0x69b050,4,m.ret(0))
+    m.bind(0x53f010,0,m.ret(0))
+    m.bind(0x53f050,8,read_stream)
+    m.bind(0x529550,0,tile_identity)
+    m.cpu.reg_write(UC_X86_REG_ECX,map_object)
+    m.cpu.reg_write(UC_X86_REG_ESP,0x103f000)
+    m.cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,0))
+    m.cpu.emu_start(0x54e1e0,0x103e000,count=50000000)
+    assert m.cpu.reg_read(UC_X86_REG_EIP)==0x103e000 and cursor[0]==len(data)
+    for index,(tile,subtile,height,ice) in expected.items():
+        cell=m.read(vector+index*4)
+        assert m.read(cell+0x38)==tile
+        assert bytes(m.cpu.mem_read(cell+0x119,3))==bytes((ice,subtile,height))
+    count=0
+    for index in range(262144):
+        cell=m.read(vector+index*4)
+        if not cell:
+            continue
+        count+=1
+        assert not (m.read(cell+0x140)&0x180)
+        assert m.read(cell+0x54)==0xffffffff and m.read(cell+0x58)==0xffffffff
+        assert struct.unpack('<h',m.cpu.mem_read(cell+0x116,2))[0]==-1
+        assert m.read(cell+0xe4)==0 and m.read(cell+0xe8)==0
+        assert m.cpu.mem_read(cell+0x122,1)==b'\0' and m.cpu.mem_read(cell+0x124,1)==b'\0'
+    assert count==len(expected)==19900 and target_index in expected
+    print(f'base x86 reads {len(expected)} MP02T2 packed tiles and preserves tested fields in 19900 cells')
+
+    if native:
+        rows=subprocess.check_output([native,game,'--cells'],text=True).splitlines()
+        actual={}
+        for row in rows:
+            fields=tuple(map(int,row.split()))
+            assert len(fields)==10 and fields[0] not in actual
+            actual[fields[0]]=fields[1:]
+        assert len(actual)==count
+        for index,values in actual.items():
+            cell=m.read(vector+index*4)
+            assert cell
+            signed=lambda value: value if value<0x80000000 else value-0x100000000
+            level=struct.unpack('<b',m.cpu.mem_read(cell+0x11b,1))[0]
+            oracle=(m.read(cell+0x38),level,signed(m.read(cell+0x54)),signed(m.read(cell+0x58)),
+                    struct.unpack('<h',m.cpu.mem_read(cell+0x116,2))[0],
+                    m.cpu.mem_read(cell+0x122,1)[0],
+                    int(bool(m.read(cell+0x140)&0x100)),m.read(cell+0xe4),m.read(cell+0xe8))
+            assert values==oracle,(index,values,oracle)
+        print('native packed map state matches 19900 original x86 cells')
+
+
+    # Replay only the four recognised Overlay root indexes from the real map.
+    # Registry identity, parent eligibility and Cell lookup are supplied.
+    # Other Overlay types and later map phases are not executed here.
+    overlay=subprocess.check_output([emitter,game,'--overlay-bytes'])
+    assert len(overlay)==512*512
+    directions=((0,-1),(1,-1),(1,0),(1,1),(0,1),(-1,1),(-1,0),(-1,-1))
+    for index,(dx,dy) in enumerate(directions):
+        m.cpu.mem_write(0x851a70+index*4,struct.pack('<hh',dx,dy))
+    def lookup_cell():
+        x,y=struct.unpack('<hh',m.cpu.mem_read(m.argument(0),4))
+        cell=m.read(vector+(y*512+x)*4) if 0<=x<512 and 0<=y<512 else 0
+        m.cpu.reg_write(UC_X86_REG_EAX,cell or 0xa6f9f8)
+    m.bind(0x548070,4,lookup_cell)
+    m.bind(0x5d4160,4,m.ret(1))
+    m.bind(0x631570,4,m.ret(0))
+    m.word(m.FOOT,m.VT)
+    m.word(m.FOOT+0x98,m.TYPE)
+    point=0x100c800
+    m.virtual(0x1a0,4,m.ret(point))
+    reached=set()
+    roots=0
+    for index,kind in enumerate(overlay):
+        if kind not in (24,25,237,238):
+            continue
+        root=m.read(vector+index*4)
+        if not root:
+            continue
+        x,y=index%512,index//512
+        direction=0 if kind in (24,237) else 6
+        dx,dy=directions[direction]
+        for distance in (0,1,2,-1):
+            nx,ny=x+dx*distance,y+dy*distance
+            if 0<=nx<512 and 0<=ny<512 and m.read(vector+(ny*512+nx)*4):
+                reached.add(ny*512+nx)
+        m.word(point,x|(y<<16))
+        m.word(m.TYPE+0x264,kind)
+        m.cpu.reg_write(UC_X86_REG_ECX,m.FOOT)
+        m.cpu.reg_write(UC_X86_REG_ESP,0x103f000)
+        m.cpu.mem_write(0x103f000,struct.pack('<II',0x103e000,1))
+        m.cpu.emu_start(0x5da970,0x5daa31,count=100000)
+        assert m.cpu.reg_read(UC_X86_REG_EIP)==0x5daa31
+        roots+=1
+    assert roots==9
+    for index in range(262144):
+        cell=m.read(vector+index*4)
+        if cell:
+            assert bool(m.read(cell+0x140)&0x100)==(index in reached)
+    assert target_index not in reached
+    print(f'base x86 replays {roots} recognised MP02T2 bridge roots; none reaches waypoint 0')

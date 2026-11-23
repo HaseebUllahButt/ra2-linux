@@ -1,0 +1,43 @@
+# Game files and builds stay out of version control.
+/game
+openra/
+*.zip
+analysis/ghdump.rep
+analysis/ghdump.gpr
+analysis/ghidra-proj/
+analysis/extracted/unnamed/
+analysis/extracted/ini/
+analysis/gamemd.snap
+__pycache__/
+*.log
+
+rebuild/hook/winmm.dll
+/rebuild/build/
+/analysis/base-ra2/*.gpr
+/analysis/base-ra2/*.rep/
+/analysis/base-ra2/*.lock*
+
+# Generated tests must be rebuilt for the current Linux CPU.
+/rebuild/src/fs/mix_test
+/rebuild/src/gfx/gfx_test
+/rebuild/src/gfx/shp_view
+/rebuild/src/loop/loop_test
+/rebuild/src/map/map_test
+/rebuild/src/pack/pack_test
+/rebuild/src/render/render_test
+/rebuild/src/render/*.ppm
+/rebuild/src/rules/rules_test
+/rebuild/src/text/test_csf
+/rebuild/hook/*.o
+/rebuild/hook/test_trampoline
+
+# Decompiled original code, the full game install and QA captures stay out of git.
+/export/
+/game-full
+/qa/bin/
+/qa/xvfb-pkg/
+/qa/qa-input
+/qa/reports*/**/*.png
+/qa/reports*/**/*.ppm
+/qa/reports*/**/*.jpg
+/qa/reports*/**/*.log

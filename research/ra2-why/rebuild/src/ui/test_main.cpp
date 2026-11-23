@@ -1,0 +1,558 @@
+#include "../pack/map_pack.h"
+#include "ui.h"
+#include "../fs/mix_bootstrap.h"
+#include "../rules/ini_file.h"
+#include <algorithm>
+#include <cassert>
+#include <fstream>
+#include <iostream>
+#include <iterator>
+#include <limits>
+#include <stdexcept>
+using namespace ra2;
+static std::vector<std::uint8_t> read(const std::string& path) {
+    std::ifstream f(path,std::ios::binary); if(!f) throw std::runtime_error("cannot read file");
+    return {std::istreambuf_iterator<char>(f),{}};
+}
+template<class F> void fails(F f) {bool caught=false;try{f();}catch(const std::runtime_error&){caught=true;}assert(caught);}
+static void check_blit(const gfx::RgbaImage& output, const gfx::RgbaImage& source, int x, int y) {
+    std::size_t checked=0;
+    for (int sy=0;sy<source.height && y+sy<output.height;++sy)
+        for (int sx=0;sx<source.width && x+sx<output.width;++sx) {
+            auto s=(static_cast<std::size_t>(sy)*source.width+sx)*4;
+            auto d=(static_cast<std::size_t>(y+sy)*output.width+x+sx)*4;
+            if(source.pixels[s+3]) {
+                assert(std::equal(source.pixels.begin()+s,source.pixels.begin()+s+4,output.pixels.begin()+d));
+                ++checked;
+            }
+        }
+    assert(checked>0);
+}
+int main(int argc,char** argv) {
+    if(argc!=2)return 2;
+    fs::MixFileSystem files(argv[1]); files.bootstrap(); files.mount("langmd.mix");
+    // The original shell mounts these archives at 0x00534E50.
+    files.mount("ntrlmd.mix"); files.mount("neutral.mix");
+    auto csf=files.read_file("ra2md.csf"), title=files.read_file("TITLE.PCX");
+    auto fontdata=files.read_file("GAME.FNT"); assert(csf && title && fontdata);
+    ra2text::CsfFile strings;strings.parse(csf->data(),csf->size());
+    auto exe=read(std::string(argv[1])+"/gamemd.exe");
+    auto main=ui::load_dialog(exe,ui::Page::Main,strings);
+    assert(main.resource_id==226 && main.bounds.width==533 && main.bounds.height==369 && main.controls.size()==11);
+    auto button=std::find_if(main.controls.begin(),main.controls.end(),[](const auto& c){return c.id==1667;});
+    assert(button!=main.controls.end() && button->label_key=="GUI:SinglePlayer" && button->label=="Single Player");
+    auto pixel=ui::dialog_to_pixels({4,8,12,16},8,16);
+    assert(pixel.x==8 && pixel.y==16 && pixel.width==24 && pixel.height==32);
+    fails([&]{ui::dialog_to_pixels({0,0,1,1},0,16);});
+    assert(button->bounds.x==425 && button->bounds.y==125 && button->bounds.width==108 && button->bounds.height==23);
+    assert(main.hit_test(425,125,{1667})==1667 && !main.hit_test(425,125,{}) && !main.hit_test(533,125,{1667}));
+    assert(main.hit_test_pixels(850,250,8,16,{1667})==1667);
+    assert(!main.hit_test_pixels(1066,250,8,16,{1667}));
+    auto single=ui::load_dialog(exe,ui::Page::SinglePlayer,strings);assert(single.resource_id==256 && single.controls.size()==8);
+    auto skirmish=ui::load_dialog(exe,ui::Page::Skirmish,strings);assert(skirmish.resource_id==258 && skirmish.controls.size()==72);
+    auto start=std::find_if(skirmish.controls.begin(),skirmish.controls.end(),[](const auto& c){return c.id==1559;});
+    assert(start!=skirmish.controls.end() && start->label=="Start Game" && start->bounds.x==425 && start->bounds.y==149);
+    assert(!skirmish.hit_test(425,149,{}) && skirmish.hit_test(425,149,{1559})==1559);
+    auto font=ui::GameFont::parse(*fontdata);
+    const auto combo_metrics=ui::combo_item_metrics(font);
+    assert(combo_metrics.selection_height==19 && combo_metrics.list_height==23);
+    for (const auto* name : {"gdnarrowr.pcx","gdnarrowp.pcx","dnarrowr.pcx","dnarrowp.pcx"}) {
+        const auto bytes=files.read_file(name); assert(bytes);
+        const auto arrow=ui::decode_pcx(*bytes);
+        assert(arrow.width==18 && arrow.height==22);
+    }
+    auto letter=font.glyph(u'A',{255,0,0,255}); assert(letter && letter->width==7 && letter->height==16 && font.line_height()==17);
+    assert(std::any_of(letter->pixels.begin(),letter->pixels.end(),[](auto v){return v!=0;}));
+    gfx::RgbaImage canvas{100,20,std::vector<std::uint8_t>(100*20*4)};
+    font.draw_text(canvas,"Single Player",-2,0,{255,0,0,255});
+    assert(std::any_of(canvas.pixels.begin(),canvas.pixels.end(),[](auto v){return v!=0;}));
+    fails([&]{font.draw_text(canvas,"\xff",0,0,{255,0,0,255});});
+    auto invalid_font=*fontdata; invalid_font.resize(50); fails([&]{ui::GameFont::parse(invalid_font);});
+    auto img=ui::decode_pcx(*title); assert(img.width==640 && img.height==480 && img.pixels.size()==640*480*4);
+    auto shell=ui::draw_shell_background(files,800,600);
+    assert(shell.width==800 && shell.height==600 && shell.pixels.size()==800*600*4);
+    auto palbytes=files.read_file("SHELL.PAL"); auto bgbytes=files.read_file("MNSCRNL.SHP");
+    auto btnbytes=files.read_file("SDBTNANM.SHP"); auto bottombytes=files.read_file("SDBTM.SHP");
+    assert(palbytes && bgbytes && btnbytes && bottombytes);
+    auto pal=gfx::Palette::from_bytes(*palbytes);
+    auto bg=gfx::ShpImage::parse(*bgbytes).decode_frame(0,pal);
+    auto buttonpal=files.read_file("SDBTNANM.PAL"); assert(buttonpal);
+    auto cell=gfx::ShpImage::parse(*btnbytes).decode_frame(10,gfx::Palette::from_bytes(*buttonpal));
+    auto bottom=gfx::ShpImage::parse(*bottombytes).decode_frame(0,pal);
+    check_blit(shell,bg,0,0); check_blit(shell,cell,644,199);
+    check_blit(shell,cell,644,535); check_blit(shell,bottom,632,577);
+    ui::MenuNavigation nav;
+    assert(nav.activate(1559)==ui::Action::None && nav.page()==ui::Page::Main);
+    assert(nav.activate(1667)==ui::Action::PageChanged && nav.page()==ui::Page::SinglePlayer);
+    assert(nav.activate(1401)==ui::Action::PageChanged && nav.page()==ui::Page::Skirmish);
+    assert(nav.activate(1559)==ui::Action::None && nav.page()==ui::Page::Skirmish);
+    assert(nav.activate(1472)==ui::Action::PageChanged && nav.page()==ui::Page::SinglePlayer);
+    assert(nav.activate(1670)==ui::Action::PageChanged && nav.page()==ui::Page::Main);
+    assert(nav.activate(1006)==ui::Action::None && nav.page()==ui::Page::Main);
+    fs::MixFileSystem base(argv[1]);
+    base.bootstrap(fs::GameVariant::RedAlert2); base.mount_language(fs::GameVariant::RedAlert2);
+    base.mount("neutral.mix");
+    base.mount("multi.mix"); files.mount("multimd.mix");
+    const auto base_font_bytes=base.read_file("GAME.FNT"); assert(base_font_bytes);
+    const auto base_metrics=ui::combo_item_metrics(ui::GameFont::parse(*base_font_bytes));
+    assert(base_metrics.selection_height==19 && base_metrics.list_height==23);
+    for (const auto* name : {"gdnarrowr.pcx","gdnarrowp.pcx","dnarrowr.pcx","dnarrowp.pcx"}) {
+        const auto bytes=base.read_file(name); assert(bytes);
+        const auto arrow=ui::decode_pcx(*bytes);
+        assert(arrow.width==18 && arrow.height==22);
+    }
+    auto basecsf=base.read_file("ra2.csf"); assert(basecsf);
+    auto base_art=base.read_file("art.ini"); assert(base_art && !base_art->empty());
+    rules::IniFile art; art.parse(std::string_view(reinterpret_cast<const char*>(base_art->data()),base_art->size()));
+    assert(art.section_count()>100);
+    ra2text::CsfFile base_strings; base_strings.parse(basecsf->data(),basecsf->size());
+    auto base_exe=read(std::string(argv[1])+"/game.exe");
+    auto base_main=ui::load_dialog(base_exe,ui::Page::Main,base_strings);
+    auto base_single=ui::load_dialog(base_exe,ui::Page::SinglePlayer,base_strings);
+    auto base_skirmish=ui::load_dialog(base_exe,ui::Page::Skirmish,base_strings);
+    assert(base_main.controls.size()==11 && base_single.controls.size()==8 && base_skirmish.controls.size()==51);
+    for (auto id : ui::SkirmishControls::opponents)
+        assert(std::any_of(base_skirmish.controls.begin(),base_skirmish.controls.end(),[id](const auto& c){return c.id==id;}));
+    for (auto id : ui::SkirmishControls::countries)
+        assert(std::any_of(base_skirmish.controls.begin(),base_skirmish.controls.end(),[id](const auto& c){return c.id==id;}));
+    for (auto id : ui::SkirmishControls::colors)
+        assert(std::any_of(base_skirmish.controls.begin(),base_skirmish.controls.end(),[id](const auto& c){return c.id==id;}));
+    auto base_shell=ui::draw_shell_background(base,800,600);
+    assert(base_shell.width==800 && base_shell.height==600);
+    auto base_maps=ui::load_skirmish_maps(base,base_strings);
+    auto expansion_maps=ui::load_skirmish_maps(files,strings);
+    auto base_modes=ui::load_skirmish_modes(base,base_strings);
+    auto expansion_modes=ui::load_skirmish_modes(files,strings);
+    auto default_menu=ui::Menu::load(base,base_exe,base_strings);
+    default_menu.enable_prototype_start(true);
+    default_menu.configure_maps(base_maps,base_modes);
+    assert(default_menu.page()==ui::Page::Main);
+    assert(default_menu.setup().game_mode==1 && default_menu.setup().map_filename=="MP02T2.MAP");
+    auto fallback_maps=base_maps;
+    for(auto& map:fallback_maps)if(map.filename=="MP02T2.MAP")map.available=false;
+    default_menu.configure_maps(fallback_maps,base_modes);
+    const auto fallback=std::find_if(fallback_maps.begin(),fallback_maps.end(),[&](const auto& map) {
+        return map.filename==default_menu.setup().map_filename && map.source_archive==default_menu.setup().map_archive;
+    });
+    assert(fallback!=fallback_maps.end() && fallback->available && fallback->built_in && fallback->source_archive.empty());
+    auto custom_only=base_maps;
+    for(auto& map:custom_only)if(map.built_in)map.available=false;
+    default_menu.configure_maps(custom_only,base_modes);
+    assert(!default_menu.setup().map_filename && !default_menu.setup().map_archive);
+
+
+    assert(base_modes.size()==8 && expansion_modes.size()==9);
+    assert(base_modes[0].id==1 && base_modes[0].map_filter=="standard" && !base_modes[0].name.empty());
+    auto base_countries=ui::load_skirmish_countries(base,base_strings);
+    auto expansion_countries=ui::load_skirmish_countries(files,strings);
+    auto colors=ui::load_skirmish_colors(base_strings);
+    assert(colors.size()==9 && colors[0].index==-2 && !colors[0].swatch);
+    assert(colors[2].index==1 && colors[2].swatch && colors[2].swatch->r==255 &&
+           colors[2].swatch->g==25 && colors[2].swatch->b==25);
+    for (const auto& color : colors) assert(!color.name.empty());
+    for (const auto& color : ui::load_skirmish_colors(strings)) assert(!color.name.empty());
+    auto opponents=ui::load_skirmish_opponents(base_strings);
+    assert(opponents.size()==4 && opponents[0].value==ui::Opponent::Closed &&
+           opponents[1].value==ui::Opponent::Easy && opponents[2].value==ui::Opponent::Medium &&
+           opponents[3].value==ui::Opponent::Hard);
+    for (const auto& choice : opponents) assert(!choice.name.empty());
+    assert(base_countries.size()==10 && expansion_countries.size()==11);
+    assert(base_countries.front().index==-2 && base_countries[1].id=="Americans");
+    assert(expansion_countries.back().id=="YuriCountry" && expansion_countries.back().index==9);
+    for (const auto& country : base_countries) assert(!country.name.empty());
+    for (const auto& country : expansion_countries) assert(!country.name.empty());
+    assert(base_maps.size()>=137 && expansion_maps.size()>=161);
+    assert(base_maps[0].id=="MP02T2" && base_maps[0].filename=="MP02T2.MAP" && !base_maps[0].name.empty());
+    assert(expansion_maps[0].id=="XMP29U2" && !expansion_maps[0].name.empty());
+    assert(std::any_of(base_maps.begin(),base_maps.end(),[](const auto& map){return map.available;}));
+    assert(std::any_of(expansion_maps.begin(),expansion_maps.end(),[](const auto& map){return map.available;}));
+    // Base and expansion use different cooperative packet entries and files.
+    const auto base_packet=base.locate("MISSIONS.PKT");
+    const auto expansion_packet=files.locate("MISSIONSMD.PKT");
+    assert(base_packet && base_packet->archive->name()=="LOCAL.MIX");
+    assert(expansion_packet && expansion_packet->archive->name().find("langmd.mix")!=std::string::npos);
+    const auto base_coop=std::find_if(base_maps.begin(),base_maps.end(),[](const auto& map){return map.id=="C1M1A";});
+    assert(base_coop!=base_maps.end() && base_coop->built_in && base_coop->filename=="C1M1A.MAP");
+    assert(!ui::skirmish_map_matches_mode(*base_coop,base_modes[0]));
+    assert(base_coop->available==bool(base.read_file("C1M1A.MAP")));
+    const auto expansion_coop=std::find_if(expansion_maps.begin(),expansion_maps.end(),[](const auto& map){return map.id=="C1A01MD";});
+    assert(expansion_coop!=expansion_maps.end() && expansion_coop->filename=="C1A01MD.MAP" && expansion_coop->available);
+    ui::SkirmishSetup known_map; known_map.game_mode=1; known_map.scenario_index=0;
+    const auto resolved=ui::resolve_saved_skirmish_map(known_map,base_maps,base_modes);
+    assert(!resolved);
+    known_map.game_mode=8;
+    assert(!ui::resolve_saved_skirmish_map(known_map,base_maps,base_modes));
+    known_map.game_mode=1; known_map.scenario_index=static_cast<int>(base_maps.size());
+    assert(!ui::resolve_saved_skirmish_map(known_map,base_maps,base_modes));
+    assert(std::any_of(base_maps.begin(),base_maps.end(),[](const auto& map){
+        return map.source_archive=="Grinder.mmx" && map.filename=="Grinder.MAP" && map.available && !map.name.empty();
+    }));
+    assert(std::any_of(expansion_maps.begin(),expansion_maps.end(),[](const auto& map){
+        return map.source_archive=="DeepFrze.yro" && map.available && map.description_key=="Name:DpFreeze";
+    }));
+    for (const auto& dialog : {ui::load_map_selection_dialog(base_exe,base_strings),
+                                ui::load_map_selection_dialog(exe,strings)}) {
+        assert(dialog.resource_id==107);
+        for (auto id : {1771u,1363u,1733u,1472u}) {
+            const auto found=std::find_if(dialog.controls.begin(),dialog.controls.end(),
+                                          [id](const auto& control){return control.id==id;});
+            assert(found!=dialog.controls.end() && found->bounds.width>0 && found->bounds.height>0);
+        }
+    }
+    auto menu=ui::Menu::load(base,base_exe,base_strings);
+    rules::IniFile defaults;
+    auto empty_setup=ui::read_skirmish_setup(defaults);
+    assert(empty_setup.unit_count==10);
+    assert(empty_setup.scenario_index==0 && empty_setup.credits==10000 && empty_setup.game_speed==6);
+    assert(empty_setup.short_game==false && empty_setup.super_weapons==true);
+    assert(empty_setup.opponents[0].opponent==ui::Opponent::Easy);
+    assert(empty_setup.opponents[1].opponent==ui::Opponent::Closed);
+    rules::IniFile defaults_rules; defaults_rules.parse("[MultiplayerDialogSettings]\nMoney=7000\nMinMoney=1000\nMoneyIncrement=250\nShortGame=yes\n");
+    auto rules_setup=ui::read_skirmish_setup(defaults,&defaults_rules);
+    assert(rules_setup.credits==7000 && rules_setup.short_game==true);
+    assert(rules_setup.min_credits==1000 && rules_setup.max_credits==10000 && rules_setup.credit_increment==250);
+    assert(ui::credit_from_slider_pointer(6,128,5000,10000,100)==5000);
+    assert(ui::credit_from_slider_pointer(38,128,5000,10000,100)==7400);
+    assert(ui::credit_from_slider_pointer(71,128,5000,10000,100)==10000);
+    assert(!ui::credit_from_slider_pointer(5,63,5000,10000,100));
+    assert(!ui::credit_from_slider_pointer(5,128,5000,10000,0));
+    rules::IniFile saved; saved.parse("[MultiPlayer]\nSide=Russians\nColor=2\n[Skirmish]\nCredits=10000\nSlot01=4,-2,-2\n");
+    auto setup=ui::read_skirmish_setup(saved);
+    assert(setup.country=="Russians" && setup.color==2 && setup.credits==10000);
+    assert(setup.opponents[0].opponent==ui::Opponent::Hard && setup.opponents[0].country==-2);
+    auto actual=rules::IniFile::from_file(std::string(argv[1])+"/RA2.INI");
+    assert(menu.skirmish_setup().credits==actual.read_integer("Skirmish","Credits"));
+    // Reference dialog normalization at 0x00775BC0, followed by cell snapping.
+    for (int dlu : {125,152,179,206,233,122,149,176}) {
+        const int expected=(dlu*163/100-199+21)/42;
+        for (int font_height=8;font_height<=24;++font_height) {
+            const int reference=(100*font_height+4)/8;
+            const int initial=(dlu*font_height+4)/8;
+            assert((initial*163/reference-199+21)/42==expected);
+        }
+    }
+    auto unhovered=menu.render();
+    bool heading_changed=false;
+    for (int y=8;y<25;++y) for(int x=632;x<800;++x) {
+        auto p=(static_cast<std::size_t>(y)*800+x)*4;
+        if (!std::equal(unhovered.pixels.begin()+p,unhovered.pixels.begin()+p+4,
+                        base_shell.pixels.begin()+p)) heading_changed=true;
+    }
+    assert(heading_changed);
+    menu.pointer_down(645,536); assert(menu.pointer_up(645,536)==ui::Action::None);
+    assert(menu.confirming_exit());
+    auto confirm=menu.render(); assert(confirm.pixels!=unhovered.pixels);
+    menu.pointer_down(487,423); assert(menu.pointer_up(487,423)==ui::Action::None);
+    assert(!menu.confirming_exit() && menu.page()==ui::Page::Main);
+    menu.pointer_down(645,536); assert(menu.pointer_up(645,536)==ui::Action::None);
+    assert(menu.key_down(ui::Key::Escape)==ui::Action::None && !menu.confirming_exit());
+    menu.pointer_down(645,536); assert(menu.pointer_up(645,536)==ui::Action::None);
+    menu.pointer_down(487,390); assert(menu.pointer_up(487,390)==ui::Action::Quit);
+    assert(!menu.confirming_exit());
+    menu.pointer_move(644,199);
+    auto hovered=menu.render(); assert(hovered.pixels!=unhovered.pixels);
+    menu.pointer_down(644,199);
+    auto pressed=menu.render(); assert(pressed.pixels!=hovered.pixels);
+    assert(menu.pointer_up(643,199)==ui::Action::None && menu.page()==ui::Page::Main);
+    menu.pointer_down(800,199); assert(menu.pointer_up(800,199)==ui::Action::None);
+    menu.pointer_down(645,200); assert(menu.pointer_up(645,200)==ui::Action::PageChanged);
+    assert(menu.page()==ui::Page::SinglePlayer); menu.render();
+    menu.pointer_down(645,284); assert(menu.pointer_up(645,284)==ui::Action::PageChanged);
+    assert(menu.page()==ui::Page::Skirmish); auto skirmish_image=menu.render();
+    const auto start_control=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
+        [](const auto& c){return c.id==ui::SkirmishControls::start;});
+    assert(start_control!=base_skirmish.controls.end());
+    // Shell buttons snap to the original 156-by-42 pixel right column.
+    const int start_x=650;
+    const int start_y=249;
+    menu.pointer_down(start_x,start_y);
+    assert(menu.pointer_up(start_x,start_y)==ui::Action::None);
+    menu.select_opponent(1,ui::Opponent::Hard);
+    menu.enable_prototype_start(true);
+    assert(menu.skirmish_setup().opponents[0].opponent==ui::Opponent::Easy);
+    menu.select_opponent(1,ui::Opponent::Hard);
+    menu.enable_prototype_start(true);
+    assert(menu.skirmish_setup().opponents[0].opponent==ui::Opponent::Hard);
+    menu.select_opponent(1,ui::Opponent::Easy);
+    menu.pointer_down(start_x,start_y);
+    assert(menu.pointer_up(start_x,start_y)==ui::Action::StartMatch);
+    menu.enable_prototype_start(false);
+    auto speed_label=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
+                                  [](const auto& c){return c.id==1689;});
+    assert(speed_label!=base_skirmish.controls.end());
+    const int sx=(speed_label->bounds.x*3+1)/2, sy=(speed_label->bounds.y*163+50)/100;
+    bool label_pixel=false;
+    for(int y=sy;y<sy+16;++y) for(int x=sx;x<sx+80;++x) {
+        auto p=(static_cast<std::size_t>(y)*800+x)*4;
+        if(skirmish_image.pixels[p]==255 && skirmish_image.pixels[p+1]==255 && skirmish_image.pixels[p+2]==0)
+            label_pixel=true;
+    }
+    assert(label_pixel);
+    auto credit_control=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
+                                     [](const auto& c){return c.id==ui::SkirmishControls::credits;});
+    assert(credit_control!=base_skirmish.controls.end());
+    const int credit_x=(credit_control->bounds.x*3+1)/2;
+    const int credit_y=(credit_control->bounds.y*163+50)/100;
+    const int credit_width=(credit_control->bounds.width*3+1)/2+1;
+    const int left_value=*ui::credit_from_slider_pointer(6,credit_width,menu.setup().min_credits,
+                                                        menu.setup().max_credits,menu.setup().credit_increment);
+    menu.pointer_down(credit_x+6,credit_y+10);
+    menu.pointer_up(credit_x+6,credit_y+10);
+    assert(menu.setup().credits==left_value);
+    menu.pointer_down(credit_x+6,credit_y+10);
+    menu.pointer_move(credit_x+credit_width+100,credit_y+10);
+    assert(menu.pointer_up(credit_x+credit_width+100,credit_y+10)==ui::Action::SetupChanged);
+    assert(menu.setup().credits==menu.setup().max_credits);
+    for (const auto id : {ui::SkirmishControls::speed,ui::SkirmishControls::units}) {
+        const auto c=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
+                                 [id](const auto& c){return c.id==id;});
+        assert(c!=base_skirmish.controls.end());
+        const int x=(c->bounds.x*3+1)/2, y=(c->bounds.y*163+50)/100;
+        const int width=(c->bounds.width*3+1)/2+1;
+        menu.pointer_down(x+6,y+10);
+        menu.pointer_move(x-100,y);
+        menu.pointer_up(x-100,y);
+        assert(id==ui::SkirmishControls::speed ? menu.setup().game_speed==6 :
+                                               menu.setup().unit_count==menu.setup().min_units);
+        menu.enable_prototype_start(true);
+        const auto low=menu.setup();
+        menu.pointer_down(start_x,start_y);
+        assert(menu.pointer_up(start_x,start_y)==ui::Action::StartMatch);
+        assert(menu.setup().game_speed==low.game_speed && menu.setup().unit_count==low.unit_count);
+        menu.enable_prototype_start(false);
+        const auto left_image=menu.render();
+        menu.pointer_down(x+6,y+10);
+        menu.pointer_move(x+width+100,y+100);
+        assert(menu.pointer_up(x+width+100,y+100)==ui::Action::SetupChanged);
+        assert(id==ui::SkirmishControls::speed ? menu.setup().game_speed==0 :
+                                               menu.setup().unit_count==menu.setup().max_units);
+        const auto right_image=menu.render();
+        assert(right_image.pixels!=left_image.pixels);
+        const auto cap=ui::decode_pcx(*base.read_file("trofl.pcx"));
+        check_blit(right_image,cap,x,y-1);
+        // A click reaches the right end without a drag.
+        menu.pointer_down(x+6,y+10);
+        menu.pointer_up(x+6,y+10);
+        menu.pointer_down(x+width-51,y+10);
+        menu.pointer_up(x+width-51,y+10);
+        assert(id==ui::SkirmishControls::speed ? menu.setup().game_speed==0 :
+                                               menu.setup().unit_count==menu.setup().max_units);
+        menu.enable_prototype_start(true);
+        const auto chosen=menu.setup();
+        menu.pointer_down(start_x,start_y);
+        assert(menu.pointer_up(start_x,start_y)==ui::Action::StartMatch);
+        assert(menu.setup().game_speed==chosen.game_speed && menu.setup().unit_count==chosen.unit_count);
+        assert(menu.setup().credits==chosen.credits && menu.setup().map_filename==chosen.map_filename);
+        menu.enable_prototype_start(false);
+    }
+    const auto previous_short_game=menu.setup().short_game; assert(previous_short_game);
+    auto short_control=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
+                                    [](const auto& c){return c.id==1358;});
+    assert(short_control!=base_skirmish.controls.end());
+    const int short_x=(short_control->bounds.x*3+1)/2;
+    const int short_y=(short_control->bounds.y*163+50)/100;
+    menu.pointer_down(short_x,short_y); assert(menu.pointer_up(short_x,short_y)==ui::Action::SetupChanged);
+    assert(menu.setup().short_game && *menu.setup().short_game!=*previous_short_game);
+    menu.pointer_down(short_x,short_y); assert(menu.pointer_up(short_x,short_y)==ui::Action::SetupChanged);
+    assert(menu.setup().short_game==previous_short_game);
+    auto combo_rect=[&](std::uint32_t id) {
+        const auto c=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
+                                  [id](const auto& control){return control.id==id;});
+        assert(c!=base_skirmish.controls.end());
+        return ui::Rect{(c->bounds.x*3+1)/2,(c->bounds.y*163+50)/100,
+                        (c->bounds.width*3+1)/2+1,23};
+    };
+    auto click=[&](int x,int y) {menu.pointer_down(x,y);return menu.pointer_up(x,y);};
+    const auto opponent_combo=combo_rect(ui::SkirmishControls::opponents[0]);
+    const auto country_combo=combo_rect(ui::SkirmishControls::player_country);
+    const auto ai_country_combo=combo_rect(ui::SkirmishControls::countries[0]);
+    const auto color_combo=combo_rect(ui::SkirmishControls::player_color);
+    const auto closed_menu=menu.render();
+    const auto normal_arrow=ui::decode_pcx(*base.read_file("dnarrowr.pcx"));
+    check_blit(closed_menu,normal_arrow,opponent_combo.x+opponent_combo.width-19,opponent_combo.y+1);
+    click(opponent_combo.x+4,opponent_combo.y+4);
+    const auto expanded=menu.render();
+    assert(expanded.pixels!=closed_menu.pixels);
+    menu.pointer_down(opponent_combo.x+4,opponent_combo.y+opponent_combo.height+3);
+    assert(menu.pointer_up(std::numeric_limits<int>::min(),std::numeric_limits<int>::min())==ui::Action::None);
+    click(opponent_combo.x+4,opponent_combo.y+4);
+    assert(click(opponent_combo.x+4,opponent_combo.y+opponent_combo.height+3)==ui::Action::SetupChanged);
+    assert(menu.setup().opponents[0].opponent==ui::Opponent::Closed);
+    // A closed slot has no active country picker.
+    assert(click(ai_country_combo.x+4,ai_country_combo.y+4)==ui::Action::None);
+    const auto disabled_country=menu.render();
+    assert(click(ai_country_combo.x+4,ai_country_combo.y+4)==ui::Action::None);
+    assert(menu.render().pixels==disabled_country.pixels);
+    click(opponent_combo.x+4,opponent_combo.y+4);
+    assert(click(opponent_combo.x+4,opponent_combo.y+opponent_combo.height+2+23+1)==ui::Action::SetupChanged);
+    assert(menu.setup().opponents[0].opponent==ui::Opponent::Easy);
+    click(country_combo.x+4,country_combo.y+4);
+    const auto old_country=menu.setup().country;
+    const auto chosen_country=old_country==base_countries[0].id ? 1u : 0u;
+    assert(click(country_combo.x+4,country_combo.y+country_combo.height+3+23*chosen_country)==ui::Action::SetupChanged);
+    assert(menu.setup().country==base_countries[chosen_country].id);
+    click(color_combo.x+4,color_combo.y+4);
+    assert(menu.key_down(ui::Key::Escape)==ui::Action::None);
+    std::vector<int> available_colors{-2};
+    for (int color=0;color<8;++color) {
+        bool used=false;
+        for (const auto& other : menu.setup().opponents)
+            if (other.opponent && *other.opponent!=ui::Opponent::Closed && other.color==color) used=true;
+        if (!used) available_colors.push_back(color);
+    }
+    const std::size_t color_choice=menu.setup().color==-2 ? 1 : 0;
+    assert(color_choice<available_colors.size());
+    click(color_combo.x+4,color_combo.y+4);
+    assert(click(color_combo.x+4,color_combo.y+color_combo.height+3+23*color_choice)==ui::Action::SetupChanged);
+    assert(menu.setup().color==available_colors[color_choice]);
+    assert(menu.page()==ui::Page::Skirmish);
+    const auto saved_scenario=menu.setup().scenario_index;
+    menu.configure_maps(base_maps,base_modes);
+    assert(menu.select_mode(99999)==ui::Action::None);
+    if (menu.setup().game_mode!=1) assert(menu.select_mode(1)==ui::Action::SetupChanged);
+    assert(menu.select_map(0)==ui::Action::SetupChanged);
+    assert(menu.setup().map_filename=="MP02T2.MAP" && menu.setup().scenario_index==saved_scenario);
+    const auto map_name_control=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
+                                            [](const auto& c){return c.id==1448;});
+    assert(map_name_control!=base_skirmish.controls.end());
+    const int name_width=(map_name_control->bounds.width*3+1)/2;
+    const int name_height=(map_name_control->bounds.height*163+50)/100;
+    gfx::RgbaImage expected_name{static_cast<std::uint16_t>(name_width),static_cast<std::uint16_t>(name_height),
+                                 std::vector<std::uint8_t>(name_width*name_height*4)};
+    ui::GameFont::parse(*base_font_bytes).draw_text(expected_name,base_maps[0].name,0,0,{255,255,0,255});
+    check_blit(menu.render(),expected_name,(map_name_control->bounds.x*3+1)/2,
+               (map_name_control->bounds.y*163+50)/100);
+
+    // The selected map thumbnail uses the original PreviewPack RGB bytes.
+    const auto preview_map=base.read_file("MP02T2.MAP");assert(preview_map);
+    rules::IniFile preview_ini;
+    preview_ini.parse(std::string_view(reinterpret_cast<const char*>(preview_map->data()),preview_map->size()));
+    const auto preview_rgb=pack::read_section(preview_ini,"PreviewPack",pack::Codec::Lzo);
+    const auto preview_size=preview_ini.read_list("Preview","Size");
+    const int preview_w=std::stoi(preview_size[2]),preview_h=std::stoi(preview_size[3]);
+    const int thumb_w=std::min(280,155*preview_w/preview_h),thumb_h=thumb_w*preview_h/preview_w;
+    const auto with_preview=menu.render();
+    for(int y=0;y<thumb_h;++y)for(int x=0;x<thumb_w;++x) {
+        const auto source=(std::size_t(y*preview_h/thumb_h)*preview_w+x*preview_w/thumb_w)*3;
+        const auto dest=(std::size_t(y+365)*with_preview.width+x+44)*4;
+        for(int c=0;c<3;++c)assert(with_preview.pixels[dest+c]==preview_rgb[source+c]);
+    }
+    assert(menu.render().pixels==with_preview.pixels);
+
+    assert(menu.select_map(0)==ui::Action::None);
+    assert(menu.select_map(base_maps.size())==ui::Action::None);
+    auto local=std::find_if(base_maps.begin(),base_maps.end(),[](const auto& map){
+        return map.source_archive=="Grinder.mmx" && map.available;
+    });
+    assert(local!=base_maps.end());
+    assert(menu.select_map(static_cast<std::size_t>(local-base_maps.begin()))==ui::Action::SetupChanged);
+    assert(menu.setup().map_filename==local->filename && menu.setup().map_archive=="Grinder.mmx");
+    assert(menu.setup().scenario_index==saved_scenario);
+    assert(menu.select_mode(8)==ui::Action::SetupChanged);
+    assert(!menu.setup().map_filename && menu.setup().scenario_index==saved_scenario);
+    assert(menu.select_map(0)==ui::Action::None);
+    assert(menu.select_mode(1)==ui::Action::SetupChanged);
+    const auto map_dialog=ui::load_map_selection_dialog(base_exe,base_strings);
+    auto list_rect=[&](std::uint32_t id) {
+        const auto c=std::find_if(map_dialog.controls.begin(),map_dialog.controls.end(),
+                                  [id](const auto& control){return control.id==id;});
+        assert(c!=map_dialog.controls.end());
+        return ui::Rect{(c->bounds.x*3+1)/2,(c->bounds.y*163+50)/100,
+                        (c->bounds.width*3+1)/2+1,(c->bounds.height*163+50)/100+1};
+    };
+    const auto mode_list=list_rect(1771), map_list=list_rect(1363);
+    assert(click(645,284)==ui::Action::None && menu.choosing_map());
+    assert(click(mode_list.x+4,mode_list.y+3+23)==ui::Action::None);
+    assert(menu.setup().game_mode==1 && !menu.setup().map_filename);
+    assert(click(645,536)==ui::Action::None && !menu.choosing_map());
+    assert(menu.setup().game_mode==1 && !menu.setup().map_filename);
+    assert(click(645,284)==ui::Action::None && menu.choosing_map());
+    const auto first_list=menu.render();
+    menu.pointer_scroll(map_list.x+4,map_list.y+4,-1);
+    assert(menu.render().pixels!=first_list.pixels);
+    menu.pointer_scroll(map_list.x+4,map_list.y+4,1);
+    assert(menu.render().pixels==first_list.pixels);
+    assert(click(map_list.x+map_list.width-4,map_list.y+map_list.height-4)==ui::Action::None);
+    assert(menu.render().pixels!=first_list.pixels);
+    assert(click(map_list.x+map_list.width-4,map_list.y+4)==ui::Action::None);
+    assert(menu.render().pixels==first_list.pixels);
+    menu.pointer_scroll(map_list.x+4,map_list.y+4,std::numeric_limits<int>::min());
+    menu.pointer_scroll(map_list.x+4,map_list.y+4,std::numeric_limits<int>::max());
+    assert(menu.render().pixels==first_list.pixels);
+    assert(click(map_list.x+4,map_list.y+3)==ui::Action::None);
+    assert(!menu.setup().map_filename);
+    assert(click(645,200)==ui::Action::SetupChanged && !menu.choosing_map());
+    assert(menu.setup().map_filename=="MP02T2.MAP" && menu.setup().scenario_index==saved_scenario);
+    assert(click(645,284)==ui::Action::None && menu.choosing_map());
+    assert(menu.key_down(ui::Key::Escape)==ui::Action::None && !menu.choosing_map());
+    menu.select_opponent(1,ui::Opponent::Easy);
+    assert(menu.select_opponent(1,ui::Opponent::Closed)==ui::Action::SetupChanged);
+    assert(menu.select_country(1,0)==ui::Action::None);
+    assert(menu.select_opponent(1,ui::Opponent::Easy)==ui::Action::SetupChanged);
+    assert(menu.select_country(1,0)==ui::Action::SetupChanged);
+    assert(menu.setup().opponents[0].country==0);
+    int free_color=-1;
+    for (int color=0;color<8;++color) {
+        bool used=menu.setup().color==color;
+        for(std::size_t i=1;i<menu.setup().opponents.size();++i) {
+            const auto& other=menu.setup().opponents[i];
+            if(other.opponent && *other.opponent!=ui::Opponent::Closed && other.color==color) used=true;
+        }
+        if(!used) {free_color=color;break;}
+    }
+    assert(free_color>=0 && menu.select_color(1,free_color)==ui::Action::SetupChanged);
+    assert(menu.select_color(0,free_color)==ui::Action::None);
+    assert(menu.select_opponent(1,ui::Opponent::Closed)==ui::Action::SetupChanged);
+    assert(menu.setup().opponents[0].country==-2 && menu.setup().opponents[0].color==-2);
+    auto ally=std::find_if(base_skirmish.controls.begin(),base_skirmish.controls.end(),
+                           [](const auto& c){return c.id==1693;});
+    if (ally!=base_skirmish.controls.end() && (ally->style&0x08000000u)) {
+        const int x=(ally->bounds.x*3+1)/2, y=(ally->bounds.y*163+50)/100;
+        menu.pointer_down(x,y); assert(menu.pointer_up(x,y)==ui::Action::None);
+    }
+    menu.pointer_down(645,242); assert(menu.pointer_up(645,242)==ui::Action::None);
+    menu.pointer_down(645,284); assert(menu.pointer_up(645,284)==ui::Action::None && menu.choosing_map());
+    menu.pointer_down(645,536); assert(menu.pointer_up(645,536)==ui::Action::None && !menu.choosing_map());
+    menu.pointer_down(645,536); assert(menu.pointer_up(645,536)==ui::Action::PageChanged);
+    assert(menu.page()==ui::Page::SinglePlayer);
+    auto expansion_menu=ui::Menu::load(files,exe,strings);
+    assert(expansion_menu.render().width==800);
+    auto exp_click=[&](int x,int y) {expansion_menu.pointer_down(x,y);return expansion_menu.pointer_up(x,y);};
+    assert(exp_click(645,200)==ui::Action::PageChanged);
+    assert(exp_click(645,284)==ui::Action::PageChanged);
+    auto exp_ai=std::find_if(skirmish.controls.begin(),skirmish.controls.end(),[](const auto& c){return c.id==ui::SkirmishControls::opponents[0];});
+    assert(exp_ai!=skirmish.controls.end());
+    const int exp_x=(exp_ai->bounds.x*3+1)/2, exp_y=(exp_ai->bounds.y*163+50)/100;
+    const auto exp_closed=expansion_menu.render();
+    assert(exp_click(exp_x+4,exp_y+4)==ui::Action::None);
+    assert(expansion_menu.render().pixels!=exp_closed.pixels);
+    assert(expansion_menu.key_down(ui::Key::Escape)==ui::Action::None);
+    assert(expansion_menu.render().pixels==exp_closed.pixels);
+    expansion_menu.configure_maps(expansion_maps,expansion_modes);
+    expansion_menu.select_mode(1);
+    assert(exp_click(645,284)==ui::Action::None && expansion_menu.choosing_map());
+    assert(expansion_menu.render().pixels!=exp_closed.pixels);
+    const auto exp_map_dialog=ui::load_map_selection_dialog(exe,strings);
+    const auto exp_map=std::find_if(exp_map_dialog.controls.begin(),exp_map_dialog.controls.end(),
+                                    [](const auto& c){return c.id==1363;});
+    assert(exp_map!=exp_map_dialog.controls.end());
+    const int exp_map_x=(exp_map->bounds.x*3+1)/2, exp_map_y=(exp_map->bounds.y*163+50)/100;
+    assert(exp_click(exp_map_x+4,exp_map_y+3)==ui::Action::None);
+    assert(exp_click(645,200)==ui::Action::SetupChanged && !expansion_menu.choosing_map());
+    assert(expansion_menu.setup().map_filename==expansion_maps[0].filename);
+    assert(exp_click(645,284)==ui::Action::None && expansion_menu.choosing_map());
+    assert(expansion_menu.key_down(ui::Key::Escape)==ui::Action::None && !expansion_menu.choosing_map());
+    fails([&]{ui::draw_shell_background(files,640,480);});
+    auto damaged=*title;damaged.resize(140); fails([&]{ui::decode_pcx(damaged);});
+    damaged=*title;damaged[0]=0;fails([&]{ui::decode_pcx(damaged);});
+    // Leaving a match resets navigation, but keeps the player's setup.
+    ui::Menu returned=ui::Menu::load(base,base_exe,base_strings);
+    returned.pointer_down(650,200);returned.pointer_up(650,200);
+    returned.pointer_down(650,284);returned.pointer_up(650,284);
+    assert(returned.page()==ui::Page::Skirmish);
+    const auto saved_country=returned.setup().country;
+    returned.return_from_match();
+    assert(returned.page()==ui::Page::Main && returned.setup().country==saved_country);
+    auto broken=exe;broken.resize(128);fails([&]{ui::load_dialog(broken,ui::Page::Main,strings);});
+    std::cout<<"original dialogs, labels, hit bounds, title PCX and shell background passed\n";
+}
