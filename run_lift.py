@@ -43,6 +43,7 @@ sys.path.insert(0, os.path.join(_TOOLS, 'pe'))
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32          # noqa: E402
 from generate import (EXTENT_REACH, closure, find_splits, true_extent,  # noqa: E402
                       linear_disassemble_function, lift_function_linear, write_chunk)
+from x87_batch import batch_exact_x87
 from lift32 import Lifter                                  # noqa: E402
 from pe_analyze import analyze_pe, build_iat_map           # noqa: E402
 
@@ -558,6 +559,7 @@ def lifter_stamp():
     a lift from before MMX paddusb was lifted drew every light as a black circle."""
     h = hashlib.sha1()
     for p in (os.path.join(_TOOLS, 'lift', 'lift32.py'), os.path.join(_TOOLS, 'lift', 'generate.py'),
+              os.path.join(_TOOLS, 'lift', 'x87_batch.py'),
               os.path.abspath(__file__)):
         h.update(open(p, 'rb').read().replace(b'\r\n', b'\n'))
     return h.hexdigest()[:16]
@@ -567,6 +569,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--target', choices=('gamemd', 'game'), default='gamemd',
                     help="gamemd: Yuri's Revenge (the default); game: Red Alert 2")
+    ap.add_argument('--no-x87-batch', action='store_true', help='keep per-instruction exact x87 state saves')
     ap.add_argument('--exe')
     ap.add_argument('--catalog')
     ap.add_argument('--out')
@@ -693,6 +696,8 @@ def main():
             body = (lift_function_linear(lifter, name, insns, leaders, addr) if insns
                     else 'void %s(void) { }\n' % name)
             body = apply_patches(body, {va: c for va, c in patches.items() if reached and va in reached})
+            if not args.no_x87_batch:
+                body = batch_exact_x87(body)
         except Exception as e:                      # noqa: BLE001 -- counted, not hidden
             body = '/* ERROR %s: %s */\nvoid %s(void) { }\n' % (name, e, name)
             errors += 1
