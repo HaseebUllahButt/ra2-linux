@@ -211,12 +211,25 @@ void hle_yield(void) {
 
 /* ------------------------------------------------------------- dispatch
  * recomp_lookup searches the generated dispatch table (declared extern in
- * recomp_types.h; defined by the lifted program, or the selftest). */
+ * recomp_types.h; defined by the lifted program, or the selftest).
+ * Cache only hits in that immutable table. Manual overrides and imports stay
+ * in recomp_resolve and are checked on every call. In particular, a miss
+ * must not hide an import registered later. Thread-local slots also allow
+ * host lookups outside the machine lock without racing a guest thread. */
+#define LOOKUP_CACHE_SIZE 4096u
+static __thread struct { uint32_t va; recomp_func_t fn; } g_lookup_cache[LOOKUP_CACHE_SIZE];
 recomp_func_t recomp_lookup(uint32_t va) {
+    unsigned key = ((va >> 4) ^ (va >> 16) ^ va) & (LOOKUP_CACHE_SIZE - 1);
+    if (g_lookup_cache[key].va == va && g_lookup_cache[key].fn) return g_lookup_cache[key].fn;
     uint32_t lo = 0, hi = recomp_dispatch_count;
     while (lo < hi) {
         uint32_t mid = lo + (hi - lo) / 2, m = recomp_dispatch_table[mid].address;
-        if (m == va) return recomp_dispatch_table[mid].func;
+        if (m == va) {
+            recomp_func_t fn = recomp_dispatch_table[mid].func;
+            g_lookup_cache[key].va = va;
+            g_lookup_cache[key].fn = fn;
+            return fn;
+        }
         if (m < va) lo = mid + 1; else hi = mid;
     }
     return NULL;
