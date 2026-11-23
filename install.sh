@@ -14,24 +14,56 @@ die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 usage() {
     cat <<'HELP'
 Usage: ./install.sh [--game-dir PATH] [--jobs COUNT]
+       ./install.sh --uninstall [--purge]
 
 Install Red Alert 2 in ~/.local/share/ra2-linux and add a desktop entry.
 Use --game-dir to supply your Red Alert 2 folder without a prompt.
+Use --purge with --uninstall to remove settings and saves too.
 HELP
 }
 
 game_dir=
 jobs=${RA2_BUILD_JOBS:-}
+uninstall=0
+purge=0
 while (( $# )); do
     case "$1" in
         --game-dir) (( $# >= 2 )) || die 'Give a path after --game-dir.'; game_dir=$2; shift ;;
         --jobs) (( $# >= 2 )) || die 'Give a count after --jobs.'; jobs=$2; shift ;;
+        --uninstall) uninstall=1 ;;
+        --purge) purge=1 ;;
         --help|-h) usage; exit 0 ;;
         *) die "Unknown option $1. See --help." ;;
     esac
     shift
 done
 
+# Remove only the links and files that this installer owns.
+if (( uninstall )); then
+    if [[ ! -f "$target/.ra2-linux-install" ]]; then
+        printf 'No Red Alert 2 Linux installation at %s.\n' "$target"
+        exit 0
+    fi
+    if [[ -L "$command_path" && $(readlink -- "$command_path") == "$target/play.sh" ]]; then
+        rm -- "$command_path"
+    fi
+    rm -f -- "$desktop" "$target/play.sh" "$target/ra2"
+    if (( purge )); then
+        rm -rf -- "$target"
+        printf 'Uninstalled Red Alert 2 Linux and removed its local game data.\n'
+    else
+        if [[ -f "$target/.installed-assets" ]]; then
+            while IFS= read -r name; do
+                [[ -n "$name" && "$name" != .* && "$name" != */* ]] || continue
+                rm -f -- "$target/game/$name"
+            done < "$target/.installed-assets"
+            rm -- "$target/.installed-assets"
+        fi
+        printf 'Uninstalled Red Alert 2 Linux. Settings and saves remain in %s/game.\n' "$target"
+    fi
+    exit 0
+fi
+(( ! purge )) || die 'Use --purge with --uninstall.'
 [[ $(uname -s) == Linux && $(uname -m) =~ ^(x86_64|i[3-6]86)$ ]] ||
     die 'This build needs x86 Linux with 32-bit program support.'
 [[ -z "$jobs" || "$jobs" =~ ^[1-9][0-9]*$ ]] || die 'The job count must be a positive integer.'
