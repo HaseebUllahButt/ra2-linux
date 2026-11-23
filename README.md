@@ -75,6 +75,14 @@ We ran the original 1.006 game under Wine with the same setup and seeded random 
 
 See the [order replay tools](tools/order-replay/), [census tools](replay-tools/), and [frame sampler](sampler-tools/) for capture and comparison code.
 
+## Project history
+
+- [First static recompiler](research/ra2-recomp/). This attempt lifted x86 functions and tested the code that connected them to the operating system.
+- [Engine rebuild](research/ra2-why/). This route built a separate Linux engine for game rules, rendering, and skirmish play.
+- [Native production prototype](research/ra2-native/). This work connected deployment, building placement, and unit production to the shared game world.
+
+The release uses static recompilation on the community base. It carries over the original game logic and uses pcrecomp for Windows calls. We checked the result against the original in skirmish and campaign tests. Use the root installer for the playable release.
+
 ## Credits and license
 
 This project builds on [sp00nznet/redalert2-recomp](https://github.com/sp00nznet/redalert2-recomp) and [sp00nznet/pcrecomp](https://github.com/sp00nznet/pcrecomp). The source snapshots are from `4ecdea4` and `91998d6`. See the [game contributors](CONTRIBUTORS.md) and the [runtime contributors](pcrecomp/CONTRIBUTORS.md) for upstream credit.
