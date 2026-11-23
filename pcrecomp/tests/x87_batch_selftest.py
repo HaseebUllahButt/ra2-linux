@@ -101,8 +101,9 @@ static uint64_t rng=0x43796c6573506572ull;
 static uint64_t random64(void) { rng^=rng<<13; rng^=rng>>7; return rng^=rng<<17; }
 struct snap { struct x87_image x; long double st[8]; unsigned char m[256]; uint16_t cw; int top; uint32_t a,fa,fb,fk,cf; };
 static void take(struct snap *s) { memset(s,0,sizeof(*s));s->x=g_x87;memcpy(s->st,g_st,sizeof(g_st));memcpy(s->m,mem,256);s->cw=g_fpu_cw;s->top=g_fp_top;s->a=eax;s->fa=_flag_a;s->fb=_flag_b;s->fk=_flag_k;s->cf=_cf;
-/* Code and data pointers describe the test functions' different locations. */
-s->x.ip=s->x.dp=0;s->x.cs=s->x.opcode=s->x.ds=0;
+/* Only the instruction pointer names different generated code locations.
+ * Data pointers, selectors and the last opcode must still match. */
+s->x.ip=0;
 /* Long double padding has no value and the old code never writes it. */
 for(int j=0;j<8;j++)memset((unsigned char*)&s->st[j]+10,0,sizeof(long double)-10);
 }
