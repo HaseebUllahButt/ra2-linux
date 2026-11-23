@@ -452,7 +452,8 @@ def run(name, args, seconds, expect, every, original=False):
     with open(log, 'w', errors='replace') as f, (IPX if lan else contextlib.nullcontext()):
         try:
             code = subprocess.run(cmd, cwd=ROOT, stdout=f, stderr=subprocess.STDOUT,
-                                  timeout=seconds + 300).returncode
+                                  # The exclusive game lock can queue two long cases.
+                                  timeout=seconds + 3600).returncode
         except subprocess.TimeoutExpired:
             code = 'timeout'
     text = open(log, errors='replace').read()
