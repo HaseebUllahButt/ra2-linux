@@ -22,6 +22,7 @@ _CALLS = {'uint8_t', 'uint16_t', 'uint32_t', 'uint64_t',
           'RECOMP_PF', 'FK_NARROW'}
 _CALLS |= {'CMP_' + s for s in ('EQ','NE','L','LE','G','GE','B','BE','A','AE')}
 _CALLS |= {'TEST_' + s for s in ('Z','NZ','L','LE','G','GE','S','NS')}
+_NAMES = _CALLS | set('eax ecx edx ebx esp ebp esi edi _cf _df _flag_a _flag_b _flag_k _itail_tgt _fpu_cmp int unsigned signed char short long'.split())
 
 
 def _integer(line):
@@ -31,6 +32,9 @@ def _integer(line):
     if not s.endswith(';') or any(c in s for c in '{}'):
         return False
     if re.search(r'\b(?:if|goto|return|double|float|g_st|g_x87|g_fpu_cw|g_fp_top)\b', s):
+        return False
+    names = set(re.findall(r'\b[A-Za-z_]\w*', s))
+    if any(n not in _NAMES and not n.startswith('FK_') for n in names):
         return False
     calls = set(re.findall(r'\b([A-Za-z_]\w*)\s*\(', s))
     return calls <= _CALLS and ('=' in s or s.startswith('PUSH32('))

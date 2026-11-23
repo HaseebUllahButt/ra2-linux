@@ -71,7 +71,7 @@ sample=''.join('    '+line+'\n' for ins in md.disasm(bytes.fromhex('d9e8d9e8'),0
                for line in Lifter(iat_map={}).lift_instruction(ins))
 first=sample.index('    }\n')+6
 for barrier in ('L_00401000:\n','    callback();\n','    if (eax) goto L_00401000;\n',
-                '    double v = 1.0;\n','    RECOMP_BACKEDGE();\n','    _ST(0) = 1;\n'):
+                '    double v = 1.0;\n','    RECOMP_BACKEDGE();\n','    _ST(0) = 1;\n','    eax = host_float;\n'):
     assert '/* exact x87 region */' not in batch_exact_x87(sample[:first]+barrier+sample[first:]),barrier
 assert batch_exact_x87(batch_exact_x87(sample)) == batch_exact_x87(sample)
 
