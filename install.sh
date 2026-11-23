@@ -17,7 +17,8 @@ Usage: ./install.sh [--game-dir PATH] [--jobs COUNT]
        ./install.sh --uninstall [--purge]
 
 Install Red Alert 2 in ~/.local/share/ra2-linux and add a desktop entry.
-Use --game-dir to supply your Red Alert 2 folder without a prompt.
+Run without a path to look for an installed Steam copy.
+Use --game-dir to select a Red Alert 2 folder.
 Use --purge with --uninstall to remove settings and saves too.
 HELP
 }
@@ -73,6 +74,49 @@ fi
    ( -L "$command_path" && $(readlink -- "$command_path") == "$target/play.sh" ) ]] ||
     die "The start command already exists: $command_path"
 
+command -v python3 >/dev/null || die 'Install Python 3 (python on Arch) to find your game folder.'
+if [[ -z "$game_dir" ]]; then
+    mapfile -d '' -t candidates < <(python3 "$source_dir/tools/find-game.py")
+    if (( ${#candidates[@]} == 1 )); then
+        game_dir=${candidates[0]}
+        printf 'Found Red Alert 2 in %s.\n' "$game_dir"
+    else
+        if (( ${#candidates[@]} > 1 )); then
+            printf 'Found more than one Red Alert 2 folder:\n'
+            printf '  %s\n' "${candidates[@]}"
+        fi
+        read -r -e -p 'Path to your Red Alert 2 folder: ' game_dir ||
+            die 'Supply the game folder with --game-dir PATH.'
+    fi
+fi
+[[ -n "$game_dir" ]] || die 'Supply the game folder with --game-dir PATH.'
+[[ -d "$game_dir" ]] || die "Game folder does not exist: $game_dir"
+mapfile -d '' -t candidates < <(python3 "$source_dir/tools/find-game.py" -- "$game_dir")
+if (( ${#candidates[@]} > 1 )); then
+    printf 'Found more than one game.exe under %s:\n' "$game_dir" >&2
+    printf '  %s\n' "${candidates[@]}" >&2
+    die 'Use --game-dir to select the folder that contains the game.exe you want.'
+fi
+(( ${#candidates[@]} == 1 )) || die "No game.exe found in $game_dir. Select an installed copy."
+game_dir=${candidates[0]}
+game_dir=$(cd -- "$game_dir" && pwd -P)
+[[ "$game_dir" != "$target/game" ]] || die 'Choose your original game folder.'
+declare -A assets=()
+while IFS= read -r -d '' name; do
+    key=${name,,}
+    if [[ ! -v "assets[$key]" || "$name" == "$key" ]]; then
+        assets[$key]=$name
+    fi
+done < <(find -L "$game_dir" -maxdepth 1 -type f -printf '%f\0')
+[[ -v 'assets[game.exe]' ]] || die 'The folder must contain game.exe from base Red Alert 2.'
+read -r hash _ < <(sha256sum < "$game_dir/${assets[game.exe]}")
+[[ "$hash" == "$expected_hash" ]] ||
+    die "Unsupported game.exe in $game_dir (SHA-256 $hash). This build needs the tested Red Alert 2 1.006 executable (SHA-256 $expected_hash)."
+for name in "${required_assets[@]}"; do
+    [[ -v "assets[$name]" ]] || die "Game file missing: $name"
+done
+
+
 missing=()
 for tool in gcc cmake ninja pkg-config python3 fc-list; do
     command -v "$tool" >/dev/null || missing+=("$tool")
@@ -124,26 +168,6 @@ PACKAGES
     exit 1
 fi
 
-if [[ -z "$game_dir" ]]; then
-    read -r -e -p 'Path to your Red Alert 2 folder: ' game_dir ||
-        die 'Supply the game folder with --game-dir PATH.'
-fi
-[[ -d "$game_dir" ]] || die "Game folder does not exist: $game_dir"
-game_dir=$(cd -- "$game_dir" && pwd -P)
-[[ "$game_dir" != "$target/game" ]] || die 'Choose your original game folder.'
-declare -A assets=()
-while IFS= read -r -d '' name; do
-    key=${name,,}
-    if [[ ! -v "assets[$key]" || "$name" == "$key" ]]; then
-        assets[$key]=$name
-    fi
-done < <(find -L "$game_dir" -maxdepth 1 -type f -printf '%f\0')
-[[ -v 'assets[game.exe]' ]] || die 'The folder must contain game.exe from base Red Alert 2.'
-read -r hash _ < <(sha256sum < "$game_dir/${assets[game.exe]}")
-[[ "$hash" == "$expected_hash" ]] || die "Unsupported game.exe SHA-256: $hash. The installer needs the supported Red Alert 2 1.006 executable."
-for name in "${required_assets[@]}"; do
-    [[ -v "assets[$name]" ]] || die "Game file missing: $name"
-done
 
 mkdir -p -- "$data_dir"
 stage=$(mktemp -d "$data_dir/.ra2-linux-build.XXXXXXXX")
