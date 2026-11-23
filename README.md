@@ -26,6 +26,14 @@ The [release candidate report](docs/verification/release.md) lists the final che
 - The native build still uses about 2.9× the original's CPU cycles per frame under Wine in the recorded comparison.
 - Campaign tests cover the recorded orders and outcomes. Five runs stop at frame 20,000.
 
+## Requirements
+
+- An x86 Linux system that runs 32-bit programs.
+- Your installed base Red Alert 2 files, including `Blowfish.dll`. The installer accepts the tested 1.006 executable with SHA-256 `73288c03b58d370be268ca6d156b4e33bfdb2066dc980359467d8852ff3b00df`.
+- GCC with 32-bit support, CMake, Ninja, pkg-config, Python 3, and Liberation Sans fonts.
+- 32-bit SDL2, SDL2_ttf, and FFmpeg development libraries. The installer names the missing tools and packages for Arch, Debian, Ubuntu, and Fedora.
+- Space for a local copy of the game files and a temporary build. The first build takes tens of minutes. Python can use installed Capstone and pefile modules or download them into a temporary environment.
+
 ## Credits and license
 
 This project builds on [sp00nznet/redalert2-recomp](https://github.com/sp00nznet/redalert2-recomp) and [sp00nznet/pcrecomp](https://github.com/sp00nznet/pcrecomp). The source snapshots are from `4ecdea4` and `91998d6`. See the [game contributors](CONTRIBUTORS.md) and the [runtime contributors](pcrecomp/CONTRIBUTORS.md) for upstream credit.
