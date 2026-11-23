@@ -326,7 +326,8 @@ typedef struct {
     SwrContext *swr;
     int stream;                   /* the sound's mixer stream */
     int paused, have_frame, done;
-    uint32_t start_ms, paused_at;
+    uint32_t start_ms, paused_at, decoded_count, timer_base_count, decoded_frame;
+    int timer_started;
     float volume;
 } bink_t;
 
@@ -373,6 +374,7 @@ static int decode_frame(bink_t *b) {
         int r = avcodec_receive_frame(b->vdec, b->frame);
         if (r == 0) return 1;
         if (r != AVERROR(EAGAIN)) return 0;
+        if (b->done) return 0;
         if (av_read_frame(b->fmt, b->pkt) < 0) { avcodec_send_packet(b->vdec, NULL); b->done = 1; continue; }
         if (b->pkt->stream_index == b->vs) avcodec_send_packet(b->vdec, b->pkt);
         else if (b->adec && b->pkt->stream_index == b->as && avcodec_send_packet(b->adec, b->pkt) == 0)
@@ -435,7 +437,7 @@ static void k_Open(void) {                               /* (name or handle, fla
     b->Frames = v->nb_frames > 0 ? (uint32_t)v->nb_frames : (uint32_t)v->duration;
     b->FrameRate = (uint32_t)v->avg_frame_rate.num, b->FrameRateDiv = (uint32_t)(v->avg_frame_rate.den ? v->avg_frame_rate.den : 1);
     if (!b->FrameRate) b->FrameRate = 15, b->FrameRateDiv = 1;
-    b->FrameNum = 1, b->LastFrameNum = 0;
+    b->FrameNum = 1, b->LastFrameNum = UINT32_MAX;
     b->start_ms = hle_ticks_ms();
     fprintf(stderr, "[bink] %ux%u, %u frames at %u/%u fps%s\n", b->Width, b->Height, b->Frames, b->FrameRate,
             b->FrameRateDiv, b->stream >= 0 ? ", with sound" : "");
@@ -445,21 +447,47 @@ static void k_Close(void) { if (A32(0)) close_bink((bink_t *)APTR(0)); RETV(1); 
 
 static void k_DoFrame(void) {                            /* decode the current frame */
     bink_t *b = (bink_t *)APTR(0);
+    if (b->decoded_frame == b->FrameNum) RET(0, 1);
     b->have_frame = decode_frame(b);
     b->LastFrameNum = b->FrameNum;
+    b->decoded_frame = b->FrameNum;
+    b->decoded_count++;
+    if (!b->timer_started) {
+        b->start_ms = hle_ticks_ms();
+        b->timer_base_count = b->decoded_count - 1;
+        b->timer_started = 1;
+    }
     RET(0, 1);
 }
 static void k_NextFrame(void) {
     bink_t *b = (bink_t *)APTR(0);
     if (b->FrameNum < b->Frames) b->FrameNum++;
+    else {
+        if (av_seek_frame(b->fmt, b->vs, 0, AVSEEK_FLAG_BACKWARD) >= 0) {
+            avcodec_flush_buffers(b->vdec);
+            if (b->adec) avcodec_flush_buffers(b->adec);
+            b->done = 0;
+        }
+        b->FrameNum = 1;
+    }
     RETV(1);
 }
 /* BinkWait: nonzero while it is not yet time for the next frame. */
 static void k_Wait(void) {
     bink_t *b = (bink_t *)APTR(0);
+    if (!b || b->ReadError || (!b->decoded_count && !b->paused)) RET(0, 1);
     if (b->paused) RET(1, 1);
-    uint64_t due = (uint64_t)(b->FrameNum - 1) * 1000u * b->FrameRateDiv / b->FrameRate;
-    RET(hle_ticks_ms() - b->start_ms < due ? 1u : 0u, 1);
+    if (!b->timer_started || !b->FrameRate) RET(0, 1);
+    uint32_t now = hle_ticks_ms();
+    uint32_t elapsed = now - b->start_ms;
+    uint64_t due = (uint64_t)(b->decoded_count - b->timer_base_count) * 1000u * b->FrameRateDiv / b->FrameRate;
+    if (elapsed < due) RET(1, 1);
+    uint64_t threshold = (uint64_t)2000u * b->FrameRateDiv / b->FrameRate;
+    if (elapsed - due > threshold && b->stream < 0) {
+        b->start_ms = now;
+        b->timer_base_count = b->decoded_count - 1;
+    }
+    RET(0, 1);
 }
 static void k_Pause(void) {                              /* (bink, pause) -> the state */
     bink_t *b = (bink_t *)APTR(0);
