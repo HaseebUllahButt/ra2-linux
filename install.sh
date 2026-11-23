@@ -17,7 +17,7 @@ Usage: ./install.sh [--game-dir PATH] [--jobs COUNT]
        ./install.sh --uninstall [--purge]
 
 Install Red Alert 2 in ~/.local/share/ra2-linux and add a desktop entry.
-Run without a path to look for an installed Steam copy.
+Run without a path to look for Steam and EA app installations.
 Use --game-dir to select a Red Alert 2 folder.
 Use --purge with --uninstall to remove settings and saves too.
 HELP

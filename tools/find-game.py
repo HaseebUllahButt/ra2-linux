@@ -58,15 +58,22 @@ def game_folders(root, depth):
                 yield from game_folders(path, depth - 1)
 
 
+def normalized_title(path):
+    return re.sub(r"[^a-z0-9]+", " ", path.name.lower()).strip()
+
+
+def is_game_title(title):
+    return title == "ra2" or re.search(r"\bred ?alert ?(?:2|ii)\b", title) is not None
+
+
 def title_folders(common):
     for path in children(common):
-        title = re.sub(r"[^a-z0-9]+", " ", path.name.lower()).strip()
-        if re.search(r"\bred ?alert ?(?:2|ii)\b", title) or title == "ra2":
+        title = normalized_title(path)
+        if is_game_title(title):
             yield from game_folders(path, 2)
         elif "ultimate collection" in title:
             for part in children(path):
-                part_title = re.sub(r"[^a-z0-9]+", " ", part.name.lower()).strip()
-                if re.search(r"\bred ?alert ?(?:2|ii)\b", part_title) or part_title == "ra2":
+                if is_game_title(normalized_title(part)):
                     yield from game_folders(part, 2)
 
 
@@ -79,9 +86,42 @@ def steam_folders(library):
     yield from title_folders(common)
 
 
+def wine_prefixes(home, data):
+    config = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+    flatpak = home / ".var/app/net.lutris.Lutris"
+    prefix = os.environ.get("WINEPREFIX")
+    if prefix:
+        yield Path(prefix).expanduser()
+    yield home / ".wine"
+
+    for root in (home / "Games", data / "lutris/prefixes", flatpak / "data/lutris/prefixes"):
+        yield from children(root)
+    for root in (config / "lutris/games", flatpak / "config/lutris/games"):
+        for yaml in children(root):
+            if yaml.suffix not in (".yml", ".yaml"):
+                continue
+            match = re.search(r"^\s+prefix:[ \t]*(.+)$", text(yaml), re.MULTILINE)
+            if match:
+                folder = match[1].strip().strip("'\"")
+                yield Path(os.path.expandvars(folder)).expanduser()
+
+
+def wine_folders(prefix):
+    drive = prefix / "drive_c"
+    if not drive.is_dir():
+        return
+    yield from title_folders(drive / "Games")
+    for programs in (drive, drive / "Program Files", drive / "Program Files (x86)"):
+        yield from title_folders(programs)
+        for vendor in ("EA Games", "Electronic Arts", "Origin Games"):
+            yield from title_folders(programs / vendor)
+
+
 def discover(home, data):
     for library in steam_libraries(home, data):
         yield from steam_folders(library)
+    for prefix in wine_prefixes(home, data):
+        yield from wine_folders(prefix)
 
 
 def main():
