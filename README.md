@@ -42,9 +42,15 @@ cd ra2-linux
 ./install.sh
 ```
 
-Enter the path to your Red Alert 2 folder when prompted. The installer checks the executable, copies the game files, converts the code, and builds the Linux program. It installs under `~/.local/share/ra2-linux` and adds a desktop entry.
+Use your own copy of base Red Alert 2. The installer reads local game files and does not download them.
 
-Use `./install.sh --game-dir "/path/to/Red Alert 2" --jobs 4` to provide the path and limit the number of build jobs.
+- **CD or your own ISO.** Mount your disc or image. If it contains setup files, install the game from the media first. Run `./install.sh --game-dir "/path/to/Red Alert 2"` with the folder that contains `game.exe`, `Blowfish.dll`, and the game archives. You can also give a mounted folder that contains those files.
+- **Steam.** Install Red Alert 2 from *Command & Conquer: The Ultimate Collection*. Run `./install.sh` to look in Steam libraries and Proton prefixes. To select the folder yourself, use **Manage → Browse local files** in Steam and pass that path with `--game-dir`. [Official Steam store](https://store.steampowered.com/bundle/39394/Command__Conquer_The_Ultimate_Collection/)
+- **EA app.** Install Red Alert 2 from *Command & Conquer: The Ultimate Collection* in a Wine or Lutris prefix. Run `./install.sh` to look in those prefixes. For a custom location, pass the installed game folder with `--game-dir`. [Official EA store](https://www.ea.com/games/command-and-conquer/command-and-conquer-the-ultimate-collection)
+
+The build and gameplay checks used a **CD-based 1.006 copy**. Steam and EA app copies are **untested**. The installer checks the selected `game.exe` against the tested SHA-256 and stops if it differs.
+
+The installer asks for a path if it finds several copies or no copy. It copies the required files, converts the code, and builds the Linux program. It installs under `~/.local/share/ra2-linux` and adds a desktop entry. Use `--jobs 4` to limit the number of build jobs.
 
 Run `./install.sh --uninstall` to remove the game program, copied files, and launchers. Add `--purge` to also remove local saves and settings.
 
