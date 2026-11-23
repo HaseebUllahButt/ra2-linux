@@ -586,10 +586,11 @@ def main():
                     help='exit 0 if the lift is current (this lifter, these patches), 1 if not')
     args = ap.parse_args()
     tgt = targets()[args.target]
+    stamp_mode = lifter_stamp() + ('-per-instruction' if args.no_x87_batch else '')
     if args.check:
         try:
             sys.exit(0 if open(os.path.join(args.out or tgt['out'], 'lift_stamp.txt')).read().strip()
-                     == lifter_stamp() else 1)
+                     == stamp_mode else 1)
         except OSError:
             sys.exit(1)
     args.exe = args.exe or tgt['exe']
@@ -779,7 +780,7 @@ def main():
              'no_terminator': dirty, 'files': idx, 'lines': lines}
     json.dump(stats, open(tgt['stats'], 'w'), indent=1)
     write_target_header(args.out, args.target, tgt)
-    open(os.path.join(args.out, 'lift_stamp.txt'), 'w').write(lifter_stamp() + '\n')
+    open(os.path.join(args.out, 'lift_stamp.txt'), 'w').write(stamp_mode + '\n')
     print('=' * 60)
     print('  lifted %d   not-lifted stubs %d   errors %d   no terminator %d'
           % (len(chosen), len(stubs), errors, dirty))
