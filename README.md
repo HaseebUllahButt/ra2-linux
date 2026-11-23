@@ -34,6 +34,20 @@ The [release candidate report](docs/verification/release.md) lists the final che
 - 32-bit SDL2, SDL2_ttf, and FFmpeg development libraries. The installer names the missing tools and packages for Arch, Debian, Ubuntu, and Fedora.
 - Space for a local copy of the game files and a temporary build. The first build takes tens of minutes. Python can use installed Capstone and pefile modules or download them into a temporary environment.
 
+## Install
+
+```sh
+git clone https://github.com/HaseebUllahButt/ra2-linux.git
+cd ra2-linux
+./install.sh
+```
+
+Enter the path to your Red Alert 2 folder when prompted. The installer checks the executable, copies the game files, converts the code, and builds the Linux program. It installs under `~/.local/share/ra2-linux` and adds a desktop entry.
+
+Use `./install.sh --game-dir "/path/to/Red Alert 2" --jobs 4` to provide the path and limit the number of build jobs.
+
+Run `./install.sh --uninstall` to remove the game program, copied files, and launchers. Add `--purge` to also remove local saves and settings.
+
 ## Credits and license
 
 This project builds on [sp00nznet/redalert2-recomp](https://github.com/sp00nznet/redalert2-recomp) and [sp00nznet/pcrecomp](https://github.com/sp00nznet/pcrecomp). The source snapshots are from `4ecdea4` and `91998d6`. See the [game contributors](CONTRIBUTORS.md) and the [runtime contributors](pcrecomp/CONTRIBUTORS.md) for upstream credit.
