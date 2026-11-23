@@ -33,6 +33,18 @@ static inline void x87_finish(void) {
         if (((g_x87.tw >> (2*((top+i)&7))) & 3) != 3) ++g_fp_top;
     }
 }
+/* No host floating-point expression or call may run inside a region.
+ * The generator closes it before every label, branch, call and unknown line. */
+static inline void x87_batch_begin(void) {
+    x87_prepare();
+    __asm__ volatile("frstor %0" : "+m"(g_x87) : : "memory",
+                     "st", "st(1)", "st(2)", "st(3)", "st(4)", "st(5)", "st(6)", "st(7)");
+}
+static inline void x87_batch_end(void) {
+    __asm__ volatile("fnsave %0; fldcw %0" : "+m"(g_x87) : : "memory",
+                     "st", "st(1)", "st(2)", "st(3)", "st(4)", "st(5)", "st(6)", "st(7)");
+    x87_finish();
+}
 static inline void x87_external_push(void) {
     int top = (((g_x87.sw >> 11)&7)-1)&7;
     g_x87.sw = (g_x87.sw & ~0x3800) | (top<<11);
