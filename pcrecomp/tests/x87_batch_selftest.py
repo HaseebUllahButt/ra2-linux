@@ -51,6 +51,9 @@ traces.append(bytes.fromhex('d905')+A+bytes.fromhex('d80d')+A+
               bytes.fromhex('dec1d905')+A+bytes.fromhex('d80d')+A+
               bytes.fromhex('dec1d91d')+A)
 
+# Reset and clear instructions can change status and the control word.
+trace('dbe3','d9e8','d9e8','dec1','dfe0')
+trace('d9e8','dbe2','d9e8','dec1','dfe0')
 # No exceptions occur in this stream, including with every exception unmasked.
 trace('d8c1','d8c9','d9fc','dfe0')
 md=Cs(CS_ARCH_X86,CS_MODE_32);md.detail=True
