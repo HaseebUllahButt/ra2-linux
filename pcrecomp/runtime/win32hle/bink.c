@@ -329,7 +329,7 @@ typedef struct {
     int stream;                   /* the sound's mixer stream */
     int paused, have_frame, done;
     uint32_t start_ms, paused_at, decoded_count, timer_base_count, decoded_frame;
-    int timer_started;
+    int timer_started, end_wait;
     float volume;
 } bink_t;
 
@@ -482,14 +482,16 @@ static void k_DoFrame(void) {                            /* decode the current f
 }
 static void k_NextFrame(void) {
     bink_t *b = (bink_t *)APTR(0);
-    if (b->FrameNum < b->Frames) b->FrameNum++;
-    else {
+    if (b->FrameNum < b->Frames) {
+        if (++b->FrameNum == b->Frames) b->end_wait = 1;
+    } else {
         if (av_seek_frame(b->fmt, b->vs, 0, AVSEEK_FLAG_BACKWARD) >= 0) {
             avcodec_flush_buffers(b->vdec);
             if (b->adec) avcodec_flush_buffers(b->adec);
             b->done = 0;
         }
         b->FrameNum = 1;
+        b->end_wait = 1;
     }
     RETV(1);
 }
@@ -498,6 +500,12 @@ static void k_Wait(void) {
     bink_t *b = (bink_t *)APTR(0);
     if (!b || b->ReadError || (!b->decoded_count && !b->paused)) RET(0, 1);
     if (b->paused) RET(1, 1);
+    /* Just after FrameNum reaches the last frame, or wraps to the first: say wait once, whatever the
+     * clock says. The game's frame loop then goes back to its main loop, where a movie that plays once
+     * sees it is at its end (FrameNum == Frames) and closes. A late or busy machine would otherwise go
+     * round the loop again and again, past the end, and the movie never ends. When on time this
+     * changes nothing: the clock says wait here anyway. */
+    if (b->end_wait) { b->end_wait = 0; RET(1, 1); }
     if (!b->timer_started || !b->FrameRate) RET(0, 1);
     uint32_t now = hle_ticks_ms();
     uint32_t elapsed = now - b->start_ms;
