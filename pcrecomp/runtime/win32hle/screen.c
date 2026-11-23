@@ -119,6 +119,55 @@ static size_t g_ov_n;
 static SDL_Texture *g_ov_tex;
 static int g_ov_tw, g_ov_th;
 
+/* SDL's software renderer accepts RGB565 but converts it during a scaled
+ * blit. That takes the generic scaler for nearest/smooth. GL also accepts
+ * RGB565 through a hidden CPU conversion when it is not a native format.
+ * Upload RGB888 once instead. Keep native RGB565 on backends that support it.
+ * SDL supplies the conversion table, so every channel has its exact rounding. */
+static uint32_t g_rgb565[65536];
+static int g_rgb565_ready, g_rgb565_format, g_software_renderer;
+static int rgb565_format(void) {
+    if (!g_rgb565_format) {
+        SDL_RendererInfo ri;
+        g_rgb565_format = SDL_PIXELFORMAT_RGB888;
+        if (SDL_GetRendererInfo(g_ren, &ri) == 0) {
+            g_software_renderer = (ri.flags & SDL_RENDERER_SOFTWARE) != 0;
+            for (unsigned i = 0; !g_software_renderer && i < ri.num_texture_formats; i++)
+                if (ri.texture_formats[i] == SDL_PIXELFORMAT_RGB565) g_rgb565_format = SDL_PIXELFORMAT_RGB565;
+        }
+    }
+    /* Sharp/CRT already convert at 1:1 into their prescale target. Integer
+     * does not need a fractional scale. Keep those cheaper software paths. */
+    if (g_software_renderer && g_mode != 1 && g_mode != 3) return SDL_PIXELFORMAT_RGB565;
+    return g_rgb565_format;
+}
+static int upload_rgb565(const uint8_t *px, int w, int h, int pitch) {
+    if (!g_rgb565_ready) {
+        uint16_t *values = (uint16_t *)malloc(65536 * sizeof *values);
+        if (!values) return -1;
+        for (unsigned i = 0; i < 65536; i++) values[i] = (uint16_t)i;
+        int rc = SDL_ConvertPixels(65536, 1, SDL_PIXELFORMAT_RGB565, values, 65536 * 2,
+                                  SDL_PIXELFORMAT_RGB888, g_rgb565, 65536 * 4);
+        free(values);
+        if (rc != 0) return -1;
+        g_rgb565_ready = 1;
+    }
+    void *pixels;
+    int stride;
+    if (SDL_LockTexture(g_tex, NULL, &pixels, &stride) != 0) return -1;
+    for (int y = 0; y < h; y++) {
+        const uint8_t *src = px + (size_t)y * pitch;
+        uint32_t *dst = (uint32_t *)((uint8_t *)pixels + (size_t)y * stride);
+        for (int x = 0; x < w; x++) {
+            uint16_t v;
+            memcpy(&v, src + x * 2, sizeof v);          /* rows need not be aligned */
+            dst[x] = g_rgb565[v];
+        }
+    }
+    SDL_UnlockTexture(g_tex);
+    return 0;
+}
+
 static int vk_of(SDL_Scancode s) {
     if (s >= SDL_SCANCODE_A && s <= SDL_SCANCODE_Z) return 'A' + (s - SDL_SCANCODE_A);
     if (s >= SDL_SCANCODE_1 && s <= SDL_SCANCODE_9) return '1' + (s - SDL_SCANCODE_1);
@@ -292,14 +341,26 @@ static void present(void) {
         if (g_hd_n < (size_t)w * h * 4) { free(g_hd); g_hd_n = (size_t)w * h * 4; g_hd = (uint32_t *)malloc(g_hd_n * 4); }
         hd = g_hd && hle_screen_compose_hook(px, pitch, w, h, g_hd);
     }
-    int fmt = bpp == 16 && !hd ? SDL_PIXELFORMAT_RGB565 : SDL_PIXELFORMAT_RGB888;
+    int fmt = bpp == 16 && !hd ? rgb565_format() : SDL_PIXELFORMAT_RGB888;
     int tw = hd ? 2 * w : w, th = hd ? 2 * h : h;
     if (!g_tex || g_tex_w != tw || g_tex_h != th || g_tex_fmt != fmt) {
         if (g_tex) SDL_DestroyTexture(g_tex);
         g_tex = SDL_CreateTexture(g_ren, (Uint32)fmt, SDL_TEXTUREACCESS_STREAMING, tw, th);
+        /* Preserve the old path if this backend cannot create RGB888. */
+        if (!g_tex && bpp == 16 && !hd && fmt == SDL_PIXELFORMAT_RGB888) {
+            fmt = g_rgb565_format = SDL_PIXELFORMAT_RGB565;
+            g_tex = SDL_CreateTexture(g_ren, (Uint32)fmt, SDL_TEXTUREACCESS_STREAMING, tw, th);
+        }
         g_tex_w = tw, g_tex_h = th, g_tex_fmt = fmt;
     }
-    if (hd) {
+    if (!g_tex) return;
+    if (bpp == 16 && !hd && g_tex_fmt == SDL_PIXELFORMAT_RGB888) {
+        if (upload_rgb565(px, w, h, pitch) != 0) {
+            SDL_DestroyTexture(g_tex); g_tex = NULL;
+            g_rgb565_format = SDL_PIXELFORMAT_RGB565;
+            return;                                 /* retry through SDL's conversion next frame */
+        }
+    } else if (hd) {
         SDL_UpdateTexture(g_tex, NULL, g_hd, tw * 4);
     } else if (bpp == 8) {
         if (g_conv_n < (size_t)w * h) { free(g_conv); g_conv_n = (size_t)w * h; g_conv = (uint32_t *)malloc(g_conv_n * 4); }
@@ -338,14 +399,14 @@ static void present(void) {
     }
     int sharp = g_mode == 0 || g_mode == 2;
     int k = g_dst.w / tw < g_dst.h / th ? g_dst.w / tw : g_dst.h / th;
-    if (sharp && k >= 1 && (tw * k != g_dst.w || th * k != g_dst.h)) {
+    if (sharp && k >= 1 && (k > 1 || g_tex_fmt == SDL_PIXELFORMAT_RGB565) && (tw * k != g_dst.w || th * k != g_dst.h)) {
         if (!g_pre || g_pre_w != tw * k || g_pre_h != th * k) {
             if (g_pre) SDL_DestroyTexture(g_pre);
             g_pre = SDL_CreateTexture(g_ren, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_TARGET, tw * k, th * k);
             g_pre_w = tw * k, g_pre_h = th * k;
         }
     }
-    if (sharp && k >= 1 && g_pre && (tw * k != g_dst.w || th * k != g_dst.h)) {
+    if (sharp && k >= 1 && (k > 1 || g_tex_fmt == SDL_PIXELFORMAT_RGB565) && g_pre && (tw * k != g_dst.w || th * k != g_dst.h)) {
         SDL_SetTextureScaleMode(g_tex, SDL_ScaleModeNearest);
         SDL_SetRenderTarget(g_ren, g_pre);
         SDL_RenderCopy(g_ren, g_tex, NULL, NULL);
@@ -353,7 +414,7 @@ static void present(void) {
         SDL_SetTextureScaleMode(g_pre, SDL_ScaleModeLinear);
         SDL_RenderCopy(g_ren, g_pre, NULL, &g_dst);
     } else {
-        SDL_SetTextureScaleMode(g_tex, g_mode == 1 ? SDL_ScaleModeLinear : SDL_ScaleModeNearest);
+        SDL_SetTextureScaleMode(g_tex, (g_mode == 1 || (sharp && k == 1)) ? SDL_ScaleModeLinear : SDL_ScaleModeNearest);
         SDL_RenderCopy(g_ren, g_tex, NULL, &g_dst);
     }
     if (ov) {                                            /* the Nx HD overlay (ov = N), over the scaled 1x picture */
@@ -840,6 +901,7 @@ static void primary_changed(void) {
 
 int hle_screen_open(const char *title, int fullscreen, int headless) {
     g_headless = headless, g_fullscreen = fullscreen;
+    g_rgb565_format = g_software_renderer = 0;
     hle_set_pump_hook(hle_screen_pump);
     hle_gdi_window_hook = present;                       /* a GDI game's blit shows, pumping or not (a loading bar) */
     if (headless) return 0;
