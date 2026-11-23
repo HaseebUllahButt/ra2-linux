@@ -95,7 +95,7 @@ if command -v pkg-config >/dev/null; then
 fi
 if command -v python3 >/dev/null &&
    ! python3 -c 'import capstone, pefile' 2>/dev/null &&
-   ! python3 -m venv --help >/dev/null 2>&1; then
+   ! python3 -c 'import venv, ensurepip' 2>/dev/null; then
     missing+=('Python venv or the capstone and pefile modules')
 fi
 if command -v fc-list >/dev/null && [[ -z $(fc-list 'Liberation Sans' family) ]]; then
@@ -107,17 +107,17 @@ if (( ${#missing[@]} )); then
     cat >&2 <<'PACKAGES'
 Debian and Ubuntu
   Enable i386 with dpkg --add-architecture i386 and refresh the package list.
-  gcc-multilib cmake ninja-build pkg-config python3-venv fonts-liberation
+  gcc-multilib cmake ninja-build pkg-config python3-venv fontconfig fonts-liberation
   libsdl2-dev:i386 libsdl2-ttf-dev:i386 libavformat-dev:i386
   libavcodec-dev:i386 libavutil-dev:i386 libswresample-dev:i386
 Fedora
-  gcc glibc-devel.i686 libgcc.i686 libatomic.i686 cmake ninja-build pkgconf
-  python3 python3-pip liberation-sans-fonts sdl2-compat-devel.i686
+  gcc glibc-devel.i686 libgcc.i686 libatomic.i686 cmake ninja-build pkgconf-pkg-config
+  python3 python3-pip fontconfig liberation-sans-fonts sdl2-compat-devel.i686
   SDL2_ttf-devel.i686 libavformat-free-devel.i686 libavcodec-free-devel.i686
   libavutil-free-devel.i686 libswresample-free-devel.i686
 Arch Linux
   Enable the multilib repository in pacman.conf.
-  gcc cmake ninja pkgconf python python-pip ttf-liberation
+  gcc cmake ninja pkgconf python python-pip fontconfig ttf-liberation
   lib32-glibc lib32-gcc-libs lib32-sdl2-compat lib32-sdl2_ttf
   Get lib32-ffmpeg from the Arch User Repository.
 PACKAGES
