@@ -322,6 +322,8 @@ typedef struct {
     AVCodecContext *vdec, *adec;
     int vs, as;
     AVFrame *frame, *aframe;
+    AVFrame *held;                /* the last picture that decoded: shown again when a frame does not */
+    uint32_t held_count;
     AVPacket *pkt;
     SwrContext *swr;
     int stream;                   /* the sound's mixer stream */
@@ -353,6 +355,7 @@ static void close_bink(bink_t *b) {
     if (b->fmt) avformat_close_input(&b->fmt);
     if (b->io) { av_freep(&b->io->buffer); avio_context_free(&b->io); }
     av_frame_free(&b->frame);
+    av_frame_free(&b->held);
     av_frame_free(&b->aframe);
     av_packet_free(&b->pkt);
     if (b->fd >= 0 && !(b->OpenFlags & BINKFILEHANDLE)) close(b->fd);
@@ -368,15 +371,22 @@ static void push_audio(bink_t *b) {
 }
 
 /* Read packets until the next video frame is decoded; sound met on the way
- * goes to the mixer. */
+ * goes to the mixer. 1: a picture. 0: the movie has no more pictures.
+ * -1: a packet FFmpeg refuses (the original DLL has no such check: it
+ * decodes the packet and returns no error, so the caller shows the last
+ * picture again and the movie goes on). */
 static int decode_frame(bink_t *b) {
     for (;;) {
         int r = avcodec_receive_frame(b->vdec, b->frame);
         if (r == 0) return 1;
-        if (r != AVERROR(EAGAIN)) return 0;
+        if (r == AVERROR_EOF) return 0;
+        if (r != AVERROR(EAGAIN)) return -1;
         if (b->done) return 0;
         if (av_read_frame(b->fmt, b->pkt) < 0) { avcodec_send_packet(b->vdec, NULL); b->done = 1; continue; }
-        if (b->pkt->stream_index == b->vs) avcodec_send_packet(b->vdec, b->pkt);
+        if (b->pkt->stream_index == b->vs) {
+            int sr = avcodec_send_packet(b->vdec, b->pkt);
+            if (sr < 0 && sr != AVERROR(EAGAIN)) { av_packet_unref(b->pkt); return -1; }
+        }
         else if (b->adec && b->pkt->stream_index == b->as && avcodec_send_packet(b->adec, b->pkt) == 0)
             while (avcodec_receive_frame(b->adec, b->aframe) == 0) push_audio(b);
         av_packet_unref(b->pkt);
@@ -432,7 +442,7 @@ static void k_Open(void) {                               /* (name or handle, fla
             if (b->swr && swr_init(b->swr) == 0) b->stream = hle_audio_stream_open(b->adec->sample_rate, ch);
         }
     }
-    b->frame = av_frame_alloc(), b->aframe = av_frame_alloc(), b->pkt = av_packet_alloc();
+    b->frame = av_frame_alloc(), b->held = av_frame_alloc(), b->aframe = av_frame_alloc(), b->pkt = av_packet_alloc();
     b->Width = (uint32_t)v->codecpar->width, b->Height = (uint32_t)v->codecpar->height;
     b->Frames = v->nb_frames > 0 ? (uint32_t)v->nb_frames : (uint32_t)v->duration;
     b->FrameRate = (uint32_t)v->avg_frame_rate.num, b->FrameRateDiv = (uint32_t)(v->avg_frame_rate.den ? v->avg_frame_rate.den : 1);
@@ -448,7 +458,18 @@ static void k_Close(void) { if (A32(0)) close_bink((bink_t *)APTR(0)); RETV(1); 
 static void k_DoFrame(void) {                            /* decode the current frame */
     bink_t *b = (bink_t *)APTR(0);
     if (b->decoded_frame == b->FrameNum) RET(0, 1);
-    b->have_frame = decode_frame(b);
+    int got = decode_frame(b);
+    if (got > 0) {
+        av_frame_unref(b->held);
+        av_frame_ref(b->held, b->frame);
+        b->have_frame = 1;
+    } else {                                             /* keep the last picture, as the original's output does */
+        av_frame_unref(b->frame);
+        b->have_frame = b->held->data[0] && av_frame_ref(b->frame, b->held) == 0;
+        if (b->held_count++ < 4)
+            fprintf(stderr, "[bink] frame %u of %u: %s, showing the last picture again\n", b->FrameNum, b->Frames,
+                    got < 0 ? "FFmpeg refused the data" : "no more pictures");
+    }
     b->LastFrameNum = b->FrameNum;
     b->decoded_frame = b->FrameNum;
     b->decoded_count++;
@@ -511,7 +532,7 @@ static void k_Goto(void) {                               /* (bink, frame, flags)
     av_seek_frame(b->fmt, b->vs, 0, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_BYTE);
     avcodec_flush_buffers(b->vdec);
     b->done = 0, b->FrameNum = 1;
-    while (b->FrameNum < to && decode_frame(b)) b->FrameNum++;
+    while (b->FrameNum < to && decode_frame(b) != 0) b->FrameNum++;
     b->start_ms = hle_ticks_ms() - (uint32_t)((uint64_t)(b->FrameNum - 1) * 1000u * b->FrameRateDiv / b->FrameRate);
     RETV(3);
 }
