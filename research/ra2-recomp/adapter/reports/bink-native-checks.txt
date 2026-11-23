@@ -1,0 +1,4 @@
+RA2 Bink: open width=640 height=480 frames=129 fps=15/1 audio=1
+MOVIE width=640 height=480 frames=129 decoded=129 fps=15/1
+RA2 Bink: open width=640 height=480 frames=378 fps=15/1 audio=1
+MOVIE width=640 height=480 frames=378 decoded=378 fps=15/1

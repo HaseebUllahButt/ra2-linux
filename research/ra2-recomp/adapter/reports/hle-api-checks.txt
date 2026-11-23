@@ -1,0 +1,23 @@
+MIT win32hle base, native 32-bit Windows ABI, 2026-11-12.
+test-host. Hidden Xvfb. Private Wine prefix. SDL dummy audio. No Red Alert PipeWire node.
+
+PASS: DirectDraw factory, COM references, mode, surface locks, fill, copy, colour key,
+      palette, and attached flip-chain ownership.
+PASS: exclusive window origin 0,0 and 640x480 client dimensions.
+PASS: native window receives posted application and mouse messages.
+PASS: all 65,536 RGB565 colours match Wine across 786,432 pixels.
+PASS: DirectSound ring lock, duplicate, volume, loop, status, and release.
+PASS: 6,144 stereo PCM16 frames match the synthetic source exactly at unit gain.
+PASS: WESTLOGO.BIK: 640x480, 129 decoded frames, 15/1 fps.
+PASS: S13_F01E.BIK: 640x480, 378 decoded frames, 15/1 fps.
+PASS: repeated BinkDoFrame preserves the current decoded frame.
+PASS: BinkPause returns 1,1,0; final BinkNextFrame wraps to frame 1; BinkWait returns 1.
+The original Bink DLL gives the same pause and final-frame state.
+Why follow-up: original and replacement seek to frame 1 after full movie decoding;
+               the first frame matches its initial copy exactly.
+
+Commands:
+  make -j8 build/ddraw.dll build/dsound.dll build/binkw32.dll build/test_bink.exe
+  tools/hidden_display.sh tools/check_windows.sh
+
+These API checks do not prove the skirmish frame or original-game movie gates.

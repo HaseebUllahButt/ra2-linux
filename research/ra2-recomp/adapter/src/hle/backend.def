@@ -1,0 +1,17 @@
+LIBRARY ra2adapter
+EXPORTS
+    DirectDrawCreate=DirectDrawCreate@12
+    DirectSoundCreate=DirectSoundCreate@12
+    _BinkSetSoundSystem@8=BinkSetSoundSystem@8
+    _BinkOpenDirectSound@4=BinkOpenDirectSound@4
+    _BinkGetError@0=BinkGetError@0
+    _BinkOpen@8=BinkOpen@8
+    _BinkSetVolume@8=BinkSetVolume@8
+    _BinkClose@4=BinkClose@4
+    _BinkDDSurfaceType@4=BinkDDSurfaceType@4
+    _BinkGoto@12=BinkGoto@12
+    _BinkPause@8=BinkPause@8
+    _BinkNextFrame@4=BinkNextFrame@4
+    _BinkCopyToBuffer@28=BinkCopyToBuffer@28
+    _BinkDoFrame@4=BinkDoFrame@4
+    _BinkWait@4=BinkWait@4
