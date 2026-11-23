@@ -4,6 +4,8 @@ set -euo pipefail
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 data_dir="${XDG_DATA_HOME:-$HOME/.local/share}"
 target="$data_dir/ra2-linux"
+command_path="$HOME/.local/bin/ra2-linux"
+desktop="$data_dir/applications/ra2-linux.desktop"
 expected_hash=73288c03b58d370be268ca6d156b4e33bfdb2066dc980359467d8852ff3b00df
 required_assets=(game.exe ra2.mix language.mix maps01.mix maps02.mix multi.mix movies01.mix movies02.mix theme.mix)
 
@@ -13,7 +15,7 @@ usage() {
     cat <<'HELP'
 Usage: ./install.sh [--game-dir PATH] [--jobs COUNT]
 
-Install Red Alert 2 in ~/.local/share/ra2-linux for this user.
+Install Red Alert 2 in ~/.local/share/ra2-linux and add a desktop entry.
 Use --game-dir to supply your Red Alert 2 folder without a prompt.
 HELP
 }
@@ -35,7 +37,9 @@ done
 [[ -z "$jobs" || "$jobs" =~ ^[1-9][0-9]*$ ]] || die 'The job count must be a positive integer.'
 [[ ! -e "$target" || ( -d "$target" && -f "$target/.ra2-linux-install" ) ]] ||
     die "The install path already exists and belongs to another installation: $target"
-
+[[ ! -e "$command_path" && ! -L "$command_path" ||
+   ( -L "$command_path" && $(readlink -- "$command_path") == "$target/play.sh" ) ]] ||
+    die "The start command already exists: $command_path"
 
 missing=()
 for tool in gcc cmake ninja pkg-config python3 fc-list; do
@@ -157,7 +161,7 @@ BUILD_DIR=build-linux-game CMAKE_ARGS="-DRA2_TARGET=game -DCMAKE_BUILD_TYPE=Rele
 install -m 755 -- build-linux-game/ra2 "$stage/ra2"
 install -m 755 -- "$source_dir/play.sh" "$stage/play.sh"
 
-mkdir -p -- "$target/game"
+mkdir -p -- "$target/game" "$(dirname -- "$command_path")" "$(dirname -- "$desktop")"
 touch -- "$target/.ra2-linux-install"
 # Keep saves and preferences. Replace the build and its game assets.
 while IFS= read -r name; do
@@ -169,4 +173,20 @@ mv -fT -- "$stage/play.sh" "$target/play.sh"
 if [[ ! -e "$target/game/RA2.INI" ]]; then
     printf '[Intro]\r\nPlay=no\r\n\r\n[Video]\r\nScreenWidth=800\r\nScreenHeight=600\r\n' > "$target/game/RA2.INI"
 fi
-printf 'Installed. Run %s/play.sh.\n' "$target"
+ln -sfn -- "$target/play.sh" "$command_path"
+# Escape desktop Exec field syntax, including percent signs in a path.
+desktop_exec=${target//\\/\\\\\\\\}
+desktop_exec=${desktop_exec//\"/\\\\\"}
+desktop_exec=${desktop_exec//\$/\\\\\$}
+desktop_exec=${desktop_exec//\`/\\\\\`}
+desktop_exec=${desktop_exec//%/%%}
+cat > "$desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Red Alert 2 (Native Linux)
+Exec="$desktop_exec/play.sh"
+Icon=applications-games
+Terminal=false
+Categories=Game;StrategyGame;
+DESKTOP
+printf 'Installed. Start Red Alert 2 from your desktop menu or run %s.\n' "$command_path"
