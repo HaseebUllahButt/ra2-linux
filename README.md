@@ -63,6 +63,12 @@ Integer scale shows a centered 800×600 picture in a 1024×768 window and uses w
 
 The static recompiler finds x86 functions in `game.exe` and converts them to C before compilation. The release candidate converted 27,183 functions. The Linux executable loads the original game data at run time. [pcrecomp](pcrecomp/) supplies the Windows layer and uses SDL2 for the display and input, and FFmpeg for Bink movies.
 
+## How we checked gameplay
+
+We ran the original 1.006 game under Wine with the same setup and seeded random state. We compared the scenario random number generator at each recorded game frame. We also compared a census of houses and units, including cash, object types and health where the capture recorded them. Recorded orders drove the campaign checks. We compared matching end frames and score rows when a game ended naturally.
+
+See the [order replay tools](tools/order-replay/), [census tools](replay-tools/), and [frame sampler](sampler-tools/) for capture and comparison code.
+
 ## Credits and license
 
 This project builds on [sp00nznet/redalert2-recomp](https://github.com/sp00nznet/redalert2-recomp) and [sp00nznet/pcrecomp](https://github.com/sp00nznet/pcrecomp). The source snapshots are from `4ecdea4` and `91998d6`. See the [game contributors](CONTRIBUTORS.md) and the [runtime contributors](pcrecomp/CONTRIBUTORS.md) for upstream credit.
