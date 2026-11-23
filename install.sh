@@ -7,7 +7,7 @@ target="$data_dir/ra2-linux"
 command_path="$HOME/.local/bin/ra2-linux"
 desktop="$data_dir/applications/ra2-linux.desktop"
 expected_hash=73288c03b58d370be268ca6d156b4e33bfdb2066dc980359467d8852ff3b00df
-required_assets=(game.exe ra2.mix language.mix maps01.mix maps02.mix multi.mix movies01.mix movies02.mix theme.mix)
+required_assets=(game.exe blowfish.dll ra2.mix language.mix maps01.mix maps02.mix multi.mix movies01.mix movies02.mix theme.mix)
 
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 
@@ -160,7 +160,7 @@ for name in "${!assets[@]}"; do
     [[ "$name" != *$'\n'* && "$name" != .* ]] || continue
     case "$name" in
         gamemd*|*md.mix|*md[0-9][0-9].mix) continue ;;
-        game.exe|*.mix|*.mmx|conquer.dat|ra2.dsk|00000409.016|00000409.256)
+        game.exe|blowfish.dll|*.mix|*.mmx|conquer.dat|ra2.dsk|00000409.016|00000409.256)
             cp --reflink=auto -- "$game_dir/${assets[$name]}" "$stage/game/$name"
             printf '%s\n' "$name" >> "$stage/.installed-assets"
             ;;
