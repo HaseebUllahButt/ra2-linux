@@ -117,9 +117,20 @@ def wine_folders(prefix):
             yield from title_folders(programs / vendor)
 
 
+def proton_folders(library):
+    compatdata = library / "steamapps/compatdata"
+    apps = (compatdata / STEAM_APP_ID, *children(compatdata))
+    for app in dict.fromkeys(apps):
+        drive = app / "pfx/drive_c"
+        yield from wine_folders(app / "pfx")
+        for programs in (drive / "Program Files", drive / "Program Files (x86)"):
+            yield from steam_folders(programs / "Steam")
+
+
 def discover(home, data):
     for library in steam_libraries(home, data):
         yield from steam_folders(library)
+        yield from proton_folders(library)
     for prefix in wine_prefixes(home, data):
         yield from wine_folders(prefix)
 
