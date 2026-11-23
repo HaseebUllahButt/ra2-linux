@@ -48,6 +48,17 @@ Use `./install.sh --game-dir "/path/to/Red Alert 2" --jobs 4` to provide the pat
 
 Run `./install.sh --uninstall` to remove the game program, copied files, and launchers. Add `--purge` to also remove local saves and settings.
 
+## Play
+
+Open **Red Alert 2 (Native Linux)** from your desktop menu or run either command.
+
+```sh
+~/.local/bin/ra2-linux
+./play.sh --scale integer
+```
+
+Integer scale shows a centered 800×600 picture in a 1024×768 window and uses whole-number multiples in larger windows. The installed game keeps settings and saves in `~/.local/share/ra2-linux/game/`. The first launch skips the long intro. Set `Play=yes` under `[Intro]` in your installed `RA2.INI` to watch it.
+
 ## Credits and license
 
 This project builds on [sp00nznet/redalert2-recomp](https://github.com/sp00nznet/redalert2-recomp) and [sp00nznet/pcrecomp](https://github.com/sp00nznet/pcrecomp). The source snapshots are from `4ecdea4` and `91998d6`. See the [game contributors](CONTRIBUTORS.md) and the [runtime contributors](pcrecomp/CONTRIBUTORS.md) for upstream credit.
