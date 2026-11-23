@@ -19,6 +19,13 @@ This project runs base Command & Conquer: Red Alert 2 1.006 as a native Linux pr
 
 The [release candidate report](docs/verification/release.md) lists the final checks.
 
+## Limits
+
+- Online play and Yuri's Revenge are outside this release.
+- Save files differ at the byte level. The tested skirmish saves load in both directions.
+- The native build still uses about 2.9× the original's CPU cycles per frame under Wine in the recorded comparison.
+- Campaign tests cover the recorded orders and outcomes. Five runs stop at frame 20,000.
+
 ## Credits and license
 
 This project builds on [sp00nznet/redalert2-recomp](https://github.com/sp00nznet/redalert2-recomp) and [sp00nznet/pcrecomp](https://github.com/sp00nznet/pcrecomp). The source snapshots are from `4ecdea4` and `91998d6`. See the [game contributors](CONTRIBUTORS.md) and the [runtime contributors](pcrecomp/CONTRIBUTORS.md) for upstream credit.
