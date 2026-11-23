@@ -556,6 +556,11 @@ int main(int argc, char **argv) {
         hle_screen_bars(bars);
         hle_screen_settings_hook = settings_save;
         hle_screen_cursor_hook = menus_use_windows_cursor;
+#ifdef RA2_TARGET_GAME
+        /* SDL presents on the game thread. A display wait would also cap
+         * game logic at the monitor rate. Keep an explicit user override. */
+        SDL_SetHintWithPriority(SDL_HINT_RENDER_VSYNC, "0", SDL_HINT_DEFAULT);
+#endif
         if (hle_screen_open(RA2_TITLE, full, g_headless) != 0) return 1;
         mods_start(game_full, g_mod, g_saved_mod, argc, argv, settings_save_mod);
         /* In a window, HD vehicles are F10's to switch, off unless ra2.ini or
