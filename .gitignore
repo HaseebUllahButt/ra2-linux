@@ -81,3 +81,14 @@ lan-frames/
 mods/yr/
 mods/ra2/
 mods-test/
+
+# User data, generated code, and local verification output.
+src/recomp/gen_*/
+*.[bB][iI][kK]
+*.[iI][nN][iI]
+*.[sS][aA][vV]
+*.[dD][mM][pP]
+*.pyc
+/sampler-output/
+/docs/media/*.log
+!/docs/media/*.mp4
