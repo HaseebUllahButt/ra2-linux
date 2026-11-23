@@ -511,8 +511,12 @@ static void k_Wait(void) {
     uint32_t elapsed = now - b->start_ms;
     uint64_t due = (uint64_t)(b->decoded_count - b->timer_base_count) * 1000u * b->FrameRateDiv / b->FrameRate;
     if (elapsed < due) RET(1, 1);
-    uint64_t threshold = (uint64_t)2000u * b->FrameRateDiv / b->FrameRate;
-    if (elapsed - due > threshold && b->stream < 0) {
+    /* Too late to catch up: start the clock over, so the game's frame loop (it decodes frames until BinkWait
+     * says wait) goes back to its main loop. Two frames late without sound; with sound the sound is the
+     * clock, so a full second. A slow or busy machine otherwise never catches up, and the movie (the
+     * startup one too) never ends. */
+    uint64_t threshold = b->stream < 0 ? (uint64_t)2000u * b->FrameRateDiv / b->FrameRate : 1000u;
+    if (elapsed - due > threshold) {
         b->start_ms = now;
         b->timer_base_count = b->decoded_count - 1;
     }
