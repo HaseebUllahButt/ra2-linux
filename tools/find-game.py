@@ -127,12 +127,21 @@ def proton_folders(library):
             yield from steam_folders(programs / "Steam")
 
 
+def mounted_folders(home):
+    for root in (Path("/run/media") / home.name, Path("/media") / home.name,
+                 Path("/media"), Path("/mnt")):
+        for volume in children(root):
+            if volume.is_dir():
+                yield from game_folders(volume, 2)
+
+
 def discover(home, data):
     for library in steam_libraries(home, data):
         yield from steam_folders(library)
         yield from proton_folders(library)
     for prefix in wine_prefixes(home, data):
         yield from wine_folders(prefix)
+    yield from mounted_folders(home)
 
 
 def main():
