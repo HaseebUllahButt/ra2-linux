@@ -12,9 +12,10 @@ set -e
 cd "$(dirname "$0")"
 BUILD_DIR=${BUILD_DIR:-build}
 BUILD_TYPE=${BUILD_TYPE:-RelWithDebInfo}
-# The toolkit: PCRECOMP, else ../pcrecomp, else ../tools (older setups).
+# Use PCRECOMP if set, then the bundled toolkit or an older checkout.
 if [ -z "$PCRECOMP" ]; then
-  if [ ! -d ../pcrecomp ] && [ -d ../tools/runtime/native32 ]; then PCRECOMP=$(cd ../tools && pwd)
+  if [ -d pcrecomp/runtime ]; then PCRECOMP=$(pwd)/pcrecomp
+  elif [ ! -d ../pcrecomp ] && [ -d ../tools/runtime/native32 ]; then PCRECOMP=$(cd ../tools && pwd)
   else PCRECOMP=$(cd .. && pwd)/pcrecomp; fi
 fi
 if [ ! -f "$BUILD_DIR/build.ninja" ]; then

@@ -155,10 +155,10 @@ else
     fail "Python could not make its venv for pefile and capstone: install python3-venv (Debian, Ubuntu) or uv, then run setup again."
 fi
 
-# The toolkit: PCRECOMP, else ../pcrecomp, else ../tools (where older setups
-# put it), else ../pcrecomp is cloned.
+# Use PCRECOMP if set, then the bundled toolkit or an older checkout.
 if [ -z "$PCRECOMP" ]; then
-  if [ ! -d ../pcrecomp ] && [ -d ../tools/runtime/native32 ]; then PCRECOMP=$(cd ../tools && pwd)
+  if [ -d pcrecomp/runtime ]; then PCRECOMP=$(pwd)/pcrecomp
+  elif [ ! -d ../pcrecomp ] && [ -d ../tools/runtime/native32 ]; then PCRECOMP=$(cd ../tools && pwd)
   else PCRECOMP=$(cd .. && pwd)/pcrecomp; fi
 fi
 if [ ! -d "$PCRECOMP/runtime/native32" ]; then
