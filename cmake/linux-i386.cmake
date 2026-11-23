@@ -16,4 +16,4 @@ set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
 # its 64-bit ones are in /usr/lib64). Searched before the system's, not instead:
 # Fedora's i686 packages lean on the 64-bit .pc files of their dependencies
 # (harfbuzz, zlib...), whose include paths serve both.
-set(ENV{PKG_CONFIG_PATH} "/usr/lib/i386-linux-gnu/pkgconfig:/usr/lib32/pkgconfig:/usr/lib/pkgconfig")
+set(ENV{PKG_CONFIG_PATH} "$ENV{RA2_DEPS_PC}:/usr/lib/i386-linux-gnu/pkgconfig:/usr/lib32/pkgconfig:/usr/lib/pkgconfig")
