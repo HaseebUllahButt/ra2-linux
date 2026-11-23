@@ -68,6 +68,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
   endif()
   if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     target_compile_definitions(ra2 PRIVATE RECOMP_FLAT_MEMORY)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      # The host already links at a fixed address, clear of the guest image.
+      # GCC may default to PIE even when CMake's PIC property is off. Disable
+      # it explicitly so i386 can use ebx for guest registers instead of a GOT.
+      target_compile_options(ra2 PRIVATE -fno-pie)
+      target_link_options(ra2 PRIVATE -no-pie)
+    endif()
   else()
     # 64-bit: where the guest's 4 GB goes in the host. A fixed address lets
     # the lifted code add a constant, not a global it reloads after every
