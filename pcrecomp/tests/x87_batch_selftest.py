@@ -32,7 +32,7 @@ for op in ('d8c1','d8c9','d8e1','d8e9','d8f1','d8f9',
            'dbf1','dbf9','dff1','dff9','dac1','dac9','dad1','dad9',
            'dbc1','dbc9','dbd1','dbd9','d9f6','d9f7','dbE2','9b'):
     trace('d9e8',op,'dfe0','ddd8')
-for opcode in ('d9','dd','db','df'):
+for opcode in ('d8','d9','da','db','dc','dd','de','df'):
     for extension in range(8):
         # Valid memory arithmetic/load/store opcodes, with safe buffer sizes.
         code = bytes([int(opcode,16), extension * 8 + 5]) + A
@@ -51,6 +51,8 @@ traces.append(bytes.fromhex('d905')+A+bytes.fromhex('d80d')+A+
               bytes.fromhex('dec1d905')+A+bytes.fromhex('d80d')+A+
               bytes.fromhex('dec1d91d')+A)
 
+# No exceptions occur in this stream, including with every exception unmasked.
+trace('d8c1','d8c9','d9fc','dfe0')
 md=Cs(CS_ARCH_X86,CS_MODE_32);md.detail=True
 functions=[]; batched=0
 for n, raw in enumerate(traces):
@@ -124,6 +126,13 @@ for(unsigned cw=0;cw<32;cw++)for(unsigned input=0;input<512;input++) {
    put(&init);oldfn[f]();take(&a);put(&init);newfn[f]();take(&b);count++;
    if(memcmp(&a,&b,sizeof a)) { unsigned char *aa=(void*)&a,*bb=(void*)&b;for(unsigned k=0;k<sizeof a;k++)if(aa[k]!=bb[k]){fprintf(stderr,"FAIL trace=%u cw=%04x input=%u byte=%u old=%02x new=%02x\n",f,init.cw,input,k,aa[k],bb[k]);break;}return 1; }
  }
+}
+/* Exercise the guarded original path for all 64 exception-mask patterns. */
+for(unsigned control=0;control<32;control++)for(unsigned mask=0;mask<64;mask++) {
+ memset(&init,0,sizeof init);init.x.cw=init.cw=mask|((control&3)<<8)|(((control>>2)&3)<<10)|((control>>4)<<12);init.x.tw=0;
+ for(unsigned j=0;j<8;j++){uint64_t m=0x8000000000000000ull;uint16_t e=0x3fff;memcpy(init.x.st[j],&m,8);memcpy(init.x.st[j]+8,&e,2);memcpy(&init.st[j],init.x.st[j],10);}
+ put(&init);oldfn[sizeof(oldfn)/sizeof(*oldfn)-1]();take(&a);put(&init);newfn[sizeof(newfn)/sizeof(*newfn)-1]();take(&b);count++;
+ if(memcmp(&a,&b,sizeof a)){fprintf(stderr,"FAIL unmasked control=%u mask=%u\n",control,mask);return 1;}
 }
 printf("PASS %lu old/new traces; %zu instruction streams; 32 control words; random and edge payloads, TOP and tags\n",count,sizeof(oldfn)/sizeof(*oldfn));return 0;
 }
