@@ -178,6 +178,7 @@ if ! "$python" -c 'import capstone, pefile' 2>/dev/null; then
 fi
 unset PCRECOMP
 export CC=gcc
+export CFLAGS="${CFLAGS:+$CFLAGS }-mfpmath=387 -frounding-math"
 export PKG_CONFIG_LIBDIR="$pc_dirs"
 printf 'Find the functions in game.exe.\n'
 mkdir -p work/game
